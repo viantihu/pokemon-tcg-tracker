@@ -9,10 +9,16 @@ name: Deploy
 #
 # Requires these secrets/vars to be configured before it can pass (deferred to
 # the external-wiring step — see docs/devops-strategy.md §7, §11):
+#   vars.DEPLOY_ENABLED = "true"       (REPO-level flag that turns this workflow on)
 #   secrets.SUPABASE_ACCESS_TOKEN      (account-level, both envs)
 #   secrets.SUPABASE_DB_PASSWORD       (matching env)
-#   secrets.SUPABASE_PROJECT_REF       (testing ref on develop, prod ref on main)
-#   vars.APP_URL                       (deployed base URL of the matching env)
+#   vars.SUPABASE_PROJECT_REF          (matching env — the project subdomain, not secret)
+#   vars.APP_URL                       (matching env — deployed base URL)
+#
+# NOTE: the on/off gate must be a REPO-level variable, not an environment-scoped
+# one. A job's `if:` is evaluated before its `environment:` is loaded, so
+# environment-scoped vars (APP_URL, SUPABASE_PROJECT_REF) are NOT visible in the
+# `if`. They ARE visible inside the job's steps, which is where they're used.
 on:
   push:
     branches: [develop, main]
@@ -23,12 +29,15 @@ concurrency:
 
 jobs:
   migrate:
+    # Skips cleanly until deployment is wired, so pushes don't show a red deploy
+    # before Supabase/Vercel exist. Repo-level flag (see NOTE above).
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'production' || 'testing' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: latest
 
@@ -37,11 +46,12 @@ jobs:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
-          supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+          supabase link --project-ref "${{ vars.SUPABASE_PROJECT_REF }}"
           supabase db push
 
   smoke:
     needs: migrate
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'production' || 'testing' }}
     steps:
