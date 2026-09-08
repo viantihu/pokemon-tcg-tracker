@@ -2,7 +2,25 @@
  *  sync-ui-spec §C; sync-architecture §1.3–§1.7. */
 import { createRepo, type DbClient, type Row } from "./base";
 
-export const presenceGroupRepo = createRepo("presence_group");
+export const presenceGroupRepo = {
+  ...createRepo("presence_group"),
+
+  /** The reconciliation unit for one `(catalogCardId, dexVariantRaw)` key, or null if none yet. */
+  async findByKey(
+    db: DbClient,
+    catalogCardId: string,
+    dexVariantRaw: string,
+  ): Promise<Row<"presence_group"> | null> {
+    const { data, error } = await db
+      .from("presence_group")
+      .select("*")
+      .eq("catalog_card_id", catalogCardId)
+      .eq("dex_variant_raw", dexVariantRaw)
+      .maybeSingle();
+    if (error) throw error;
+    return data ?? null;
+  },
+};
 
 export const unresolvedEntryRepo = {
   ...createRepo("unresolved_entry"),
