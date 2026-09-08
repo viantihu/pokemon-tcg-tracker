@@ -49,6 +49,30 @@ export const catalogCardRepo = {
   },
 
   /**
+   * Type-ahead against the LOCAL mirror for the intake / lookup surfaces (dev-spec §5 M6, §7B step 2).
+   * Matches the free-text query against name, set name, collector number, or tcgdex id. Digital-only
+   * cards are excluded (they can never be a physical placement). Server-side only — the client never
+   * queries TCGdex live.
+   */
+  async search(db: DbClient, query: string, limit = 12): Promise<Row<"catalog_card">[]> {
+    // Strip PostgREST `or()` control characters so user input can't break out of the filter.
+    const q = query.replace(/[,()%*]/g, " ").trim();
+    if (q.length === 0) return [];
+    const like = `%${q}%`;
+    const { data, error } = await db
+      .from("catalog_card")
+      .select("*")
+      .eq("is_digital_only", false)
+      .or(
+        `name.ilike.${like},set_name.ilike.${like},local_id.ilike.${like},tcgdex_id.ilike.${like}`,
+      )
+      .order("name", { ascending: true })
+      .limit(limit);
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  /**
    * Distinct TCGdex set ids whose `set_name` matches a human set name exactly. The sync's
    * set-code-miss fallback (sync-architecture §1.3) resolves an unknown Dex code by matching the
    * Dex `Set` column against the mirrored set names, then learns the alias. Returns every distinct
