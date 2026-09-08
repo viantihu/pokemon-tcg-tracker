@@ -1,0 +1,84 @@
+/**
+ * Thin, typed data-access layer over Supabase (dev-spec §5 M1). Every route handler, Server
+ * Component, and Server Action calls the repo — never `db.from(...)` directly — so table and
+ * column names live in one place and RLS-scoped queries stay consistent.
+ *
+ * A repo does NOT create its own client: the caller passes a `DbClient` (from
+ * `lib/supabase/server.ts` for RLS-scoped access, or a service-role client for catalog sync).
+ * This keeps the repo pure of request/cookie concerns and trivially unit-testable.
+ */
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "./database.types";
+
+export type DbClient = SupabaseClient<Database>;
+
+type PublicSchema = Database["public"];
+export type TableName = keyof PublicSchema["Tables"] & string;
+export type Row<T extends TableName> = PublicSchema["Tables"][T]["Row"];
+export type Insert<T extends TableName> = PublicSchema["Tables"][T]["Insert"];
+export type Update<T extends TableName> = PublicSchema["Tables"][T]["Update"];
+
+export type ViewName = keyof PublicSchema["Views"] & string;
+export type ViewRow<T extends ViewName> = PublicSchema["Views"][T]["Row"];
+
+/**
+ * supabase-js resolves its query-builder result types from a *literal* table name; a generic table
+ * name collapses them into unusable conditional types. So the generic factory drives the builder
+ * through a schema-less view of the same client, then re-applies the precise `Row<T>` / `Insert<T>`
+ * types at the boundary. Bespoke per-aggregate finders below use literal table names and stay fully
+ * inferred without this shim.
+ */
+function loose(db: DbClient): SupabaseClient {
+  return db as unknown as SupabaseClient;
+}
+
+/**
+ * A single-column-primary-key CRUD repo for `table`, keyed on `pk` (default `"id"`).
+ * Config tables use their natural key (`color_band.band`, `type_color_map.card_type`).
+ */
+export function createRepo<T extends TableName>(table: T, pk: string = "id") {
+  return {
+    table,
+    pk,
+
+    async list(db: DbClient): Promise<Row<T>[]> {
+      const { data, error } = await loose(db).from(table).select("*");
+      if (error) throw error;
+      return (data ?? []) as Row<T>[];
+    },
+
+    async getByPk(db: DbClient, value: string | number): Promise<Row<T> | null> {
+      const { data, error } = await loose(db).from(table).select("*").eq(pk, value).maybeSingle();
+      if (error) throw error;
+      return (data as Row<T> | null) ?? null;
+    },
+
+    async insert(db: DbClient, values: Insert<T>): Promise<Row<T>> {
+      const { data, error } = await loose(db).from(table).insert(values).select().single();
+      if (error) throw error;
+      return data as Row<T>;
+    },
+
+    async insertMany(db: DbClient, values: Insert<T>[]): Promise<Row<T>[]> {
+      const { data, error } = await loose(db).from(table).insert(values).select();
+      if (error) throw error;
+      return (data ?? []) as Row<T>[];
+    },
+
+    async update(db: DbClient, value: string | number, patch: Update<T>): Promise<Row<T>> {
+      const { data, error } = await loose(db)
+        .from(table)
+        .update(patch)
+        .eq(pk, value)
+        .select()
+        .single();
+      if (error) throw error;
+      return data as Row<T>;
+    },
+
+    async remove(db: DbClient, value: string | number): Promise<void> {
+      const { error } = await loose(db).from(table).delete().eq(pk, value);
+      if (error) throw error;
+    },
+  };
+}
