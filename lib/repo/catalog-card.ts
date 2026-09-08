@@ -47,4 +47,22 @@ export const catalogCardRepo = {
     if (error) throw error;
     return data ?? [];
   },
+
+  /**
+   * Distinct TCGdex set ids whose `set_name` matches a human set name exactly. The sync's
+   * set-code-miss fallback (sync-architecture §1.3) resolves an unknown Dex code by matching the
+   * Dex `Set` column against the mirrored set names, then learns the alias. Returns every distinct
+   * `set_id` seen; the caller treats a non-unique result as ambiguous rather than mis-learning.
+   */
+  async findSetIdsByName(db: DbClient, setName: string): Promise<string[]> {
+    const { data, error } = await db
+      .from("catalog_card")
+      .select("set_id")
+      .eq("set_name", setName)
+      .not("set_id", "is", null);
+    if (error) throw error;
+    const ids = new Set<string>();
+    for (const r of data ?? []) if (r.set_id) ids.add(r.set_id);
+    return [...ids];
+  },
 };
