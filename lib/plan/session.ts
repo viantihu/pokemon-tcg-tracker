@@ -1,28 +1,27 @@
 /**
- * Owner/session seam (dev-spec §3 decision 4; §7 gate 1 — auth is a SEPARATE task).
+ * Owner/session seam (dev-spec §3 decision 4; §7 gate 1).
  *
- * ⚠️ STUBBED SESSION SEAM. Magic-link auth (single allow-listed email + RLS keyed to the owner) is
- * not built yet, so there is no request session and `auth.uid()` is null. M6 still has to read and
- * write real rows for the seeded local owner, so this module is the ONE place that fakes the
- * session:
+ * Resolves the owner context for a server request: the RLS-scoped Supabase server client (anon key +
+ * the caller's cookies) and the owner id derived from the authenticated session. Magic-link auth has
+ * landed, so `auth.uid()` is real and this is the single place callers get their DB handle + owner.
  *
- *   • it returns the SERVICE-ROLE client (bypasses RLS), and
- *   • it stamps every write with the fixed seeded owner id explicitly (the `auth.uid()` column
- *     default is null under the service role).
+ * HISTORY: M6 shipped this as a STUB — service-role client (bypassing RLS) + a fixed seeded owner id
+ * — because auth did not exist yet. The auth task swapped the implementation to the real RLS path.
+ * Because the RLS client and the session lookup are both async (`cookies()` and `auth.getUser()`),
+ * `getOwnerContext` is now `async` and returns `Promise<OwnerContext>` — callers must `await` it.
+ * The exports (`getOwnerContext`, `OwnerContext`, `SEEDED_OWNER_ID`) are otherwise unchanged.
  *
- * WHEN AUTH LANDS, change only this file: return `await createClient()` (the RLS anon server client
- * from `lib/supabase/server.ts`) and derive `ownerId` from the session, then drop the explicit
- * `owner_id` stamping in the callers (the RLS `with check (owner_id = auth.uid())` will supply it).
- * Nothing else in M6 needs to move.
+ * With RLS active, writes no longer stamp `owner_id` explicitly: the column defaults to `auth.uid()`
+ * and the `with check (owner_id = auth.uid())` policy enforces it. `ownerId` is still returned for
+ * reads/labels that need the id.
  *
- * SERVER ONLY. Imported only by server actions / route handlers / server components. The admin
- * client throws if it is ever evaluated in the browser.
+ * SERVER ONLY. Imported only by server actions / route handlers / server components.
  */
 
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import type { DbClient } from "@/lib/repo";
 
-/** Fixed local owner used by `supabase/seed.sql`. See seed.sql header. */
+/** Fixed local owner used by `supabase/seed.sql`. Retained for reference/back-compat. */
 export const SEEDED_OWNER_ID = "00000000-0000-0000-0000-000000000001";
 
 export interface OwnerContext {
@@ -31,9 +30,18 @@ export interface OwnerContext {
 }
 
 /**
- * Resolve the owner context for a server request. Today: service-role client + seeded owner.
- * See the file header for the auth swap.
+ * Resolve the owner context for a server request: the RLS-scoped server client + the session's
+ * owner id. Throws if there is no authenticated session (the app's auth guard / proxy redirect to
+ * /login means this should not be reached unauthenticated).
  */
-export function getOwnerContext(): OwnerContext {
-  return { db: createAdminClient(), ownerId: SEEDED_OWNER_ID };
+export async function getOwnerContext(): Promise<OwnerContext> {
+  const db = await createClient();
+  const {
+    data: { user },
+    error,
+  } = await db.auth.getUser();
+  if (error || !user) {
+    throw new Error("No authenticated session: getOwnerContext requires a signed-in owner.");
+  }
+  return { db, ownerId: user.id };
 }
