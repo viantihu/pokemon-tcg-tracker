@@ -13,7 +13,7 @@ import { fullness, hasRoomForLine, type SectionView } from "@/lib/surfaces";
 import type { CapacityData, CapacitySection } from "./binders-types";
 
 export async function loadCapacity(): Promise<CapacityData> {
-  const { db } = getOwnerContext();
+  const { db } = await getOwnerContext();
   const [rows, binders] = await Promise.all([binderSectionRepo.list(db), binderRepo.list(db)]);
 
   const binderById = new Map(binders.map((b) => [b.id, b]));

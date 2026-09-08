@@ -27,7 +27,7 @@ export async function searchCatalog(query: string): Promise<LookupCard[]> {
 
 /** Assemble the show-floor answer for one printing, or null if it is not in the mirror. */
 export async function lookupAnswer(tcgdexId: string): Promise<LookupAnswer | null> {
-  const { db } = getOwnerContext();
+  const { db } = await getOwnerContext();
   const [row, pc, openWishlist] = await Promise.all([
     catalogCardRepo.getByPk(db, tcgdexId),
     loadPlanContext(db),

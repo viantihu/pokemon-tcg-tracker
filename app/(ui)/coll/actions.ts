@@ -62,7 +62,7 @@ function toWishlistCard(row: Row<"catalog_card">): WishlistCard {
 
 /** Load everything the hub renders: collections (with derived ownership) + the grouped wishlist. */
 export async function loadCollHub(): Promise<CollHubData> {
-  const { db } = getOwnerContext();
+  const { db } = await getOwnerContext();
   const [collections, binders, cards, shelved, openWishlist, slots, lines, bands, typeMapRows] =
     await Promise.all([
       collectionRepo.list(db),
@@ -190,7 +190,7 @@ export async function saveCollection(input: CollectionInput): Promise<SaveResult
   const name = input.name.trim();
   if (!name) return { ok: false, error: "A collection needs a name." };
   try {
-    const { db, ownerId } = getOwnerContext();
+    const { db, ownerId } = await getOwnerContext();
 
     let binderId = input.binderId;
     if (binderId === "__new") {
@@ -228,7 +228,7 @@ export async function saveCollection(input: CollectionInput): Promise<SaveResult
 /** Flip a collection between FINITE (a chased set list) and OPEN (a running count). */
 export async function setCollectionMode(id: string, mode: "finite" | "open"): Promise<SaveResult> {
   try {
-    const { db } = getOwnerContext();
+    const { db } = await getOwnerContext();
     await collectionRepo.update(db, id, { status: mode });
     return { ok: true };
   } catch (err) {
@@ -238,7 +238,7 @@ export async function setCollectionMode(id: string, mode: "finite" | "open"): Pr
 
 export async function deleteCollection(id: string): Promise<SaveResult> {
   try {
-    const { db } = getOwnerContext();
+    const { db } = await getOwnerContext();
     await collectionRepo.remove(db, id);
     return { ok: true };
   } catch (err) {
@@ -255,7 +255,7 @@ export async function logCardIntoCollection(
   tcgdexId: string,
 ): Promise<SaveResult> {
   try {
-    const { db, ownerId } = getOwnerContext();
+    const { db, ownerId } = await getOwnerContext();
     const col = await collectionRepo.getByPk(db, collectionId);
     if (!col) return { ok: false, error: "Collection not found." };
     const binderId = (col.current_binder_ids ?? [])[0];
@@ -298,7 +298,7 @@ export async function wishlistCollectionCard(
   tcgdexId: string,
 ): Promise<SaveResult> {
   try {
-    const { db, ownerId } = getOwnerContext();
+    const { db, ownerId } = await getOwnerContext();
     const [col, card] = await Promise.all([
       collectionRepo.getByPk(db, collectionId),
       catalogCardRepo.getByPk(db, tcgdexId),

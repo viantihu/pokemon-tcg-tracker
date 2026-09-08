@@ -25,7 +25,7 @@ import type { CatalogCard as EngineCatalogCard } from "@/lib/engine";
 import type { BinderInput, RecomputeCounts, SettingsData, SettingsResult } from "./settings-types";
 
 export async function loadSettings(): Promise<SettingsData> {
-  const { db } = getOwnerContext();
+  const { db } = await getOwnerContext();
   const [binders, bands, typeMap] = await Promise.all([
     binderRepo.list(db),
     colorBandRepo.listOrdered(db),
@@ -56,7 +56,7 @@ export async function saveBinder(input: BinderInput): Promise<SettingsResult> {
   const name = input.name.trim();
   if (!name) return { ok: false, error: "A binder needs a name." };
   try {
-    const { db, ownerId } = getOwnerContext();
+    const { db, ownerId } = await getOwnerContext();
 
     const patch = {
       name,
@@ -95,7 +95,7 @@ export async function saveBinder(input: BinderInput): Promise<SettingsResult> {
 
 export async function deleteBinder(id: string): Promise<SettingsResult> {
   try {
-    const { db } = getOwnerContext();
+    const { db } = await getOwnerContext();
     await binderRepo.remove(db, id);
     return { ok: true };
   } catch (err) {
@@ -109,7 +109,7 @@ export async function deleteBinder(id: string): Promise<SettingsResult> {
  */
 export async function reorderBands(orderedKeys: string[]): Promise<SettingsResult> {
   try {
-    const { db } = getOwnerContext();
+    const { db } = await getOwnerContext();
     for (let i = 0; i < orderedKeys.length; i++) {
       await colorBandRepo.update(db, orderedKeys[i], { position: -(i + 1) });
     }
@@ -132,7 +132,7 @@ export async function setTypeBand(
   band: string,
 ): Promise<SettingsResult<RecomputeCounts>> {
   try {
-    const { db } = getOwnerContext();
+    const { db } = await getOwnerContext();
 
     // 1. Persist the map edit (update existing, else insert the pairing).
     const existing = await typeColorMapRepo.getByPk(db, cardType);
