@@ -108,6 +108,13 @@ const HEX_BIT_COUNT = Array.from({ length: 16 }, (_, i) => {
   return c;
 });
 
+/** Population count (number of set bits) of a 32-bit word — the SWAR bit-twiddle, branch-free. */
+function popcount32(v: number): number {
+  v = v - ((v >>> 1) & 0x55555555);
+  v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
+  return (((v + (v >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+}
+
 /** Hamming distance between two equal-length hex hashes (number of differing bits). */
 export function hammingHex(a: string, b: string): number {
   if (a.length !== b.length) {
@@ -150,6 +157,27 @@ export interface ClusterOptions {
 }
 
 /**
+ * Split a hash of `len` hex chars into `bandCount` contiguous, non-overlapping slices covering the
+ * whole string (returned as `[start, end)` index pairs). Slices are as even as possible; with
+ * `bandCount <= len` every slice is at least one char.
+ *
+ * Why slices matter (the LSH pigeonhole trick): two hashes at Hamming distance `d` differ in `d`
+ * bits, each of which falls in exactly one slice, so at most `d` slices differ. If `bandCount > d`
+ * then at least one slice is byte-for-byte identical between them. Choosing `bandCount = threshold
+ * + 1` therefore GUARANTEES every pair within `threshold` shares an identical band — see below.
+ */
+function bandRanges(len: number, bandCount: number): [number, number][] {
+  const ranges: [number, number][] = [];
+  let start = 0;
+  for (let b = 0; b < bandCount; b++) {
+    const end = Math.round(((b + 1) * len) / bandCount);
+    ranges.push([start, end]);
+    start = end;
+  }
+  return ranges;
+}
+
+/**
  * Cluster entries into `artwork_group_id`s. Deterministic, pure.
  *
  *   * A locked entry keeps its `lockedGroupId` verbatim and is excluded from hash-based merging
@@ -157,6 +185,16 @@ export interface ClusterOptions {
  *   * Unlocked entries with a hash are unioned when their Hamming distance ≤ threshold; each
  *     resulting group is named by the lexicographically smallest member id (stable, no randomness).
  *   * An unlocked entry with no hash yet maps to `null` (ungrouped until it is hashed).
+ *
+ * Near-duplicate discovery uses LSH banding + union-find instead of an all-pairs O(n²) scan, so it
+ * scales toward the full ~23.5k catalog. Each hash is split into `threshold + 1` contiguous bands;
+ * by the pigeonhole principle any two hashes within `threshold` bits share ≥1 byte-identical band,
+ * so bucketing by (band index, band value) and comparing only same-bucket pairs finds EVERY pair
+ * the all-pairs scan would (each verified with the exact Hamming distance). The connected components
+ * — and thus the group assignments — are therefore identical to the naive scan; banding only skips
+ * pairs that provably could never be within `threshold`. (Group naming is likewise unchanged: union
+ * always keeps the smaller id as the root, so a group is named by its min member id regardless of
+ * the order pairs are discovered.)
  */
 export function clusterArtwork(
   entries: ArtworkEntry[],
@@ -170,37 +208,90 @@ export function clusterArtwork(
     else if (e.hash == null) result.set(e.id, null);
   }
 
-  // Union-find over the unlocked, hashed entries.
-  const parent = new Map<string, string>();
-  const find = (x: string): string => {
+  const n = hashed.length;
+  const len = n > 0 ? hashed[0].hash!.length : 0;
+
+  // Union-find over the unlocked, hashed entries, indexed by position in `hashed` (0..n-1). An
+  // Int32Array root is far cheaper than a string-keyed Map at catalog scale. Group naming is kept
+  // identical to the original: a merge keeps as root whichever side's id string is lexicographically
+  // smaller, so `hashed[find(i)].id` is always the component's minimum member id (stable, no random).
+  const parent = new Int32Array(n);
+  for (let i = 0; i < n; i++) parent[i] = i;
+  const find = (x: number): number => {
     let r = x;
-    while (parent.get(r) !== r) r = parent.get(r)!;
-    let c = x;
-    while (parent.get(c) !== r) {
-      const next = parent.get(c)!;
-      parent.set(c, r);
-      c = next;
+    while (parent[r] !== r) r = parent[r];
+    while (parent[x] !== r) {
+      const next = parent[x];
+      parent[x] = r;
+      x = next;
     }
     return r;
   };
-  const union = (a: string, b: string) => {
+  const union = (a: number, b: number) => {
     const ra = find(a);
     const rb = find(b);
     if (ra === rb) return;
-    // Point the larger id at the smaller so the root is always the min id (deterministic name).
-    if (ra < rb) parent.set(rb, ra);
-    else parent.set(ra, rb);
+    if (hashed[ra].id < hashed[rb].id) parent[rb] = ra;
+    else parent[ra] = rb;
   };
 
-  for (const e of hashed) parent.set(e.id, e.id);
-  for (let i = 0; i < hashed.length; i++) {
-    for (let j = i + 1; j < hashed.length; j++) {
-      if (hammingHex(hashed[i].hash!, hashed[j].hash!) <= threshold) {
-        union(hashed[i].id, hashed[j].id);
-      }
+  // Pack each hash into 32-bit words once, so the hot loop can use a popcount Hamming (word XOR +
+  // popcount) instead of the per-char `parseInt` in `hammingHex`. Same distance, much cheaper/call.
+  const wordsPerHash = Math.max(1, Math.ceil(len / 8));
+  const packed = new Uint32Array(n * wordsPerHash);
+  for (let i = 0; i < n; i++) {
+    const h = hashed[i].hash!;
+    const base = i * wordsPerHash;
+    for (let w = 0; w < wordsPerHash; w++) {
+      packed[base + w] = parseInt(h.slice(w * 8, w * 8 + 8), 16) >>> 0 || 0;
     }
   }
-  for (const e of hashed) result.set(e.id, find(e.id));
+  const distance = (i: number, j: number): number => {
+    let d = 0;
+    const bi = i * wordsPerHash;
+    const bj = j * wordsPerHash;
+    for (let w = 0; w < wordsPerHash; w++) d += popcount32(packed[bi + w] ^ packed[bj + w]);
+    return d;
+  };
+  // Union i and j if within threshold. The find() guard skips a pair already merged (e.g. an exact
+  // duplicate that collides in every band) before paying for the distance — the only de-duplication
+  // needed, so there is no per-pair Set to blow past its size limit at catalog scale.
+  const consider = (i: number, j: number) => {
+    if (find(i) === find(j)) return;
+    if (distance(i, j) <= threshold) union(i, j);
+  };
+
+  const bandCount = threshold + 1;
+  if (threshold >= 0 && bandCount <= len) {
+    // LSH-banded near-duplicate detection (exact for this threshold; see the doc comment above).
+    const ranges = bandRanges(len, bandCount);
+    for (const [start, end] of ranges) {
+      const buckets = new Map<string, number[]>();
+      for (let i = 0; i < n; i++) {
+        const key = hashed[i].hash!.slice(start, end);
+        const bucket = buckets.get(key);
+        if (bucket) bucket.push(i);
+        else buckets.set(key, [i]);
+      }
+      for (const idxs of buckets.values()) {
+        for (let a = 0; a < idxs.length; a++) {
+          for (let b = a + 1; b < idxs.length; b++) consider(idxs[a], idxs[b]);
+        }
+      }
+    }
+  } else if (threshold >= 0) {
+    // Degenerate: `threshold + 1` exceeds the hash length, so banding at hex-char granularity can't
+    // guarantee a shared band (it would need more bands than the hash has chars). Fall back to the
+    // exact all-pairs scan so groupings never change. Only reachable for a very loose threshold
+    // (≥ 16 for the default 64-bit hash), which already collapses nearly everything into one group.
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) consider(i, j);
+    }
+  }
+  // threshold < 0: no pair can be within a negative distance, so every hashed entry stays its own
+  // group (matches the naive scan, whose `<= threshold` guard is likewise never satisfied).
+
+  for (let i = 0; i < n; i++) result.set(hashed[i].id, hashed[find(i)].id);
 
   return result;
 }
