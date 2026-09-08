@@ -302,9 +302,16 @@ Eevee printings are Colorless. It looks forward and finds no Water evolution, Va
 evolve. Fewer than two same-color members, so the line is not viable and Vaporeon goes to the
 front half in the Light blue band. Her Colorless Eevee stays where it is.
 
-**An OKUBO-illustrated Charmeleon while the Fire line has an open Stage 1 slot.** Collection claim
-fires first. It goes to the specialty binder. The line slot stays open and the system lists other
-Fire Charmeleon printings, cheapest first, as alternates to chase.
+**A Charmeleon she collects for its art (Evolutions 010, Mitsuhiro Arita) while the Fire line has
+an open Stage 1 slot.** She has tagged this printing into a collection, so collection claim fires
+first. It goes to the specialty binder holding that collection. The line's Stage 1 slot stays open
+and the system lists other Fire Charmeleon printings, cheapest first, as alternates to chase.
+
+> **Correction (2026-09-08).** An earlier draft named "an OKUBO-illustrated Charmeleon," but no
+> such card exists: OKUBO illustrated ~31 cards, none in the Charmander line (verified against
+> TCGdex). Collections are user-defined groupings, not an intrinsic card property, so any printing
+> she has tagged into a collection triggers this path. The M3 tests use Evolutions 010 (`xy12-10`)
+> as the concrete card.
 
 ---
 

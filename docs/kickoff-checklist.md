@@ -20,9 +20,16 @@ clear before M1. Stop at the two `⛔ CONFIRM` steps and wait for Karvi.
 - [ ] `.gitignore` excludes `.env*` (except example), real `*.csv` exports, `node_modules`, `.next`.
 - [ ] Vercel scopes mapped: Production→prod Supabase, Preview→testing Supabase.
 
-## 3. Prove the pipeline before feature work
-- [ ] Open a throwaway PR into `develop`; confirm CI (lint, format, typecheck, test, build) goes green
-      end to end and a preview deploy comes up. Close it.
+## 3. Local-first — the cloud pipeline is NOT a blocker
+The GitHub/Supabase/Vercel/CI pipeline is not wired yet. Do **not** wait on it. Two parallel tracks:
+- [ ] **Feature track (you, now):** develop against a **local Supabase** (`supabase start`) — local
+      Postgres + migrations + seed. M1–M9 need no cloud; M3 (pure engine) needs no DB at all.
+- [ ] **Infra track (parallel, devops/separate session):** GitHub repo + branch protection, the two
+      Supabase cloud projects, Vercel wiring, CI secrets. When it lands, CI enforces what you already run.
+- [ ] **Merge gate until CI exists:** run `pnpm typecheck && pnpm lint && pnpm test && pnpm build`
+      locally and green BEFORE every merge to `develop`. This is the DoD gate standing in for CI.
+- [ ] **Cloud-only, deferred to M10:** prod projects, PITR/backups, first real CSV import. Not on the
+      critical path — do not let them block M1–M9.
 
 ## 4. Start M1 (dev-spec §5)
 - [ ] Branch `feature/m1-domain-schema` off `develop`.
