@@ -21,6 +21,7 @@ import {
   hashArtworkPng,
   mergeAssignments,
   splitAssignment,
+  type ArtworkEntry,
   type GrayscaleImage,
 } from "@/lib/catalog/artwork";
 
@@ -151,5 +152,154 @@ describe("clusterArtwork", () => {
     );
     expect(groups.get("setB-9")).toBe("solo"); // not merged with setA-1
     expect(groups.get("setA-1")).toBe("setA-1");
+  });
+});
+
+/**
+ * The LSH-banded clusterer must return EXACTLY what the original O(n²) all-pairs scan returned. This
+ * reference mirrors the pre-optimization algorithm verbatim (union any pair within `threshold`,
+ * union-find with the smaller id as the root → group named by its min member id) so we can assert
+ * the optimized `clusterArtwork` produces byte-for-byte identical group assignments on both the real
+ * fixtures and larger generated inputs. If the two ever diverge, the optimization changed behavior.
+ */
+function clusterArtworkNaive(
+  entries: ArtworkEntry[],
+  { threshold = 10 }: { threshold?: number } = {},
+): Map<string, string | null> {
+  const result = new Map<string, string | null>();
+  const hashed = entries.filter((e) => e.hash != null && !e.lockedGroupId);
+  for (const e of entries) {
+    if (e.lockedGroupId) result.set(e.id, e.lockedGroupId);
+    else if (e.hash == null) result.set(e.id, null);
+  }
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    return r;
+  };
+  const union = (a: string, b: string) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra === rb) return;
+    if (ra < rb) parent.set(rb, ra);
+    else parent.set(ra, rb);
+  };
+  for (const e of hashed) parent.set(e.id, e.id);
+  for (let i = 0; i < hashed.length; i++) {
+    for (let j = i + 1; j < hashed.length; j++) {
+      if (hammingHex(hashed[i].hash!, hashed[j].hash!) <= threshold) {
+        union(hashed[i].id, hashed[j].id);
+      }
+    }
+  }
+  for (const e of hashed) result.set(e.id, find(e.id));
+  return result;
+}
+
+/** Assert two group maps are identical (same keys, same values) regardless of insertion order. */
+function expectSameGroups(a: Map<string, string | null>, b: Map<string, string | null>) {
+  expect(new Set(a.keys())).toEqual(new Set(b.keys()));
+  for (const [id, group] of a) expect(b.get(id)).toBe(group);
+}
+
+/** Deterministic PRNG (mulberry32) so generated hashes are stable across runs — no flakiness. */
+function mulberry32(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const HEX = "0123456789abcdef";
+function randomHash(rand: () => number, chars = 16): string {
+  let h = "";
+  for (let i = 0; i < chars; i++) h += HEX[Math.floor(rand() * 16)];
+  return h;
+}
+/** Flip `bits` random bits of a 16-char (64-bit) hex hash — a near-identical reprint of the art. */
+function perturb(hash: string, bits: number, rand: () => number): string {
+  const arr = hash.split("");
+  for (let k = 0; k < bits; k++) {
+    const pos = Math.floor(rand() * arr.length);
+    const nibble = parseInt(arr[pos], 16) ^ (1 << Math.floor(rand() * 4));
+    arr[pos] = nibble.toString(16);
+  }
+  return arr.join("");
+}
+
+describe("clusterArtwork — optimized (LSH banding) matches the naive all-pairs scan", () => {
+  it("produces identical groups on the M2 fixtures (default and tuned thresholds)", () => {
+    const fixtures: ArtworkEntry[] = [
+      { id: "setA-1", hash: "0000000000000000" },
+      { id: "setB-9", hash: "0000000000000001" }, // 1 bit off setA-1
+      { id: "setC-5", hash: "ffffffffffffffff" }, // far from everything
+      { id: "sv03-027", hash: "abcdef0123456789" },
+      { id: "grp-lock-2", hash: "0000000000000003", lockedGroupId: "grp-merged" },
+      { id: "no-hash", hash: null },
+    ];
+    for (const threshold of [0, 1, 5, 10, 15]) {
+      expectSameGroups(
+        clusterArtwork(fixtures, { threshold }),
+        clusterArtworkNaive(fixtures, { threshold }),
+      );
+    }
+  });
+
+  it("matches the naive scan on a larger generated catalog with planted reprint clusters", () => {
+    const rand = mulberry32(20240917);
+    const entries: ArtworkEntry[] = [];
+    // 400 distinct base artworks, each with 1–4 near-identical reprints (holo/reverse/reprints).
+    for (let g = 0; g < 400; g++) {
+      const base = randomHash(rand);
+      entries.push({ id: `base-${String(g).padStart(4, "0")}`, hash: base });
+      const reprints = Math.floor(rand() * 4);
+      for (let r = 0; r < reprints; r++) {
+        entries.push({
+          id: `rep-${String(g).padStart(4, "0")}-${r}`,
+          hash: perturb(base, 1 + Math.floor(rand() * 4), rand), // ≤4 bits off → within threshold
+        });
+      }
+    }
+    // A handful of locked overrides (manual merge/split) mixed in — must be honored unchanged.
+    entries.push({ id: "locked-a", hash: randomHash(rand), lockedGroupId: "manual-grp" });
+    entries.push({ id: "locked-b", hash: randomHash(rand), lockedGroupId: "manual-grp" });
+    for (const threshold of [5, 8, 10]) {
+      expectSameGroups(
+        clusterArtwork(entries, { threshold }),
+        clusterArtworkNaive(entries, { threshold }),
+      );
+    }
+  });
+
+  it("scale sanity: clusters ~23.5k hashes and still groups planted reprints correctly", () => {
+    const rand = mulberry32(511);
+    const entries: ArtworkEntry[] = [];
+    const expectedPairs: [string, string][] = [];
+    for (let g = 0; g < 23500; g++) {
+      const id = `c-${String(g).padStart(5, "0")}`;
+      const base = randomHash(rand);
+      entries.push({ id, hash: base });
+      // Every 50th card gets one near-identical reprint we expect to co-group.
+      if (g % 50 === 0) {
+        const repId = `${id}-rev`;
+        entries.push({ id: repId, hash: perturb(base, 3, rand) });
+        expectedPairs.push([id, repId]);
+      }
+    }
+    const started = Date.now();
+    const groups = clusterArtwork(entries, { threshold: 10 });
+    const elapsedMs = Date.now() - started;
+
+    expect(groups.size).toBe(entries.length);
+    // Planted reprints land in the same group as their base…
+    for (const [a, b] of expectedPairs) expect(groups.get(a)).toBe(groups.get(b));
+    // …and random unrelated hashes stay in their own singleton group (id === group).
+    expect(groups.get("c-00001")).toBe("c-00001");
+    // Banding must avoid the ~276M-pair all-vs-all scan; comfortably under a generous CI bound.
+    expect(elapsedMs).toBeLessThan(10000);
   });
 });
