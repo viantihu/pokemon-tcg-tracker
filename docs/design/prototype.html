@@ -1,0 +1,1803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BINDER OPS — prototype</title>
+<style>
+/* ============================================================
+   BINDER OPS · 16-bit menu structure, cocowyo olive and cream palette
+   Screens: 1 Haul Plan · 2 Decision Card · 3 Line Detail · 4 Lookup
+   ============================================================ */
+:root{
+  color-scheme: light;
+  /* cocowyo olive palette. hexes marked * are straight from the reference sheet. */
+  --olive:#6D7B3C;
+  --panel:#FBF2DD; --panel-2:#F1D6AF;        /* *f1d6af */
+  --ink:#3C3C3B;   --ink-2:#5F5035;  --ink-3:#84572F;   /* *3c3c3b *5f5035 *84572f */
+  --hi:#FFFAF0;    --lo:#E4BA77;                        /* *e4ba77 */
+  --note:#FEDF4F;  --mint:#ADEBB3;   --lime:#9FD45B;    /* *fedf4f *adebb3 *9fd45b */
+  --dead:#A89D85;  --ok:#3AA94F;
+  --b-red:#EC6F4D; --b-orange:#C9762B; --b-yellow:#FEDF4F; --b-olive:#8F9A3A;
+  --b-green:#45C55D; --b-navy:#3B5687; --b-sky:#6FB9DD; --b-purple:#9D6FB8;
+  --b-pink:#FF94A6; --b-white:#FDF6E6;
+  --font:"Silkscreen","Press Start 2P","DotGothic16",ui-monospace,"Cascadia Mono","Segoe UI Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--olive);
+  background-image:
+    linear-gradient(rgba(255,255,255,.10) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,.07) 1px, transparent 1px);
+  background-size:4px 4px, 4px 4px;
+  color:var(--ink);
+  font-family:var(--font);
+  font-size:13px;
+  line-height:1.45;
+  letter-spacing:.02em;
+  -webkit-font-smoothing:none;
+  font-smooth:never;
+}
+button{font-family:inherit;font-size:inherit;color:inherit;background:none;border:0;cursor:pointer;letter-spacing:.06em}
+input{font-family:inherit;font-size:inherit;color:inherit}
+.u{text-transform:uppercase}
+
+/* ---------- pixel panel primitives ---------- */
+.panel{
+  background:var(--panel);
+  border:3px solid var(--ink);
+  box-shadow:inset 2px 2px 0 var(--hi), inset -2px -2px 0 var(--lo), 5px 5px 0 rgba(60,60,59,.20);
+}
+.plate{
+  border:3px solid var(--ink);
+  background:var(--panel-2);
+  box-shadow:inset 2px 2px 0 var(--hi), inset -2px -2px 0 var(--lo);
+}
+.btn{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:9px 14px;border:3px solid var(--ink);background:var(--panel-2);
+  box-shadow:inset 2px 2px 0 var(--hi), inset -2px -2px 0 var(--lo), 4px 4px 0 rgba(60,60,59,.22);
+  text-transform:uppercase;font-size:12px;
+}
+.btn:hover{background:var(--hi)}
+.btn:active{transform:translate(3px,3px);box-shadow:inset 2px 2px 0 var(--lo), inset -2px -2px 0 var(--hi), 1px 1px 0 rgba(60,60,59,.22)}
+.btn.primary{background:var(--ink);color:var(--panel);box-shadow:inset 2px 2px 0 rgba(255,255,255,.22), inset -2px -2px 0 rgba(0,0,0,.35), 4px 4px 0 rgba(60,60,59,.28)}
+.btn.primary:hover{background:#241f1a}
+.btn.wide{width:100%;justify-content:center}
+.btn.sm{padding:6px 10px;font-size:11px;box-shadow:inset 2px 2px 0 var(--hi), inset -2px -2px 0 var(--lo), 3px 3px 0 rgba(60,60,59,.2)}
+.kbd{
+  display:inline-block;min-width:20px;padding:1px 5px;font-size:10px;
+  border:2px solid var(--ink);background:var(--hi);box-shadow:2px 2px 0 rgba(60,60,59,.25);
+}
+.dither{background-image:repeating-conic-gradient(rgba(60,60,59,.22) 0% 25%, transparent 0% 50%);background-size:4px 4px}
+
+/* ---------- app frame ---------- */
+.app{max-width:1480px;margin:0 auto;padding:14px 14px 90px}
+.topbar{display:flex;flex-wrap:wrap;align-items:stretch;gap:10px;margin-bottom:12px}
+.brand{
+  display:flex;align-items:center;gap:10px;padding:10px 14px;
+  background:var(--ink);color:var(--panel);border:3px solid var(--ink);
+  box-shadow:5px 5px 0 rgba(60,60,59,.2)
+}
+.brand .mark{width:22px;height:22px;background:var(--panel);position:relative;box-shadow:inset 0 0 0 3px var(--ink)}
+.brand .mark::after{content:"";position:absolute;inset:6px;background:var(--b-red)}
+.brand b{font-size:14px;letter-spacing:.14em}
+.brand span{font-size:10px;color:#E4BA77;letter-spacing:.1em}
+nav.menu{display:flex;flex:1;gap:0;flex-wrap:wrap}
+nav.menu .tab{
+  display:flex;align-items:center;gap:8px;padding:10px 16px;
+  border:3px solid var(--ink);border-right-width:0;background:var(--panel-2);
+  box-shadow:inset 2px 2px 0 var(--hi), inset -2px -2px 0 var(--lo);
+  text-transform:uppercase;font-size:12px;position:relative
+}
+nav.menu .tab:last-child{border-right-width:3px}
+nav.menu .tab:hover{background:var(--hi)}
+nav.menu .tab.on{background:var(--ink);color:var(--panel);box-shadow:inset 2px 2px 0 rgba(255,255,255,.18)}
+nav.menu .tab .n{font-size:10px;opacity:.6}
+.badge{
+  display:inline-block;min-width:18px;text-align:center;padding:0 4px;
+  background:var(--b-red);color:var(--ink);border:2px solid var(--ink);font-size:10px;line-height:15px
+}
+
+/* ---------- screens ---------- */
+.screen{display:none}
+.screen.on{display:block}
+
+/* ---------- haul header ---------- */
+/* one bar, not three boxes. Three panels of stats before the work began was
+   the densest thing on the screen and the least useful. */
+.haulbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:9px 13px;margin-bottom:10px}
+.haulbar .xp{flex:1 1 160px;margin-top:0}
+.haulbar .hk{font-size:10px;color:var(--ink-2);letter-spacing:.13em}
+.haulbar .hv{font-size:13px;letter-spacing:.06em}
+.haulbar .w{flex-basis:100%}
+.xp{display:flex;gap:3px;margin-top:8px}
+.xp i{display:block;flex:1;height:14px;border:2px solid var(--ink);background:var(--panel-2)}
+.xp i.f{background:var(--lime);box-shadow:inset 0 2px 0 rgba(255,255,255,.45)}
+.alertbar{
+  display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 14px;margin-bottom:12px;
+  border:3px solid var(--ink);background:var(--note);
+  box-shadow:inset 2px 2px 0 rgba(255,255,255,.5), inset -2px -2px 0 rgba(60,60,59,.18), 5px 5px 0 rgba(60,60,59,.18)
+}
+.alertbar .blink{animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:.15}}
+
+/* ---------- plan layout ---------- */
+.planwrap{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:12px;align-items:start}
+.worklist{padding:0}
+.bandhead{
+  display:flex;align-items:center;gap:10px;padding:8px 12px;
+  border-bottom:3px solid var(--ink);border-top:3px solid var(--ink);
+  background:var(--panel-2);position:sticky;top:0;z-index:3
+}
+.worklist > .bandgroup:first-child .bandhead{border-top:0}
+.chip{width:20px;height:20px;border:3px solid var(--ink);flex:0 0 auto}
+.bandhead .nm{font-size:13px;letter-spacing:.12em}
+.bandhead .ty{font-size:10px;color:var(--ink-2);letter-spacing:.1em}
+.bandhead .ct{margin-left:auto;font-size:10px;color:var(--ink-2)}
+.subhead{
+  padding:5px 12px 5px 44px;font-size:10px;letter-spacing:.16em;color:var(--ink-2);
+  background:var(--panel-2);border-bottom:2px solid var(--lo)
+}
+.row{
+  display:grid;grid-template-columns:26px 14px 34px minmax(0,1fr) auto;gap:10px;align-items:center;
+  padding:9px 12px;border-bottom:2px solid var(--lo);cursor:pointer;background:var(--panel);
+  min-height:65px
+}
+.row:hover{background:var(--hi)}
+.row.cur{background:var(--note);box-shadow:inset 4px 0 0 var(--ink), inset -4px 0 0 var(--ink)}
+.row.done{background:var(--panel-2);color:var(--ink-3)}
+.row.done .nm{text-decoration:line-through}
+.row .rail{width:10px;height:47px;border:2px solid var(--ink);align-self:center}
+.row .box{position:relative;width:24px;height:24px;border:3px solid var(--ink);background:var(--hi);flex:0 0 auto}
+.actwrap{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:0}
+.row.done .box{background:var(--ok)}
+.row.done .box::after{
+  content:"";position:absolute;left:2px;top:8px;width:3px;height:3px;background:#fff;
+  box-shadow:3px 3px 0 #fff,6px 6px 0 #fff,9px 3px 0 #fff,12px 0 0 #fff,15px -3px 0 #fff
+}
+.row .nm{font-size:14px;letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .meta{font-size:10px;color:var(--ink-2);letter-spacing:.06em;margin-top:4px;display:flex;
+  align-items:center;gap:7px;flex-wrap:wrap}
+/* the full collector number, the thing she reads off the card in her hand */
+.row .no{padding:2px 5px;border:2px solid var(--ink);background:var(--hi);color:var(--ink);font-size:11px;letter-spacing:.04em}
+.row.done .no{background:transparent;border-color:var(--dead);color:var(--ink-3)}
+.act{
+  display:inline-block;padding:5px 9px;border:3px solid var(--ink);font-size:10px;letter-spacing:.1em;
+  background:var(--panel-2);box-shadow:2px 2px 0 rgba(60,60,59,.2);white-space:nowrap
+}
+.act.front{background:#ADEBB3}
+.act.fill{background:#DCEFF8}
+.act.newline{background:#EDDFF7}
+.act.pull{background:#F9E7C6}
+.act.bulk{background:var(--dead);color:#3C3C3B}
+.act.swap{background:#FFD9DF}
+.act.spec{background:var(--ink);color:var(--panel)}
+.act.batch{background:var(--b-white)}
+.needs{display:inline-block;margin-left:6px;padding:4px 7px;border:3px solid var(--ink);background:var(--b-red);color:var(--ink);font-size:10px;box-shadow:2px 2px 0 rgba(60,60,59,.25)}
+.emptyband{display:flex;align-items:center;gap:12px;padding:14px 12px;border-bottom:2px solid var(--lo);color:var(--ink-2);font-size:11px}
+.emptyband .resv{flex:1;height:16px;border:2px dashed var(--ink-3)}
+
+/* ---------- card face ----------
+   Live TCGdex art over a generated pixel sigil. If the image cannot load the
+   sigil is what remains, so a card is still identifiable offline. All four
+   sizes hold the real 2.5 x 3.5 card ratio. */
+.face{position:relative;display:block;flex:0 0 auto;border:3px solid var(--ink);background:var(--hi);
+  overflow:hidden;box-shadow:2px 2px 0 rgba(60,60,59,.2)}
+.face .sig{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:block}
+.face .px{position:absolute}
+.face img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top center;
+  display:block;image-rendering:pixelated}
+.face.s{width:34px;height:47px;border-width:2px}
+.face.m{width:52px;height:72px}
+.face.l{width:104px;height:145px}
+.face.xl{width:150px;height:209px}
+.face.zoomable{cursor:zoom-in}
+.face.zoomable:hover{box-shadow:0 0 0 3px var(--note), 2px 2px 0 rgba(60,60,59,.2)}
+
+/* ---------- card lightbox ---------- */
+.lightbox{position:fixed;inset:0;background:rgba(60,60,59,.82);display:none;z-index:80;
+  align-items:center;justify-content:center;padding:24px;cursor:zoom-out}
+.lightbox.on{display:flex}
+.lightbox .lbwrap{display:flex;flex-direction:column;align-items:center;gap:12px;max-width:100%;max-height:100%}
+.lightbox .lbcard{position:relative;border:3px solid var(--ink);background:var(--hi);
+  box-shadow:8px 8px 0 rgba(0,0,0,.4);width:min(78vw,360px);aspect-ratio:2.5/3.5;overflow:hidden}
+.lightbox .lbcard img{width:100%;height:100%;object-fit:contain;display:block}
+.lightbox .lbcard .load{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:11px;letter-spacing:.14em;color:var(--ink-2)}
+.lightbox .lbcap{display:flex;gap:10px;align-items:center;padding:9px 13px;border:3px solid var(--ink);
+  background:var(--panel);box-shadow:4px 4px 0 rgba(0,0,0,.35);max-width:min(78vw,360px)}
+.lightbox .lbcap .nm{font-size:14px;letter-spacing:.04em}
+.lightbox .lbcap .no{padding:3px 6px;border:2px solid var(--ink);background:var(--hi);font-size:11px;white-space:nowrap}
+.lightbox .lbhint{font-size:9px;letter-spacing:.16em;color:var(--panel);opacity:.75}
+
+/* ---------- spotlight ---------- */
+.spot{position:sticky;top:14px;padding:0;overflow:hidden}
+.spot .cap{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--ink);color:var(--panel);font-size:10px;letter-spacing:.16em}
+.spot .body{padding:13px}
+/* the card in her hand: art big enough to match against the real thing */
+.hand{display:flex;gap:12px;margin-bottom:12px}
+.hand .hd{min-width:0}
+.hand .nm{font-size:17px;letter-spacing:.03em;line-height:1.2}
+.hand .no{display:inline-block;margin-top:7px;padding:4px 7px;border:3px solid var(--ink);
+  background:var(--note);font-size:13px;letter-spacing:.06em}
+.hand .sb{font-size:10px;color:var(--ink-2);margin-top:7px;line-height:1.6}
+.hand .bd{display:flex;align-items:center;gap:7px;font-size:10px;letter-spacing:.1em;margin-top:8px}
+/* the one instruction, and where the card goes */
+.doit{padding:11px;border:3px solid var(--ink);background:var(--panel-2);margin-bottom:10px;
+  box-shadow:inset 2px 2px 0 rgba(255,255,255,.5)}
+.doit b{display:block;font-size:18px;letter-spacing:.05em;line-height:1.25;font-weight:400}
+.doit .sg{display:block;margin-top:8px;padding:6px 9px;border:3px solid var(--ink);background:var(--hi);font-size:12px}
+.doit .sg.from{background:#F9E7C6}
+.doit .sg.band{display:flex;align-items:center;gap:7px}
+.wy{font-size:11px;color:var(--ink-2);line-height:1.65;margin-bottom:11px;padding-left:11px;
+  border-left:5px solid var(--lo)}
+.why{padding:11px;border:3px solid var(--ink);background:var(--hi);margin-bottom:11px}
+.why .k{font-size:10px;letter-spacing:.16em;color:var(--ink-2);margin-bottom:5px}
+.why .t{font-size:12px;line-height:1.6}
+/* one dominant action, the rest demoted beside it */
+.spotbtns{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+.spotbtns .go{grid-column:1 / -1;font-size:16px;padding:15px 12px}
+/* what is coming, so the stack has a visible shape */
+.nextup{margin-top:12px;border-top:3px solid var(--lo);padding-top:10px}
+.nextup .k{font-size:10px;color:var(--ink-2);letter-spacing:.14em;margin-bottom:7px}
+.nextup .fl{display:flex;gap:7px}
+.nextup button{padding:0;border:0;background:none;cursor:pointer;display:block}
+.nextup button:hover .face{box-shadow:2px 2px 0 var(--ink)}
+.hint{margin-top:11px;font-size:10px;color:var(--ink-2);line-height:1.9}
+
+/* ---------- decision overlay ---------- */
+.veil{position:fixed;inset:0;background:rgba(60,60,59,.62);display:none;z-index:50;overflow:auto;padding:18px}
+.veil.on{display:block}
+.dsheet{max-width:900px;margin:12px auto;padding:0}
+.dsheet .cap{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:11px 14px;background:var(--ink);color:var(--panel)}
+.dsheet .cap .t{font-size:14px;letter-spacing:.1em}
+.dsheet .cap .n{font-size:10px;color:#E4BA77}
+.dsheet .body{padding:22px}
+.dkind{display:inline-block;padding:5px 9px;border:3px solid var(--ink);background:var(--note);font-size:10px;letter-spacing:.12em;margin-bottom:16px}
+.dq{font-size:17px;line-height:1.5;letter-spacing:.03em;margin-bottom:20px}
+.ev{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:20px}
+.ev .col{border:3px solid var(--ink);background:var(--panel-2);padding:0;overflow:hidden}
+.ev .h{padding:8px 11px;background:var(--ink);color:var(--panel);font-size:10px;letter-spacing:.14em}
+.ev .c{padding:12px 13px}
+.ev ul{list-style:none;font-size:11px;line-height:1.85}
+.ev li{display:flex;gap:8px;padding:6px 0;border-bottom:2px solid var(--lo)}
+.ev li:last-child{border-bottom:0}
+.ev li .g{color:var(--ink-2)}
+.tick{flex:0 0 auto;width:11px;height:11px;border:2px solid var(--ink);margin-top:3px}
+.tick.y{background:var(--mint)}
+.tick.n{background:var(--dead)}
+.tick.s{background:var(--b-purple)}
+.dprop{border:3px solid var(--ink);background:var(--hi);padding:14px 15px;margin-bottom:20px;box-shadow:inset 2px 2px 0 #fff, inset -2px -2px 0 var(--lo)}
+.dprop .k{font-size:10px;letter-spacing:.16em;color:var(--ink-2);margin-bottom:8px}
+.dprop .t{font-size:13px;line-height:1.65}
+/* wishlist candidates: see the art before you pick a printing */
+.wish{border:3px solid var(--ink);background:var(--panel-2);margin-bottom:20px}
+.wish .k{padding:8px 11px;background:var(--ink);color:var(--panel);font-size:10px;letter-spacing:.14em;
+  display:flex;flex-wrap:wrap;gap:6px 12px;justify-content:space-between;align-items:center}
+.wish .k .sel{color:#E4BA77}
+.wcards{display:flex;flex-wrap:wrap;gap:12px;padding:14px}
+.wcard{display:flex;flex-direction:column;gap:6px;width:138px;padding:10px;border:3px solid var(--ink);
+  background:var(--panel);text-align:left;cursor:pointer;box-shadow:3px 3px 0 rgba(60,60,59,.2)}
+.wcard:hover{background:var(--hi)}
+.wcard.on{background:var(--note);box-shadow:3px 3px 0 var(--ink)}
+.wcard .top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px}
+.wcard .badge{font-size:8px;letter-spacing:.06em;border:2px solid var(--ink);padding:2px 4px;background:var(--hi);white-space:nowrap}
+.wcard.on .badge{background:#fff}
+.wcard .wn{font-size:12px;letter-spacing:.03em;line-height:1.2;margin-top:2px}
+.wcard .wno{font-size:9px;color:var(--ink-2);letter-spacing:.04em}
+.wcard .wpx{font-size:15px;letter-spacing:.04em}
+.wcard .pill{align-self:flex-start;font-size:8px;letter-spacing:.1em;border:2px solid var(--ink);padding:2px 5px;background:var(--mint)}
+.dchoices{display:grid;gap:12px}
+.dchoice{display:flex;gap:12px;align-items:flex-start;text-align:left;padding:14px;border:3px solid var(--ink);background:var(--panel-2);box-shadow:4px 4px 0 rgba(60,60,59,.2)}
+.dchoice:hover{background:var(--hi)}
+.dchoice:active{transform:translate(3px,3px);box-shadow:1px 1px 0 rgba(60,60,59,.2)}
+.dchoice.rec{background:var(--note)}
+.dchoice .lb{font-size:13px;letter-spacing:.05em}
+.dchoice .ds{font-size:10px;color:var(--ink-2);margin-top:4px;line-height:1.7}
+.dchoice .ar{margin-left:auto;font-size:14px}
+/* ---------- manual override: place it anywhere, against the proposal ---------- */
+.ovrtoggle{width:100%;margin-top:14px;padding:12px;border:3px dashed var(--ink);background:var(--panel-2);
+  font:inherit;font-size:12px;letter-spacing:.06em;cursor:pointer;color:var(--ink)}
+.ovrtoggle:hover{background:var(--hi)}
+.ovr{margin-top:12px;border:3px solid var(--ink);background:var(--panel-2);box-shadow:4px 4px 0 rgba(60,60,59,.2)}
+.ovr .ohead{padding:9px 12px;background:var(--ink);color:var(--panel);font-size:10px;letter-spacing:.13em;
+  display:flex;justify-content:space-between;align-items:center;gap:10px}
+.ovr .ohead .yc{color:#E4BA77}
+.ovr .obody{padding:14px}
+.omode{display:flex;margin-bottom:15px}
+.omode button{flex:1;padding:11px;border:3px solid var(--ink);border-right-width:0;background:var(--panel);
+  font:inherit;font-size:11px;letter-spacing:.05em;cursor:pointer;color:var(--ink)}
+.omode button:last-child{border-right-width:3px}
+.omode button.on{background:var(--ink);color:var(--panel)}
+.orow{margin-bottom:14px}
+.orow .ol{font-size:9px;letter-spacing:.14em;color:var(--ink-2);margin-bottom:7px}
+.ochips{display:flex;flex-wrap:wrap;gap:7px}
+.ochip{padding:7px 10px;border:3px solid var(--ink);background:var(--panel);font:inherit;font-size:11px;
+  cursor:pointer;color:var(--ink);display:flex;align-items:center;gap:7px}
+.ochip:hover{background:var(--hi)}
+.ochip.on{background:var(--note)}
+.ochip.spec{box-shadow:inset 0 -4px 0 var(--b-purple)}
+.ochip.spec.on{background:var(--note);box-shadow:inset 0 -4px 0 var(--b-purple)}
+.ochip.bulk{box-shadow:inset 0 -4px 0 var(--ink-2)}
+.ochip.bulk.on{background:var(--panel-2);box-shadow:inset 0 -4px 0 var(--ink-2)}
+.ochip .sw{width:12px;height:12px;border:2px solid var(--ink);flex:0 0 auto}
+.ochip .rt{font-size:8px;color:var(--ink-2);letter-spacing:.06em}
+.oname{width:100%;margin-top:9px;padding:10px 11px;border:3px solid var(--ink);background:var(--hi);
+  font:inherit;font-size:12px;letter-spacing:.05em;color:var(--ink)}
+.oname::placeholder{color:var(--ink-2)}
+.osum{padding:11px 12px;border:3px solid var(--ink);background:var(--hi);font-size:12px;letter-spacing:.03em;
+  line-height:1.5;margin-bottom:12px;box-shadow:inset 2px 2px 0 #fff, inset -2px -2px 0 var(--lo)}
+.oconfirm{width:100%;padding:13px;border:3px solid var(--ink);background:var(--note);font:inherit;font-size:13px;
+  letter-spacing:.06em;cursor:pointer;color:var(--ink);box-shadow:4px 4px 0 rgba(60,60,59,.2)}
+.oconfirm:hover:not([disabled]){background:#F4C86B}
+.oconfirm[disabled]{opacity:.45;cursor:not-allowed;box-shadow:none}
+.oskip{font-size:10px;letter-spacing:.08em;color:var(--ink-2);padding:8px 2px;font-style:italic}
+/* collections screen: finite (set list + wishlist) vs open (running count) */
+.collhd{display:flex;align-items:center;gap:14px;padding:12px 16px;margin-bottom:16px}
+.collhd .hk{font-size:13px;letter-spacing:.12em}
+.collhd .hv{font-size:10px;letter-spacing:.1em;color:var(--ink-2);margin-left:auto}
+.collwrap{display:flex;flex-direction:column;gap:16px}
+.collcard{padding:16px}
+.collhead{display:flex;align-items:flex-start;gap:12px;margin-bottom:14px}
+.collname{font-size:16px;letter-spacing:.06em;font-weight:700}
+.collmeta{font-size:9px;letter-spacing:.08em;color:var(--ink-2);margin-top:5px}
+.modetoggle{margin-left:auto;display:flex;border:3px solid var(--ink);flex:0 0 auto}
+.modebtn{padding:7px 12px;background:var(--panel);font:inherit;font-size:10px;letter-spacing:.08em;
+  cursor:pointer;color:var(--ink);border:none}
+.modebtn+.modebtn{border-left:3px solid var(--ink)}
+.modebtn.on{background:var(--note)}
+.cbar{height:16px;border:3px solid var(--ink);background:var(--panel-2);margin-bottom:8px;overflow:hidden}
+.cbar i{display:block;height:100%;background:var(--mint);border-right:3px solid var(--ink);transition:width .2s}
+.cprog{font-size:10px;letter-spacing:.06em;color:var(--ink-2);margin-bottom:14px}
+.cprog b{color:var(--ink)}
+.cprog .need{color:var(--b-purple)}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:10px}
+.ccard{border:3px solid var(--ink);background:var(--panel-2);padding:8px;text-align:center;display:flex;
+  flex-direction:column;align-items:center;gap:4px}
+.ccard.need{opacity:.9;background:repeating-linear-gradient(45deg,var(--panel),var(--panel) 6px,var(--panel-2) 6px,var(--panel-2) 12px)}
+.ccard .cn{font-size:10px;letter-spacing:.04em;font-weight:700}
+.ccard .cno{font-size:8px;letter-spacing:.03em;color:var(--ink-2)}
+.cpill{font-size:8px;letter-spacing:.06em;padding:3px 6px;border:2px solid var(--ink);margin-top:2px}
+.cpill.have{background:var(--mint)}
+.cpill.wish{background:var(--note)}
+.wbtn{font:inherit;font-size:9px;letter-spacing:.05em;padding:5px 7px;border:3px solid var(--ink);
+  background:var(--hi);cursor:pointer;color:var(--ink);margin-top:2px}
+.wbtn:hover{background:var(--note)}
+.infbox{border:3px solid var(--ink);background:var(--panel-2);padding:18px;text-align:center;margin-bottom:12px}
+.infnum{font-size:44px;line-height:1;letter-spacing:.02em}
+.inflab{font-size:9px;letter-spacing:.14em;color:var(--ink-2);margin-top:6px}
+.logbtn{font:inherit;font-size:10px;letter-spacing:.06em;padding:8px 14px;border:3px solid var(--ink);
+  background:var(--note);cursor:pointer;color:var(--ink);margin-top:12px;box-shadow:2px 2px 0 rgba(60,60,59,.2)}
+.logbtn:hover{background:#F4C86B}
+/* collections: create / edit */
+.collnew{margin-bottom:16px}
+.newcollbtn{width:100%;padding:14px;border:3px dashed var(--ink);background:var(--panel);font:inherit;
+  font-size:12px;letter-spacing:.08em;cursor:pointer;color:var(--ink)}
+.newcollbtn:hover{background:var(--note);border-style:solid}
+.collactions{margin-left:auto;display:flex;gap:8px;align-items:flex-start;flex:0 0 auto}
+.collactions .modetoggle{margin-left:0}
+.editcollbtn{padding:7px 10px;border:3px solid var(--ink);background:var(--panel-2);font:inherit;
+  font-size:10px;letter-spacing:.06em;cursor:pointer;color:var(--ink)}
+.editcollbtn:hover{background:var(--hi)}
+/* collection editor overlay (reuses .cap/.body/.orow/.ol/.oname/.ochips/.ochip/.oconfirm/.hint) */
+.oname.sm{max-width:220px}
+.cerow-h{font-size:9px;letter-spacing:.09em;color:var(--ink-2);margin:6px 0 8px}
+.celist{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.cerow{display:flex;align-items:center;gap:10px;border:3px solid var(--ink);background:var(--panel-2);padding:8px}
+.cerow.own{background:var(--mint)}
+.cet{flex:0 0 auto}
+.cei{flex:1;min-width:0;font-size:11px;letter-spacing:.04em}
+.cei b{display:block}
+.cei i{font-style:normal;font-size:9px;color:var(--ink-2)}
+.cebtn{padding:6px 9px;border:3px solid var(--ink);background:var(--note);font:inherit;font-size:9px;
+  letter-spacing:.06em;cursor:pointer;color:var(--ink)}
+.cebtn.on{background:var(--mint)}
+.cex{padding:6px 9px;border:3px solid var(--ink);background:var(--panel);font:inherit;font-size:10px;
+  cursor:pointer;color:var(--ink)}
+.cex:hover{background:var(--lo)}
+.cehint{font-size:9px;letter-spacing:.06em;color:var(--ink-2);padding:10px;border:3px dashed var(--ink);text-align:center}
+.ceadd{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.ceaddbtn{padding:9px 12px;border:3px solid var(--ink);background:var(--note);font:inherit;font-size:10px;
+  letter-spacing:.06em;cursor:pointer;color:var(--ink)}
+.ceaddbtn:hover{background:#F4C86B}
+.cesave{display:flex;gap:10px;align-items:center;margin-top:16px}
+.cesave .oconfirm{margin-left:auto}
+.cedel{padding:10px 14px;border:3px solid var(--ink);background:var(--panel);font:inherit;font-size:10px;
+  letter-spacing:.06em;cursor:pointer;color:var(--ink-3)}
+.cedel:hover{background:var(--lo)}
+.loclock{border:3px solid var(--ink);background:var(--panel-2);padding:9px 12px;font-size:11px;
+  letter-spacing:.05em;color:var(--ink)}
+.logres{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto;margin-bottom:12px;
+  border:3px solid var(--ink);background:var(--panel);padding:8px}
+.logrow{display:flex;align-items:center;gap:10px;width:100%;text-align:left;border:3px solid var(--ink);
+  background:var(--panel-2);padding:6px;font:inherit;cursor:pointer;color:var(--ink)}
+.logrow:hover{background:var(--note)}
+.logrow.free{justify-content:center;background:var(--panel);font-size:10px;letter-spacing:.06em;color:var(--ink-3)}
+.logrow.free:hover{background:var(--lo)}
+.logrow .lr,.logpick .lr{flex:1;min-width:0;font-size:11px;letter-spacing:.04em}
+.logrow .lr b,.logpick .lr b{display:block}
+.logrow .lr i,.logpick .lr i{font-style:normal;font-size:9px;color:var(--ink-2)}
+.logpick{display:flex;align-items:center;gap:10px;border:3px solid var(--ink);background:var(--mint);padding:7px}
+/* move: relocate an already-shelved card, reachable from a line slot or a lookup */
+.movebtn{margin-top:8px;padding:7px 10px;border:3px solid var(--ink);background:var(--panel-2);
+  font:inherit;font-size:10px;letter-spacing:.06em;cursor:pointer;color:var(--ink);box-shadow:2px 2px 0 rgba(60,60,59,.2)}
+.movebtn:hover{background:var(--hi)}
+.movebtn.wide{width:100%;padding:11px}
+.slot .movebtn{width:100%;margin-top:6px}
+.movedtag{margin-top:7px;padding:5px 7px;border:3px solid var(--ink);background:#F4C86B;font-size:9px;letter-spacing:.05em;line-height:1.5}
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(30px);
+  background:var(--ink);color:var(--panel);border:3px solid var(--ink);box-shadow:5px 5px 0 rgba(60,60,59,.3);
+  padding:12px 16px;font-size:11px;letter-spacing:.06em;z-index:90;opacity:0;pointer-events:none;
+  transition:opacity .16s, transform .16s;max-width:88vw}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ---------- line detail ---------- */
+.linehead{display:flex;flex-wrap:wrap;gap:12px;align-items:stretch;margin-bottom:12px}
+.linetabs{display:flex;flex-wrap:wrap;gap:0;margin-bottom:12px}
+.linetabs .lt{padding:9px 13px;border:3px solid var(--ink);border-right-width:0;background:var(--panel-2);font-size:11px;display:flex;align-items:center;gap:8px}
+.linetabs .lt:last-child{border-right-width:3px}
+.linetabs .lt.on{background:var(--ink);color:var(--panel)}
+.linetitle{padding:12px 14px;flex:1;min-width:260px}
+.linetitle .sp{font-size:20px;letter-spacing:.08em}
+.linetitle .lc{font-size:10px;color:var(--ink-2);letter-spacing:.12em;margin-top:5px;display:flex;align-items:center;gap:8px}
+.status{display:inline-flex;align-items:center;gap:8px;padding:9px 12px;border:3px solid var(--ink);font-size:12px;letter-spacing:.1em;box-shadow:4px 4px 0 rgba(60,60,59,.2)}
+.status.capped{background:var(--b-purple);color:var(--ink)}
+.status.terminated{background:var(--dead)}
+.status.open{background:var(--note)}
+
+.page{
+  position:relative;padding:18px 16px 22px;border:3px solid var(--ink);
+  background:var(--panel);
+  background-image:repeating-linear-gradient(0deg,rgba(60,60,59,.045) 0 1px,transparent 1px 5px);
+  box-shadow:inset 2px 2px 0 var(--hi), inset -2px -2px 0 var(--lo), 6px 6px 0 rgba(60,60,59,.2);
+}
+.pagerail{position:absolute;left:0;top:0;bottom:0;width:13px;border-right:3px solid var(--ink)}
+.pageholes{position:absolute;left:22px;top:0;bottom:0;width:12px;display:flex;flex-direction:column;justify-content:space-around;align-items:center}
+.pageholes i{width:11px;height:11px;border:3px solid var(--ink);background:var(--olive);border-radius:50%}
+.strip{display:flex;gap:14px;align-items:stretch;margin-left:48px;min-height:270px;overflow-x:auto;padding-bottom:6px}
+
+.slot{width:172px;flex:0 0 auto;position:relative;display:flex;flex-direction:column}
+.slotlabel{font-size:10px;letter-spacing:.14em;color:var(--ink-2);margin-bottom:6px;display:flex;justify-content:space-between}
+.pocket{
+  flex:1;border:3px solid var(--ink);background:var(--hi);position:relative;overflow:hidden;
+  box-shadow:inset -3px -3px 0 rgba(60,60,59,.10), 5px 5px 0 rgba(60,60,59,.18)
+}
+.pocket .top{padding:6px 8px;border-bottom:3px solid var(--ink);font-size:10px;letter-spacing:.1em;display:flex;justify-content:space-between;align-items:center;color:var(--ink)}
+.pocket .art{height:96px;padding:6px;display:flex;align-items:center;justify-content:center;position:relative;border-bottom:3px solid var(--ink)}
+.pocket .info{padding:8px}
+.pocket .cn{font-size:13px;letter-spacing:.03em;line-height:1.3}
+.pocket .no{display:inline-block;margin-top:5px;padding:2px 5px;border:2px solid var(--ink);background:var(--hi);font-size:10px}
+.pocket .cs{font-size:9px;color:var(--ink-2);margin-top:5px;line-height:1.7}
+
+/* state: FILLED */
+.slot.filled .pocket{background:var(--panel)}
+.slot.filled .pocket .art{background:var(--panel-2)}
+
+/* state: PLACEHOLDER */
+.slot.ph .pocket{
+  background:var(--note);border-style:dashed;
+  box-shadow:5px 5px 0 rgba(60,60,59,.14)
+}
+.slot.ph .pocket .top{background:var(--ink);border-bottom-style:dashed}
+.slot.ph .pocket .art{border-bottom-style:dashed;background:repeating-linear-gradient(45deg,rgba(60,60,59,.06) 0 4px,transparent 4px 9px)}
+/* the target card's own art, held back so it never reads as owned */
+.slot.ph .face{opacity:.7;filter:grayscale(.3)}
+.slot.ph .caret{display:inline-block;width:7px;height:11px;background:var(--ink);margin-left:6px;
+  vertical-align:-1px;animation:blink 1s steps(1) infinite}
+.slot.ph .price{margin-top:7px;font-size:11px;border:2px solid var(--ink);background:var(--hi);padding:4px 6px;display:inline-block}
+.alts{margin-top:7px;font-size:9px;color:var(--ink-2);line-height:1.7}
+
+/* state: BLOCK */
+.slot.block .pocket{background:var(--dead);border-color:#5F5035;box-shadow:inset 0 0 0 3px rgba(60,60,59,.16), 5px 5px 0 rgba(60,60,59,.14)}
+.slot.block .pocket .top{background:#5F5035}
+.slot.block .pocket .art{background-image:repeating-linear-gradient(45deg,rgba(60,60,59,.34) 0 4px,transparent 4px 9px);border-bottom-color:#5F5035}
+.slot.block .cn{color:#3C3C3B}
+.slot.block .cs{color:#5F5035}
+.xmark{width:40px;height:40px;position:relative}
+.xmark i{position:absolute;left:0;top:18px;width:40px;height:5px;background:#3C3C3B}
+.xmark i:first-child{transform:rotate(45deg)}
+.xmark i:last-child{transform:rotate(-45deg)}
+.tagline{margin-top:8px;padding:4px 6px;font-size:9px;letter-spacing:.12em;border:2px solid var(--ink);display:inline-block}
+.slot.block .tagline{background:#5F5035;color:var(--panel-2)}
+.arrowcell{flex:0 0 auto;align-self:center;display:flex;flex-direction:column;align-items:center;gap:4px;padding-top:18px}
+.arrowcell .ev{display:block;margin:0;font-size:9px;color:var(--ink-2);letter-spacing:.1em}
+.pxarrow{width:26px;height:14px;position:relative}
+.pxarrow i{position:absolute;background:var(--ink)}
+.pxarrow i:nth-child(1){left:0;top:5px;width:16px;height:4px}
+.pxarrow i:nth-child(2){left:14px;top:1px;width:4px;height:12px}
+.pxarrow i:nth-child(3){left:18px;top:5px;width:4px;height:4px}
+.arrowcell.dead .pxarrow i{background:var(--dead)}
+
+/* CAP terminator */
+.capcell{flex:0 0 auto;align-self:stretch;display:flex;align-items:center;padding-top:18px}
+.capplate{
+  width:158px;padding:11px;border:3px solid var(--ink);background:var(--b-purple);color:var(--ink);
+  box-shadow:5px 5px 0 rgba(60,60,59,.2);
+  clip-path:polygon(0 0,100% 0,100% 88%,88% 100%,0 100%)
+}
+.capplate .k{font-size:10px;letter-spacing:.14em;margin-bottom:6px}
+.capplate .t{font-size:12px;line-height:1.5}
+.capplate .w{margin-top:8px;font-size:9px;line-height:1.7;color:var(--ink-2)}
+.tear{width:14px;align-self:stretch;background:
+  linear-gradient(135deg,transparent 50%,var(--ink) 50%) 0 0/14px 14px repeat-y}
+
+.lineinfo{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px}
+.lineinfo .box{padding:12px}
+.lineinfo .k{font-size:10px;letter-spacing:.14em;color:var(--ink-2);margin-bottom:7px}
+.lineinfo .v{font-size:12px;line-height:1.7}
+
+/* ---------- lookup ---------- */
+.lookwrap{max-width:520px;margin:0 auto}
+.searchbox{display:flex;border:3px solid var(--ink);background:var(--hi);box-shadow:5px 5px 0 rgba(60,60,59,.2);margin-bottom:12px}
+.searchbox input{flex:1;min-width:0;border:0;outline:0;background:transparent;padding:16px 14px;font-size:17px;letter-spacing:.06em;text-transform:uppercase}
+.searchbox button{padding:0 16px;border-left:3px solid var(--ink);background:var(--ink);color:var(--panel);font-size:11px}
+.sugg{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px}
+.sugg button{padding:6px 9px;border:2px solid var(--ink-3);background:var(--panel-2);font-size:10px}
+.sugg button:hover{border-color:var(--ink);background:var(--hi)}
+.answer{padding:0;overflow:hidden;margin-bottom:12px}
+.answer .cap{padding:8px 12px;background:var(--ink);color:var(--panel);font-size:10px;letter-spacing:.16em;display:flex;justify-content:space-between}
+.answer .hero{padding:16px 14px;display:flex;gap:14px;align-items:center;border-bottom:3px solid var(--ink)}
+.answer .where{font-size:26px;line-height:1.2;letter-spacing:.04em}
+.answer .where small{display:block;font-size:11px;color:var(--ink-2);letter-spacing:.14em;margin-top:7px}
+.bandstack{display:flex;flex-direction:column;gap:0;width:30px;flex:0 0 auto;border:3px solid var(--ink)}
+.bandstack i{height:9px;border-bottom:1px solid rgba(60,60,59,.35)}
+.bandstack i:last-child{border-bottom:0}
+.bandstack i.on{height:22px;box-shadow:inset 0 0 0 2px var(--ink)}
+.facts{padding:12px 14px;display:grid;gap:8px}
+.fact{display:flex;gap:10px;align-items:flex-start;padding:9px 10px;border:3px solid var(--ink);background:var(--panel-2);font-size:12px;line-height:1.5}
+.fact.y{background:#ADEBB3}
+.fact.n{background:var(--panel-2);color:var(--ink-2)}
+.fact.hot{background:var(--note)}
+.fact .ic{width:20px;height:20px;border:3px solid var(--ink);flex:0 0 auto;background:var(--hi)}
+.fact.y .ic{background:var(--ok)}
+.fact.hot .ic{background:var(--b-red)}
+.notfound{padding:14px;border:3px solid var(--ink);background:var(--panel-2)}
+
+/* ---------- misc ---------- */
+.foot{margin-top:16px;font-size:10px;color:var(--ink-2);line-height:1.9}
+
+/* ---------- responsive ---------- */
+@media (max-width:1080px){
+  .planwrap{grid-template-columns:1fr}
+  .spot{position:static}
+  .ev{grid-template-columns:1fr}
+}
+@media (max-width:720px){
+  .app{padding:10px 10px 130px}
+  .brand span{display:none}
+  nav.menu .tab{padding:9px 11px;font-size:11px}
+  nav.menu .tab .n{display:none}
+  .row{grid-template-columns:24px 12px 34px minmax(0,1fr);gap:8px;padding:9px 10px}
+  .row .act{grid-column:4;justify-self:start;margin-top:6px}
+  .row .actwrap{grid-column:4}
+  .doit b{font-size:16px}
+  .hand .face.l{width:80px;height:112px}
+  .spotbtns{grid-template-columns:1fr 1fr}
+  .strip{margin-left:40px;scroll-snap-type:x mandatory}
+  .slot{width:154px;scroll-snap-align:start}
+  .answer .where{font-size:22px}
+  /* on a phone the spotlight leads: the card in her hand is the headline,
+     and it stays pinned while she scrolls the rest of the plan */
+  .planwrap{display:flex;flex-direction:column}
+  .spot{order:-1;position:sticky;top:0;z-index:8;max-height:56vh;overflow:auto}
+  .nextup{display:none}
+  .capplate{width:140px}
+  .lineinfo{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="topbar">
+    <div class="brand"><span class="mark"></span><div><b>BINDER OPS</b><br><span>SORT · ROUTE · HUNT</span></div></div>
+    <nav class="menu">
+      <button class="tab on" data-go="plan"><span class="n">1</span> HAUL PLAN</button>
+      <button class="tab" data-go="dec"><span class="n">2</span> DECISIONS <span class="badge" id="decBadge">4</span></button>
+      <button class="tab" data-go="line"><span class="n">3</span> LINES</button>
+      <button class="tab" data-go="look"><span class="n">4</span> LOOKUP</button>
+      <button class="tab" data-go="coll"><span class="n">5</span> COLLECTIONS</button>
+    </nav>
+  </div>
+
+  <!-- ============ SCREEN 1 : HAUL PLAN ============ -->
+  <section class="screen on" id="scr-plan">
+    <div class="haulbar panel">
+      <span class="hk">HAUL · 05 SEP 2026</span>
+      <span class="hv" id="cardCount">0 CARDS</span>
+      <div class="xp" id="xp"></div>
+      <span class="hv" id="progText">0 / 0</span>
+      <span class="hk w" id="destSummary"></span>
+    </div>
+
+    <div class="alertbar" id="decAlert">
+      <span class="blink">!</span>
+      <b id="decAlertText">4 DECISIONS WAITING</b>
+      <button class="btn sm" style="margin-left:auto" id="openFirstDec">OPEN FIRST <span class="kbd">D</span></button>
+    </div>
+
+    <div class="planwrap">
+      <div class="worklist panel" id="worklist"></div>
+      <aside class="spot panel" id="spot">
+        <div class="cap"><span>NOW HANDLING</span><span id="spotIdx">—</span></div>
+        <div class="body" id="spotBody"></div>
+      </aside>
+    </div>
+
+    <div class="foot">BAND → BASIC / NON-BASIC → ACTION. WORK TOP TO BOTTOM.</div>
+  </section>
+
+  <!-- ============ SCREEN 3 : LINE DETAIL ============ -->
+  <section class="screen" id="scr-line">
+    <div class="linetabs" id="lineTabs"></div>
+    <div class="linehead">
+      <div class="linetitle panel" id="lineTitle"></div>
+      <div id="lineStatusWrap" style="display:flex;align-items:center"></div>
+    </div>
+    <div class="page">
+      <div class="pagerail" id="pageRail"></div>
+      <div class="pageholes"><i></i><i></i><i></i><i></i></div>
+      <div class="strip" id="strip"></div>
+    </div>
+    <div class="lineinfo" id="lineInfo"></div>
+  </section>
+
+  <!-- ============ SCREEN 4 : LOOKUP ============ -->
+  <section class="screen" id="scr-look">
+    <div class="lookwrap">
+      <div class="searchbox">
+        <input id="q" placeholder="WHERE IS MY..." autocomplete="off" spellcheck="false">
+        <button id="qgo">FIND</button>
+      </div>
+      <div class="sugg" id="sugg"></div>
+      <div id="lookOut"></div>
+      <div class="foot">BINDER → HALF → BAND. NO PAGE, NO POCKET.</div>
+    </div>
+  </section>
+
+  <!-- ============ SCREEN 5 : COLLECTIONS ============ -->
+  <section class="screen" id="scr-coll">
+    <div class="collhd panel">
+      <span class="hk">COLLECTIONS</span>
+      <span class="hv">TRACK PROGRESS · FINITE OR OPEN</span>
+    </div>
+    <div class="collwrap" id="collWrap"></div>
+    <div class="foot">FINITE · A SET LIST YOU CHASE. OPEN · A RUNNING COUNT WITH NO END.</div>
+  </section>
+</div>
+
+<!-- ============ SCREEN 2 : DECISION OVERLAY ============ -->
+<div class="veil" id="veil">
+  <div class="dsheet panel" id="dsheet"></div>
+</div>
+
+<!-- move an already-shelved card: same override panel, no proposal to fight -->
+<div class="veil" id="moveVeil">
+  <div class="dsheet panel" id="moveSheet"></div>
+</div>
+
+<!-- create / edit a collection: COLLS is the single source of truth -->
+<div class="veil" id="collVeil">
+  <div class="dsheet panel" id="collSheet"></div>
+</div>
+<div id="toast"></div>
+
+<!-- card lightbox: click any thumbnail to enlarge -->
+<div class="lightbox" id="lightbox">
+  <div class="lbwrap">
+    <div class="lbcard" id="lbcard"></div>
+    <div class="lbcap" id="lbcap"></div>
+    <div class="lbhint">CLICK ANYWHERE OR PRESS ESC TO CLOSE</div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   DATA
+   Every card below is a real printing: name, set, collector number, type,
+   stage, evolves-from, and rarity were all read off the TCGdex API on
+   06 Sep 2026, as were the four catalog claims the decisions rest on.
+   Market prices are the one illustrative field, because they move daily.
+   ===================================================================== */
+
+/* twelve sets, verified. serie and set are the TCGdex path segments, tot is
+   cardCount.official, which is the denominator printed on the card face. */
+const SETS = {
+  SVI:{serie:'sv',   set:'sv01',   tot:198, nm:'SCARLET & VIOLET'},
+  PAL:{serie:'sv',   set:'sv02',   tot:193, nm:'PALDEA EVOLVED'},
+  OBF:{serie:'sv',   set:'sv03',   tot:197, nm:'OBSIDIAN FLAMES'},
+  MEW:{serie:'sv',   set:'sv03.5', tot:165, nm:'151'},
+  PAF:{serie:'sv',   set:'sv04.5', tot:91,  nm:'PALDEAN FATES'},
+  TEF:{serie:'sv',   set:'sv05',   tot:162, nm:'TEMPORAL FORCES'},
+  TWM:{serie:'sv',   set:'sv06',   tot:167, nm:'TWILIGHT MASQUERADE'},
+  SFA:{serie:'sv',   set:'sv06.5', tot:64,  nm:'SHROUDED FABLE'},
+  BRS:{serie:'swsh', set:'swsh9',  tot:172, nm:'BRILLIANT STARS'},
+  LOR:{serie:'swsh', set:'swsh11', tot:196, nm:'LOST ORIGIN'},
+  SIT:{serie:'swsh', set:'swsh12', tot:195, nm:'SILVER TEMPEST'},
+  PRC:{serie:'xy',   set:'xy5',    tot:160, nm:'PRIMAL CLASH'}
+};
+const BANDS = [
+  {id:'red',    nm:'RED',        ty:'FIRE',       c:'#EC6F4D'},
+  {id:'orange', nm:'ORANGE',     ty:'FIGHTING',   c:'#C9762B'},
+  {id:'yellow', nm:'YELLOW',     ty:'LIGHTNING',  c:'#FEDF4F', lt:true},
+  {id:'olive',  nm:'OLIVE',      ty:'DRAGON',     c:'#8F9A3A'},
+  {id:'green',  nm:'GREEN',      ty:'GRASS',      c:'#45C55D', lt:true},
+  {id:'navy',   nm:'DARK BLUE',  ty:'DARKNESS',   c:'#3B5687', dk:true},
+  {id:'sky',    nm:'LIGHT BLUE', ty:'WATER',      c:'#6FB9DD', lt:true},
+  {id:'purple', nm:'PURPLE',     ty:'PSYCHIC',    c:'#9D6FB8'},
+  {id:'pink',   nm:'PINK',       ty:'FAIRY',      c:'#FF94A6', lt:true},
+  {id:'white',  nm:'WHITE',      ty:'COLORLESS · METAL · TRAINERS', c:'#FDF6E6', lt:true, dith:true}
+];
+const BAND = {}; BANDS.forEach(b=>BAND[b.id]=b);
+
+const ACT = {
+  PULL:   {cls:'pull',    lb:'PULL FROM ANOTHER BINDER', big:'PULL IT OUT, THEN RESHELVE'},
+  FILL:   {cls:'fill',    lb:'FILL A PLACEHOLDER',       big:'PULL THE STICKY NOTE, DROP IT IN'},
+  NEWLINE:{cls:'newline', lb:'START A NEW LINE',         big:'START A NEW EVOLUTION LINE'},
+  FRONT:  {cls:'front',   lb:'PLACE IN FRONT HALF',      big:'PLACE IN THE FRONT HALF'},
+  BULK:   {cls:'bulk',    lb:'SEND TO BULK BOX',         big:'INTO THE BULK BOX'},
+  SWAP:   {cls:'swap',    lb:'SWAP FOR THE NORMAL'  , big:'HOLO IN, NORMAL OUT'},
+  SPEC:   {cls:'spec',    lb:'SPECIALTY BINDER',         big:'TO SPECIALTY'},
+  BATCH:  {cls:'batch',   lb:'BATCH',                    big:'ONE STACK'}
+};
+
+const HAUL = [
+ // ---- RED / FIRE
+ {b:'red',basic:1,a:'PULL',n:'CHARMANDER',s:'OBF 026',v:'NORMAL',st:'BASIC',
+  from:'BINDER 1 · FRONT · RED',to:'BINDER 1 · BACK · RED',
+  why:'Root of the new line. Wrong half today.'},
+ {b:'red',basic:1,a:'BULK',n:'GROWLITHE',s:'SVI 030',v:'NORMAL',st:'BASIC',to:'BULK BOX',
+  why:'Same set and number as a shelved copy.'},
+ {b:'red',basic:1,a:'SWAP',n:'LITWICK (HOLO)',s:'LOR 024',v:'HOLO',st:'BASIC',to:'BINDER 1 · FRONT · RED',
+  why:'Holo takes the shelved normal’s place.'},
+ {b:'red',basic:1,a:'FRONT',n:'VULPIX',s:'OBF 028',v:'NORMAL',st:'BASIC',to:'BINDER 1 · FRONT · RED',
+  why:'The VULPIX line already has its Basic.'},
+ {b:'red',basic:0,a:'NEWLINE',n:'CHARMELEON',s:'OBF 027',v:'NORMAL',st:'STAGE 1',to:'BINDER 1 · BACK · RED',
+  dec:'d1',line:'L1',
+  why:'New line, viable. Every recent FIRE CHARIZARD is an ex.'},
+ {b:'red',basic:0,a:'FILL',n:'NINETALES',s:'OBF 029',v:'NORMAL',st:'STAGE 1',to:'BINDER 1 · BACK · RED',
+  why:'VULPIX line. The STAGE 1 slot is open.'},
+
+ // ---- ORANGE / FIGHTING
+ {b:'orange',basic:1,a:'NEWLINE',n:'MANKEY',s:'PAL 106',v:'NORMAL',st:'BASIC',to:'BINDER 2 · BACK · ORANGE',
+  why:'Root of the new line PRIMEAPE starts. Place it first.'},
+ {b:'orange',basic:0,a:'NEWLINE',n:'PRIMEAPE',s:'PAL 107',v:'NORMAL',st:'STAGE 1',to:'BINDER 2 · BACK · ORANGE',
+  why:'MANKEY is in this haul. Two members, viable.'},
+ {b:'orange',basic:1,a:'FRONT',n:'RIOLU',s:'SVI 112',v:'NORMAL',st:'BASIC',to:'BINDER 2 · FRONT · ORANGE',
+  why:'Basic, no STAGE 1 in this haul.'},
+
+ // ---- YELLOW / LIGHTNING
+ {b:'yellow',basic:1,a:'FRONT',n:'PIKACHU',s:'TEF 051',v:'NORMAL',st:'BASIC',to:'BINDER 2 · FRONT · YELLOW',
+  why:'The PIKACHU line already has its Basic.'},
+ {b:'yellow',basic:1,a:'FRONT',n:'VOLTORB',s:'PAL 066',v:'NORMAL',st:'BASIC',to:'BINDER 2 · FRONT · YELLOW',
+  why:'A Basic alone never starts a line.'},
+ {b:'yellow',basic:0,a:'FILL',n:'RAICHU',s:'TEF 052',v:'NORMAL',st:'STAGE 1',to:'BINDER 2 · BACK · YELLOW',
+  why:'PIKACHU line. The STAGE 1 slot is open.'},
+
+ // ---- OLIVE / DRAGON
+ {b:'olive',basic:1,a:'FRONT',n:'DRATINI',s:'OBF 157',v:'NORMAL',st:'BASIC',to:'BINDER 2 · FRONT · OLIVE',
+  why:'Basic, no STAGE 1 in this haul.'},
+ {b:'olive',basic:0,a:'NEWLINE',n:'VIBRAVA',s:'PRC 109',v:'NORMAL',st:'STAGE 1',to:'BINDER 2 · BACK · OLIVE',
+  dec:'d3',line:'L3',
+  why:'A DRAGON FLYGON exists. A DRAGON TRAPINCH does not.'},
+
+ // ---- GREEN / GRASS
+ {b:'green',basic:1,a:'FRONT',n:'APPLIN',s:'TWM 017',v:'NORMAL',st:'BASIC',to:'BINDER 2 · FRONT · GREEN',
+  why:'Basic, no STAGE 1 in this haul.'},
+ {b:'green',basic:0,a:'FILL',n:'GLOOM',s:'OBF 002',v:'NORMAL',st:'STAGE 1',to:'BINDER 2 · BACK · GREEN',
+  why:'ODDISH line. The STAGE 1 slot is open.'},
+
+ // ---- DARK BLUE / DARKNESS
+ {b:'navy',basic:1,a:'FRONT',n:'MURKROW',s:'PAL 131',v:'NORMAL',st:'BASIC',to:'BINDER 1 · FRONT · DARK BLUE',
+  why:'Basic, no line. Front half.'},
+ {b:'navy',basic:1,a:'BULK',n:'ZORUA',s:'SFA 031',v:'REVERSE HOLO',st:'BASIC',to:'BULK BOX',
+  why:'Reverse holo of a card already shelved.'},
+
+ // ---- LIGHT BLUE / WATER
+ {b:'sky',basic:1,a:'FRONT',n:'PSYDUCK',s:'MEW 054',v:'NORMAL',st:'BASIC',to:'BINDER 1 · FRONT · LIGHT BLUE',
+  why:'Basic, no STAGE 1 in this haul.'},
+ {b:'sky',basic:0,a:'FRONT',n:'VAPOREON',s:'MEW 134',v:'NORMAL',st:'STAGE 1',to:'BINDER 1 · FRONT · LIGHT BLUE',
+  why:'No WATER EEVEE exists, and VAPOREON does not evolve.'},
+
+ // ---- PURPLE / PSYCHIC
+ {b:'purple',basic:1,a:'SPEC',n:'RALTS · MATSUNO',s:'SVI 084',v:'NORMAL',st:'BASIC',to:'SPECIALTY BINDER A · MATSUNO',
+  dec:'d4',line:'L4',
+  why:'MATSUNO collection. The claim beats the open RALTS root.'},
+ {b:'purple',basic:1,a:'NEWLINE',n:'DUSKULL',s:'SFA 018',v:'NORMAL',st:'BASIC',to:'BINDER 1 · BACK · PURPLE',
+  why:'Root of the new line DUSCLOPS starts.'},
+ {b:'purple',basic:0,a:'NEWLINE',n:'DUSCLOPS',s:'SFA 019',v:'NORMAL',st:'STAGE 1',to:'BINDER 1 · BACK · PURPLE',
+  why:'DUSKULL is in this haul. Two members, viable.'},
+
+ // ---- WHITE / COLORLESS · METAL · TRAINERS
+ {b:'white',basic:1,a:'FRONT',n:'EEVEE',s:'OBF 166',v:'NORMAL',st:'BASIC',to:'BINDER 2 · FRONT · WHITE',
+  why:'COLORLESS Basic, no line.'},
+ {b:'white',basic:1,a:'FRONT',n:'SKWOVET',s:'SVI 151',v:'NORMAL',st:'BASIC',to:'BINDER 2 · FRONT · WHITE',
+  why:'COLORLESS Basic.'},
+ {b:'white',basic:0,a:'FRONT',n:'SCIZOR',s:'OBF 141',v:'NORMAL',st:'STAGE 1',to:'BINDER 2 · FRONT · WHITE',
+  dec:'d2',line:'L2',
+  why:'No METAL SCYTHER exists, so this chain can never reach two.'},
+ {b:'white',basic:1,a:'BULK',n:'BIDOOF',s:'PRC 116',v:'NORMAL',st:'BASIC',to:'BULK BOX',
+  why:'Same set and number as a shelved copy.'},
+ {b:'white',basic:1,a:'BULK',n:'TOGEDEMARU',s:'OBF 151',v:'NORMAL',st:'BASIC',to:'BULK BOX → WEDGE',
+  why:'Duplicate. Offered as the wedge for the TRAPINCH root.'},
+ {b:'white',basic:0,a:'FRONT',n:'TRAINERS, SUPPORTERS, ITEMS',s:'',v:'MIXED',st:'TRAINER',
+  to:'BINDER 2 · FRONT · WHITE', batch:34, sc:'SVI 196',
+  sample:'ULTRA BALL SVI 196 · NEST BALL SVI 181 · RARE CANDY SVI 191 · +31 MORE',
+  why:'Every trainer and item goes here. One stack, one check.'},
+ {b:'white',basic:0,a:'BULK',n:'DUPLICATE TRAINERS',s:'',v:'MIXED',st:'TRAINER',
+  to:'BULK BOX', batch:12, sc:'SVI 194',
+  sample:'ULTRA BALL ×3 · SWITCH ×2 · NEST BALL ×2 · +5 MORE',
+  why:'All matched a shelved copy. Bulk is unsorted.'}
+];
+
+/* ---------------- DECISIONS ---------------- */
+const DECS = {
+ d1:{
+  kind:'LINE CAP · EX-ONLY COMPLETION', line:'L1', card:'CHARMELEON', cs:'OBF 027', cb:'red',
+  q:'NO STANDARD FIRE CHARIZARD EXISTS. CAP THE LINE?',
+  cat:[['s','FIRE CHARIZARD: 110'],['n','SCARLET & VIOLET ERA: 3'],['n','All three are CHARIZARD ex'],['y','Cheapest $24.10 · MEW 006']],
+  own:[['y','CHARMANDER · pull queued'],['y','CHARMELEON · this haul'],['n','CHARIZARD · none']],
+  why:['Specialty-class next stage means CAP, not COMPLETE.','The page never closes. That is correct, not an error.'],
+  prop:'PLACEHOLDER + WISHLIST CHARIZARD ex $24.10 · TAG SPECIALTY A · LINE CAPPED',
+  wish:[{nm:'CHARIZARD ex',cs:'MEW 006',band:'red',px:'$24.10',badge:'CHEAPEST'},
+        {nm:'CHARIZARD ex',cs:'MEW 183',band:'red',px:'$61.40',badge:'ALT ART'},
+        {nm:'CHARIZARD ex',cs:'MEW 199',band:'red',px:'$88.00',badge:'GOLD'}],
+  ch:[{lb:'CONFIRM THE CAP',ds:'Placeholder and wishlist created.',rec:1},
+      {lb:'CAP, NO WISHLIST',ds:'Placeholder with no target.'},
+      {lb:'BLOCK IT INSTEAD',ds:'Wedge a duplicate. Never chase the ex.'},
+      {lb:'LEAVE IT',ds:'Resurfaces next haul.'}]
+ },
+ d2:{
+  kind:'NO LINE · ROOT CANNOT EXIST', line:'L2', card:'SCIZOR', cs:'OBF 141', cb:'white',
+  q:'NO METAL SCYTHER EXISTS. SO NO LINE?',
+  cat:[['s','SCYTHER PRINTINGS: 35'],['n','METAL: 0'],['s','GRASS · OBF 004, SAME PACK'],['n','No other METAL member']],
+  own:[['y','SCIZOR · this haul'],['s','SCYTHER · GRASS · wrong band'],['n','METAL SCYTHER · none']],
+  why:['A line needs two same-color members. This chain can only have one.','One chain, one color. The GRASS SCYTHER cannot sit in White.'],
+  prop:'NO LINE · SCIZOR TO BINDER 2 · FRONT · WHITE',
+  ch:[{lb:'NO LINE, FRONT HALF',ds:'Scizor shelves with the basics.',rec:1},
+      {lb:'MAKE THE LINE ANYWAY',ds:'A page with one card and one block.'},
+      {lb:'LEAVE IT',ds:'Resurfaces next haul.'}]
+ },
+ d3:{
+  kind:'ROOT BLOCK · NO SAME-COLOR BASIC', line:'L3', card:'VIBRAVA', cs:'PRC 109', cb:'olive',
+  q:'NO DRAGON TRAPINCH EXISTS. BLOCK THE ROOT?',
+  cat:[['s','TRAPINCH PRINTINGS: 21'],['n','DRAGON: 0'],['s','FIGHTING · PRC 082, SAME PACK'],['y','DRAGON FLYGON: 8 · $0.60']],
+  own:[['y','VIBRAVA · this haul'],['s','TRAPINCH · FIGHTING · wrong band'],['n','FLYGON · none']],
+  why:['VIBRAVA plus a FLYGON placeholder still makes two members.','Nothing can ever fill the root. Block, not a hunt.'],
+  prop:'BLOCK THE ROOT · WEDGE TOGEDEMARU · WISHLIST FLYGON $0.60 · LINE OPEN',
+  wish:[{nm:'FLYGON',cs:'PRC 110',band:'olive',px:'$0.60',badge:'STAGE 2'}],
+  ch:[{lb:'CONFIRM ROOT BLOCK',ds:'Root dead, Stage 2 a hunt.',rec:1},
+      {lb:'BLOCK, NO WISHLIST',ds:'Nothing to shop for.'},
+      {lb:'NO LINE AT ALL',ds:'VIBRAVA to the front half.'}]
+ },
+ d4:{
+  kind:'COLLECTION CLAIM vs LINE SLOT', line:'L4', card:'RALTS · MATSUNO', cs:'SVI 084', cb:'purple',
+  q:'THIS IS THE CARD THE RALTS LINE NEEDS. COLLECTION STILL WINS?',
+  cat:[['s','PSYCHIC RALTS: 30'],['y','Cheapest $0.09 · SVI 084'],['y','Next $0.12 · PAF 027'],['s','MATSUNO RALTS: 2']],
+  own:[['s','MATSUNO · 46 cards · RUNNING'],['y','KIRLIA · Stage 1 filled'],['n','RALTS · root open'],['n','GARDEVOIR · none']],
+  why:['Collection claim is the first rule. It beats a line on purpose.','The collection needs one copy. A second is nine cents.'],
+  prop:'TO SPECIALTY A · ROOT STAYS A PLACEHOLDER · WISHLIST RALTS $0.09',
+  wish:[{nm:'RALTS',cs:'SVI 084',band:'purple',px:'$0.09',badge:'CHEAPEST'},
+        {nm:'RALTS',cs:'PAF 027',band:'purple',px:'$0.12',badge:'ALT ART'}],
+  ch:[{lb:'COLLECTION WINS',ds:'Root stays a nine cent hunt.',rec:1},
+      {lb:'OVERRIDE, USE IT IN THE LINE',ds:'MATSUNO gets a gap. Logged.'},
+      {lb:'COLLECTION WINS, NO TARGET',ds:'Nothing wishlisted.'}]
+ }
+};
+
+/* ---------------- LINES ---------------- */
+const LINES = {
+ L1:{sp:'CHARMANDER LINE',band:'red',binder:'BINDER 1 · BACK HALF',status:'capped',
+   slots:[
+    {st:'filled',stage:'BASIC',nm:'CHARMANDER',s:'OBF 026',meta:['COMMON · NORMAL','PULLED 05 SEP']},
+    {st:'filled',stage:'STAGE 1',nm:'CHARMELEON',s:'OBF 027',meta:['UNCOMMON · NORMAL','ADDED 05 SEP']},
+    {st:'ph',stage:'STAGE 2',nm:'CHARIZARD ex',s:'MEW 006',meta:['TARGET · SPECIALTY'],price:'$24.10 LOW',
+     alts:'ALTS · MEW 183 $61.40 · MEW 199 $88.00',spec:1}
+   ],
+   cap:{t:'CHARIZARD ex · SPECIALTY BINDER A',w:'THIS PAGE NEVER CLOSES.'},
+   info:[['CAPPED BECAUSE','Every recent FIRE CHARIZARD is an ex.'],
+         ['WISHLIST','CHARIZARD ex · $24.10 · SPECIALTY A']]
+ },
+ L2:{sp:'SCYTHER LINE',band:'white',binder:'NO PAGE · NEVER OPENED',status:'terminated',
+   slots:[
+    {st:'block',stage:'BASIC',nm:'SCYTHER',s:'NO METAL PRINTING',meta:['35 PRINTINGS · 0 METAL'],
+     wedge:'NO PAGE, SO NO POCKET.'},
+    {st:'filled',stage:'STAGE 1',nm:'SCIZOR',s:'OBF 141',meta:['RARE · NORMAL','FRONT HALF INSTEAD']}
+   ],
+   info:[['NO LINE BECAUSE','No METAL SCYTHER exists. Two stages, one member.'],
+         ['WHERE SCIZOR GOES','BINDER 2 · FRONT · WHITE']]
+ },
+ L3:{sp:'TRAPINCH LINE',band:'olive',binder:'BINDER 2 · BACK HALF',status:'open',
+   slots:[
+    {st:'block',stage:'BASIC',nm:'TRAPINCH',s:'NO DRAGON PRINTING',meta:['21 PRINTINGS · 0 DRAGON'],
+     wedge:'WEDGED: TOGEDEMARU · OBF 151'},
+    {st:'filled',stage:'STAGE 1',nm:'VIBRAVA',s:'PRC 109',meta:['UNCOMMON · NORMAL','ADDED 05 SEP']},
+    {st:'ph',stage:'STAGE 2',nm:'FLYGON',s:'PRC 110',meta:['TARGET'],price:'$0.60 LOW',
+     alts:'ALTS · DRM 39 $0.85 · FFI 76 $1.40'}
+   ],
+   info:[['ONE BLOCK, ONE HUNT','Dead root, live top. Two different jobs.'],
+         ['WISHLIST','FLYGON · $0.60 CLOSES THIS PAGE.']]
+ },
+ L4:{sp:'RALTS LINE',band:'purple',binder:'BINDER 1 · BACK HALF',status:'open',
+   slots:[
+    {st:'ph',stage:'BASIC',nm:'RALTS',s:'SVI 084',meta:['TARGET · SECOND COPY'],price:'$0.09 LOW',
+     alts:'ALTS · PAF 027 $0.12 · SVI 084 CLAIMED'},
+    {st:'filled',stage:'STAGE 1',nm:'KIRLIA',s:'SVI 085',meta:['COMMON · NORMAL','ADDED 22 AUG']},
+    {st:'ph',stage:'STAGE 2',nm:'GARDEVOIR',s:'SIT 069',meta:['TARGET · STANDARD CLASS'],price:'$0.42 LOW',
+     alts:'ALTS · CRE 61 $0.75 · NXD 57 $1.10'}
+   ],
+   info:[['ROOT STILL OPEN','The MATSUNO copy went to the collection instead.'],
+         ['WISHLIST','RALTS $0.09 + GARDEVOIR $0.42 = $0.51']]
+ }
+};
+
+/* ---------------- LOOKUP ---------------- */
+const LOOK = [
+ {q:['CHARMELEON','OBF 027','027'],nm:'CHARMELEON',s:'OBF 027',sub:'UNCOMMON · FIRE · STAGE 1',
+  owned:1,binder:'BINDER 1',half:'BACK HALF',band:'red',
+  facts:[['y','IN A LINE','CHARMANDER LINE · STAGE 1 · CAPPED','L1'],
+         ['n','NOT WISHLISTED','YOU OWN IT.'],
+         ['n','NO COLLECTION','NOT CLAIMED.'],
+         ['n','DUPLICATES','DIFFERENT ART STILL COUNTS.']]},
+ {q:['CHARMANDER','OBF 026'],nm:'CHARMANDER',s:'OBF 026',sub:'COMMON · FIRE · BASIC',
+  owned:1,binder:'BINDER 1',half:'BACK HALF',band:'red',
+  facts:[['y','IN A LINE','CHARMANDER LINE · ROOT','L1'],
+         ['hot','MOVED 05 SEP','PULLED FROM THE FRONT HALF.'],
+         ['n','NO COLLECTION','NOT CLAIMED.']]},
+ {q:['CHARIZARD','CHARIZARD EX','MEW 006'],nm:'CHARIZARD ex',s:'MEW 006',sub:'DOUBLE RARE · FIRE · STAGE 2',
+  owned:0,
+  facts:[['hot','WANTED · $24.10','TOP TARGET FOR THE CAPPED LINE.','L1'],
+         ['y','WOULD GO TO','SPECIALTY BINDER A'],
+         ['n','NOT OWNED','NO FIRE PRINTING OWNED.'],
+         ['n','ALTERNATES','MEW 183 $61.40 · MEW 199 $88.00']]},
+ {q:['GROWLITHE','SVI 030'],nm:'GROWLITHE',s:'SVI 030',sub:'COMMON · FIRE · BASIC',
+  owned:1,binder:'BINDER 1',half:'FRONT HALF',band:'red',
+  facts:[['y','SHELVED','THE 05 SEP COPY WENT TO BULK.'],
+         ['n','NOT WISHLISTED','NOTHING OPEN NEEDS IT.'],
+         ['n','NO COLLECTION','Not claimed.']]},
+ {q:['VAPOREON','MEW 134'],nm:'VAPOREON',s:'MEW 134',sub:'RARE · WATER · STAGE 1',
+  owned:1,binder:'BINDER 1',half:'FRONT HALF',band:'sky',
+  facts:[['n','NO LINE','NO WATER EEVEE, AND IT DOES NOT EVOLVE.'],
+         ['n','NOT WISHLISTED','Nothing open needs it.'],
+         ['n','NO COLLECTION','Not claimed.']]},
+ {q:['FLYGON','PRC 110'],nm:'FLYGON',s:'PRC 110',sub:'RARE · DRAGON · STAGE 2',
+  owned:0,
+  facts:[['hot','WANTED · $0.60','CLOSES THE TRAPINCH LINE.','L3'],
+         ['y','WOULD GO TO','BINDER 2 · BACK · OLIVE'],
+         ['n','NOT OWNED','NOT OWNED IN DRAGON.']]},
+ {q:['RALTS','SVI 084','PAF 027'],nm:'RALTS',s:'SVI 084',sub:'COMMON · PSYCHIC · BASIC',
+  owned:0,
+  facts:[['hot','WANTED · $0.09','ROOT OF THE RALTS LINE.','L4'],
+         ['y','WOULD GO TO','BINDER 1 · BACK · PURPLE'],
+         ['n','NOT SHELVED','THE MATSUNO COPY IS IN SPECIALTY A.']]},
+ {q:['SCYTHER','SCIZOR'],nm:'SCYTHER',s:'',sub:'NO METAL PRINTING · 35 IN OTHER TYPES',
+  owned:0,blocked:1,
+  facts:[['n','NO METAL COPY','SO THE SCIZOR LINE NEVER FORMS.','L2'],
+         ['n','NOT WISHLISTED','BLOCKS ARE NEVER WISHLISTED.'],
+         ['y','GRASS COPY OWNED','OBF 004 · BINDER 2 · FRONT · GREEN']]},
+ {q:['ULTRA BALL','ULTRABALL'],nm:'ULTRA BALL',s:'SVI 196',sub:'ITEM · SEVERAL PRINTINGS OWNED',
+  owned:1,binder:'BINDER 2',half:'FRONT HALF',band:'white',
+  facts:[['y','WHITE BAND','EVERY TRAINER AND ITEM LANDS HERE.'],
+         ['hot','3 IN BULK','FROM THE 05 SEP HAUL.'],
+         ['n','NO COLLECTION','Not claimed.']]}
+];
+
+/* =====================================================================
+   HELPERS
+   ===================================================================== */
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+function hash(str){let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+/* deterministic symmetric pixel sigil, original art, no licensed assets */
+function sigil(seed,color,px){
+  px=px||8; let h=hash(seed), out='', dark='rgba(60,60,59,.35)';
+  for(let y=0;y<6;y++){for(let x=0;x<3;x++){
+    h=(Math.imul(h,1103515245)+12345)>>>0;
+    const bit=((h>>>16)&7)>2; if(!bit) continue;     /* ~62% fill */
+    const shade=((h>>>7)&3)===0?dark:color;
+    [x,5-x].forEach(xx=>{out+='<i class="px" style="left:'+(xx*px)+'px;top:'+(y*px)+'px;width:'+px+'px;height:'+px+'px;background:'+shade+'"></i>'});
+  }}
+  return out;
+}
+function bandChip(id){const b=BAND[id];return '<span class="chip'+(b.dith?' dither':'')+'" style="background:'+b.c+'"></span>'}
+
+/* ---- card identity: full collector number and live art ----
+   Cards are stored as a short "SET LOCALID" code. SETS holds the two path
+   segments TCGdex needs plus cardCount.official, which is the denominator
+   printed on the card itself, so the number she reads in the app is the
+   number she reads on the card. */
+function pc(code){const p=String(code||'').trim().split(/\s+/);return {st:p[0],id:p[1]}}
+/* a code only yields a printed number if the set is one we actually know the
+   official count for. anything else falls back to its raw string, never to a
+   fabricated denominator. */
+function num(code){const c=pc(code),S=SETS[c.st];if(!c.id||!S)return '';return c.st+' · '+c.id+'/'+S.tot}
+function setName(code){const S=SETS[pc(code).st];return S?S.nm:''}
+function img(code,q){const c=pc(code),S=SETS[c.st];if(!S||!c.id)return '';
+  return 'https://assets.tcgdex.net/en/'+S.serie+'/'+S.set+'/'+c.id+'/'+(q||'low')+'.png'}
+
+/* card face. the live TCGdex scan sits on top of a generated pixel sigil, so
+   the app still identifies a card with no network: onerror strips the img and
+   leaves the sigil showing. */
+function face(nm,code,band,size){
+  const b=BAND[band]||{c:'#5F5035'}, sz=size||'m';
+  const PX={s:5,m:8,l:16,xl:23}[sz];
+  const u=img(code);
+  /* only a card with real art is zoomable; a block has nothing to enlarge */
+  const z=u?' zoomable" data-zoom="'+img(code,'high')+'" data-nm="'+esc(nm)+'" data-code="'+esc(code)+'"'
+          :'"';
+  return '<span class="face '+sz+z+'><span class="sig" style="width:'+(PX*6)+'px;height:'+(PX*6)+'px">'+
+    sigil(nm+code,b.c,PX)+'</span>'+
+    (u?'<img src="'+u+'" alt="" loading="lazy" onerror="this.remove()">':'')+'</span>';
+}
+
+/* =====================================================================
+   STATE
+   ===================================================================== */
+HAUL.forEach((h,i)=>{h.i=i;h.done=false});
+let cur=0, resolved={}, wishPick={};
+
+/* =====================================================================
+   SCREEN 1 : HAUL PLAN
+   ===================================================================== */
+function actOrder(a){return ['PULL','FILL','NEWLINE','SWAP','SPEC','FRONT','BULK'].indexOf(a)}
+function renderPlan(){
+  let html='';
+  BANDS.forEach(b=>{
+    const items=HAUL.filter(h=>h.b===b.id);
+    html+='<div class="bandgroup"><div class="bandhead">'+bandChip(b.id)+
+      '<span class="nm">'+b.nm+'</span><span class="ty">'+b.ty+'</span>'+
+      '<span class="ct">'+(items.length?cardsIn(items)+' CARDS':'RESERVED · 0')+'</span></div>';
+    if(!items.length){
+      html+='<div class="emptyband"><span class="resv"></span><span>'+
+        (b.id==='pink'?'RESERVED. THE SLOT HOLDS EVEN AT ZERO.':'NOTHING THIS HAUL.')+'</span></div>';
+    } else {
+      [1,0].forEach(basic=>{
+        const grp=items.filter(h=>h.basic===basic).sort((x,y)=>actOrder(x.a)-actOrder(y.a));
+        if(!grp.length) return;
+        html+='<div class="subhead">'+(basic?'BASICS':(b.id==='white'?'TRAINERS · ITEMS':'STAGE 1 · 2'))+'</div>';
+        grp.forEach(h=>{html+=rowHTML(h)});
+      });
+    }
+    html+='</div>';
+  });
+  $('#worklist').innerHTML=html;
+  $$('.row').forEach(r=>r.addEventListener('click',e=>{
+    const i=+r.dataset.i;
+    if(e.target.closest('.box')){toggle(i);setCur(i);return}
+    setCur(i);
+  }));
+  updateProgress();
+}
+function cardsIn(items){return items.reduce((n,h)=>n+(h.batch||1),0)}
+function rowHTML(h){
+  const a=ACT[h.a], pend=h.dec&&!resolved[h.dec], code=h.s||h.sc;
+  /* the row identifies the card the way she does: picture first, then the full
+     printed number, then where it goes. the old row led with a set string. */
+  return '<div class="row'+(h.i===cur?' cur':'')+(h.done?' done':'')+'" data-i="'+h.i+'">'+
+    '<div class="box"></div>'+
+    '<div class="rail'+(BAND[h.b].dith?' dither':'')+'" style="background:'+BAND[h.b].c+'"></div>'+
+    face(h.n,code,h.b,'s')+
+    '<div><div class="nm">'+esc(h.n)+(h.batch?' <span style="font-size:10px;color:var(--ink-2)">×'+h.batch+'</span>':'')+'</div>'+
+      '<div class="meta">'+(h.s?'<span class="no">'+num(h.s)+'</span>':'')+
+      '<span>'+esc(h.to)+'</span></div></div>'+
+    '<div class="actwrap"><span class="act '+a.cls+'">'+(h.batch?'BATCH · ':'')+a.lb+'</span>'+
+      (pend?'<span class="needs">DECIDE</span>':(h.dec?'<span class="act" style="background:#ADEBB3">RESOLVED</span>':''))+'</div></div>';
+}
+function setCur(i){cur=Math.max(0,Math.min(HAUL.length-1,i));renderPlan();renderSpot();
+  const el=$('.row.cur'); if(el) el.scrollIntoView({block:'nearest'});}
+function toggle(i){HAUL[i].done=!HAUL[i].done}
+function advance(){let i=cur+1;while(i<HAUL.length&&HAUL[i].done)i++;setCur(Math.min(i,HAUL.length-1))}
+
+function renderSpot(){
+  const h=HAUL[cur], a=ACT[h.a], b=BAND[h.b], pend=h.dec&&!resolved[h.dec], code=h.s||h.sc;
+  $('#spotIdx').textContent=(cur+1)+' / '+HAUL.length;
+  /* three questions in order: which card is this, what do I do with it, why.
+     the art and the printed number answer the first before any text is read. */
+  const nextFive=HAUL.filter(x=>x.i>cur&&!x.done).slice(0,5);
+  const mv=MOVED[code];
+  const sbind=OBINDERS.find(x=>(h.to||'').indexOf(x)===0)||'BINDER 1', shalf=/FRONT/.test(h.to||'')?'FRONT':'BACK';
+  const moveBtn='<button class="movebtn wide" onclick="openMove({src:\'spot\',nm:\''+jsq(h.n)+'\',s:\''+jsq(code)+'\',band:\''+h.b+'\',binder:\''+jsq(sbind)+'\',half:\''+shalf+'\',loc:\''+jsq(h.to||'')+'\'})">↔ CHANGE POSITION</button>';
+  $('#spotBody').innerHTML=
+    '<div class="hand">'+face(h.n,code,h.b,'l')+
+      '<div class="hd"><div class="nm">'+esc(h.n)+(h.batch?' ×'+h.batch:'')+'</div>'+
+        (h.s?'<div><span class="no">'+num(h.s)+'</span></div>':'')+
+        '<div class="sb">'+(h.s?esc(setName(h.s))+'<br>':'')+h.st+' · '+h.v+'</div>'+
+        '<div class="bd">'+bandChip(h.b)+b.nm+'</div></div></div>'+
+    '<div class="doit"><b>'+a.big+'</b>'+
+      (h.from?'<span class="sg from">FROM · '+esc(h.from)+'</span>':'')+
+      '<span class="sg">'+esc(mv?mv.dest:h.to)+'</span>'+
+      (mv?'<span class="movedtag">MOVED · OVERRIDE</span>':'')+'</div>'+
+    moveBtn+
+    '<div class="wy">'+esc(h.why)+(h.sample?'<br>'+esc(h.sample):'')+'</div>'+
+    (pend?'<div class="why" style="background:var(--note)"><div class="k">NEEDS YOU</div><div class="t">'+
+        esc(DECS[h.dec].kind)+'</div>'+
+        '<button class="btn primary wide sm" style="margin-top:9px" onclick="openDec(\''+h.dec+'\')">DECIDE <span class="kbd">D</span></button></div>':'')+
+    (h.dec&&resolved[h.dec]?'<div class="why" style="background:#ADEBB3"><div class="k">YOUR CALL</div><div class="t">'+esc(resolved[h.dec])+'</div></div>':'')+
+    '<div class="spotbtns">'+
+      '<button class="btn primary go" onclick="toggle('+cur+');advance()">'+(h.done?'UNDO':'DONE, NEXT CARD')+' <span class="kbd">SPACE</span></button>'+
+      '<button class="btn" onclick="setCur('+(cur-1)+')">◀ BACK</button>'+
+      '<button class="btn"'+(h.line?'':' style="grid-column:span 2"')+' onclick="setCur('+(cur+1)+')">SKIP ▶</button>'+
+      (h.line?'<button class="btn" onclick="goLine(\''+h.line+'\')">THE LINE</button>':'')+
+    '</div>'+
+    (nextFive.length?'<div class="nextup"><div class="k">NEXT UP</div><div class="fl">'+
+      nextFive.map(x=>'<button onclick="setCur('+x.i+')" title="'+esc(x.n)+'">'+
+        face(x.n,x.s||x.sc,x.b,'s')+'</button>').join('')+'</div></div>':'')+
+    '<div class="hint"><span class="kbd">SPACE</span> DONE · <span class="kbd">J</span><span class="kbd">K</span> MOVE · <span class="kbd">D</span> DECIDE</div>';
+}
+function updateProgress(){
+  const done=HAUL.filter(h=>h.done).length, tot=HAUL.length;
+  $('#progText').textContent=done+' / '+tot;
+  $('#xp').innerHTML=HAUL.map(h=>'<i class="'+(h.done?'f':'')+'"></i>').join('');
+  $('#cardCount').textContent=cardsIn(HAUL)+' CARDS';
+  const d=HAUL.reduce((m,h)=>{m[h.a]=(m[h.a]||0)+(h.batch||1);return m},{});
+  $('#destSummary').textContent='FRONT '+(d.FRONT||0)+' · BACK '+((d.FILL||0)+(d.NEWLINE||0)+(d.PULL||0))+' · SPECIALTY '+(d.SPEC||0)+' · BULK '+((d.BULK||0)+(d.SWAP||0));
+  const pend=Object.keys(DECS).filter(k=>!resolved[k]).length;
+  $('#decBadge').textContent=pend; $('#decBadge').style.display=pend?'':'none';
+  const bl=$('#decAlert').querySelector('.blink');
+  if(pend){
+    $('#decAlertText').textContent=pend+' DECISION'+(pend>1?'S':'')+' WAITING';
+    $('#decAlert').style.background='var(--note)'; bl.textContent='!'; bl.style.animation='';
+    $('#openFirstDec').style.display='';
+  } else {
+    $('#decAlertText').textContent='ALL RESOLVED · READY TO COMMIT';
+    $('#decAlert').style.background='#ADEBB3'; bl.textContent='✓'; bl.style.animation='none';
+    $('#openFirstDec').style.display='none';
+  }
+}
+
+/* =====================================================================
+   SCREEN 2 : DECISION CARD
+   ===================================================================== */
+function openDecQueue(){
+  const next=Object.keys(DECS).find(k=>!resolved[k]);
+  openDec(next||'d1');
+}
+function openDec(id){
+  const d=DECS[id], done=resolved[id];
+  const col=(h,rows)=>'<div class="col"><div class="h">'+h+'</div><div class="c"><ul>'+
+    rows.map(r=>'<li><span class="tick '+r[0]+'"></span><span>'+esc(r[1])+'</span></li>').join('')+'</ul></div></div>';
+  $('#dsheet').innerHTML=
+    '<div class="cap"><span class="t">DECISION</span><span class="n">'+esc(d.card)+'</span>'+
+      '<button class="btn sm" style="background:var(--panel-2);color:var(--ink)" onclick="closeDec()">CLOSE <span class="kbd">ESC</span></button></div>'+
+    '<div class="body">'+
+      '<span class="dkind">'+esc(d.kind)+'</span>'+
+      /* the card the question is about, shown rather than named */
+      '<div class="hand" style="margin-bottom:18px">'+face(d.card,d.cs,d.cb,'m')+
+        '<div class="hd"><div class="nm" style="font-size:15px">'+esc(d.card)+'</div>'+
+        '<div><span class="no">'+num(d.cs)+'</span></div>'+
+        '<div class="bd">'+bandChip(d.cb)+BAND[d.cb].nm+'</div></div></div>'+
+      '<div class="dq">'+esc(d.q)+'</div>'+
+      '<div class="ev">'+col('CATALOG',d.cat)+col('YOU OWN',d.own)+
+        '<div class="col"><div class="h">WHY</div><div class="c" style="font-size:11px;line-height:1.75">'+
+          d.why.map(t=>'<p style="margin-bottom:8px">'+esc(t)+'</p>').join('')+'</div></div></div>'+
+      '<div class="dprop"><div class="k">PROPOSED</div><div class="t">'+esc(d.prop)+'</div></div>'+
+      wishStrip(id,d)+
+      (done?(function(){const ovr=/^MANUAL OVERRIDE/.test(done);
+        return '<div class="dprop" style="background:'+(ovr?'#F4C86B':'#ADEBB3')+'"><div class="k">'+
+          (ovr?'YOU OVERRODE':'YOU CHOSE')+'</div><div class="t">'+esc(done)+'</div>'+
+          (ovr?'<div style="font-size:10px;color:var(--ink-2);margin-top:7px;letter-spacing:.06em">AGAINST THE PROPOSAL. LOGGED AS A MANUAL CALL.</div>':'')+
+          '</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="reopen(\''+id+'\')">CHANGE</button>'+
+          '<button class="btn primary" onclick="goLine(\''+d.line+'\')">THE LINE ▶</button>'+
+          '<button class="btn" onclick="closeDec()">◀ PLAN</button></div>';})()
+       :'<div class="dchoices">'+d.ch.map((c,i)=>
+          '<button class="dchoice'+(c.rec?' rec':'')+'" onclick="choose(\''+id+'\','+i+')">'+
+          '<span class="tick '+(c.rec?'y':'n')+'" style="margin-top:5px"></span><span><span class="lb">'+esc(c.lb)+
+          (c.rec?'  <span style="font-size:9px;border:2px solid var(--ink);padding:2px 5px">PICK</span>':'')+
+          '</span><span class="ds">'+esc(c.ds)+'</span></span><span class="ar">▶</span></button>').join('')+'</div>'+
+        ovrBlock(id)+
+        '<div class="hint">PICK A PROPOSAL ABOVE, OR PLACE IT YOURSELF.</div>')+
+    '</div>';
+  $('#veil').classList.add('on');
+}
+/* ---- manual override: any binder + half + band, or a collection, even
+   against the proposal. this is the escape hatch from the routing cascade. ---- */
+const OVR={};
+let OBINDERS=['BINDER 1','BINDER 2','SPECIALTY BINDER A'];
+/* COLLECTIONS are the single source of truth for what lives in a specialty binder.
+   A collection is a themed group (illustrator sets are Karvi's real case) that she
+   sizes herself: FINITE = a set list of cards she chases (owned / listed, needed →
+   wishlist); OPEN = no target, just a running count. One specialty binder can hold
+   several collections. She creates and edits them on the Collections screen, and
+   because this object is the source of truth, edits show up in placement too.
+   All MATSUNO sample cards are real Tika Matsuno printings, verified on TCGdex
+   07 Sep 2026. */
+const COLLS = {
+  'MATSUNO':{binder:'SPECIALTY BINDER A', note:'TIKA MATSUNO ILLUSTRATIONS', mode:'finite', count:0,
+    cards:[
+      {n:'RALTS',    s:'SVI 084', band:'purple', have:true},
+      {n:'CACNEA',   s:'SVI 005', band:'green',  have:true},
+      {n:'GROWLITHE',s:'SVI 031', band:'red',    have:true},
+      {n:'CATERPIE', s:'MEW 010', band:'green',  have:false},
+      {n:'GASTLY',   s:'LOR 064', band:'purple', have:false},
+      {n:'DEDENNE',  s:'PAF 036', band:'yellow', have:false}
+    ]},
+  'OKUBO':{binder:'SPECIALTY BINDER A', note:'ALL OKUBO-ILLUSTRATED CARDS · ~31 KNOWN', mode:'open', count:12, cards:[]},
+  'SABOTERI CITYSCAPE':{binder:'SPECIALTY BINDER A', note:'CONNECTED-ART CITYSCAPE SUBSET · ~74 KNOWN', mode:'open', count:20, cards:[]}
+};
+/* which collections live in a binder, derived from COLLS so create/edit is instant */
+const collsFor=bn=>Object.keys(COLLS).filter(n=>COLLS[n].binder===bn);
+const OCOLLS=Object.keys(COLLS); // flat list, for reference
+/* specialty binders are themed, not rainbow-ordered, so the front/back half rule
+   does not apply. a binder is specialty if its name says so OR it holds a collection. */
+const isSpec=n=>/SPECIALTY/i.test(n||'')||Object.keys(COLLS).some(c=>COLLS[c].binder===n);
+/* a brand-new binder is assumed a standard rainbow binder, so it keeps halves;
+   only an existing specialty binder drops the front/back split. */
+const effBinder=o=>o.binder==='__new'?'':o.binder;
+function ovrState(id){
+  if(!OVR[id]) OVR[id]={open:false,mode:'shelf',binder:'BINDER 2',half:'BACK',band:null,coll:null,newBinder:'',newColl:''};
+  return OVR[id];
+}
+function toggleOvr(id){ovrState(id).open=!OVR[id].open;openDec(id)}
+function setOvr(id,k,v){const o=ovrState(id);o[k]=v;
+  if(k==='binder'&&v!=='__new')o.newBinder='';
+  if(k==='coll'&&v!=='__new')o.newColl='';
+  /* the binder decides the mode: a specialty binder is placed by collection,
+     a standard/new binder is placed by half + rainbow band. */
+  if(k==='binder'){
+    o.mode=v==='__bulk'?'bulk':(isSpec(v)?'coll':'shelf');
+    if(o.mode==='coll'&&!collsFor(v).includes(o.coll)&&o.coll!=='__new')o.coll=null;
+  }
+  rerenderOvr(id);}
+/* the same override panel is used inside a decision and inside the move overlay.
+   re-render whichever host is showing it. */
+function rerenderOvr(id){ id==='__move'?renderMove():openDec(id); }
+/* name typing must not re-render (would drop focus); patch the summary in place */
+function ovrName(id,k,v){ovrState(id)[k]=v;const el=$('#ovrSum');if(el)el.innerHTML=ovrSummary(id);}
+function ovrDest(id){
+  const o=ovrState(id);
+  if(o.binder==='__bulk')return 'BULK BOX'; // not shelved: no binder, no order
+  const bnd=o.binder==='__new'?('NEW BINDER · '+(o.newBinder.trim()||'UNNAMED')):o.binder;
+  if(isSpec(o.binder)){
+    const c=o.coll==='__new'?('NEW COLLECTION · '+(o.newColl.trim()||'UNNAMED')):(o.coll||'PICK A COLLECTION');
+    return bnd+' · '+c; // specialty: binder + collection, no band
+  }
+  const bn=o.band?(BAND[o.band].nm+' · '+BAND[o.band].ty.split(' ')[0]):'PICK A BAND';
+  return bnd+' · '+o.half+' HALF · '+bn;
+}
+function ovrSummary(id){return 'PLACING · <b>'+esc(ovrDest(id))+'</b>'}
+function confirmOvr(id){
+  const o=ovrState(id);
+  if(o.mode==='shelf'&&!o.band)return;
+  if(o.mode==='coll'&&!o.coll)return;
+  resolved[id]='MANUAL OVERRIDE · '+ovrDest(id);
+  o.open=false;renderPlan();renderSpot();openDec(id);
+}
+
+/* ---- move a card that is already shelved ----
+   same override panel, but there is no proposal to override: the card just has
+   a current home and she wants a new one. reachable from a line slot or a lookup. */
+const MOVED={};            // set-code -> {dest, band}
+let moveSrc=null;          // 'line' | 'look' — which screen to refresh on confirm
+const jsq=s=>String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); // safe for inline onclick strings
+function openMove(c){
+  moveSrc=c.src;
+  const bd=OBINDERS.includes(c.binder)?c.binder:'BINDER 1', sp=isSpec(bd);
+  OVR['__move']={open:true,mode:sp?'coll':'shelf',
+    binder:bd,
+    half:c.half||'BACK', band:c.band||null,
+    coll:sp&&collsFor(bd).includes(c.coll)?c.coll:null,newBinder:'',newColl:'',
+    card:{nm:c.nm,s:c.s,band:c.band,from:c.loc||''}};
+  renderMove();
+  $('#moveVeil').classList.add('on');
+}
+function closeMove(){$('#moveVeil').classList.remove('on');}
+function renderMove(){
+  const o=OVR['__move'], c=o.card;
+  $('#moveSheet').innerHTML=
+    '<div class="cap"><span class="t">MOVE A SHELVED CARD</span><span class="n">'+esc(c.nm)+'</span>'+
+      '<button class="btn sm" style="background:var(--panel-2);color:var(--ink)" onclick="closeMove()">CLOSE <span class="kbd">ESC</span></button></div>'+
+    '<div class="body">'+
+      '<div class="hand" style="margin-bottom:16px">'+face(c.nm,c.s,c.band||'white','m')+
+        '<div class="hd"><div class="nm" style="font-size:15px">'+esc(c.nm)+'</div>'+
+        (num(c.s)?'<div><span class="no">'+num(c.s)+'</span></div>':'')+
+        '<div class="bd" style="font-size:10px;color:var(--ink-2);letter-spacing:.08em">NOW · '+esc(c.from||'SHELVED')+'</div></div></div>'+
+      ovrBlock('__move',{hideToggle:true,confirm:'confirmMove'})+
+      '<div class="hint">PICK A NEW HOME. NO RULE APPLIES HERE, IT IS YOUR CALL.</div>'+
+    '</div>';
+}
+function confirmMove(){
+  const o=OVR['__move'];
+  if(o.mode==='shelf'&&!o.band)return;
+  if(o.mode==='coll'&&!o.coll)return;
+  const dest=ovrDest('__move');
+  MOVED[o.card.s]={dest, band:o.mode==='shelf'?o.band:o.card.band};
+  closeMove();
+  if(moveSrc==='line') renderLine();
+  else if(moveSrc==='look') doLook($('#q').value);
+  else if(moveSrc==='spot') renderSpot();
+  toast('MOVED · '+o.card.nm+' → '+dest);
+}
+let toastT=null;
+function toast(msg){
+  const el=$('#toast'); if(!el)return;
+  el.textContent=msg; el.classList.add('on');
+  clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('on'),2600);
+}
+function ovrBlock(id,cfg){
+  cfg=cfg||{};
+  const confirmFn=cfg.confirm||'confirmOvr';
+  const o=ovrState(id);
+  let h='';
+  if(!cfg.hideToggle){
+    h+='<button class="ovrtoggle" onclick="toggleOvr(\''+id+'\')">'+
+      (o.open?'▾ HIDE MANUAL PLACEMENT':'✎ PLACE IT MYSELF · OVERRIDE THE RULE')+'</button>';
+    if(!o.open)return h;
+  }
+  const spec=isSpec(o.binder), bulk=o.binder==='__bulk';
+  const bandChips=BANDS.map(b=>'<button class="ochip'+(o.band===b.id?' on':'')+'" '+
+    'onclick="setOvr(\''+id+'\',\'band\',\''+b.id+'\')"><span class="sw'+(b.dith?' dither':'')+'" style="background:'+b.c+'"></span>'+
+    b.nm+(b.id==='pink'?' <span class="rt">RSV</span>':'')+'</button>').join('');
+  const binderChips=OBINDERS.map(bn=>'<button class="ochip'+(o.binder===bn?' on':'')+(isSpec(bn)?' spec':'')+'" '+
+    'onclick="setOvr(\''+id+'\',\'binder\',\''+jsq(bn)+'\')">'+esc(bn)+'</button>').join('')+
+    '<button class="ochip'+(o.binder==='__new'?' on':'')+'" onclick="setOvr(\''+id+'\',\'binder\',\'__new\')">+ NEW BINDER</button>'+
+    '<button class="ochip bulk'+(bulk?' on':'')+'" onclick="setOvr(\''+id+'\',\'binder\',\'__bulk\')">▤ BULK BOX · DON\'T SHELF</button>';
+  /* collection chips are scoped to the chosen specialty binder, so the picker
+     itself shows which collections live in that binder. */
+  const collChips=collsFor(o.binder).map(cn=>'<button class="ochip'+(o.coll===cn?' on':'')+'" '+
+    'onclick="setOvr(\''+id+'\',\'coll\',\''+jsq(cn)+'\')">'+esc(cn)+'</button>').join('')+
+    '<button class="ochip'+(o.coll==='__new'?' on':'')+'" onclick="setOvr(\''+id+'\',\'coll\',\'__new\')">+ NEW COLLECTION</button>';
+  const canConfirm=bulk?true:(spec?(o.coll==='__new'?!!o.newColl.trim():!!o.coll):!!o.band);
+  h+='<div class="ovr"><div class="ohead"><span>MANUAL PLACEMENT · AGAINST THE PROPOSAL</span><span class="yc">YOUR CALL</span></div>'+
+    '<div class="obody">'+
+    '<div class="orow"><div class="ol">BINDER</div><div class="ochips">'+binderChips+'</div>'+
+        (o.binder==='__new'?'<input class="oname" placeholder="NAME THE NEW BINDER" value="'+esc(o.newBinder)+'" oninput="ovrName(\''+id+'\',\'newBinder\',this.value)">':'')+'</div>';
+  if(bulk){
+    /* bulk box has no internal structure: no half, no band, no collection. */
+    h+='<div class="orow"><div class="ol"></div><div class="ochips"><span class="oskip">▤ BULK BOX · NOT SHELVED. NO BINDER, NO ORDER. IT STAYS IN THE PILE UNTIL YOU PLACE IT.</span></div></div>';
+  }else if(spec){
+    /* specialty: no rainbow, no front/back. place by collection instead. */
+    h+='<div class="orow"><div class="ol">COLLECTION IN '+esc(o.binder)+'</div><div class="ochips">'+collChips+'</div>'+
+        (o.coll==='__new'?'<input class="oname" placeholder="NAME THE NEW COLLECTION" value="'+esc(o.newColl)+'" oninput="ovrName(\''+id+'\',\'newColl\',this.value)">':'')+'</div>'+
+       '<div class="orow"><div class="ol"></div><div class="ochips"><span class="oskip">SPECIALTY BINDERS ARE GROUPED BY COLLECTION, NOT RAINBOW OR FRONT/BACK</span></div></div>';
+  }else{
+    h+='<div class="orow"><div class="ol">HALF</div><div class="ochips">'+
+        ['FRONT','BACK'].map(hf=>'<button class="ochip'+(o.half===hf?' on':'')+'" onclick="setOvr(\''+id+'\',\'half\',\''+hf+'\')">'+hf+' HALF</button>').join('')+'</div></div>'+
+       '<div class="orow"><div class="ol">COLOR BAND · RAINBOW ORDER</div><div class="ochips">'+bandChips+'</div></div>';
+  }
+  h+='<div class="osum" id="ovrSum">'+ovrSummary(id)+'</div>'+
+     '<button class="oconfirm"'+(canConfirm?'':' disabled')+' onclick="'+confirmFn+'(\''+id+'\')">PLACE IT HERE ▶</button>'+
+     '</div></div>';
+  return h;
+}
+
+/* the wishlist target is a choice between real printings, so show the art.
+   the thumbnail zooms (capture handler); clicking the card body picks it. */
+function wishStrip(id,d){
+  if(!d.wish||!d.wish.length) return '';
+  const pick=wishPick[id]!=null?wishPick[id]:0, sel=d.wish[pick];
+  const one=d.wish.length===1;
+  return '<div class="wish"><div class="k">'+
+      '<span>'+(one?'WISHLIST TARGET':'WISHLIST OPTIONS')+' · TAP ART TO ENLARGE</span>'+
+      '<span class="sel">WISHLISTING · '+esc(sel.nm)+' '+esc(sel.cs)+' '+esc(sel.px)+'</span></div>'+
+    '<div class="wcards">'+d.wish.map((w,i)=>
+      '<div class="wcard'+(i===pick?' on':'')+'" onclick="pickWish(\''+id+'\','+i+')">'+
+        '<div class="top">'+face(w.nm,w.cs,w.band,'m')+
+          (w.badge?'<span class="badge">'+esc(w.badge)+'</span>':'')+'</div>'+
+        '<div class="wn">'+esc(w.nm)+'</div>'+
+        '<div class="wno">'+esc(num(w.cs))+'</div>'+
+        '<div class="wpx">'+esc(w.px)+'</div>'+
+        (i===pick?'<span class="pill">WISHLISTING</span>':'')+
+      '</div>').join('')+'</div></div>';
+}
+function pickWish(id,i){wishPick[id]=i;openDec(id)}
+function choose(id,i){resolved[id]=DECS[id].ch[i].lb;renderPlan();renderSpot();openDec(id)}
+function reopen(id){delete resolved[id];renderPlan();renderSpot();openDec(id)}
+function closeDec(){$('#veil').classList.remove('on')}
+
+/* =====================================================================
+   SCREEN 5 : COLLECTIONS
+   The COLLS object (defined in the override section, since placement reads it
+   too) is the source of truth. This screen renders it, tracks progress, and is
+   where she creates and edits collections. FINITE = a set list she chases
+   (owned / listed, needed → wishlist); OPEN = a running count with no target.
+   ===================================================================== */
+const WISHED = {};   // "SET LOCALID" -> true, cards pushed to the wishlist from a finite collection
+const collKey=c=>c.s;
+function renderColls(){
+  const wrap='<div class="collnew"><button class="newcollbtn" onclick="openCollEditor(null)">＋ NEW COLLECTION</button></div>';
+  $('#collWrap').innerHTML=wrap+Object.keys(COLLS).map(name=>{
+    const C=COLLS[name], fin=C.mode==='finite';
+    const owned=fin?C.cards.filter(c=>c.have).length:C.count;
+    const total=fin?C.cards.length:null;
+    const pct=fin&&total?Math.round(owned/total*100):0;
+    let head='<div class="collhead">'+
+      '<div><div class="collname">'+esc(name)+'</div>'+
+        '<div class="collmeta">'+esc(C.binder)+' · '+esc(C.note)+'</div></div>'+
+      '<div class="collactions">'+
+        '<div class="modetoggle">'+
+          '<button class="modebtn'+(fin?' on':'')+'" onclick="setCollMode(\''+jsq(name)+'\',\'finite\')">FINITE</button>'+
+          '<button class="modebtn'+(fin?'':' on')+'" onclick="setCollMode(\''+jsq(name)+'\',\'open\')">OPEN</button>'+
+        '</div>'+
+        '<button class="editcollbtn" onclick="openCollEditor(\''+jsq(name)+'\')">✎ EDIT</button>'+
+      '</div></div>';
+    let body;
+    if(fin){
+      const needed=C.cards.filter(c=>!c.have).length;
+      body='<div class="cbar"><i style="width:'+pct+'%"></i></div>'+
+        '<div class="cprog"><b>'+owned+' / '+total+'</b> OWNED · '+pct+'%'+
+          (needed?' · <span class="need">'+needed+' ON THE WISHLIST</span>':' · COMPLETE')+'</div>'+
+        '<div class="cgrid">'+C.cards.map(c=>{
+          const w=WISHED[collKey(c)];
+          return '<div class="ccard'+(c.have?'':' need')+'">'+
+            '<div class="ct">'+face(c.n,c.s,c.band,'m')+'</div>'+
+            '<div class="cn">'+esc(c.n)+'</div>'+
+            '<div class="cno">'+esc(num(c.s))+'</div>'+
+            (c.have
+              ? '<span class="cpill have">OWNED</span>'
+              : (w?'<span class="cpill wish">ON WISHLIST</span>'
+                  :'<button class="wbtn" onclick="wishlistCard(\''+jsq(name)+'\',\''+jsq(c.s)+'\')">+ WISHLIST</button>'))+
+          '</div>';
+        }).join('')+'</div>';
+    }else{
+      const logged=C.cards||[];
+      const tot=(C.count||0)+logged.length;
+      body='<div class="infbox"><div class="infnum">'+tot+'</div>'+
+        '<div class="inflab">CARDS AND COUNTING</div>'+
+        '<button class="logbtn" onclick="openCollLog(\''+jsq(name)+'\')">＋ LOG A CARD</button></div>'+
+        '<div class="cprog">OPEN COLLECTION · NO TARGET, JUST A RUNNING COUNT'+
+          (C.count&&logged.length?' · '+C.count+' UNLISTED + '+logged.length+' LOGGED':'')+'</div>'+
+        (logged.length?'<div class="cerow-h">LOGGED CARDS · EACH LIVES IN '+esc(C.binder)+' · '+esc(name)+'</div>'+
+          '<div class="cgrid">'+logged.map((c,i)=>
+            '<div class="ccard">'+
+              '<div class="ct">'+face(c.n,c.s,c.band||'white','m')+'</div>'+
+              '<div class="cn">'+esc(c.n)+'</div>'+
+              (num(c.s)?'<div class="cno">'+esc(num(c.s))+'</div>':'')+
+              '<span class="cpill have">IN COLLECTION</span>'+
+              '<button class="wbtn" onclick="unlogColl(\''+jsq(name)+'\','+i+')">− REMOVE</button>'+
+            '</div>').join('')+'</div>':'');
+    }
+    return '<div class="collcard panel">'+head+body+'</div>';
+  }).join('');
+}
+function setCollMode(name,m){COLLS[name].mode=m;renderColls()}
+function wishlistCard(name,code){WISHED[code]=true;renderColls();toast('WISHLISTED · '+name+' · '+num(code))}
+/* ---- log a card into an OPEN collection ----
+   Adding a card to a collection is a placement, not a tally bump: you name the
+   card and it takes the collection's binder+collection as its position. */
+let LOGST=null;
+function openCollLog(name){LOGST={coll:name,term:'',pick:null};renderCollLog();$('#moveVeil').classList.add('on')}
+/* live search over the catalog (LOOK). Only #logResults is patched on each
+   keystroke, so the input never loses focus mid-type. */
+function logSearch(v){if(!LOGST)return;LOGST.term=v;const r=$('#logResults');if(r)r.innerHTML=logResultsHTML()}
+function logResultsHTML(){
+  const t=(LOGST.term||'').trim().toUpperCase();
+  if(!t)return '<div class="cehint">TYPE TO SEARCH THE CATALOG.</div>';
+  const hits=LOOK.map((e,i)=>({e,i})).filter(({e})=>
+    e.nm.toUpperCase().includes(t)||(e.q||[]).some(k=>String(k).toUpperCase().includes(t))).slice(0,8);
+  const rows=hits.map(({e,i})=>
+    '<button class="logrow" onclick="logPick('+i+')">'+
+      face(e.nm,e.s,e.band||'white','s')+
+      '<span class="lr"><b>'+esc(e.nm)+'</b>'+
+        (num(e.s)?'<i>'+esc(num(e.s))+'</i>':(e.s?'<i>'+esc(e.s)+'</i>':'<i>NO NUMBER</i>'))+'</span>'+
+    '</button>').join('');
+  return rows+'<button class="logrow free" onclick="logFree()">＋ LOG “'+esc(LOGST.term.trim())+'” AS TYPED</button>';
+}
+function logPick(i){const e=LOOK[i];LOGST.pick={n:e.nm.toUpperCase(),s:e.s||'',band:e.band||'white'};renderCollLog()}
+function logFree(){const t=(LOGST.term||'').trim();if(!t)return;LOGST.pick={n:t.toUpperCase(),s:'',band:'white'};renderCollLog()}
+function logClearPick(){LOGST.pick=null;renderCollLog()}
+function renderCollLog(){
+  const C=COLLS[LOGST.coll], p=LOGST.pick;
+  $('#moveSheet').innerHTML=
+    '<div class="cap"><span class="t">LOG A CARD</span><span class="n">'+esc(LOGST.coll)+'</span>'+
+      '<button class="btn sm" style="background:var(--panel-2);color:var(--ink)" onclick="closeMove()">CLOSE <span class="kbd">ESC</span></button></div>'+
+    '<div class="body">'+
+      '<div class="orow"><div class="ol">FIND A CARD</div>'+
+        '<input class="oname" id="logq" placeholder="SEARCH BY NAME OR NUMBER" value="'+esc(LOGST.term)+'" oninput="logSearch(this.value)"></div>'+
+      '<div id="logResults" class="logres">'+logResultsHTML()+'</div>'+
+      (p?'<div class="orow"><div class="ol">PICKED</div>'+
+        '<div class="logpick">'+face(p.n,p.s,p.band||'white','s')+
+          '<span class="lr"><b>'+esc(p.n)+'</b>'+(num(p.s)?'<i>'+esc(num(p.s))+'</i>':(p.s?'<i>'+esc(p.s)+'</i>':'<i>NO NUMBER</i>'))+'</span>'+
+          '<button class="cex" onclick="logClearPick()">✕</button></div></div>':'')+
+      '<div class="orow"><div class="ol">LOCATION</div>'+
+        '<div class="loclock">▤ '+esc(C.binder)+' · '+esc(LOGST.coll)+'</div></div>'+
+      '<div class="cesave"><button class="oconfirm"'+(p?'':' disabled')+' onclick="confirmCollLog()">LOG IT ▶</button></div>'+
+      '<div class="hint">PICK A CARD FROM THE CATALOG · ADDING IT TO A COLLECTION IS ITS POSITION.</div>'+
+    '</div>';
+}
+function confirmCollLog(){
+  if(!LOGST||!LOGST.pick)return;
+  const C=COLLS[LOGST.coll]; C.cards=C.cards||[];
+  const p=LOGST.pick;
+  C.cards.push({n:p.n,s:p.s||'',band:p.band||'white',have:true});
+  const dest=C.binder+' · '+LOGST.coll;
+  if(p.s)MOVED[p.s]={dest,band:null}; // so a lookup on that card shows its collection home
+  LOGST=null; closeMove(); renderColls();
+  toast('LOGGED · '+p.n+' → '+dest);
+}
+function unlogColl(name,i){COLLS[name].cards.splice(i,1);renderColls();toast('REMOVED FROM '+name)}
+
+/* ---- create / edit a collection ----
+   COLLS is the source of truth, so saving here also updates the placement
+   picker. CEDIT is the working copy; nothing lands in COLLS until she saves. */
+let CEDIT=null;
+function openCollEditor(name){
+  if(name){
+    const C=COLLS[name];
+    CEDIT={orig:name, name, binder:C.binder, newBinder:'', mode:C.mode, note:C.note||'',
+      count:C.count||0, cards:C.cards.map(c=>({n:c.n,s:c.s,band:c.band||'',have:!!c.have})),
+      draftN:'', draftS:''};
+  }else{
+    const first=OBINDERS.filter(isSpec)[0]||'SPECIALTY BINDER A';
+    CEDIT={orig:null, name:'', binder:first, newBinder:'', mode:'finite', note:'',
+      count:0, cards:[], draftN:'', draftS:''};
+  }
+  renderCollEditor();
+  $('#collVeil').classList.add('on');
+}
+function closeCollEditor(){$('#collVeil').classList.remove('on');CEDIT=null}
+/* text fields patch state without a re-render, so typing never drops focus */
+function ceType(k,v){if(CEDIT)CEDIT[k]=v}
+/* structural changes (mode, binder, card add/remove/own) do re-render */
+function ceSet(k,v){CEDIT[k]=v;if(k==='binder'&&v!=='__new')CEDIT.newBinder='';renderCollEditor()}
+function ceAddCard(){
+  const n=(CEDIT.draftN||'').trim(), s=(CEDIT.draftS||'').trim().toUpperCase();
+  if(!n)return;
+  CEDIT.cards.push({n:n.toUpperCase(),s,band:'',have:false});
+  CEDIT.draftN='';CEDIT.draftS='';renderCollEditor();
+}
+function ceOwn(i){CEDIT.cards[i].have=!CEDIT.cards[i].have;renderCollEditor()}
+function ceRemoveCard(i){CEDIT.cards.splice(i,1);renderCollEditor()}
+function ceResolvedBinder(){return CEDIT.binder==='__new'?CEDIT.newBinder.trim():CEDIT.binder}
+function ceValid(){
+  const nm=(CEDIT.name||'').trim();
+  if(!nm)return false;
+  if(!ceResolvedBinder())return false;
+  if(nm!==CEDIT.orig&&Object.prototype.hasOwnProperty.call(COLLS,nm))return false; // no dup name
+  return true;
+}
+function renderCollEditor(){
+  const e=CEDIT, fin=e.mode==='finite', isNew=!e.orig;
+  const specBinders=OBINDERS.filter(isSpec);
+  const binderChips=specBinders.map(bn=>'<button class="ochip'+(e.binder===bn?' on':'')+' spec" '+
+      'onclick="ceSet(\'binder\',\''+jsq(bn)+'\')">'+esc(bn)+'</button>').join('')+
+    '<button class="ochip'+(e.binder==='__new'?' on':'')+'" onclick="ceSet(\'binder\',\'__new\')">+ NEW BINDER</button>';
+  let cardsBlock='';
+  if(fin){
+    const rows=e.cards.length?e.cards.map((c,i)=>
+      '<div class="cerow'+(c.have?' own':'')+'">'+
+        '<span class="cet">'+face(c.n,c.s,c.band||'white','s')+'</span>'+
+        '<span class="cei"><b>'+esc(c.n)+'</b>'+(num(c.s)?'<i>'+esc(num(c.s))+'</i>':(c.s?'<i>'+esc(c.s)+'</i>':''))+'</span>'+
+        '<button class="cebtn'+(c.have?' on':'')+'" onclick="ceOwn('+i+')">'+(c.have?'OWNED':'NEEDED')+'</button>'+
+        '<button class="cex" onclick="ceRemoveCard('+i+')">✕</button>'+
+      '</div>').join(''):'<div class="cehint">NO CARDS YET. ADD THE FIRST ONE BELOW.</div>';
+    cardsBlock='<div class="cerow-h">CARDS IN THIS COLLECTION · NEEDED CARDS GO TO THE WISHLIST</div>'+
+      '<div class="celist">'+rows+'</div>'+
+      '<div class="ceadd">'+
+        '<input class="oname" placeholder="CARD NAME" value="'+esc(e.draftN)+'" oninput="ceType(\'draftN\',this.value)">'+
+        '<input class="oname sm" placeholder="SET + NO. e.g. SVI 084" value="'+esc(e.draftS)+'" oninput="ceType(\'draftS\',this.value)">'+
+        '<button class="ceaddbtn" onclick="ceAddCard()">+ ADD</button>'+
+      '</div>';
+  }else{
+    cardsBlock='<div class="orow"><div class="ol">STARTING COUNT</div>'+
+      '<input class="oname sm" type="number" min="0" value="'+esc(e.count)+'" oninput="ceType(\'count\',this.value)"></div>'+
+      '<div class="oskip">OPEN COLLECTION · NO CARD LIST, JUST A RUNNING COUNT SHE BUMPS AS SHE ADDS.</div>';
+  }
+  const valid=ceValid();
+  $('#collSheet').innerHTML=
+    '<div class="cap"><span class="t">'+(isNew?'NEW COLLECTION':'EDIT COLLECTION')+'</span>'+
+      '<span class="n">'+esc((e.name||'').trim()||'UNNAMED')+'</span>'+
+      '<button class="btn sm" style="background:var(--panel-2);color:var(--ink)" onclick="closeCollEditor()">CLOSE <span class="kbd">ESC</span></button></div>'+
+    '<div class="body">'+
+      '<div class="orow"><div class="ol">NAME</div>'+
+        '<input class="oname" placeholder="NAME THE COLLECTION" value="'+esc(e.name)+'" oninput="ceType(\'name\',this.value)"></div>'+
+      '<div class="orow"><div class="ol">SPECIALTY BINDER</div><div class="ochips">'+binderChips+'</div>'+
+        (e.binder==='__new'?'<input class="oname" placeholder="NAME THE NEW SPECIALTY BINDER" value="'+esc(e.newBinder)+'" oninput="ceType(\'newBinder\',this.value)">':'')+'</div>'+
+      '<div class="orow"><div class="ol">SIZE</div><div class="modetoggle">'+
+        '<button class="modebtn'+(fin?' on':'')+'" onclick="ceSet(\'mode\',\'finite\')">FINITE · SET LIST</button>'+
+        '<button class="modebtn'+(fin?'':' on')+'" onclick="ceSet(\'mode\',\'open\')">OPEN · RUNNING COUNT</button>'+
+      '</div></div>'+
+      '<div class="orow"><div class="ol">NOTE</div>'+
+        '<input class="oname" placeholder="A SHORT NOTE (WHAT THIS COLLECTION IS)" value="'+esc(e.note)+'" oninput="ceType(\'note\',this.value)"></div>'+
+      cardsBlock+
+      '<div class="cesave">'+
+        (isNew?'':'<button class="cedel" onclick="deleteColl()">DELETE COLLECTION</button>')+
+        '<button class="oconfirm"'+(valid?'':' disabled')+' onclick="saveColl()">'+(isNew?'CREATE ▶':'SAVE ▶')+'</button>'+
+      '</div>'+
+      (valid?'':'<div class="hint">NAME AND BINDER ARE REQUIRED, AND THE NAME MUST BE UNIQUE.</div>')+
+    '</div>';
+}
+function saveColl(){
+  if(!ceValid())return;
+  const nm=CEDIT.name.trim(), bn=ceResolvedBinder();
+  if(CEDIT.orig&&CEDIT.orig!==nm)delete COLLS[CEDIT.orig];
+  if(!OBINDERS.includes(bn))OBINDERS=OBINDERS.concat([bn]);
+  COLLS[nm]={binder:bn, note:CEDIT.note.trim(), mode:CEDIT.mode,
+    count:parseInt(CEDIT.count,10)||0, cards:CEDIT.cards.map(c=>({n:c.n,s:c.s,band:c.band||'',have:!!c.have}))};
+  const was=CEDIT.orig; closeCollEditor(); renderColls();
+  toast((was?'SAVED · ':'CREATED · ')+nm);
+}
+function deleteColl(){
+  const nm=CEDIT.orig; if(!nm)return;
+  delete COLLS[nm]; closeCollEditor(); renderColls(); toast('REMOVED · '+nm);
+}
+
+/* =====================================================================
+   SCREEN 3 : LINE DETAIL
+   ===================================================================== */
+let curLine='L1';
+function goLine(id){curLine=id||curLine;closeDec();show('line');renderLine()}
+function renderLine(){
+  $('#lineTabs').innerHTML=Object.keys(LINES).map(k=>{
+    const L=LINES[k];
+    return '<button class="lt'+(k===curLine?' on':'')+'" onclick="curLine=\''+k+'\';renderLine()">'+
+      bandChip(L.band)+BAND[L.band].ty+' · '+esc(L.sp)+'</button>';
+  }).join('');
+  const L=LINES[curLine], b=BAND[L.band];
+  const counts=L.slots.reduce((m,s)=>{m[s.st]=(m[s.st]||0)+1;return m},{});
+  $('#lineTitle').innerHTML='<div class="sp">'+BAND[L.band].ty+' · '+esc(L.sp)+'</div>'+
+    '<div class="lc">'+bandChip(L.band)+BAND[L.band].nm+' · '+esc(L.binder).replace(' HALF','')+' · '+
+    (counts.filled||0)+'◆ '+(counts.ph||0)+'◇ '+(counts.block||0)+'✕</div>';
+  const badge={capped:'CAPPED',terminated:'TERMINATED',open:'OPEN'}[L.status];
+  $('#lineStatusWrap').innerHTML='<span class="status '+L.status+'">'+
+    (L.status==='capped'?'▲ ':L.status==='terminated'?'■ ':'● ')+badge+'</span>';
+  $('#pageRail').style.background=b.c;
+  $('#pageRail').className='pagerail'+(b.dith?' dither':'');
+
+  let html='';
+  L.slots.forEach((s,i)=>{
+    if(i>0) html+='<div class="arrowcell'+(L.slots[i].st==='block'||L.slots[i-1].st==='block'?' dead':'')+
+      '"><span class="ev">▶</span><span class="pxarrow"><i></i><i></i><i></i></span></div>';
+    html+=slotHTML(s,b);
+  });
+  if(L.cap) html+='<div class="tear"></div><div class="capcell"><div class="capplate">'+
+    '<div class="k">▲ CAP</div><div class="t">'+esc(L.cap.t)+'</div><div class="w">'+esc(L.cap.w)+'</div></div></div>';
+  $('#strip').innerHTML=html;
+  $('#lineInfo').innerHTML=L.info.map(x=>'<div class="box panel"><div class="k">'+esc(x[0])+'</div><div class="v">'+esc(x[1])+'</div></div>').join('');
+}
+function slotHTML(s,b){
+  const head={filled:'FILLED',ph:'HUNTING',block:'BLOCKED'}[s.st];
+  const topbg=s.st==='filled'?b.c:(s.st==='ph'?'var(--ink)':'#5F5035');
+  /* filled and hunting slots both show the real card. the difference is carried
+     by the dimmed face, the price, and the caret, never by the art being absent. */
+  let art='';
+  if(s.st==='block') art='<span class="xmark"><i></i><i></i></span>';
+  else art=face(s.nm,s.s,b.id,'m');
+  const n=num(s.s);
+  let body='<div class="cn">'+esc(s.nm)+'</div>'+
+    (n?'<div><span class="no">'+n+'</span></div>':'<div class="cs">'+esc(s.s)+'</div>')+
+    '<div class="cs">'+s.meta.map(esc).join('<br>')+'</div>';
+  if(s.st==='ph'){
+    body+='<div class="price">'+esc(s.price)+'<span class="caret"></span></div>'+
+      (s.spec?'<div class="tagline" style="background:var(--b-purple);color:var(--ink)">SPECIALTY</div>':'')+
+      '<div class="alts">'+esc(s.alts)+'</div>';
+  } else if(s.st==='block'){
+    /* the block keeps one tagline, the wedge card, because that is the one
+       thing she cannot see from the pocket itself. the DEAD word is already
+       carried by the label, the grey, and the X. */
+    body+='<div class="tagline">'+esc(s.wedge)+'</div>';
+  }
+  if(s.st==='filled'){
+    /* an owned card can always be relocated, rule or no rule */
+    const mv=MOVED[s.s];
+    if(mv) body+='<div class="movedtag">MOVED → '+esc(mv.dest)+'</div>';
+    const loc=(LINES[curLine]&&LINES[curLine].binder)||'',
+      sbind=OBINDERS.find(x=>loc.indexOf(x)===0)||'BINDER 1',
+      shalf=/FRONT/.test(loc)?'FRONT':'BACK';
+    body+='<button class="movebtn" onclick="openMove({src:\'line\',nm:\''+jsq(s.nm)+'\',s:\''+jsq(s.s)+'\',band:\''+b.id+'\',binder:\''+jsq(sbind)+'\',half:\''+shalf+'\',loc:\''+jsq((loc||'')+' · '+BAND[b.id].nm)+'\'})">↔ MOVE</button>';
+  }
+  return '<div class="slot '+s.st+'"><div class="slotlabel"><span>'+s.stage+'</span><span>'+head+'</span></div>'+
+    '<div class="pocket"><div class="top" style="background:'+topbg+(b.dk&&s.st==='filled'?';color:var(--panel)':'')+'">'+
+    '<span>'+(s.st==='filled'?'◆ OWNED':s.st==='ph'?'◇ OPEN':'✕ DEAD')+'</span></div>'+
+    '<div class="art">'+art+'</div><div class="info">'+body+'</div></div></div>';
+}
+
+/* =====================================================================
+   SCREEN 4 : LOOKUP
+   ===================================================================== */
+function renderSugg(){
+  $('#sugg').innerHTML=['CHARMELEON','CHARIZARD ex','RALTS','SCYTHER','VAPOREON','ULTRA BALL','FLYGON']
+    .map(t=>'<button onclick="doLook(\''+t+'\')">'+t+'</button>').join('');
+}
+function doLook(term){
+  $('#q').value=term;
+  const t=String(term).trim().toUpperCase();
+  if(!t){$('#lookOut').innerHTML='';return}
+  const hit=LOOK.find(e=>e.q.some(k=>k.startsWith(t)||t.startsWith(k)))||
+            LOOK.find(e=>e.q.some(k=>k.includes(t)));
+  if(!hit){
+    $('#lookOut').innerHTML='<div class="notfound"><b>NO MATCH.</b>'+
+      '<div style="font-size:11px;color:var(--ink-2);margin-top:8px">NOT OWNED, NOT WISHLISTED. SO NOT A DUPLICATE.</div></div>';
+    return;
+  }
+  const stack=BANDS.map(b=>'<i class="'+(hit.band===b.id?'on':'')+(b.dith?' dither':'')+'" style="background:'+b.c+'"></i>').join('');
+  const mv=hit.owned?MOVED[hit.s]:null;
+  const where=hit.owned?
+    (mv?(esc(mv.dest).replace(/ · /,'<br>')+'<small>MOVED · OVERRIDE</small>')
+       :(hit.binder+'<br>'+hit.half+'<small>'+BAND[hit.band].nm+' · '+BAND[hit.band].ty+'</small>'))
+    :(hit.blocked?'NOT OWNED<br>AND BLOCKED<small>NOTHING CAN FILL IT</small>':'NOT IN A BINDER<small>NOT OWNED YET</small>');
+  const moveBtn=hit.owned?'<div style="padding:0 13px 13px">'+
+    '<button class="movebtn wide" onclick="openMove({src:\'look\',nm:\''+jsq(hit.nm)+'\',s:\''+jsq(hit.s)+'\',band:\''+(hit.band||'white')+'\',binder:\''+jsq(hit.binder||'')+'\',half:\''+(/FRONT/.test(hit.half||'')?'FRONT':'BACK')+'\',loc:\''+jsq((hit.binder||'')+' · '+(hit.half||'')+' · '+(BAND[hit.band]?BAND[hit.band].nm:''))+'\'})">↔ MOVE THIS CARD</button></div>':'';
+  $('#lookOut').innerHTML=
+    '<div class="answer panel"><div class="cap"><span>'+(hit.owned?'YOU OWN IT':'NOT OWNED')+'</span><span>FOUND</span></div>'+
+    /* identity first so she can check the search found the printing in her hand,
+       then the address at arm's-length size. the old THE CARD panel sat below the
+       fold, which is the wrong end of a three second lookup. */
+    '<div class="hand" style="padding:12px 13px 0">'+face(hit.nm,hit.s,hit.band||'white','m')+
+      '<div class="hd"><div class="nm">'+esc(hit.nm)+'</div>'+
+      (num(hit.s)?'<div><span class="no">'+num(hit.s)+'</span></div>':'')+
+      '<div class="sb">'+esc(hit.sub)+'</div></div></div>'+
+    '<div class="hero">'+(hit.owned?'<div class="bandstack">'+stack+'</div>':'')+
+      '<div class="where">'+where+'</div></div>'+
+    moveBtn+
+    '<div class="facts">'+hit.facts.map(f=>'<div class="fact '+f[0]+'"><span class="ic"></span><span><b>'+esc(f[1])+'</b><br>'+esc(f[2])+
+      (f[3]?' <button class="btn sm" style="margin-top:6px" onclick="goLine(\''+f[3]+'\')">LINE ▶</button>':'')+'</span></div>').join('')+
+    '</div></div>';
+}
+
+/* =====================================================================
+   NAV + KEYS
+   ===================================================================== */
+function show(id){
+  $$('.screen').forEach(s=>s.classList.remove('on'));
+  $('#scr-'+id).classList.add('on');
+  $$('nav.menu .tab').forEach(t=>t.classList.toggle('on',t.dataset.go===id||(id==='line'&&t.dataset.go==='line')));
+  window.scrollTo({top:0});
+}
+$$('nav.menu .tab').forEach(t=>t.addEventListener('click',()=>{
+  const g=t.dataset.go;
+  if(g==='dec'){openDecQueue();return}
+  show(g);
+  if(g==='line')renderLine();
+  if(g==='look')$('#q').focus();
+  if(g==='coll')renderColls();
+}));
+$('#openFirstDec').addEventListener('click',openDecQueue);
+$('#veil').addEventListener('click',e=>{if(e.target.id==='veil')closeDec()});
+$('#moveVeil').addEventListener('click',e=>{if(e.target.id==='moveVeil')closeMove()});
+$('#collVeil').addEventListener('click',e=>{if(e.target.id==='collVeil')closeCollEditor()});
+
+/* ---- card lightbox: click any thumbnail to enlarge ---- */
+function openZoom(el){
+  const src=el.dataset.zoom, nm=el.dataset.nm, code=el.dataset.code;
+  if(!src)return;
+  $('#lbcard').innerHTML='<div class="load">LOADING…</div>'+
+    '<img alt="'+esc(nm)+'" onload="this.previousElementSibling&&this.previousElementSibling.remove()" '+
+    'onerror="this.previousElementSibling.textContent=\'IMAGE UNAVAILABLE OFFLINE\'">';
+  $('#lbcard').querySelector('img').src=src;
+  $('#lbcap').innerHTML='<span class="nm">'+esc(nm)+'</span>'+(num(code)?'<span class="no">'+num(code)+'</span>':'');
+  $('#lightbox').classList.add('on');
+}
+function closeZoom(){$('#lightbox').classList.remove('on');$('#lbcard').innerHTML=''}
+document.addEventListener('click',e=>{
+  const f=e.target.closest('.face.zoomable');
+  if(f){e.preventDefault();e.stopPropagation();openZoom(f)}
+},true);
+$('#lightbox').addEventListener('click',closeZoom);
+$('#q').addEventListener('input',e=>doLook(e.target.value));
+$('#qgo').addEventListener('click',()=>doLook($('#q').value));
+
+document.addEventListener('keydown',e=>{
+  const typing=e.target.tagName==='INPUT';
+  if(e.key==='Escape'){
+    if(typing){e.target.blur();return}
+    closeZoom();closeMove();closeCollEditor();closeDec();return;
+  }
+  if(typing)return;
+  if($('#lightbox').classList.contains('on'))return;
+  if($('#veil').classList.contains('on'))return;
+  if($('#moveVeil').classList.contains('on'))return;
+  if($('#collVeil').classList.contains('on'))return;
+  const onPlan=$('#scr-plan').classList.contains('on');
+  if(['1','2','3','4','5'].includes(e.key)){
+    e.preventDefault();
+    if(e.key==='1')show('plan');
+    if(e.key==='2')openDecQueue();
+    if(e.key==='3'){show('line');renderLine()}
+    if(e.key==='4'){show('look');$('#q').focus()}
+    if(e.key==='5'){show('coll');renderColls()}
+    return;
+  }
+  if(!onPlan)return;
+  if(e.key===' '||e.key==='Enter'){e.preventDefault();toggle(cur);advance();return}
+  if(e.key==='j'||e.key==='ArrowDown'){e.preventDefault();setCur(cur+1);return}
+  if(e.key==='k'||e.key==='ArrowUp'){e.preventDefault();setCur(cur-1);return}
+  if(e.key==='d'||e.key==='D'){e.preventDefault();const h=HAUL[cur];openDec(h.dec&&!resolved[h.dec]?h.dec:(Object.keys(DECS).find(k=>!resolved[k])||h.dec||'d1'));return}
+});
+
+/* boot */
+renderPlan();renderSpot();renderSugg();doLook('CHARMELEON');renderLine();
+</script>
+</body>
+</html>

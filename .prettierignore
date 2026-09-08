@@ -1,0 +1,10 @@
+node_modules
+.next
+out
+build
+coverage
+pnpm-lock.yaml
+next-env.d.ts
+
+# Planning docs and HTML prototypes are authored artifacts — keep them verbatim.
+docs

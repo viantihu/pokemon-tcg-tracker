@@ -1,0 +1,10 @@
+-- Deterministic seed for the TESTING database only. Reset-from-seed is allowed
+-- at any time on Testing; Production is NEVER seeded after its first real import
+-- (docs/devops-strategy.md §6).
+--
+-- STANDING RULE: use REAL cards only. Verify every set code + collector number
+-- against the live TCGdex API before adding a row here. Fabricated numbers have
+-- broken things before — do not invent them.
+--
+-- (Left empty until the domain schema exists; populate alongside the migration
+-- that creates the catalog/copy tables.)

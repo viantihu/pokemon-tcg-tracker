@@ -1,0 +1,54 @@
+name: Deploy
+
+# Applies DB migrations to the matching environment, then smoke-checks the
+# deploy (docs/devops-strategy.md §8). Vercel's Git integration performs the
+# actual app deploy on push; this workflow owns migrations + the health check.
+#
+# Ordering matters: MIGRATE BEFORE the deploy is trusted, so new code never
+# meets an old schema.
+#
+# Requires these secrets/vars to be configured before it can pass (deferred to
+# the external-wiring step — see docs/devops-strategy.md §7, §11):
+#   secrets.SUPABASE_ACCESS_TOKEN      (account-level, both envs)
+#   secrets.SUPABASE_DB_PASSWORD       (matching env)
+#   secrets.SUPABASE_PROJECT_REF       (testing ref on develop, prod ref on main)
+#   vars.APP_URL                       (deployed base URL of the matching env)
+on:
+  push:
+    branches: [develop, main]
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'testing' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Push migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}"
+          supabase db push
+
+  smoke:
+    needs: migrate
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'testing' }}
+    steps:
+      - name: Health check
+        run: |
+          url="${{ vars.APP_URL }}/api/health"
+          echo "Checking $url"
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --retry 5 --retry-delay 10 --retry-all-errors "$url")
+          echo "HTTP $code"
+          test "$code" = "200"

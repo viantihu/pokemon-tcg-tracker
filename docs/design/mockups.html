@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BINDER OPS — static mockups, screens 5 to 10</title>
+<style>
+/* ============================================================
+   BINDER OPS — static mockups for screens 5-10
+   Same 16-bit RPG menu language as prototype.html
+   ============================================================ */
+:root{
+  color-scheme: light;
+  --olive:#6D7B3C;
+  --panel:#FBF2DD; --panel-2:#F1D6AF;
+  --ink:#3C3C3B;   --ink-2:#5F5035;  --ink-3:#84572F;
+  --hi:#FFFAF0;    --lo:#E4BA77;
+  --note:#FEDF4F;  --mint:#ADEBB3;   --lime:#9FD45B;
+  --dead:#A89D85;  --ok:#3AA94F;
+  --b-red:#EC6F4D; --b-orange:#C9762B; --b-yellow:#FEDF4F; --b-olive:#8F9A3A;
+  --b-green:#45C55D; --b-navy:#3B5687; --b-sky:#6FB9DD; --b-purple:#9D6FB8;
+  --b-pink:#FF94A6; --b-white:#FDF6E6;
+  --font:"Silkscreen","Press Start 2P","DotGothic16",ui-monospace,"Cascadia Mono","Segoe UI Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--olive);
+  background-image:linear-gradient(rgba(255,255,255,.10) 1px,transparent 1px),linear-gradient(90deg,rgba(0,0,0,.07) 1px,transparent 1px);
+  background-size:4px 4px,4px 4px;
+  color:var(--ink);font-family:var(--font);font-size:13px;line-height:1.45;letter-spacing:.02em;
+  -webkit-font-smoothing:none;
+}
+button{font-family:inherit;font-size:inherit;color:inherit;background:none;border:0;cursor:default;letter-spacing:.06em}
+input{font-family:inherit;font-size:inherit;color:inherit}
+
+.panel{background:var(--panel);border:3px solid var(--ink);
+  box-shadow:inset 2px 2px 0 var(--hi),inset -2px -2px 0 var(--lo),5px 5px 0 rgba(60,60,59,.20)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border:3px solid var(--ink);
+  background:var(--panel-2);box-shadow:inset 2px 2px 0 var(--hi),inset -2px -2px 0 var(--lo),4px 4px 0 rgba(60,60,59,.22);
+  text-transform:uppercase;font-size:12px}
+.btn.primary{background:var(--ink);color:var(--panel);box-shadow:inset 2px 2px 0 rgba(255,255,255,.22),inset -2px -2px 0 rgba(0,0,0,.35),4px 4px 0 rgba(60,60,59,.28)}
+.btn.sm{padding:6px 10px;font-size:11px;box-shadow:inset 2px 2px 0 var(--hi),inset -2px -2px 0 var(--lo),3px 3px 0 rgba(60,60,59,.2)}
+.btn.wide{width:100%;justify-content:center}
+.kbd{display:inline-block;min-width:20px;padding:1px 5px;font-size:10px;border:2px solid var(--ink);
+  background:var(--hi);box-shadow:2px 2px 0 rgba(60,60,59,.25);text-align:center}
+.dither{background-image:repeating-conic-gradient(rgba(60,60,59,.22) 0% 25%,transparent 0% 50%);background-size:4px 4px}
+.chip{width:20px;height:20px;border:3px solid var(--ink);flex:0 0 auto;display:inline-block}
+.chip.sm{width:14px;height:14px;border-width:2px}
+.tag{display:inline-block;padding:4px 8px;border:3px solid var(--ink);background:var(--panel-2);font-size:10px;letter-spacing:.1em;box-shadow:2px 2px 0 rgba(60,60,59,.2)}
+.tag.ok{background:var(--mint)}.tag.hot{background:var(--note)}.tag.dead{background:var(--dead)}
+.tag.spec{background:var(--ink);color:var(--panel)}.tag.blk{background:#5F5035;color:#F1D6AF}
+
+/* ---- card face ----
+   Live TCGdex scan over a generated pixel sigil. If the image cannot load the
+   sigil is what remains, so a card is still identifiable offline. Both sizes
+   hold the real 2.5 x 3.5 card ratio. */
+.face{position:relative;display:block;flex:0 0 auto;border:3px solid var(--ink);background:var(--hi);
+  overflow:hidden;box-shadow:2px 2px 0 rgba(60,60,59,.2)}
+.face .sig{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:block}
+.face .px{position:absolute}
+.face img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top center;
+  display:block;image-rendering:pixelated}
+.face.s{width:34px;height:47px;border-width:2px}
+.face.m{width:52px;height:72px}
+.face.dim{opacity:.7;filter:grayscale(.3)}
+.face.zoomable{cursor:zoom-in}
+.face.zoomable:hover{box-shadow:0 0 0 3px var(--note), 2px 2px 0 rgba(60,60,59,.2)}
+/* ---- card lightbox ---- */
+.lightbox{position:fixed;inset:0;background:rgba(60,60,59,.82);display:none;z-index:80;
+  align-items:center;justify-content:center;padding:24px;cursor:zoom-out}
+.lightbox.on{display:flex}
+.lightbox .lbwrap{display:flex;flex-direction:column;align-items:center;gap:12px;max-width:100%;max-height:100%}
+.lightbox .lbcard{position:relative;border:3px solid var(--ink);background:var(--hi);
+  box-shadow:8px 8px 0 rgba(0,0,0,.4);width:min(78vw,360px);aspect-ratio:2.5/3.5;overflow:hidden}
+.lightbox .lbcard img{width:100%;height:100%;object-fit:contain;display:block}
+.lightbox .lbcard .load{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:11px;letter-spacing:.14em;color:var(--ink-2)}
+.lightbox .lbcap{display:flex;gap:10px;align-items:center;padding:9px 13px;border:3px solid var(--ink);
+  background:var(--panel);box-shadow:4px 4px 0 rgba(0,0,0,.35);max-width:min(78vw,360px)}
+.lightbox .lbcap .nm{font-size:14px;letter-spacing:.04em}
+.lightbox .lbcap .pnum{white-space:nowrap}
+.lightbox .lbhint{font-size:9px;letter-spacing:.16em;color:var(--panel);opacity:.75}
+/* the printed collector number, always NNN out of the set's official count */
+.pnum{display:inline-block;padding:2px 5px;border:2px solid var(--ink);background:var(--hi);
+  font-size:10px;letter-spacing:.04em;white-space:nowrap}
+.pnum.big{padding:3px 6px;border-width:3px;background:var(--note);font-size:11px}
+
+/* ---- page frame ---- */
+.wrap{max-width:1180px;margin:0 auto;padding:18px 16px 80px}
+.masthead{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:8px;padding:14px 16px;
+  background:var(--ink);color:var(--panel);border:3px solid var(--ink);box-shadow:6px 6px 0 rgba(60,60,59,.2)}
+.masthead b{font-size:16px;letter-spacing:.16em}
+.masthead span{font-size:10px;color:#E4BA77;letter-spacing:.1em}
+.toc{display:flex;flex-wrap:wrap;gap:0;margin-bottom:26px}
+.toc a{padding:9px 12px;border:3px solid var(--ink);border-right-width:0;background:var(--panel-2);
+  font-size:11px;text-decoration:none;color:var(--ink);text-transform:uppercase}
+.toc a:last-child{border-right-width:3px}
+.toc a:hover{background:var(--hi)}
+
+.mock{margin-bottom:44px}
+.mockcap{display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;padding:11px 14px;margin-bottom:12px;
+  border:3px solid var(--ink);background:var(--note);box-shadow:5px 5px 0 rgba(60,60,59,.18)}
+.mockcap .no{font-size:20px;letter-spacing:.08em}
+.mockcap .ti{font-size:15px;letter-spacing:.1em}
+.mockcap .su{font-size:10px;color:#5a4a34;letter-spacing:.06em;flex:1;min-width:220px;line-height:1.7}
+.note{margin-top:12px;padding:11px 13px;border:3px dashed var(--ink-3);background:var(--panel-2);font-size:11px;line-height:1.8}
+.note b{letter-spacing:.1em}
+.frame{padding:14px}
+.tabs{display:flex;flex-wrap:wrap;margin-bottom:12px}
+.tabs button{padding:9px 13px;border:3px solid var(--ink);border-right-width:0;background:var(--panel-2);font-size:11px;display:flex;align-items:center;gap:8px}
+.tabs button:last-child{border-right-width:3px}
+.tabs button.on{background:var(--ink);color:var(--panel)}
+.hd{font-size:10px;letter-spacing:.16em;color:var(--ink-2);margin-bottom:8px}
+.cap2{padding:8px 12px;background:var(--ink);color:var(--panel);font-size:10px;letter-spacing:.16em;display:flex;justify-content:space-between;gap:10px}
+
+/* ---- 5 binder view ---- */
+.halves{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.half{border:3px solid var(--ink);background:var(--panel);overflow:hidden}
+.bandrow{display:grid;grid-template-columns:22px 116px minmax(0,1fr) 96px;gap:10px;align-items:center;
+  padding:8px 11px;border-bottom:2px solid var(--lo)}
+.bandrow:last-child{border-bottom:0}
+.bandrow .lb{font-size:11px;letter-spacing:.08em}
+.bandrow .lb small{display:block;font-size:9px;color:var(--ink-2);letter-spacing:.1em;margin-top:2px}
+.bandrow .rt{font-size:10px;color:var(--ink-2);text-align:right;letter-spacing:.06em;line-height:1.6}
+.meter{display:flex;gap:2px;height:18px;align-items:stretch}
+.meter i{flex:1;border:2px solid var(--ink);background:var(--panel-2)}
+.meter i.f{background:var(--ink-3)}
+.meter i.f.c{background:currentColor}
+.meter.resv i{border-style:dashed;border-color:var(--ink-3);background:transparent}
+.brk{position:relative;display:flex;align-items:center;gap:0}
+.brk .zig{width:12px;align-self:stretch;background:linear-gradient(135deg,transparent 50%,var(--ink) 50%) 0 0/6px 6px repeat-y;flex:0 0 auto}
+.brk .over{padding:2px 6px;border:2px solid var(--ink);background:var(--b-red);color:var(--ink);font-size:9px;white-space:nowrap}
+.legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;font-size:10px;color:var(--ink-2)}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:14px;height:14px;border:2px solid var(--ink);display:inline-block}
+
+/* ---- 6 wishlist ---- */
+.wgroup{border:3px solid var(--ink);background:var(--panel);margin-bottom:12px;overflow:hidden}
+.wgroup .gh{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:8px 12px;background:var(--panel-2);border-bottom:3px solid var(--ink)}
+.wgroup .gh .nm{font-size:12px;letter-spacing:.1em}
+.wgroup .gh .ct{margin-left:auto;font-size:10px;color:var(--ink-2)}
+.witem{display:grid;grid-template-columns:26px 52px minmax(0,1fr) 92px 128px;gap:11px;align-items:center;padding:11px 12px;border-bottom:2px solid var(--lo)}
+.witem:last-child{border-bottom:0}
+.witem .cb{width:24px;height:24px;border:3px solid var(--ink);background:var(--hi)}
+.witem .nm{font-size:13px}
+.witem .su{font-size:10px;color:var(--ink-2);margin-top:3px;line-height:1.7}
+.witem .pr{font-size:14px;text-align:right}
+.witem .pr small{display:block;font-size:9px;color:var(--ink-2)}
+.wtot{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:12px 14px;border:3px solid var(--ink);background:var(--note);box-shadow:5px 5px 0 rgba(60,60,59,.18)}
+.wtot .big{font-size:20px;letter-spacing:.06em}
+
+/* ---- 7 intake ---- */
+.entry{border:3px solid var(--ink);background:var(--hi);box-shadow:5px 5px 0 rgba(60,60,59,.2)}
+.entry .row1{display:flex;border-bottom:3px solid var(--ink)}
+.entry input{flex:1;min-width:0;border:0;outline:0;background:transparent;padding:16px 14px;font-size:18px;letter-spacing:.06em;text-transform:uppercase}
+.entry .row1 .who{padding:0 14px;display:flex;align-items:center;font-size:10px;color:var(--ink-2);border-left:3px solid var(--ink);background:var(--panel-2)}
+.ac{border-bottom:3px solid var(--ink)}
+.ac .opt{display:grid;grid-template-columns:26px 34px minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 12px;border-bottom:2px solid var(--lo);font-size:12px}
+.ac .opt:last-child{border-bottom:0}
+.ac .opt.on{background:var(--note)}
+.ac .opt .su{font-size:10px;color:var(--ink-2);margin-top:2px}
+.vars{display:flex;flex-wrap:wrap;gap:8px;padding:11px 12px}
+.vars .v{display:flex;align-items:center;gap:7px;padding:7px 10px;border:3px solid var(--ink);background:var(--panel-2);font-size:11px}
+.vars .v.on{background:var(--ink);color:var(--panel)}
+.tally{display:flex;gap:3px;align-items:flex-end;height:78px;padding:12px;border:3px solid var(--ink);background:var(--panel);margin-top:12px}
+.tally .t{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%}
+.tally .t i{width:100%;border:2px solid var(--ink)}
+.tally .t span{font-size:8px;color:var(--ink-2)}
+.recent{margin-top:12px;border:3px solid var(--ink);background:var(--panel);overflow:hidden}
+.recent .r{display:grid;grid-template-columns:14px 34px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:8px 11px;border-bottom:2px solid var(--lo);font-size:11px}
+.recent .r .nm{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+.recent .r:last-child{border-bottom:0}
+.keymap{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin-top:12px}
+.keymap div{display:flex;gap:9px;align-items:center;padding:8px 10px;border:3px solid var(--ink);background:var(--panel-2);font-size:10px}
+
+/* ---- 8 collections ---- */
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.col{border:3px solid var(--ink);background:var(--panel);overflow:hidden;box-shadow:5px 5px 0 rgba(60,60,59,.18)}
+.col .ch{padding:11px 13px;background:var(--ink);color:var(--panel)}
+.col .ch .nm{font-size:15px;letter-spacing:.08em}
+.col .ch .su{font-size:10px;color:#E4BA77;margin-top:4px;letter-spacing:.08em}
+.col .cb{padding:12px 13px}
+.grid24{display:grid;grid-template-columns:repeat(8,1fr);gap:3px;margin:10px 0}
+.grid24 i{aspect-ratio:1;border:2px solid var(--ink);background:var(--panel-2)}
+.grid24 i.f{background:var(--b-purple)}
+.grid24 i.f.b{background:var(--b-sky)}
+.kv{display:flex;justify-content:space-between;gap:10px;font-size:10px;color:var(--ink-2);padding:5px 0;border-bottom:2px solid var(--lo)}
+.kv b{color:var(--ink);letter-spacing:.06em}
+.kv:last-of-type{border-bottom:0}
+.conflict{margin-top:10px;padding:10px;border:3px solid var(--ink);background:var(--note);font-size:10px;line-height:1.8}
+
+/* ---- 9 settings ---- */
+.setgrid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:14px;align-items:start}
+.srow{display:grid;grid-template-columns:minmax(0,1fr) 74px 74px 96px 30px;gap:9px;align-items:center;padding:9px 11px;border-bottom:2px solid var(--lo)}
+.srow:last-child{border-bottom:0}
+.srow .f{border:3px solid var(--ink);background:var(--hi);padding:6px 8px;font-size:11px;text-align:center}
+.srow .f.l{text-align:left}
+.srow .hh{font-size:9px;color:var(--ink-2);letter-spacing:.1em;text-align:center}
+.ord{border:3px solid var(--ink);background:var(--panel);overflow:hidden}
+.ord .o{display:grid;grid-template-columns:22px 22px minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 11px;border-bottom:2px solid var(--lo);font-size:11px}
+.ord .o:last-child{border-bottom:0}
+.ord .o .gr{color:var(--ink-3);font-size:13px;letter-spacing:-1px}
+.tog{display:flex;gap:10px;align-items:flex-start;padding:11px;border-bottom:2px solid var(--lo)}
+.tog:last-child{border-bottom:0}
+.sw{width:44px;height:24px;border:3px solid var(--ink);background:var(--panel-2);position:relative;flex:0 0 auto}
+.sw i{position:absolute;top:0;left:0;width:18px;height:18px;background:var(--ink-3);border:0}
+.sw.on{background:var(--ok)}
+.sw.on i{left:auto;right:0;background:var(--hi)}
+.tog .tx{font-size:11px;line-height:1.7}
+.tog .tx b{letter-spacing:.06em}
+.tog .tx span{display:block;font-size:10px;color:var(--ink-2);margin-top:4px}
+
+/* ---- 10 backfill ---- */
+.steps{display:flex;flex-wrap:wrap;gap:0;margin-bottom:14px}
+.steps .s{display:flex;align-items:center;gap:8px;padding:10px 13px;border:3px solid var(--ink);border-right-width:0;background:var(--panel-2);font-size:10px;letter-spacing:.08em}
+.steps .s:last-child{border-right-width:3px}
+.steps .s.done{background:#ADEBB3}
+.steps .s.on{background:var(--ink);color:var(--panel)}
+.steps .s .n{width:20px;height:20px;border:2px solid var(--ink);background:var(--hi);color:var(--ink);display:flex;align-items:center;justify-content:center;font-size:10px}
+.bfwrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start}
+.seq{display:flex;flex-wrap:wrap;gap:6px;padding:12px;border:3px solid var(--ink);background:var(--panel)}
+.seq .c{display:flex;align-items:center;gap:7px;padding:5px 7px;border:2px solid var(--ink);background:var(--panel-2);font-size:10px}
+.seq .c .tx{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.seq .c.new{background:var(--note);border-style:dashed;align-self:stretch}
+.lineform{border:3px solid var(--ink);background:var(--panel);overflow:hidden}
+.lineform .lf{display:grid;grid-template-columns:70px 34px minmax(0,1fr) 118px;gap:10px;align-items:center;padding:10px 12px;border-bottom:2px solid var(--lo)}
+.lineform .lf:last-child{border-bottom:0}
+.lineform .st{font-size:9px;letter-spacing:.12em;color:var(--ink-2)}
+.lineform .f{border:3px solid var(--ink);background:var(--hi);padding:7px 9px;font-size:11px}
+.lineform .f .pnum{margin-top:5px}
+.lineform .f.ph{background:var(--note);border-style:dashed}
+.lineform .f.blk{background:var(--dead);color:#3C3C3B}
+.seg3{display:flex}
+.seg3 button{padding:6px 8px;border:3px solid var(--ink);border-right-width:0;background:var(--panel-2);font-size:9px;letter-spacing:.06em}
+.seg3 button:last-child{border-right-width:3px}
+.seg3 button.on{background:var(--ink);color:var(--panel)}
+.seg3 button.on.ph{background:var(--note);color:var(--ink)}
+.seg3 button.on.blk{background:#5F5035;color:#F1D6AF}
+.bfbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:12px;padding:12px 14px;border:3px solid var(--ink);background:var(--panel-2)}
+.xp{display:flex;gap:3px;flex:1;min-width:180px}
+.xp i{flex:1;height:14px;border:2px solid var(--ink);background:var(--panel)}
+.xp i.f{background:var(--lime)}
+
+@media (max-width:900px){
+  .halves,.setgrid,.bfwrap{grid-template-columns:1fr}
+  .witem{grid-template-columns:26px 52px minmax(0,1fr);}
+  .witem .pr{grid-column:3;text-align:left}
+  .lineform .lf{display:flex;flex-wrap:wrap;gap:9px}
+  .lineform .lf .f{flex:1;min-width:150px}
+  .ac .opt{grid-template-columns:26px 34px minmax(0,1fr);}
+  .bandrow{grid-template-columns:22px 96px minmax(0,1fr);}
+  .bandrow .rt{grid-column:3;text-align:left}
+  .srow{grid-template-columns:minmax(0,1fr) 1fr 1fr;}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <div><b>BINDER OPS</b><br><span>SCREENS 5 TO 10</span></div>
+  </div>
+  <div class="toc">
+    <a href="#m5">5 BINDER</a><a href="#m6">6 WISHLIST</a><a href="#m7">7 HAUL INTAKE</a>
+    <a href="#m8">8 COLLECTIONS</a><a href="#m9">9 SETTINGS</a><a href="#m10">10 BACKFILL</a>
+  </div>
+
+  <!-- ================= 5 BINDER VIEW ================= -->
+  <section class="mock" id="m5">
+    <div class="mockcap"><span class="no">05</span><span class="ti">BINDER VIEW</span><span class="su">CAPACITY PER BAND</span></div>
+
+    <div class="panel frame">
+      <div class="tabs">
+        <button class="on">BINDER 1 · GENERAL</button>
+        <button>BINDER 2 · GENERAL</button>
+        <button>SPECIALTY A</button>
+        <button>+ BINDER</button>
+      </div>
+      <div class="halves">
+        <div class="half">
+          <div class="cap2"><span>FRONT · SINGLES</span><span>PAGES 1 – 20</span></div>
+          <div id="frontRows"></div>
+        </div>
+        <div class="half">
+          <div class="cap2"><span>BACK · LINES</span><span>PAGES 21 – 40</span></div>
+          <div id="backRows"></div>
+        </div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--ink-3)"></i>USED</span>
+        <span><i style="background:var(--panel-2)"></i>FREE</span>
+        <span><i style="border-style:dashed;border-color:var(--ink-3);background:transparent"></i>RESERVED</span>
+        <span><i class="dither" style="background:#fff"></i>WHITE BAND</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 6 WISHLIST ================= -->
+  <section class="mock" id="m6">
+    <div class="mockcap"><span class="no">06</span><span class="ti">WISHLIST</span><span class="su">OPEN SLOTS, PRICED</span></div>
+
+    <div class="panel frame">
+      <div class="tabs">
+        <button class="on">BY LINE</button><button>BY BAND</button><button>BY PRICE</button><button>SHOW MODE</button>
+      </div>
+
+      <div class="wtot" style="margin-bottom:14px">
+        <div><div class="hd" style="margin:0">EVERYTHING</div><div class="big">$25.21</div></div>
+        <div><div class="hd" style="margin:0">CHEAP LIST</div><div class="big">$1.11</div></div>
+        <div style="font-size:10px;color:var(--ink-2);flex:1;min-width:180px;line-height:1.8">
+          </div>
+        <button class="btn sm">COPY LIST</button>
+        <button class="btn sm">CSV</button>
+        <button class="btn primary sm">MASS ENTRY</button>
+      </div>
+
+      <div class="wgroup">
+        <div class="gh"><span class="chip" style="background:var(--b-red)"></span>
+          <span class="nm">FIRE · CHARMANDER LINE</span>
+          <span class="tag spec">CAPPED</span>
+          <span class="ct">BINDER 1 · BACK · 1 OPEN</span></div>
+        <div class="witem">
+          <div class="cb"></div>
+          <span data-card="CHARIZARD ex" data-s="MEW 006" data-b="red" data-sz="m"></span>
+          <div><div class="nm">CHARIZARD ex</div>
+            <div><span class="pnum" data-num="MEW 006"></span></div>
+            <div class="su">STAGE 2 · 2 ALTERNATES</div></div>
+          <div class="pr">$24.10<small>MARKET LOW</small></div>
+          <div><span class="tag spec">SPECIALTY BINDER A</span></div>
+        </div>
+      </div>
+
+      <div class="wgroup">
+        <div class="gh"><span class="chip" style="background:var(--b-purple)"></span>
+          <span class="nm">PSYCHIC · RALTS LINE</span>
+          <span class="tag hot">2 OPEN</span>
+          <span class="ct">BINDER 1 · BACK</span></div>
+        <div class="witem">
+          <div class="cb"></div>
+          <span data-card="RALTS" data-s="SVI 084" data-b="purple" data-sz="m"></span>
+          <div><div class="nm">RALTS</div>
+            <div><span class="pnum" data-num="SVI 084"></span></div>
+            <div class="su">ROOT · SECOND COPY · 1 ALTERNATE</div></div>
+          <div class="pr">$0.09<small>MARKET LOW</small></div>
+          <div><span class="tag hot">COLLECTION TOOK IT</span></div>
+        </div>
+        <div class="witem">
+          <div class="cb"></div>
+          <span data-card="GARDEVOIR" data-s="SIT 069" data-b="purple" data-sz="m"></span>
+          <div><div class="nm">GARDEVOIR</div>
+            <div><span class="pnum" data-num="SIT 069"></span></div>
+            <div class="su">STAGE 2 · 2 ALTERNATES</div></div>
+          <div class="pr">$0.42<small>MARKET LOW</small></div>
+          <div><span class="tag ok">BINDER 1 · BACK</span></div>
+        </div>
+      </div>
+
+      <div class="wgroup">
+        <div class="gh"><span class="chip" style="background:var(--b-olive)"></span>
+          <span class="nm">DRAGON · TRAPINCH LINE</span>
+          <span class="tag dead">ROOT BLOCKED</span>
+          <span class="ct">BINDER 2 · BACK · 1 OPEN</span></div>
+        <div class="witem">
+          <div class="cb"></div>
+          <span data-card="FLYGON" data-s="PRC 110" data-b="olive" data-sz="m"></span>
+          <div><div class="nm">FLYGON</div>
+            <div><span class="pnum" data-num="PRC 110"></span></div>
+            <div class="su">STAGE 2 · 2 ALTERNATES</div></div>
+          <div class="pr">$0.60<small>MARKET LOW</small></div>
+          <div><span class="tag ok">LAST ONE</span></div>
+        </div>
+      </div>
+
+      <div class="wgroup">
+        <div class="gh"><span class="chip" style="background:var(--b-yellow)"></span>
+          <span class="nm">LIGHTNING · PIKACHU LINE</span>
+          <span class="tag ok">RESOLVING</span>
+          <span class="ct">BINDER 2 · BACK</span></div>
+        <div class="witem" style="opacity:.55">
+          <div class="cb" style="background:var(--ok)"></div>
+          <span data-card="RAICHU" data-s="TEF 052" data-b="yellow" data-sz="m"></span>
+          <div><div class="nm" style="text-decoration:line-through">RAICHU</div>
+            <div><span class="pnum" data-num="TEF 052"></span></div>
+            <div class="su">FOUND 05 SEP</div></div>
+          <div class="pr">$0.31<small>DONE</small></div>
+          <div><span class="tag ok">FOUND IN BULK</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 7 HAUL INTAKE ================= -->
+  <section class="mock" id="m7">
+    <div class="mockcap"><span class="no">07</span><span class="ti">HAUL INTAKE</span><span class="su">FAST ENTRY</span></div>
+
+    <div class="panel frame">
+      <div class="tabs"><button class="on">TYPE THEM IN</button><button>PASTE A LIST</button><button>CAMERA · LATER</button></div>
+
+      <div class="entry">
+        <div class="row1">
+          <input value="CHARMEL" readonly>
+          <div class="who">148 IN</div>
+        </div>
+        <div class="ac">
+          <div class="opt on"><span class="kbd">1</span>
+            <span data-card="CHARMELEON" data-s="OBF 027" data-b="red"></span>
+            <div><b>CHARMELEON</b> <span class="pnum" data-num="OBF 027"></span>
+              <div class="su">OBSIDIAN FLAMES · UNCOMMON · RYOTA MURAYAMA</div></div>
+            <span class="chip sm" style="background:var(--b-red)"></span></div>
+          <div class="opt"><span class="kbd">2</span>
+            <span data-card="CHARMELEON" data-s="MEW 005" data-b="red"></span>
+            <div><b>CHARMELEON</b> <span class="pnum" data-num="MEW 005"></span>
+              <div class="su">151 · UNCOMMON · GIDORA</div></div>
+            <span class="chip sm" style="background:var(--b-red)"></span></div>
+          <div class="opt"><span class="kbd">3</span>
+            <span data-card="CHARMELEON" data-s="PAF 008" data-b="red"></span>
+            <div><b>CHARMELEON</b> <span class="pnum" data-num="PAF 008"></span>
+              <div class="su">PALDEAN FATES · UNCOMMON · TONJI MATSUNO</div></div>
+            <span class="chip sm" style="background:var(--b-red)"></span></div>
+          <div class="opt"><span class="kbd">4</span>
+            <span data-card="CHARMELEON" data-s="PAF 110" data-b="red"></span>
+            <div><b>CHARMELEON</b> <span class="pnum" data-num="PAF 110"></span>
+              <div class="su">PALDEAN FATES · SHINY RARE · GOES TO SPECIALTY</div></div>
+            <span class="tag spec" style="font-size:9px">SPEC</span></div>
+        </div>
+        <div class="vars">
+          <span style="font-size:10px;color:var(--ink-2);align-self:center;letter-spacing:.12em">VARIANT</span>
+          <span class="v on"><span class="kbd" style="background:var(--panel);color:var(--ink)">N</span>NORMAL</span>
+          <span class="v"><span class="kbd">R</span>REVERSE HOLO</span>
+          <span class="v"><span class="kbd">H</span>HOLO</span>
+          <span class="v"><span class="kbd">P</span>PROMO</span>
+          <span style="flex:1"></span>
+          <button class="btn sm">ADD <span class="kbd">↵</span></button>
+        </div>
+      </div>
+
+      <div class="tally" id="tally"></div>
+
+      <div class="recent">
+        <div class="cap2"><span>LAST SIX</span><span>⌫ UNDO</span></div>
+        <div class="r"><span class="chip sm" style="background:var(--b-red)"></span>
+          <span data-card="CHARMANDER" data-s="OBF 026" data-b="red"></span>
+          <span class="nm">CHARMANDER <span class="pnum" data-num="OBF 026"></span></span><span style="font-size:9px;color:var(--ink-2)">NORMAL</span><span class="kbd">⌫</span></div>
+        <div class="r"><span class="chip sm" style="background:var(--b-purple)"></span>
+          <span data-card="DUSCLOPS" data-s="SFA 019" data-b="purple"></span>
+          <span class="nm">DUSCLOPS <span class="pnum" data-num="SFA 019"></span></span><span style="font-size:9px;color:var(--ink-2)">NORMAL</span><span class="kbd">⌫</span></div>
+        <div class="r"><span class="chip sm" style="background:var(--b-purple)"></span>
+          <span data-card="DUSKULL" data-s="SFA 018" data-b="purple"></span>
+          <span class="nm">DUSKULL <span class="pnum" data-num="SFA 018"></span></span><span style="font-size:9px;color:var(--ink-2)">NORMAL</span><span class="kbd">⌫</span></div>
+        <div class="r"><span class="chip sm dither" style="background:#fff"></span>
+          <span data-card="ULTRA BALL" data-s="SVI 196" data-b="white"></span>
+          <span class="nm">ULTRA BALL <span class="pnum" data-num="SVI 196"></span></span><span style="font-size:9px;color:var(--ink-2)">REVERSE</span><span class="kbd">⌫</span></div>
+        <div class="r"><span class="chip sm" style="background:var(--b-red)"></span>
+          <span data-card="LITWICK" data-s="LOR 024" data-b="red"></span>
+          <span class="nm">LITWICK <span class="pnum" data-num="LOR 024"></span></span><span style="font-size:9px;color:var(--ink-2)">HOLO</span><span class="kbd">⌫</span></div>
+        <div class="r"><span class="chip sm" style="background:var(--b-sky)"></span>
+          <span data-card="VAPOREON" data-s="MEW 134" data-b="sky"></span>
+          <span class="nm">VAPOREON <span class="pnum" data-num="MEW 134"></span></span><span style="font-size:9px;color:var(--ink-2)">NORMAL</span><span class="kbd">⌫</span></div>
+      </div>
+
+      <div class="keymap">
+        <div><span class="kbd">1</span><span class="kbd">4</span> PRINTING</div>
+        <div><span class="kbd">N</span><span class="kbd">R</span><span class="kbd">H</span> VARIANT</div>
+        <div><span class="kbd">↵</span> ADD</div>
+        <div><span class="kbd">⌫</span> UNDO</div>
+        <div><span class="kbd">⇧</span><span class="kbd">↵</span> ADD ×4</div>
+        <div><span class="kbd">ESC</span> BUILD THE PLAN</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 8 COLLECTIONS ================= -->
+  <section class="mock" id="m8">
+    <div class="mockcap"><span class="no">08</span><span class="ti">COLLECTIONS</span><span class="su">CUSTOM SETS</span></div>
+
+    <div class="panel frame">
+      <div class="cols">
+        <div class="col">
+          <div class="ch"><div class="nm">TIKA MATSUNO</div>
+            <div class="su">ILLUSTRATOR SET · OPEN ENDED</div></div>
+          <div class="cb">
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+              <span class="tag ok">RUNNING</span><span class="tag">SPECIALTY BINDER A</span><span class="tag">MANUAL CLAIM</span>
+            </div>
+            <div class="kv"><span>CLAIMED</span><b>46</b></div>
+            <div class="kv"><span>SIZE</span><b>OPEN ENDED</b></div>
+            <div class="kv"><span>CLAIMING</span><b>MANUAL</b></div>
+            <div class="conflict" style="display:flex;gap:10px;align-items:center">
+              <span data-card="RALTS" data-s="SVI 084" data-b="purple"></span>
+              <span><b>BEAT A LINE ONCE</b><br>05 SEP · RALTS <span class="pnum" data-num="SVI 084"></span></span></div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="ch"><div class="nm">SABOTERI CITYSCAPE</div>
+            <div class="su">CONNECTED ART · 24 CARDS</div></div>
+          <div class="cb">
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+              <span class="tag ok">RUNNING</span><span class="tag">SPECIALTY BINDER A</span><span class="tag hot">12 OF 24</span>
+            </div>
+            <div class="grid24" id="sabo"></div>
+            <div class="kv"><span>SEQUENCE</span><b>ART CONNECTS</b></div>
+            <div class="kv"><span>NEXT</span><b>POSITION 13</b></div>
+            <div class="kv"><span>ADDED 05 SEP</span><b>0</b></div>
+            <div class="conflict"><b>A PICTURE, NOT A MAP</b><br>SEQUENCE ONLY, NEVER A POCKET</div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="ch" style="background:var(--panel-2);color:var(--ink)"><div class="nm">+ NEW SET</div>
+            <div class="su" style="color:var(--ink-2)">NAME · BINDER · SIZE</div></div>
+          <div class="cb">
+            <div class="kv"><span>PHASE 1</span><b>MANUAL TAGS</b></div>
+            <div class="kv"><span>PHASE 2</span><b>RULE BASED</b></div>
+            <button class="btn wide sm" style="margin-top:12px">NEW COLLECTION</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 9 SETTINGS ================= -->
+  <section class="mock" id="m9">
+    <div class="mockcap"><span class="no">09</span><span class="ti">SETTINGS</span><span class="su">BINDERS AND BANDS</span></div>
+
+    <div class="panel frame">
+      <div class="setgrid">
+        <div>
+          <div class="hd">BINDERS</div>
+          <div class="ord" style="margin-bottom:14px">
+            <div class="srow"><span class="hh" style="text-align:left">NAME</span><span class="hh">PAGES</span><span class="hh">POCKETS<small style="display:block;font-size:8px;color:var(--ink-3);letter-spacing:.06em">CAPACITY, NOT ADDRESS</small></span><span class="hh">BACK AT</span><span></span></div>
+            <div class="srow"><span class="f l">BINDER 1 · GENERAL</span><span class="f">40</span><span class="f">9</span><span class="f">PAGE 21</span><span style="text-align:center;color:var(--ink-3)">✕</span></div>
+            <div class="srow"><span class="f l">BINDER 2 · GENERAL</span><span class="f">40</span><span class="f">9</span><span class="f">PAGE 21</span><span style="text-align:center;color:var(--ink-3)">✕</span></div>
+            <div class="srow"><span class="f l">SPECIALTY A</span><span class="f">30</span><span class="f">9</span><span class="f">N/A</span><span style="text-align:center;color:var(--ink-3)">✕</span></div>
+            <div class="srow"><span class="f l" style="background:var(--note);border-style:dashed">+ BINDER</span><span class="f">—</span><span class="f">—</span><span class="f">—</span><span></span></div>
+          </div>
+
+          <div class="hd">RULES</div>
+          <div class="ord">
+            <div class="tog"><span class="sw on"><i></i></span><div class="tx"><b>MATCH BY ARTWORK</b>
+              <span>Same picture across sets counts once.</span></div></div>
+            <div class="tog"><span class="sw on"><i></i></span><div class="tx"><b>HOLO BEATS NORMAL</b>
+              <span>Normal goes to bulk.</span></div></div>
+            <div class="tog"><span class="sw on"><i></i></span><div class="tx"><b>LINE NEEDS 2 MEMBERS</b>
+              <span>Below this, front half instead.</span></div></div>
+            <div class="tog"><span class="sw"><i></i></span><div class="tx"><b>AUTO BLOCK</b>
+              <span>Off. The app always asks.</span></div></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="hd">BAND ORDER</div>
+          <div class="ord" id="ordList"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 10 BACKFILL ================= -->
+  <section class="mock" id="m10">
+    <div class="mockcap"><span class="no">10</span><span class="ti">BACKFILL WIZARD</span><span class="su">ONE TIME LOAD IN</span></div>
+
+    <div class="panel frame">
+      <div class="steps">
+        <div class="s done"><span class="n">✓</span>BINDERS</div>
+        <div class="s done"><span class="n">✓</span>COLLECTIONS</div>
+        <div class="s on"><span class="n" style="background:var(--note)">3</span>BINDER 1 · FRONT</div>
+        <div class="s"><span class="n">4</span>BINDER 1 · BACK</div>
+        <div class="s"><span class="n">5</span>BINDER 2</div>
+        <div class="s"><span class="n">6</span>SPECIALTY A</div>
+      </div>
+
+      <div class="bfwrap">
+        <div>
+          <div class="hd">FRONT HALF · IN ORDER<small style="font-weight:400;font-size:9px;color:var(--ink-3);letter-spacing:.06em"> · TYPING AID, NOT STORED</small></div>
+          <div class="seq">
+            <span class="c"><span data-card="CHARMANDER" data-s="OBF 026" data-b="red"></span>
+              <span class="tx">CHARMANDER<span class="pnum" data-num="OBF 026"></span></span></span>
+            <span class="c"><span data-card="GROWLITHE" data-s="SVI 030" data-b="red"></span>
+              <span class="tx">GROWLITHE<span class="pnum" data-num="SVI 030"></span></span></span>
+            <span class="c"><span data-card="LITWICK" data-s="LOR 024" data-b="red"></span>
+              <span class="tx">LITWICK<span class="pnum" data-num="LOR 024"></span></span></span>
+            <span class="c"><span data-card="VULPIX" data-s="OBF 028" data-b="red"></span>
+              <span class="tx">VULPIX<span class="pnum" data-num="OBF 028"></span></span></span>
+            <span class="c"><span data-card="TRAPINCH" data-s="PRC 82" data-b="orange"></span>
+              <span class="tx">TRAPINCH<span class="pnum" data-num="PRC 82"></span></span></span>
+            <span class="c"><span data-card="ZORUA" data-s="SFA 031" data-b="navy"></span>
+              <span class="tx">ZORUA<span class="pnum" data-num="SFA 031"></span></span></span>
+            <span class="c"><span data-card="PSYDUCK" data-s="MEW 054" data-b="sky"></span>
+              <span class="tx">PSYDUCK<span class="pnum" data-num="MEW 054"></span></span></span>
+            <span class="c"><span data-card="VAPOREON" data-s="MEW 134" data-b="sky"></span>
+              <span class="tx">VAPOREON<span class="pnum" data-num="MEW 134"></span></span></span>
+            <span class="c new">NEXT<span class="kbd">↵</span></span>
+          </div>
+        </div>
+
+        <div>
+          <div class="hd">BACK HALF · LINE BY LINE</div>
+          <div class="lineform">
+            <div class="cap2"><span>LINE 7 / 11</span><span>DRAGON · TRAPINCH</span></div>
+            <div class="lf"><span class="st">BASIC</span>
+              <span data-card="TOGEDEMARU" data-s="OBF 151" data-b="white" data-dim="1"></span>
+              <span class="f blk">NO DRAGON TRAPINCH<br>WEDGE · TOGEDEMARU <span class="pnum" data-num="OBF 151"></span></span>
+              <span class="seg3"><button>FILLED</button><button>HUNT</button><button class="on blk">BLOCK</button></span></div>
+            <div class="lf"><span class="st">STAGE 1</span>
+              <span data-card="VIBRAVA" data-s="PRC 109" data-b="olive"></span>
+              <span class="f">VIBRAVA<span class="pnum" data-num="PRC 109"></span></span>
+              <span class="seg3"><button class="on">FILLED</button><button>HUNT</button><button>BLOCK</button></span></div>
+            <div class="lf"><span class="st">STAGE 2</span>
+              <span data-card="FLYGON" data-s="PRC 110" data-b="olive" data-dim="1"></span>
+              <span class="f ph">FLYGON<span class="pnum" data-num="PRC 110"></span></span>
+              <span class="seg3"><button>FILLED</button><button class="on ph">HUNT</button><button>BLOCK</button></span></div>
+            <div class="lf" style="grid-template-columns:70px minmax(0,1fr)"><span class="st">STATUS</span>
+              <span style="font-size:11px">OPEN · 1 HUNT · ROOT BLOCKED</span></div>
+          </div>
+
+          <div class="lineform" style="margin-top:12px">
+            <div class="cap2"><span>LINE 8 / 11</span><span>PSYCHIC · RALTS</span></div>
+            <div class="lf"><span class="st">BASIC</span>
+              <span data-card="RALTS" data-s="SVI 084" data-b="purple" data-dim="1"></span>
+              <span class="f ph">RALTS<span class="pnum" data-num="SVI 084"></span></span>
+              <span class="seg3"><button>FILLED</button><button class="on ph">HUNT</button><button>BLOCK</button></span></div>
+            <div class="lf"><span class="st">STAGE 1</span>
+              <span data-card="KIRLIA" data-s="SVI 085" data-b="purple"></span>
+              <span class="f">KIRLIA<span class="pnum" data-num="SVI 085"></span></span>
+              <span class="seg3"><button class="on">FILLED</button><button>HUNT</button><button>BLOCK</button></span></div>
+            <div class="lf"><span class="st">STAGE 2</span>
+              <span data-card="GARDEVOIR" data-s="SIT 069" data-b="purple" data-dim="1"></span>
+              <span class="f ph">GARDEVOIR<span class="pnum" data-num="SIT 069"></span></span>
+              <span class="seg3"><button>FILLED</button><button class="on ph">HUNT</button><button>BLOCK</button></span></div>
+            <div class="lf" style="grid-template-columns:70px minmax(0,1fr)"><span class="st">STATUS</span>
+              <span style="font-size:11px">OPEN · 2 HUNTS</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="bfbar">
+        <span style="font-size:10px;color:var(--ink-2);letter-spacing:.12em">BINDER 1 FRONT · 148 / 340</span>
+        <span class="xp" id="bfxp"></span>
+        <button class="btn sm">SAVE</button>
+        <button class="btn primary sm">NEXT STEP</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+/* repetitive mockup furniture, generated so the markup stays readable */
+const BANDS=[
+ {id:'red',nm:'RED',ty:'FIRE',c:'#EC6F4D'},{id:'orange',nm:'ORANGE',ty:'FIGHTING',c:'#C9762B'},
+ {id:'yellow',nm:'YELLOW',ty:'LIGHTNING',c:'#FEDF4F'},{id:'olive',nm:'OLIVE',ty:'DRAGON',c:'#8F9A3A'},
+ {id:'green',nm:'GREEN',ty:'GRASS',c:'#45C55D'},{id:'navy',nm:'DARK BLUE',ty:'DARKNESS',c:'#3B5687'},
+ {id:'sky',nm:'LIGHT BLUE',ty:'WATER',c:'#6FB9DD'},{id:'purple',nm:'PURPLE',ty:'PSYCHIC',c:'#9D6FB8'},
+ {id:'pink',nm:'PINK',ty:'FAIRY',c:'#FF94A6'},{id:'white',nm:'WHITE',ty:'COLORLESS · METAL · TRAINERS',c:'#FDF6E6',dith:1}
+];
+const BAND={}; BANDS.forEach(b=>BAND[b.id]=b);
+
+/* ---- card identity, same contract as the prototype ----
+   serie and set are the TCGdex path segments, tot is cardCount.official, which
+   is the denominator printed on the card face. */
+const SETS={
+  SVI:{serie:'sv',   set:'sv01',   tot:198},
+  OBF:{serie:'sv',   set:'sv03',   tot:197},
+  MEW:{serie:'sv',   set:'sv03.5', tot:165},
+  PAF:{serie:'sv',   set:'sv04.5', tot:91 },
+  TEF:{serie:'sv',   set:'sv05',   tot:162},
+  SFA:{serie:'sv',   set:'sv06.5', tot:64 },
+  LOR:{serie:'swsh', set:'swsh11', tot:196},
+  SIT:{serie:'swsh', set:'swsh12', tot:195},
+  PRC:{serie:'xy',   set:'xy5',    tot:160}
+};
+function hash(str){let h=2166136261;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+/* deterministic symmetric pixel sigil, original art, shown when art cannot load */
+function sigil(seed,color,px){
+  px=px||8; let h=hash(seed), out='', dark='rgba(60,60,59,.35)';
+  for(let y=0;y<6;y++){for(let x=0;x<3;x++){
+    h=(Math.imul(h,1103515245)+12345)>>>0;
+    const bit=((h>>>16)&7)>2; if(!bit) continue;
+    const shade=((h>>>7)&3)===0?dark:color;
+    [x,5-x].forEach(xx=>{out+='<i class="px" style="left:'+(xx*px)+'px;top:'+(y*px)+'px;width:'+px+'px;height:'+px+'px;background:'+shade+'"></i>'});
+  }}
+  return out;
+}
+function pc(code){const p=String(code||'').trim().split(/\s+/);return {st:p[0],id:p[1]}}
+/* a code only yields a printed number if the set is one we know the official
+   count for. anything else falls back to nothing, never to a made up total. */
+function num(code){const c=pc(code),S=SETS[c.st];if(!c.id||!S)return '';return c.st+' · '+c.id+'/'+S.tot}
+function img(code,q){const c=pc(code),S=SETS[c.st];if(!S||!c.id)return '';
+  return 'https://assets.tcgdex.net/en/'+S.serie+'/'+S.set+'/'+c.id+'/'+(q||'low')+'.png'}
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+function face(nm,code,band,size,dim){
+  const b=BAND[band]||{c:'#5F5035'}, sz=size||'s', PX={s:5,m:8}[sz]||5, u=img(code);
+  /* only a card with real art is zoomable; a block has nothing to enlarge */
+  const z=u?' zoomable" data-zoom="'+img(code,'high')+'" data-nm="'+esc(nm)+'" data-code="'+esc(code)+'"'
+          :'"';
+  return '<span class="face '+sz+(dim?' dim':'')+z+'><span class="sig" style="width:'+(PX*6)+'px;height:'+(PX*6)+'px">'+
+    sigil(nm+code,b.c,PX)+'</span>'+
+    (u?'<img src="'+u+'" alt="" loading="lazy" onerror="this.remove()">':'')+'</span>';
+}
+/* every place a card is named in the static markup carries data-card and
+   data-num, so art and printed numbers stay derived from SETS in one place */
+function hydrate(){
+  document.querySelectorAll('[data-card]').forEach(el=>{
+    el.innerHTML=face(el.dataset.card,el.dataset.s||'',el.dataset.b||'white',el.dataset.sz||'s',el.dataset.dim);
+  });
+  document.querySelectorAll('[data-num]').forEach(el=>{
+    el.textContent=num(el.dataset.num)||el.dataset.num;
+  });
+}
+hydrate();
+/* pages used per band. White is the outlier the layout has to survive. */
+const FRONT=[3.5,2,2.5,1.5,3,2,3,2.5,0,11.5];
+const BACK =[2.5,1.5,2,1.5,2.5,1,1.5,3,0,1];
+
+function meter(used,scale,color,ink){
+  const CELLS=10, full=Math.min(used,scale), n=Math.round(full/scale*CELLS);
+  let cells='';
+  for(let i=0;i<CELLS;i++) cells+='<i class="'+(i<n?'f c':'')+(ink&&i<n?' dither':'')+'"></i>';
+  let html='<div class="meter" style="color:'+color+'">'+cells+'</div>';
+  if(used>scale){
+    html='<div class="brk"><div class="meter" style="flex:1;color:'+color+'">'+cells+'</div>'+
+      '<span class="zig"></span><span class="over">×'+(used/scale).toFixed(1)+' THE NEXT BAND</span></div>';
+  }
+  return html;
+}
+function rows(arr,isBack){
+  /* Scale to the second largest band only when the largest is a genuine outlier.
+     A 1.2x lead is not worth a break edge, it just adds noise. */
+  const sorted=[...arr].sort((a,b)=>b-a);
+  const scale=(sorted[1] && sorted[0]/sorted[1]>=1.5) ? sorted[1] : (sorted[0]||1);
+  return BANDS.map((b,i)=>{
+    const u=arr[i];
+    if(u===0) return '<div class="bandrow"><span class="chip" style="background:'+b.c+'"></span>'+
+      '<span class="lb">'+b.nm+'<small>'+b.ty+'</small></span>'+
+      '<div class="meter resv"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>'+
+      '<span class="rt">RESERVED<br>0 CARDS</span></div>';
+    const extra=isBack
+      ? (i===0?'2 LINES · 1 CAPPED':i===7?'3 LINES · 2 HUNTING':i===3?'1 LINE · 1 BLOCK':i===9?'1 LINE':'1 LINE')
+      : Math.round(u*9)+' CARDS';
+    return '<div class="bandrow"><span class="chip'+(b.dith?' dither':'')+'" style="background:'+b.c+'"></span>'+
+      '<span class="lb">'+b.nm+'<small>'+b.ty+'</small></span>'+
+      meter(u,scale,b.c,b.dith)+
+      '<span class="rt">'+u.toFixed(1)+' PAGES<br>'+extra+'</span></div>';
+  }).join('');
+}
+document.getElementById('frontRows').innerHTML=rows(FRONT,false);
+document.getElementById('backRows').innerHTML=rows(BACK,true);
+
+/* intake tally, by band not by destination */
+const T=[14,6,9,4,11,5,8,12,0,79], TM=Math.max(...T);
+document.getElementById('tally').innerHTML=BANDS.map((b,i)=>{
+  const h=T[i]?Math.max(6,Math.round(T[i]/TM*100)):0;
+  return '<div class="t"><span>'+T[i]+'</span>'+
+    (T[i]?'<i style="height:'+h+'%;background:'+b.c+'" class="'+(b.dith?'dither':'')+'"></i>'
+         :'<i style="height:6px;border-style:dashed;border-color:var(--ink-3);background:transparent"></i>')+
+    '<span>'+b.nm.slice(0,3)+'</span></div>';
+}).join('');
+
+/* saboteri 24 card connected art sequence */
+document.getElementById('sabo').innerHTML=Array.from({length:24},(_,i)=>
+  '<i class="'+(i<12?'f'+(i%5===0?' b':''):'')+'"></i>').join('');
+
+/* band order list */
+document.getElementById('ordList').innerHTML=BANDS.map((b,i)=>
+  '<div class="o"><span class="gr">⣿</span><span class="chip sm'+(b.dith?' dither':'')+'" style="background:'+b.c+'"></span>'+
+  '<span>'+(i+1)+'. '+b.nm+' <small style="color:var(--ink-2)">'+b.ty+'</small></span>'+
+  (b.nm==='PINK'?'<span class="tag" style="font-size:9px">RESERVED, 0 CARDS</span>':
+   b.nm==='WHITE'?'<span class="tag hot" style="font-size:9px">HEAVIEST BAND</span>':'')+'</div>').join('');
+
+/* backfill progress */
+document.getElementById('bfxp').innerHTML=Array.from({length:24},(_,i)=>'<i class="'+(i<10?'f':'')+'"></i>').join('');
+
+/* ---- card lightbox: click any face with real art to enlarge to high-res ---- */
+function openZoom(el){
+  const src=el.dataset.zoom, nm=el.dataset.nm, code=el.dataset.code;
+  if(!src)return;
+  const card=document.getElementById('lbcard');
+  card.innerHTML='<div class="load">LOADING…</div>'+
+    '<img alt="'+esc(nm)+'" onload="this.previousElementSibling&&this.previousElementSibling.remove()" '+
+    'onerror="this.previousElementSibling.textContent=\'IMAGE UNAVAILABLE OFFLINE\'">';
+  card.querySelector('img').src=src;
+  document.getElementById('lbcap').innerHTML='<span class="nm">'+esc(nm)+'</span>'+
+    (num(code)?'<span class="pnum">'+num(code)+'</span>':'');
+  document.getElementById('lightbox').classList.add('on');
+}
+function closeZoom(){document.getElementById('lightbox').classList.remove('on');document.getElementById('lbcard').innerHTML=''}
+document.addEventListener('click',e=>{
+  const f=e.target.closest('.face.zoomable');
+  if(f){e.preventDefault();e.stopPropagation();openZoom(f)}
+},true);
+document.getElementById('lightbox').addEventListener('click',closeZoom);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeZoom()});
+</script>
+<div class="lightbox" id="lightbox">
+  <div class="lbwrap">
+    <div class="lbcard" id="lbcard"></div>
+    <div class="lbcap" id="lbcap"></div>
+    <div class="lbhint">CLICK ANYWHERE OR PRESS ESC TO CLOSE</div>
+  </div>
+</div>
+</body>
+</html>
