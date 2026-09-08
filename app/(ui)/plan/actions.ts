@@ -18,6 +18,7 @@ import {
   planFromDraft,
   type DraftItem,
 } from "@/lib/plan";
+import { loadMoveOptions, type MoveOptions } from "@/lib/line";
 import { catalogCardRepo } from "@/lib/repo";
 import type { CommitActionInput, CommitCounts, LookupCard, RunPlanResult } from "./plan-types";
 
@@ -77,9 +78,16 @@ export async function commitHaulAction(
       source: input.source,
       notes: input.notes ?? null,
       draft: input.draft,
+      overrides: input.overrides,
     });
     return { ok: true, haulId: res.haulId, counts: res.counts };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** Move-panel options (binders, collections, bands) for the spotlight placement override (M7). */
+export async function getMoveOptions(): Promise<MoveOptions> {
+  const { db } = getOwnerContext();
+  return loadMoveOptions(db);
 }

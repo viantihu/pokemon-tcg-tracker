@@ -12,12 +12,14 @@
 import { useMemo, useState } from "react";
 import type { Variant } from "@/lib/engine";
 import type { PlanItem } from "@/lib/plan";
+import type { MoveDestination, MoveOptions } from "@/lib/line/types";
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
 import { CardLookup } from "../_components/CardLookup";
+import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { VariantSelector } from "../_components/VariantSelector";
 import { ACTION_META, bandMeta } from "../_components/plan-meta";
-import { commitHaulAction, lookupCatalog, runHaulPlan } from "./actions";
+import { commitHaulAction, getMoveOptions, lookupCatalog, runHaulPlan } from "./actions";
 import type { CommitCounts, DraftCard, LookupCard, RunPlanResult } from "./plan-types";
 
 const SOURCES: { v: "bulk-bin" | "pack-rip" | "show" | "trade"; l: string }[] = [
@@ -44,12 +46,56 @@ export function PlanScreen() {
   const [error, setError] = useState<string | null>(null);
   const [cur, setCur] = useState(0);
   const [done, setDone] = useState<Set<string>>(new Set());
+  // Placement overrides (M7): draft id → chosen destination, applied at commit (cascade skipped).
+  const [overrides, setOverrides] = useState<Record<string, MoveDestination>>({});
+  const [moveOptions, setMoveOptions] = useState<MoveOptions | null>(null);
+  const [moveTarget, setMoveTarget] = useState<MoveTargetCard | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
-  // Editing the draft invalidates a computed plan / prior commit.
+  // Editing the draft invalidates a computed plan / prior commit (and its overrides).
   function mutateDraft(next: DraftCard[]) {
     setDraft(next);
     setPlan(null);
     setCommitted(null);
+    setOverrides({});
+  }
+
+  function flashToast(msg: string) {
+    setToast(msg);
+    window.setTimeout(() => setToast((t) => (t === msg ? null : t)), 2600);
+  }
+
+  async function openMove(item: PlanItem) {
+    let opts = moveOptions;
+    if (!opts) {
+      try {
+        opts = await getMoveOptions();
+        setMoveOptions(opts);
+      } catch {
+        setError("Could not load the placement options.");
+        return;
+      }
+    }
+    const gen = opts.binders.find((b) => b.type === "general");
+    const existing = overrides[item.incomingId];
+    setMoveTarget({
+      copyId: item.incomingId, // carries the draft id; the override is keyed by it (no copy exists yet)
+      name: item.name,
+      localId: item.localId,
+      imageUrl: null,
+      bandKey: item.bandKey,
+      currentLabel: item.destination,
+      initial:
+        existing ??
+        (gen ? { kind: "shelf", binderId: gen.id, half: "front", band: item.bandKey } : undefined),
+    });
+  }
+
+  function onMoveConfirm(dest: MoveDestination) {
+    if (!moveTarget) return;
+    setOverrides((prev) => ({ ...prev, [moveTarget.copyId]: dest }));
+    flashToast(`Placement override set · ${moveTarget.name}`);
+    setMoveTarget(null);
   }
   function addCard(card: LookupCard) {
     mutateDraft([...draft, { id: newId(), card, variant: card.variants[0] ?? "normal" }]);
@@ -86,6 +132,7 @@ export function PlanScreen() {
         source,
         notes: notes.trim() || null,
         draft: draft.map((d) => ({ id: d.id, tcgdexId: d.card.tcgdexId, variant: d.variant })),
+        overrides,
       });
       if (res.ok) setCommitted(res.counts);
       else setError(res.error);
@@ -104,6 +151,8 @@ export function PlanScreen() {
     setNotes("");
     setCur(0);
     setError(null);
+    setOverrides({});
+    setMoveTarget(null);
   }
 
   const flatItems = useMemo<PlanItem[]>(
@@ -167,8 +216,25 @@ export function PlanScreen() {
           committing={committing}
           committed={committed}
           onReset={resetAll}
+          overrides={overrides}
+          onMove={openMove}
         />
       )}
+
+      {moveTarget && moveOptions ? (
+        <MoveOverlay
+          card={moveTarget}
+          options={moveOptions}
+          onConfirm={onMoveConfirm}
+          onClose={() => setMoveTarget(null)}
+        />
+      ) : null}
+
+      {toast ? (
+        <div className="toast on" role="status">
+          {toast}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -290,6 +356,8 @@ function PlanView(props: {
   committing: boolean;
   committed: CommitCounts | null;
   onReset: () => void;
+  overrides: Record<string, MoveDestination>;
+  onMove: (item: PlanItem) => void;
 }) {
   const {
     plan,
@@ -305,6 +373,8 @@ function PlanView(props: {
     committing,
     committed,
     onReset,
+    overrides,
+    onMove,
   } = props;
 
   const total = flatItems.length;
@@ -430,6 +500,8 @@ function PlanView(props: {
               onSkip={() => setCur(Math.min(total - 1, cur + 1))}
               onCommit={onCommit}
               committing={committing}
+              override={flatItems[cur] ? overrides[flatItems[cur].incomingId] : undefined}
+              onMove={() => flatItems[cur] && onMove(flatItems[cur])}
             />
           </div>
         </aside>
@@ -504,8 +576,21 @@ function Spotlight(props: {
   onSkip: () => void;
   onCommit: () => void;
   committing: boolean;
+  override: MoveDestination | undefined;
+  onMove: () => void;
 }) {
-  const { item, done, onToggle, advance, onBackCard, onSkip, onCommit, committing } = props;
+  const {
+    item,
+    done,
+    onToggle,
+    advance,
+    onBackCard,
+    onSkip,
+    onCommit,
+    committing,
+    override,
+    onMove,
+  } = props;
   if (!item) return <p style={{ fontSize: 11, color: "var(--ink-2)" }}>No cards to handle.</p>;
   const act = ACTION_META[item.action];
   const meta = bandMeta(item.bandKey);
@@ -536,7 +621,15 @@ function Spotlight(props: {
         <span className="sg u">{item.destination}</span>
       </div>
 
-      <div className="wy">{item.reason}</div>
+      {override ? <div className="movedtag u">Moved · override at commit</div> : null}
+
+      <button type="button" className="movebtn wide u" style={{ width: "100%" }} onClick={onMove}>
+        ↔ Change position
+      </button>
+
+      <div className="wy" style={{ marginTop: 11 }}>
+        {item.reason}
+      </div>
 
       {item.needsDecision ? (
         <div className="doit" style={{ background: "var(--note)" }}>

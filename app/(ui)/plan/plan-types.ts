@@ -5,6 +5,7 @@
 
 import type { Variant } from "@/lib/engine";
 import type { PlanBandGroup } from "@/lib/plan";
+import type { MoveDestination } from "@/lib/line/types";
 
 /** A catalog printing surfaced by the type-ahead, trimmed to what the intake UI needs. */
 export interface LookupCard {
@@ -50,4 +51,6 @@ export interface CommitActionInput {
   source: "bulk-bin" | "pack-rip" | "show" | "trade";
   notes?: string | null;
   draft: { id: string; tcgdexId: string; variant: Variant }[];
+  /** Per-draft-id placement overrides from the spotlight move panel (M7). */
+  overrides?: Record<string, MoveDestination>;
 }

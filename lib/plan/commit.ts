@@ -24,6 +24,9 @@ import {
   placementDecisionRepo,
   wishlistItemRepo,
 } from "@/lib/repo";
+// Leaf import (lib/line/move depends only on lib/line/types → lib/engine; no cycle back to lib/plan).
+import { placementForMove } from "@/lib/line/move";
+import type { MoveDestination } from "@/lib/line/types";
 import { copyPlacementFromTarget } from "./placement";
 import { loadPlanContext, planFromDraft, type DraftItem } from "./context";
 import type { PlannedCard } from "./types";
@@ -34,6 +37,13 @@ export interface CommitInput {
   source: HaulSource;
   notes?: string | null;
   draft: DraftItem[];
+  /**
+   * Per-incoming-card placement overrides (M7 — placement override on ALL cards; keyed by draft id).
+   * An overridden card is placed exactly where she says (binder+half+band / collection / bulk) with a
+   * `resolved_by: 'user'` audit row, and the cascade's line/swap side effects are skipped for it.
+   * Absent/empty ⇒ identical to the pure cascade commit.
+   */
+  overrides?: Record<string, MoveDestination>;
 }
 
 export interface CommitResult {
@@ -85,6 +95,21 @@ export async function commitHaul(
     rb.add(() => haulRepo.remove(db, haul.id));
 
     for (const p of planned) {
+      const override = input.overrides?.[p.incomingId];
+      if (override) {
+        // Manual placement wins: place the copy where she said, skip all cascade side effects.
+        const copyId = await writeOverriddenCard(db, ownerId, haul.id, p, override, counts, rb);
+        await placementDecisionRepo.insert(db, {
+          owner_id: ownerId,
+          haul_id: haul.id,
+          copy_id: copyId,
+          decision: "placement-override",
+          reason: `Manual placement override at intake (your call, cascade skipped): ${p.result.reason}`,
+          resolved_by: "user",
+        });
+        counts.decisions += 1;
+        continue;
+      }
       const copyId = await writeCard(db, ownerId, haul.id, p, pc, passLines, counts, rb);
       await placementDecisionRepo.insert(db, {
         owner_id: ownerId,
@@ -190,6 +215,34 @@ async function writeCard(
     await writeNewLine(db, ownerId, p, copy.id, pc, passLines, counts, rb);
   }
 
+  return copy.id;
+}
+
+/** Insert a copy at a manual override placement (M7). No line/swap side effects; audited as user. */
+async function writeOverriddenCard(
+  db: DbClient,
+  ownerId: string,
+  haulId: string,
+  p: PlannedCard,
+  dest: MoveDestination,
+  counts: CommitResult["counts"],
+  rb: Rollback,
+): Promise<string> {
+  const placement = placementForMove(dest);
+  const copy = await copyRepo.insert(db, {
+    owner_id: ownerId,
+    catalog_card_id: p.tcgdexId,
+    variant: p.variant,
+    haul_id: haulId,
+    acquired_at: new Date().toISOString(),
+    role: placement.role,
+    binder_id: placement.binder_id,
+    binder_half: placement.binder_half,
+    color_band: placement.color_band,
+    line_slot_id: placement.line_slot_id,
+  });
+  rb.add(() => copyRepo.remove(db, copy.id));
+  counts.copies += 1;
   return copy.id;
 }
 
