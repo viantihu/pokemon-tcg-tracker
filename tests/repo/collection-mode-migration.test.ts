@@ -106,7 +106,9 @@ describe("0005_collection_mode migration (fresh Postgres via PGlite)", () => {
 
   it("enforces the check constraint — an out-of-range mode is rejected", async () => {
     await expect(
-      db.exec(`insert into collection (owner_id, name, mode) values ('${OWNER}', 'Bad', 'archived')`),
+      db.exec(
+        `insert into collection (owner_id, name, mode) values ('${OWNER}', 'Bad', 'archived')`,
+      ),
     ).rejects.toThrow();
   });
 
