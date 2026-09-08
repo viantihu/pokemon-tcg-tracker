@@ -23,12 +23,15 @@ concurrency:
 
 jobs:
   migrate:
+    # Skips cleanly until the environment is wired (APP_URL repo variable set),
+    # so pushes don't show a red deploy before Supabase/Vercel exist.
+    if: ${{ vars.APP_URL != '' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'production' || 'testing' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: latest
 
@@ -42,6 +45,7 @@ jobs:
 
   smoke:
     needs: migrate
+    if: ${{ vars.APP_URL != '' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'production' || 'testing' }}
     steps:
