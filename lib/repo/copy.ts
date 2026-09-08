@@ -26,4 +26,11 @@ export const copyRepo = {
     if (error) throw error;
     return data ?? [];
   },
+
+  /** Every physical copy of a printing (lookup "where is my card" — all roles, all binders). */
+  async listByCatalogCard(db: DbClient, catalogCardId: string): Promise<Row<"copy">[]> {
+    const { data, error } = await db.from("copy").select("*").eq("catalog_card_id", catalogCardId);
+    if (error) throw error;
+    return data ?? [];
+  },
 };

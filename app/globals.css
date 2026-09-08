@@ -717,3 +717,808 @@ nav.menu .tab .n {
     overflow: auto;
   }
 }
+
+/* ============================================================
+   M8 surfaces — Lookup · Collections · Wishlist · Capacity · Settings
+   (design/prototype.html scr-look, scr-coll). Appended + scoped;
+   reuses the primitives above (.panel/.btn/.field/.chip/.face/…).
+   ============================================================ */
+
+/* ---------- lookup (scr-look) ---------- */
+.lookwrap {
+  max-width: 520px;
+  margin: 0 auto;
+}
+.answer {
+  padding: 0;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.answer .cap {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--ink);
+  color: var(--panel);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+.answer .hand {
+  gap: 12px;
+}
+.answer .hand .nm {
+  font-size: 18px;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+}
+.answer .hand .sb {
+  font-size: 10px;
+  color: var(--ink-2);
+  margin-top: 7px;
+  letter-spacing: 0.1em;
+}
+.hero {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  border-bottom: 3px solid var(--ink);
+}
+.bandstack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.bandstack i {
+  display: block;
+  width: 16px;
+  height: 12px;
+  border: 2px solid var(--ink);
+  opacity: 0.5;
+}
+.bandstack i.on {
+  opacity: 1;
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.where {
+  font-size: 26px;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.where small {
+  display: block;
+  font-size: 11px;
+  color: var(--ink-2);
+  letter-spacing: 0.14em;
+  margin-top: 7px;
+}
+.facts {
+  display: flex;
+  flex-direction: column;
+}
+.fact {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 11px 13px;
+  border-bottom: 2px solid var(--lo);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.fact:last-child {
+  border-bottom: 0;
+}
+.fact .ic {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border: 3px solid var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  background: var(--panel-2);
+}
+.fact b {
+  letter-spacing: 0.08em;
+}
+.fact.y .ic {
+  background: var(--mint);
+}
+.fact.hot .ic {
+  background: #ec6f4d;
+  color: var(--panel);
+}
+.fact.n .ic {
+  color: var(--ink-2);
+}
+.notfound {
+  padding: 22px 16px;
+  text-align: center;
+  margin-bottom: 12px;
+}
+.notfound b {
+  font-size: 15px;
+  letter-spacing: 0.08em;
+}
+
+/* ---------- collections + wishlist (scr-coll) ---------- */
+.collhd {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+.segbar {
+  display: flex;
+  border: 3px solid var(--ink);
+  margin-left: auto;
+}
+.seg {
+  padding: 8px 14px;
+  background: var(--panel);
+  border: 0;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  cursor: pointer;
+}
+.seg + .seg {
+  border-left: 3px solid var(--ink);
+}
+.seg.on {
+  background: var(--ink);
+  color: var(--panel);
+}
+.collwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.collnew .newcollbtn {
+  width: 100%;
+  padding: 14px;
+  border: 3px dashed var(--ink);
+  background: var(--panel);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  color: var(--ink);
+}
+.collnew .newcollbtn:hover {
+  background: var(--note);
+  border-style: solid;
+}
+.collcard {
+  padding: 16px;
+}
+.collhead {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.collname {
+  font-size: 16px;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+}
+.collmeta {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+  margin-top: 5px;
+}
+.collactions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.modetoggle {
+  display: flex;
+  border: 3px solid var(--ink);
+  flex: 0 0 auto;
+}
+.modebtn {
+  padding: 7px 12px;
+  background: var(--panel);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  color: var(--ink);
+  border: none;
+}
+.modebtn + .modebtn {
+  border-left: 3px solid var(--ink);
+}
+.modebtn.on {
+  background: var(--note);
+}
+.editcollbtn {
+  padding: 7px 10px;
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  color: var(--ink);
+}
+.editcollbtn:hover {
+  background: var(--hi);
+}
+.cbar {
+  height: 16px;
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.cbar i {
+  display: block;
+  height: 100%;
+  background: var(--mint);
+  border-right: 3px solid var(--ink);
+  transition: width 0.2s;
+}
+.cbar i.hot {
+  background: #ec6f4d;
+}
+.cprog {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  margin-bottom: 14px;
+}
+.cprog b {
+  color: var(--ink);
+}
+.cprog .need {
+  color: var(--ink-3);
+}
+.cgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+.ccard {
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+  padding: 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.ccard.need {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--panel),
+    var(--panel) 6px,
+    var(--panel-2) 6px,
+    var(--panel-2) 12px
+  );
+}
+.ccard .cn {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+.ccard .cno {
+  font-size: 8px;
+  letter-spacing: 0.03em;
+  color: var(--ink-2);
+}
+.cpill {
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  padding: 3px 6px;
+  border: 2px solid var(--ink);
+  margin-top: 2px;
+}
+.cpill.have {
+  background: var(--mint);
+}
+.cpill.wish {
+  background: var(--note);
+}
+.wbtn {
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  padding: 5px 7px;
+  border: 3px solid var(--ink);
+  background: var(--hi);
+  cursor: pointer;
+  color: var(--ink);
+  margin-top: 2px;
+}
+.wbtn:hover {
+  background: var(--note);
+}
+.infbox {
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+  padding: 18px;
+  text-align: center;
+  margin-bottom: 12px;
+}
+.infnum {
+  font-size: 44px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+.inflab {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--ink-2);
+  margin-top: 6px;
+}
+.logbtn {
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 8px 14px;
+  border: 3px solid var(--ink);
+  background: var(--note);
+  cursor: pointer;
+  color: var(--ink);
+  margin-top: 12px;
+  box-shadow: 2px 2px 0 rgba(60, 60, 59, 0.2);
+}
+.logbtn:hover {
+  background: #f4c86b;
+}
+
+/* ---------- wishlist ---------- */
+.wishwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wishbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+}
+.wishgroup {
+  padding: 0;
+  overflow: hidden;
+}
+.wishrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 2px solid var(--lo);
+}
+.wishrow:last-child {
+  border-bottom: 0;
+}
+.wishrow .nm {
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+.wishrow .meta {
+  font-size: 10px;
+  color: var(--ink-2);
+  letter-spacing: 0.06em;
+  margin-top: 3px;
+}
+.wishrow .alts {
+  font-size: 9px;
+  color: var(--ink-3);
+  letter-spacing: 0.05em;
+  margin-top: 3px;
+}
+.wprice {
+  margin-left: auto;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* ---------- capacity (Binders) ---------- */
+.capwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.roombar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+}
+.roomchips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.roomchip {
+  padding: 5px 9px;
+  border: 3px solid var(--ink);
+  background: var(--mint);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.capgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+.capcard {
+  padding: 13px;
+}
+.caphead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.caphead .nm {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+.caphead .half {
+  font-size: 9px;
+  color: var(--ink-2);
+  letter-spacing: 0.1em;
+}
+.flag {
+  margin-left: auto;
+  font-size: 9px;
+  padding: 3px 6px;
+  border: 2px solid var(--ink);
+  letter-spacing: 0.08em;
+}
+.flag-ok {
+  background: var(--mint);
+}
+.flag-near {
+  background: var(--note);
+}
+.flag-full {
+  background: #ec6f4d;
+  color: var(--panel);
+}
+.flag-empty {
+  background: var(--panel-2);
+  color: var(--ink-2);
+}
+.capnums {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+.capstat {
+  text-align: center;
+}
+.capstat .sv {
+  font-size: 17px;
+  letter-spacing: 0.02em;
+}
+.capstat .sv.strong {
+  color: var(--ink-3);
+  font-weight: 700;
+}
+.capstat .sl {
+  font-size: 8px;
+  color: var(--ink-2);
+  letter-spacing: 0.06em;
+  margin-top: 2px;
+}
+
+/* ---------- settings ---------- */
+.setwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.setpanel {
+  padding: 14px;
+}
+.sethead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  border-bottom: 2px solid var(--lo);
+  padding-bottom: 8px;
+}
+.binderlist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.binderrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+  padding: 8px 10px;
+}
+.binderrow .nm {
+  font-size: 13px;
+  letter-spacing: 0.05em;
+}
+.binderrow .meta {
+  font-size: 9px;
+  color: var(--ink-2);
+  letter-spacing: 0.06em;
+  margin-top: 3px;
+}
+.binderrow > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.binderform {
+  margin-top: 12px;
+  padding: 12px;
+}
+.ff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.fld {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 160px;
+}
+.fld.sm {
+  flex: 0 0 120px;
+}
+.fld.chk {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.fld .fl {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+}
+.ffbtns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.bandorder {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bandrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+  padding: 7px 10px;
+}
+.bandrow .pos {
+  width: 22px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.bandrow .ord {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.typemap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+}
+.typerow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+  padding: 7px 10px;
+}
+.typerow .ty {
+  flex: 0 0 84px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.typerow .arw {
+  color: var(--ink-2);
+}
+.typerow .field {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+/* ---------- modal overlay (collection editor / log a card) ---------- */
+.veil {
+  position: fixed;
+  inset: 0;
+  background: rgba(60, 60, 59, 0.55);
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 14px;
+  z-index: 40;
+  overflow: auto;
+}
+.veil.on {
+  display: flex;
+}
+.dsheet {
+  width: 100%;
+  max-width: 560px;
+  padding: 0;
+  overflow: hidden;
+}
+.dsheet .cap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 13px;
+  background: var(--ink);
+  color: var(--panel);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+.dsheet .cap .t {
+  letter-spacing: 0.14em;
+}
+.dsheet .cap .n {
+  color: #e4ba77;
+  font-size: 10px;
+}
+.dsheet .cap .btn {
+  margin-left: auto;
+}
+.dsheet .body {
+  padding: 14px;
+}
+.orow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.orow .ol {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--ink-2);
+}
+.ochips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ochip {
+  padding: 8px 11px;
+  border: 3px solid var(--ink);
+  background: var(--panel);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  color: var(--ink);
+}
+.ochip.on {
+  background: var(--note);
+}
+.cerow-h {
+  font-size: 9px;
+  letter-spacing: 0.09em;
+  color: var(--ink-2);
+  margin: 6px 0 8px;
+}
+.celist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 12px;
+  max-height: 220px;
+  overflow: auto;
+}
+.cerow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+  padding: 8px;
+}
+.cerow.own {
+  background: var(--mint);
+}
+.cerow .cet {
+  flex: 0 0 auto;
+}
+.cerow .cei {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.cerow .cei b {
+  display: block;
+}
+.cerow .cei i {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--ink-2);
+}
+.cex {
+  padding: 6px 9px;
+  border: 3px solid var(--ink);
+  background: var(--panel);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.cex:hover {
+  background: var(--lo);
+}
+.cehint {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  padding: 10px;
+  border: 3px dashed var(--ink);
+  text-align: center;
+}
+.cesave {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+.loclock {
+  padding: 8px 10px;
+  border: 3px solid var(--ink);
+  background: var(--hi);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+.hint {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  margin-top: 10px;
+  line-height: 1.7;
+}
+
+@media (max-width: 720px) {
+  .where {
+    font-size: 22px;
+  }
+  .capnums {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  .collactions {
+    width: 100%;
+  }
+}
