@@ -5,8 +5,8 @@
  *
  * Everything the backfill screen needs from the server: type-ahead against the LOCAL catalog mirror
  * (the client NEVER queries TCGdex), the binders/collections/bands/type-map context, back-half chain
- * resolution, and the three atomic commit paths. Owner/session is resolved through the stubbed seam
- * (`getOwnerContext` — service role + seeded owner until magic-link auth lands; see session.ts).
+ * resolution, and the three atomic commit paths. Owner/session is resolved through the auth seam
+ * (`await getOwnerContext()` — RLS-scoped client + session owner id; see lib/plan/session.ts).
  */
 
 import { availableVariants, getOwnerContext, toCardVariants } from "@/lib/plan";
@@ -30,7 +30,7 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
   const q = query.trim();
   if (q.length < 2) return [];
   try {
-    const { db } = getOwnerContext();
+    const { db } = await getOwnerContext();
     const rows = await catalogCardRepo.search(db, q, 12);
     return rows.map((r) => ({
       tcgdexId: r.tcgdex_id,
@@ -51,7 +51,7 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
 
 /** Load the binders, collections, ordered bands, and type→band map the screen needs. */
 export async function loadContext(): Promise<BackfillContextPayload> {
-  const { db } = getOwnerContext();
+  const { db } = await getOwnerContext();
   const ctx = await loadBackfillContext(db);
   return {
     binders: ctx.binders,
@@ -66,7 +66,7 @@ export async function resolveLine(
   tcgdexId: string,
   bandKey: string,
 ): Promise<ResolvedBackLine | null> {
-  const { db } = getOwnerContext();
+  const { db } = await getOwnerContext();
   const ctx = await loadBackfillContext(db);
   return resolveBackLineFromContext(ctx, tcgdexId, bandKey);
 }
@@ -74,7 +74,7 @@ export async function resolveLine(
 export async function commitFrontAction(input: FrontHalfCommit): Promise<CommitResult> {
   if (input.cards.length === 0) return { ok: false, error: "No cards to save." };
   try {
-    const { db, ownerId } = getOwnerContext();
+    const { db, ownerId } = await getOwnerContext();
     const counts = await commitFrontHalf(db, ownerId, input);
     return { ok: true, counts };
   } catch (err) {
@@ -85,7 +85,7 @@ export async function commitFrontAction(input: FrontHalfCommit): Promise<CommitR
 export async function commitLineAction(input: BackLineCommit): Promise<CommitResult> {
   if (input.stages.length === 0) return { ok: false, error: "The line has no stages." };
   try {
-    const { db, ownerId } = getOwnerContext();
+    const { db, ownerId } = await getOwnerContext();
     const counts = await commitBackLine(db, ownerId, input);
     return { ok: true, counts };
   } catch (err) {
@@ -96,7 +96,7 @@ export async function commitLineAction(input: BackLineCommit): Promise<CommitRes
 export async function commitSpecialtyAction(input: SpecialtyCommit): Promise<CommitResult> {
   if (input.cards.length === 0) return { ok: false, error: "No cards to save." };
   try {
-    const { db, ownerId } = getOwnerContext();
+    const { db, ownerId } = await getOwnerContext();
     const counts = await commitSpecialty(db, ownerId, input);
     return { ok: true, counts };
   } catch (err) {
