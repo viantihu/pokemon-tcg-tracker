@@ -49,3 +49,8 @@ next-env.d.ts
 # Supabase CLI local artifacts
 supabase/.temp/
 supabase/.branches/
+
+# Claude Code local scratch — per-machine settings and agent worktrees (full checkouts with
+# their own build output). Shared .claude config (if any) can be force-added past these.
+.claude/settings.local.json
+.claude/worktrees/

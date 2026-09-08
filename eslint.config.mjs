@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Claude Code scratch space: local settings + agent worktrees (each a full checkout with its
+    // own build output). Never project source — must not be linted. The root ".next/**" above is
+    // anchored, so nested "**/.next" under a worktree would otherwise slip through.
+    ".claude/**",
   ]),
 ]);
 
