@@ -123,7 +123,7 @@ export async function loadCollHub(): Promise<CollHubData> {
     return {
       id: col.id,
       name: col.name,
-      mode: collectionMode(col.status),
+      mode: collectionMode(col.mode),
       binderIds: col.current_binder_ids ?? [],
       binderNames: (col.current_binder_ids ?? []).map((bid) => binderNameById.get(bid) ?? bid),
       cards: cardsView,
@@ -209,7 +209,7 @@ export async function saveCollection(input: CollectionInput): Promise<SaveResult
 
     const patch = {
       name,
-      status: input.mode,
+      mode: input.mode,
       current_binder_ids: [binderId],
       target_catalog_card_ids: input.targetTcgdexIds,
     };
@@ -229,7 +229,7 @@ export async function saveCollection(input: CollectionInput): Promise<SaveResult
 export async function setCollectionMode(id: string, mode: "finite" | "open"): Promise<SaveResult> {
   try {
     const { db } = await getOwnerContext();
-    await collectionRepo.update(db, id, { status: mode });
+    await collectionRepo.update(db, id, { mode });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

@@ -1,5 +1,5 @@
 /**
- * Supabase schema types for the `public` schema (migrations 0001 + 0002 + 0004).
+ * Supabase schema types for the `public` schema (migrations 0001 + 0002 + 0004 + 0005).
  *
  * HAND-AUTHORED to mirror `supabase gen types typescript --local`. Regenerate from the live local
  * schema once the database is reachable and commit the result verbatim:
@@ -184,6 +184,7 @@ export type Database = {
           current_binder_ids: string[];
           target_catalog_card_ids: string[];
           status: string;
+          mode: string;
           created_at: string;
         };
         Insert: {
@@ -194,6 +195,7 @@ export type Database = {
           current_binder_ids?: string[];
           target_catalog_card_ids?: string[];
           status?: string;
+          mode?: string;
           created_at?: string;
         };
         Update: {
@@ -204,6 +206,7 @@ export type Database = {
           current_binder_ids?: string[];
           target_catalog_card_ids?: string[];
           status?: string;
+          mode?: string;
           created_at?: string;
         };
         Relationships: [];
