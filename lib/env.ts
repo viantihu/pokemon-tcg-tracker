@@ -10,6 +10,10 @@ const serverSchema = z.object({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   TCGDEX_BASE_URL: z.string().min(1).default("https://api.tcgdex.net/v2"),
+  // Single allow-listed owner email (dev-spec §3 decision 4). Magic-link sign-in is offered
+  // ONLY to this address; every other email is rejected before a link is sent and again after
+  // the link is verified.
+  ALLOWED_OWNER_EMAIL: z.string().min(1),
 });
 
 export type ServerEnv = z.infer<typeof serverSchema>;
