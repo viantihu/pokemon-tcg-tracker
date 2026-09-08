@@ -12,11 +12,13 @@ import {
 } from "@/lib/surfaces";
 
 describe("collectionMode", () => {
-  it("reads the finite/open toggle off status, defaulting legacy rows to open", () => {
+  it("reads the finite/open toggle off the mode column, defaulting anything else to open", () => {
     expect(collectionMode("finite")).toBe("finite");
     expect(collectionMode("open")).toBe("open");
-    expect(collectionMode("active")).toBe("open"); // legacy seed value
+    // Defensive: a null/undefined or unexpected value reads as a running count, not finite.
     expect(collectionMode(null)).toBe("open");
+    expect(collectionMode(undefined)).toBe("open");
+    expect(collectionMode("active")).toBe("open");
   });
 });
 

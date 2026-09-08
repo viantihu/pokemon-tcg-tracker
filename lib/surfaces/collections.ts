@@ -6,16 +6,16 @@
  * collection here must make it appear as a placement target immediately — that's what
  * `placementPickerOptions` guarantees, and what the M8 acceptance test pins.
  *
- * Pure/I/O-free. The frozen `collection` schema has no `mode` column, so the finite/open toggle is
- * carried on the free-text `status` column (`definition_type`/`status` are read by no engine or sync
- * code — verified — so this overload is safe). Legacy `status='active'` reads as OPEN.
+ * Pure/I/O-free. The finite/open toggle lives on the collection's own `mode` column (migration
+ * 0005: `text not null default 'open' check (mode in ('finite','open'))`); `status` is back to its
+ * real active/archived meaning. Anything but "finite" reads as OPEN (defensive against null/legacy).
  */
 
 export type CollectionMode = "finite" | "open";
 
-/** Read the finite/open mode off a collection's `status`. Anything but "finite" is a running count. */
-export function collectionMode(status: string | null | undefined): CollectionMode {
-  return status === "finite" ? "finite" : "open";
+/** Read the finite/open toggle off a collection's `mode` column. Anything but "finite" is OPEN. */
+export function collectionMode(mode: string | null | undefined): CollectionMode {
+  return mode === "finite" ? "finite" : "open";
 }
 
 /** Progress of a finite collection — the set list she chases. */
