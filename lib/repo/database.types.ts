@@ -1,5 +1,5 @@
 /**
- * Supabase schema types for the `public` schema (migrations 0001 + 0002).
+ * Supabase schema types for the `public` schema (migrations 0001 + 0002 + 0004).
  *
  * HAND-AUTHORED to mirror `supabase gen types typescript --local`. Regenerate from the live local
  * schema once the database is reachable and commit the result verbatim:
@@ -51,6 +51,8 @@ export type Database = {
           hp: number | null;
           variants: Json;
           artwork_group_id: string | null;
+          artwork_hash: string | null;
+          artwork_group_locked: boolean;
           card_class: string;
           is_digital_only: boolean;
           image_url: string | null;
@@ -73,6 +75,8 @@ export type Database = {
           hp?: number | null;
           variants?: Json;
           artwork_group_id?: string | null;
+          artwork_hash?: string | null;
+          artwork_group_locked?: boolean;
           card_class?: string;
           is_digital_only?: boolean;
           image_url?: string | null;
@@ -95,6 +99,8 @@ export type Database = {
           hp?: number | null;
           variants?: Json;
           artwork_group_id?: string | null;
+          artwork_hash?: string | null;
+          artwork_group_locked?: boolean;
           card_class?: string;
           is_digital_only?: boolean;
           image_url?: string | null;
