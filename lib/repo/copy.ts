@@ -33,4 +33,14 @@ export const copyRepo = {
     if (error) throw error;
     return data ?? [];
   },
+
+  /** Copies in one presence group — the reconciliation unit's ordered members (sync-arch §1.5). */
+  async listByPresenceGroup(db: DbClient, presenceGroupId: string): Promise<Row<"copy">[]> {
+    const { data, error } = await db
+      .from("copy")
+      .select("*")
+      .eq("presence_group_id", presenceGroupId);
+    if (error) throw error;
+    return data ?? [];
+  },
 };
