@@ -5,8 +5,8 @@
  *
  * Everything the plan screen needs from the server: type-ahead against the LOCAL catalog mirror,
  * the cascade run over a draft, and the atomic commit. The client NEVER queries TCGdex — all
- * catalog access is server-side via `lib/repo`. Owner/session is resolved through the stubbed seam
- * (`getOwnerContext` — service role + seeded owner until magic-link auth lands; see session.ts).
+ * catalog access is server-side via `lib/repo`. Owner/session is resolved through the auth seam
+ * (`await getOwnerContext()` — RLS-scoped client + session owner id; see lib/plan/session.ts).
  */
 
 import { availableVariants, toCardVariants } from "@/lib/plan";
@@ -27,7 +27,7 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
   const q = query.trim();
   if (q.length < 2) return [];
   try {
-    const { db } = getOwnerContext();
+    const { db } = await getOwnerContext();
     const rows = await catalogCardRepo.search(db, q, 12);
     return rows.map((r) => ({
       tcgdexId: r.tcgdex_id,
@@ -48,7 +48,7 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
 
 /** Run the cascade over the whole draft and return the grouped plan for rendering. */
 export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
-  const { db } = getOwnerContext();
+  const { db } = await getOwnerContext();
   const pc = await loadPlanContext(db);
   const { items } = planFromDraft(pc, draft);
   const groups = groupPlan(items, pc.orderedBandKeys);
@@ -73,8 +73,8 @@ export async function commitHaulAction(
 ): Promise<{ ok: true; haulId: string; counts: CommitCounts } | { ok: false; error: string }> {
   if (input.draft.length === 0) return { ok: false, error: "No cards in the haul." };
   try {
-    const { db, ownerId } = getOwnerContext();
-    const res = await commitHaul(db, ownerId, {
+    const { db } = await getOwnerContext();
+    const res = await commitHaul(db, {
       source: input.source,
       notes: input.notes ?? null,
       draft: input.draft,
@@ -88,6 +88,6 @@ export async function commitHaulAction(
 
 /** Move-panel options (binders, collections, bands) for the spotlight placement override (M7). */
 export async function getMoveOptions(): Promise<MoveOptions> {
-  const { db } = getOwnerContext();
+  const { db } = await getOwnerContext();
   return loadMoveOptions(db);
 }

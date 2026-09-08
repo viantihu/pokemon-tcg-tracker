@@ -1563,3 +1563,168 @@ nav.menu .tab .n {
     overflow: auto;
   }
 }
+
+/* ==== merged from develop: M5 backfill + auth login styles (reconciled M7↔develop) ==== */
+/* ---------- backfill wizard (M5; design/mockups.html scr-10) ---------- */
+.bfhead {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.bfhead .bfnote {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+.hd {
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  margin-bottom: 10px;
+  color: var(--ink-2);
+}
+.seq {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border: 3px solid var(--ink);
+  background: var(--panel);
+}
+.seq .c {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 6px 8px;
+  border: 2px solid var(--ink);
+  background: var(--panel-2);
+  font-size: 10px;
+}
+.seq .c .tx {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.seq .c .nm {
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+.lineform {
+  border: 3px solid var(--ink);
+  background: var(--panel);
+  overflow: hidden;
+}
+.lineform .cap2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  background: var(--ink);
+  color: var(--panel);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+.lineform .lf {
+  display: grid;
+  grid-template-columns: 70px 150px minmax(0, 1fr) 160px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 2px solid var(--lo);
+}
+.lineform .lf:last-child {
+  border-bottom: 0;
+}
+.lineform .st {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  color: var(--ink-2);
+}
+.lineform .f {
+  border: 3px solid var(--ink);
+  background: var(--hi);
+  padding: 7px 9px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.lineform .f.ph {
+  background: var(--note);
+  border-style: dashed;
+}
+.lineform .f.blk {
+  background: var(--dead);
+  color: #3c3c3b;
+}
+.seg3 {
+  display: flex;
+}
+.seg3 button {
+  padding: 6px 10px;
+  border: 3px solid var(--ink);
+  border-right-width: 0;
+  background: var(--panel-2);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: inherit;
+  cursor: pointer;
+}
+.seg3 button:last-child {
+  border-right-width: 3px;
+}
+.seg3 button.on {
+  background: var(--ink);
+  color: var(--panel);
+}
+.seg3 button.on.ph {
+  background: var(--note);
+  color: var(--ink);
+}
+.seg3 button.on.blk {
+  background: #5f5035;
+  color: #f1d6af;
+}
+.seg3 button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.bfbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+}
+.taglist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.chiptag {
+  padding: 4px 8px;
+  border: 2px solid var(--ink);
+  background: var(--panel);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  color: inherit;
+}
+.chiptag.on {
+  background: var(--mint);
+}
+
+.lineform .lf {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.lineform .lf .f {
+  flex: 1;
+  min-width: 150px;
+}

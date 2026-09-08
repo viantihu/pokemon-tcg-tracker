@@ -6,8 +6,8 @@
  * Everything the screen needs from the server: (re)load the persisted lines + outstanding
  * decisions + move options, apply a manual move, and resolve a decision. All catalog/DB access is
  * server-side via `lib/line` (which calls `lib/repo`); the client never touches Supabase or TCGdex.
- * Owner/session is resolved through the stubbed seam (`getOwnerContext`; see lib/plan/session.ts —
- * used AS-IS, not edited: auth owns it).
+ * Owner/session is resolved through the auth seam (`await getOwnerContext()` — RLS-scoped client +
+ * session owner id; see lib/plan/session.ts).
  */
 
 import {
@@ -23,7 +23,7 @@ import { getOwnerContext } from "@/lib/plan/session";
 
 /** Reload the whole screen model (called after every mutation so the strip + queue stay truthful). */
 export async function loadLine(): Promise<LineScreenData> {
-  const { db } = getOwnerContext();
+  const { db } = await getOwnerContext();
   return loadLineScreen(db);
 }
 
@@ -51,7 +51,7 @@ export async function moveCardAction(
   destination: MoveDestination,
 ): Promise<MoveActionResult> {
   try {
-    const { db, ownerId } = getOwnerContext();
+    const { db, ownerId } = await getOwnerContext();
     const before = await loadLineScreen(db);
     const res = await applyMove(db, ownerId, { copyId, destination }, nameLookups(before));
     const data = await loadLineScreen(db);
@@ -70,7 +70,7 @@ export async function resolveDecisionAction(
   choiceId: DecisionChoiceId,
 ): Promise<DecisionActionResult> {
   try {
-    const { db, ownerId } = getOwnerContext();
+    const { db, ownerId } = await getOwnerContext();
     await applyDecision(db, ownerId, decisionId, choiceId);
     const data = await loadLineScreen(db);
     return { ok: true, data };
