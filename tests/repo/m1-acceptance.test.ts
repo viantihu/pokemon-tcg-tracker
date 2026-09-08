@@ -1,15 +1,23 @@
 /**
- * M1 acceptance criteria (dev-spec §5), verified against a running local Supabase.
+ * M1 acceptance criteria (dev-spec §5), verified against a Supabase project with 0002 + seed.
  *
  *   1. RLS denies an UNAUTHENTICATED read on every domain table (and the binder_section view).
  *   2. color_band holds all 10 bands including the empty Pink, in rainbow order.
  *   3. type_color_map matches the confirmed table (system-design §4) exactly.
  *
- * The suite auto-detects the local stack via `supabase status -o env` and SKIPS when none is
- * running, so the merge gate (`pnpm test`) stays green without Docker. To run it for real:
+ * The suite resolves a target in two ways and SKIPS when neither is present, so the merge gate
+ * (`pnpm test`) stays green with no stack running:
  *
- *   supabase start && supabase db reset   # apply 0001+0002, load seed.sql
- *   pnpm test
+ *   A) Explicit env — point it at the TESTING project (the planned post-merge verification, once
+ *      CI has applied 0002 + seed to testing). Gated behind M1_ACCEPTANCE_VERIFY so it never runs
+ *      against a project that lacks 0002 yet (e.g. testing during this PR's own CI check):
+ *        M1_ACCEPTANCE_VERIFY=1 NEXT_PUBLIC_SUPABASE_URL=... NEXT_PUBLIC_SUPABASE_ANON_KEY=... \
+ *        SUPABASE_SERVICE_ROLE_KEY=... pnpm test
+ *   B) Local stack — auto-detected via `supabase status -o env`:
+ *        supabase start && supabase db reset   # apply 0001+0002, load seed.sql
+ *        pnpm test
+ *
+ * Read-only throughout (only SELECTs), so it is safe to run against a shared testing project.
  */
 import { execSync } from "node:child_process";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -17,16 +25,31 @@ import { describe, expect, it } from "vitest";
 import type { Database } from "@/lib/repo/database.types";
 import { colorBandRepo, typeColorMapRepo } from "@/lib/repo";
 
-function localEnv(): { url: string; anonKey: string; serviceKey: string } | null {
+type Target = { url: string; anonKey: string; serviceKey: string };
+
+function resolveEnv(): Target | null {
+  // A) Explicit env (testing project, per the env contract in .env.example). Opt-in only, so the
+  //    presence of app SUPABASE_* vars in CI never triggers a run against a project without 0002.
+  if (process.env.M1_ACCEPTANCE_VERIFY === "1") {
+    const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+    const anonKey =
+      process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+    if (url && anonKey && serviceKey) return { url, anonKey, serviceKey };
+  }
+
+  // B) Local stack via the Supabase CLI.
   try {
     const out = execSync("supabase status -o env", {
       stdio: ["ignore", "pipe", "ignore"],
     }).toString();
     const get = (k: string) => out.match(new RegExp(`^${k}="?([^"\\n]+)"?`, "m"))?.[1] ?? "";
-    const url = get("API_URL");
-    const anonKey = get("ANON_KEY");
-    const serviceKey = get("SERVICE_ROLE_KEY");
-    return url && anonKey && serviceKey ? { url, anonKey, serviceKey } : null;
+    const localUrl = get("API_URL");
+    const localAnon = get("ANON_KEY");
+    const localService = get("SERVICE_ROLE_KEY");
+    return localUrl && localAnon && localService
+      ? { url: localUrl, anonKey: localAnon, serviceKey: localService }
+      : null;
   } catch {
     return null;
   }
@@ -84,7 +107,7 @@ const EXPECTED_BANDS_IN_ORDER = [
   "white",
 ];
 
-const env = localEnv();
+const env = resolveEnv();
 // Safe fallback so the suite body (which Vitest still evaluates at collection time even when
 // skipped) never dereferences null. The dummy URL is a valid format, so no client throws; a
 // skipped suite makes zero requests.
