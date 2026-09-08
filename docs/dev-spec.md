@@ -109,7 +109,7 @@ keep `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` green (this is the
 
 The upstream docs left these open. As solution architect I am resolving them so engineers are
 unblocked. **Each is marked `[DECIDED — vetoable]`; Karvi can overturn any of them at kickoff.**
-Two of them (auth, line-binder assignment) shape stored data, so raise them explicitly (§11).
+Two of them (auth, line-binder assignment) shape stored data, so raise them explicitly (§7).
 
 1. **Front-half color band stored as a zone.** `[DECIDED — vetoable]` **Yes, store it.** `Copy`
    carries a derived `colorBand`. It is computed from card type (free, no data entry) and narrows a
@@ -395,7 +395,8 @@ them hardest. UI phases are design-led; the prototype is the visual contract.
 2. **Line binder assignment (decision §3)** — confirm "active binder" for phase 1 before M3 writes
    `EvolutionLine.binderId`.
 3. **Supabase project names/region + enable prod PITR (devops §11 step 5)** — needed before M1
-   migrations run against real projects and before M10's first real import.
+   migrations run against the *cloud* projects and before M10's first real import. Local Supabase
+   development (M1–M9) does not wait on this.
 
 Decisions §1, §2, §5, §6, §7 are made and do not block; overturn only if Karvi objects.
 
