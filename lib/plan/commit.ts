@@ -5,8 +5,9 @@
  * record it implies via `lib/repo`: the Haul, a Copy per card, EvolutionLine + LineSlots for new
  * lines, slot fills for existing lines, holo-swap displacements, WishlistItems for placeholders,
  * and a PlacementDecision per card (reason + resolvedBy — the audit trail is not optional, dev-spec
- * §4). Every write is stamped with the owner id (service-role bypasses the auth.uid() default; see
- * session.ts).
+ * §4). Writes run under the RLS-scoped client from the auth seam (lib/plan/session.ts), so
+ * `owner_id` is NOT stamped explicitly: the column defaults to `auth.uid()` and the RLS
+ * `with check (owner_id = auth.uid())` policy enforces it.
  *
  * ATOMICITY. supabase-js has no cross-statement transaction and this phase adds no migration (the
  * migrations dir is frozen), so a real all-or-nothing commit would need a Postgres RPC in a future
@@ -62,11 +63,7 @@ class Rollback {
  * Commit a whole haul atomically-enough (compensating rollback on failure). Returns the new haul id
  * and per-table counts written.
  */
-export async function commitHaul(
-  db: DbClient,
-  ownerId: string,
-  input: CommitInput,
-): Promise<CommitResult> {
+export async function commitHaul(db: DbClient, input: CommitInput): Promise<CommitResult> {
   const pc = await loadPlanContext(db);
   const { planned } = planFromDraft(pc, input.draft);
 
@@ -78,16 +75,14 @@ export async function commitHaul(
 
   try {
     const haul = await haulRepo.insert(db, {
-      owner_id: ownerId,
       source: input.source,
       notes: input.notes ?? null,
     });
     rb.add(() => haulRepo.remove(db, haul.id));
 
     for (const p of planned) {
-      const copyId = await writeCard(db, ownerId, haul.id, p, pc, passLines, counts, rb);
+      const copyId = await writeCard(db, haul.id, p, pc, passLines, counts, rb);
       await placementDecisionRepo.insert(db, {
-        owner_id: ownerId,
         haul_id: haul.id,
         copy_id: copyId,
         decision: p.result.step,
@@ -107,7 +102,6 @@ export async function commitHaul(
 /** Insert the incoming copy with its placement, then apply the step's line/swap side effects. */
 async function writeCard(
   db: DbClient,
-  ownerId: string,
   haulId: string,
   p: PlannedCard,
   pc: Awaited<ReturnType<typeof loadPlanContext>>,
@@ -130,7 +124,6 @@ async function writeCard(
     : copyPlacementFromTarget(result.target);
 
   const copyInsert: Insert<"copy"> = {
-    owner_id: ownerId,
     catalog_card_id: p.tcgdexId,
     variant: p.variant,
     haul_id: haulId,
@@ -187,7 +180,7 @@ async function writeCard(
 
   // Create (or dedupe into) a new line.
   if (result.newLine) {
-    await writeNewLine(db, ownerId, p, copy.id, pc, passLines, counts, rb);
+    await writeNewLine(db, p, copy.id, pc, passLines, counts, rb);
   }
 
   return copy.id;
@@ -196,7 +189,6 @@ async function writeCard(
 /** Create the proposed line + its slots + wishlist, or fill the incoming's slot if the line exists. */
 async function writeNewLine(
   db: DbClient,
-  ownerId: string,
   p: PlannedCard,
   incomingCopyId: string,
   pc: Awaited<ReturnType<typeof loadPlanContext>>,
@@ -230,7 +222,6 @@ async function writeNewLine(
   }
 
   const line = await evolutionLineRepo.insert(db, {
-    owner_id: ownerId,
     root_dex_id: plan.rootDexId,
     color_band: plan.colorBand,
     binder_id: plan.binderId,
@@ -249,7 +240,6 @@ async function writeNewLine(
     const copyIdForSlot = isIncoming ? incomingCopyId : ownedCopyId;
 
     const slotRow = await lineSlotRepo.insert(db, {
-      owner_id: ownerId,
       line_id: line.id,
       stage_index: slot.stageIndex,
       stage: slot.stage,
@@ -292,7 +282,6 @@ async function writeNewLine(
   for (const w of p.result.wishlist ?? []) {
     const lineSlotId = slotIdByStage.get(w.stageIndex) ?? null;
     await wishlistItemRepo.insert(db, {
-      owner_id: ownerId,
       line_slot_id: lineSlotId,
       required_dex_id: w.requiredDexId,
       required_type: w.requiredType,
