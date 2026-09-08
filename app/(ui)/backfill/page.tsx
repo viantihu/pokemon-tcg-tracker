@@ -1,12 +1,13 @@
-import { Stub } from "../_components/Stub";
+/**
+ * Backfill route (scr backfill wizard; dev-spec §5 M5; system-design §7A). The screen is fully
+ * client-driven via server actions (context / lookup / resolve / commit), so the page is a thin
+ * host — no request-time data fetch here.
+ */
+
+import { BackfillScreen } from "./BackfillScreen";
 
 export const metadata = { title: "Backfill · Binder Ops" };
 
 export default function BackfillPage() {
-  return (
-    <Stub title="Backfill" phase="Coming in M5">
-      Load the existing physical collection through the app, re-runnable per binder: flat front-half
-      entry and line-oriented back-half entry.
-    </Stub>
-  );
+  return <BackfillScreen />;
 }
