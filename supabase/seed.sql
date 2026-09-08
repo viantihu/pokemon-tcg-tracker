@@ -19,36 +19,11 @@
 \set owner '00000000-0000-0000-0000-000000000001'
 
 -- =============================================================================
--- Config: ten ordered color bands (Pink #9 stays even though it is empty) + the confirmed
--- type→band map (system-design §4). White absorbs Colorless/Metal/Trainer/Supporter/Item.
+-- Config (color_band + type_color_map) is NOT seeded here. It is environment-independent config
+-- that every environment needs, so it ships via migration 0003_config.sql — the only path that
+-- reaches Testing/Production (`supabase db push` never runs this seed). On `supabase db reset`
+-- migrations apply before this seed, so the color_band rows the FKs below depend on already exist.
 -- =============================================================================
-insert into color_band (band, display_name, position) values
-  ('red',        'Red',        1),
-  ('orange',     'Orange',     2),
-  ('yellow',     'Yellow',     3),
-  ('olive',      'Olive',      4),
-  ('green',      'Green',      5),
-  ('dark_blue',  'Dark blue',  6),
-  ('light_blue', 'Light blue', 7),
-  ('purple',     'Purple',     8),
-  ('pink',       'Pink',       9),
-  ('white',      'White',      10);
-
-insert into type_color_map (card_type, band) values
-  ('Fire',      'red'),
-  ('Fighting',  'orange'),
-  ('Lightning', 'yellow'),
-  ('Dragon',    'olive'),
-  ('Grass',     'green'),
-  ('Darkness',  'dark_blue'),
-  ('Water',     'light_blue'),
-  ('Psychic',   'purple'),
-  ('Fairy',     'pink'),
-  ('Colorless', 'white'),
-  ('Metal',     'white'),
-  ('Trainer',   'white'),
-  ('Supporter', 'white'),
-  ('Item',      'white');
 
 -- =============================================================================
 -- Catalog cards (real, verified above). Pricing left NULL — the M2 catalog sync fills it.
