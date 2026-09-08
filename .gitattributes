@@ -1,0 +1,35 @@
+# Normalize line endings and force source files to be treated as text so diffs
+# always render. Without this, git's content heuristic can misclassify a source
+# file as binary (e.g. a lib/sync key builder that uses a NUL byte as an
+# intentional composite-key delimiter), which renders as "Binary files differ"
+# and blocks PR review.
+* text=auto eol=lf
+
+# Source and config: always text, LF endings, always a textual diff.
+*.ts    text diff
+*.tsx   text diff
+*.mts   text diff
+*.mjs   text diff
+*.js    text diff
+*.cjs   text diff
+*.json  text diff
+*.jsonc text diff
+*.css   text diff
+*.md    text diff
+*.sql   text diff
+*.html  text diff
+*.svg   text diff
+*.yml   text diff
+*.yaml  text diff
+*.toml  text diff
+*.example text diff
+
+# Known binary assets: never normalize, never attempt a textual diff.
+*.ico  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.woff  binary
+*.woff2 binary
