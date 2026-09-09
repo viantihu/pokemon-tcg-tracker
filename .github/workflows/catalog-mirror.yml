@@ -1,0 +1,112 @@
+name: Catalog Mirror (Testing)
+
+# Populates the Testing catalog_card mirror from TCGdex, one set per request.
+#
+# Why this exists: lib/sync/catalog-lookup.ts resolves a Dex CSV row ONLY against
+# the local mirror — there is no lazy fetch from TCGdex on a miss. Testing currently
+# holds just the handful of real cards in seed.sql, so a real CSV import would send
+# almost every row to the unresolved queue. The mirror has never been run anywhere.
+#
+# Why one request per set instead of a single POST /api/catalog/sync: `syncAll`
+# walks every set serially in one invocation (~23.5k cards), which will not finish
+# inside a Vercel function's 300s limit. `?set=<id>` mirrors a single set well
+# within it, and the loop lives here where there is no such ceiling. The upserts key
+# on tcgdex_id, so re-running is idempotent and a partial run is safe to resume.
+#
+# Artwork hashing (`?pass=artwork`) is deliberately NOT run here. It downloads and
+# hashes every card image, it is only needed for duplicate-artwork grouping, and CSV
+# resolution keys on setCode-localId without it. Run it separately, later.
+#
+# Trigger: push to the ops/run-catalog-mirror branch (a workflow_dispatch button
+# only appears once the file is on the default branch, and `main` deliberately lags
+# `develop` until the production cutover). workflow_dispatch is declared too so the
+# button starts working for free after that promotion.
+
+on:
+  push:
+    branches: [ops/run-catalog-mirror]
+  workflow_dispatch:
+
+concurrency:
+  group: catalog-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    environment: testing
+    timeout-minutes: 60
+    steps:
+      - name: Check for the service-role key
+        id: creds
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SERVICE_KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped — set SUPABASE_SERVICE_ROLE_KEY on the testing environment to enable."
+          fi
+
+      - name: Mirror every set
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # Public community catalog, no key required.
+          TCGDEX_BASE_URL: https://api.tcgdex.net/v2
+        run: |
+          set -euo pipefail
+          base="${APP_URL%/}"
+
+          # Brief set list: GET /v2/en/sets (see lib/catalog/tcgdex.ts).
+          curl -sS --retry 3 --retry-delay 5 "$TCGDEX_BASE_URL/en/sets" -o sets.json
+          jq -r '.[].id' sets.json > set-ids.txt
+          total=$(wc -l < set-ids.txt | tr -d ' ')
+          echo "Mirroring $total sets into Testing."
+
+          ok=0
+          failed=0
+          : > failures.txt
+
+          while read -r set_id; do
+            [ -n "$set_id" ] || continue
+            # --get-style POST with no body; the route reads the set from the query.
+            response=$(curl -sS -X POST \
+              -H "Authorization: Bearer $SERVICE_KEY" \
+              -w $'\n%{http_code}' \
+              --max-time 300 \
+              "$base/api/catalog/sync?set=$set_id" || printf '\n000')
+            code=${response##*$'\n'}
+            body=${response%$'\n'*}
+            if [ "$code" = "200" ]; then
+              ok=$((ok + 1))
+              printf '  %-14s ok  %s\n' "$set_id" "$(printf '%s' "$body" | jq -c '.result' 2>/dev/null || echo '')"
+            else
+              failed=$((failed + 1))
+              printf '  %-14s FAIL (HTTP %s) %s\n' "$set_id" "$code" "$body"
+              echo "$set_id HTTP=$code $body" >> failures.txt
+            fi
+            # Be a good citizen to a free community API.
+            sleep 1
+          done < set-ids.txt
+
+          echo "Mirrored $ok/$total sets; $failed failed."
+          if [ "$failed" -gt 0 ]; then
+            echo "::error::$failed set(s) failed to mirror — see failures.txt in the job log above."
+            exit 1
+          fi
+
+      - name: Report catalog size
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          set -euo pipefail
+          # The catalog is read-only to anon under RLS, so this only confirms the app
+          # is still serving after ~170 upsert requests, not the row count.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' "${APP_URL%/}/api/health")
+          echo "Post-mirror health: HTTP $code"
+          [ "$code" = "200" ]
