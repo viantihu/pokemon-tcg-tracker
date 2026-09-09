@@ -82,7 +82,12 @@ export function buildHaulCommitPayload(
   for (const [lineId, rows] of pc.slotRowsByLine) {
     slotsByLine.set(
       lineId,
-      rows.map((r) => ({ id: r.id, stage_index: r.stage_index, state: r.state, copy_id: r.copy_id })),
+      rows.map((r) => ({
+        id: r.id,
+        stage_index: r.stage_index,
+        state: r.state,
+        copy_id: r.copy_id,
+      })),
     );
   }
 
@@ -165,8 +170,16 @@ function writeCard(
   if (swap) {
     // Incoming holo takes over the line slot, if any; the displaced normal goes to bulk.
     if (swap.incomingInherits.lineSlotId) {
-      ops.push({ op: "update_copy", id: copyId, patch: { line_slot_id: swap.incomingInherits.lineSlotId } });
-      ops.push({ op: "update_slot", id: swap.incomingInherits.lineSlotId, patch: { copy_id: copyId } });
+      ops.push({
+        op: "update_copy",
+        id: copyId,
+        patch: { line_slot_id: swap.incomingInherits.lineSlotId },
+      });
+      ops.push({
+        op: "update_slot",
+        id: swap.incomingInherits.lineSlotId,
+        patch: { copy_id: copyId },
+      });
       touchSlot(slotsByLine, swap.incomingInherits.lineSlotId, copyId);
     }
     const displaced = pc.copyRowById.get(swap.displacedCopyId);
@@ -174,7 +187,13 @@ function writeCard(
       ops.push({
         op: "update_copy",
         id: displaced.id,
-        patch: { role: "bulk", binder_id: null, binder_half: null, color_band: null, line_slot_id: null },
+        patch: {
+          role: "bulk",
+          binder_id: null,
+          binder_half: null,
+          color_band: null,
+          line_slot_id: null,
+        },
       });
     }
     return copyId;
@@ -247,9 +266,7 @@ function writeNewLine(
 
   // Same line already created this pass, or already in the DB → fill instead of duplicating.
   const passLine = passLines.get(key);
-  const dbLine = passLine
-    ? null
-    : findLineByRootAndBand(pc, plan.rootDexId, plan.colorBand);
+  const dbLine = passLine ? null : findLineByRootAndBand(pc, plan.rootDexId, plan.colorBand);
   if (passLine || dbLine) {
     const lineId = passLine?.lineId ?? dbLine!;
     const slots = slotsByLine.get(lineId) ?? [];
@@ -259,7 +276,11 @@ function writeNewLine(
     if (slot) {
       slot.state = "filled";
       slot.copy_id = incomingCopyId;
-      ops.push({ op: "update_slot", id: slot.id, patch: { state: "filled", copy_id: incomingCopyId } });
+      ops.push({
+        op: "update_slot",
+        id: slot.id,
+        patch: { state: "filled", copy_id: incomingCopyId },
+      });
       ops.push({ op: "update_copy", id: incomingCopyId, patch: { line_slot_id: slot.id } });
     }
     return;
@@ -299,7 +320,12 @@ function writeNewLine(
     });
     counts.slots += 1;
     slotIdByStage.set(slot.stageIndex, slotId);
-    mirror.push({ id: slotId, stage_index: slot.stageIndex, state: slot.state, copy_id: copyIdForSlot });
+    mirror.push({
+      id: slotId,
+      stage_index: slot.stageIndex,
+      state: slot.state,
+      copy_id: copyIdForSlot,
+    });
 
     // Wire the incoming copy to its slot.
     if (isIncoming) {
@@ -357,7 +383,11 @@ function touchSlot(slotsByLine: Map<string, MutableSlot[]>, slotId: string, copy
 }
 
 /** Existing line id for a (rootDexId, colorBand), read from the loaded snapshot (was a live query). */
-function findLineByRootAndBand(pc: PlanContext, rootDexId: number, colorBand: string): string | null {
+function findLineByRootAndBand(
+  pc: PlanContext,
+  rootDexId: number,
+  colorBand: string,
+): string | null {
   for (const line of pc.ctx.lines) {
     if (line.rootDexId === rootDexId && line.colorBand === colorBand) return line.id;
   }

@@ -64,8 +64,14 @@ describe("sync apply/undo/manual-match atomicity (RPC layer, PGlite)", () => {
     createdAt: "2026-09-08T00:00:00.000Z",
     fastPath: false,
     counts: {
-      creates: 1, retires: 1, variantUpdates: 0, parks: 0, drops: 0,
-      promotions: 0, dedupeUpdates: 0, unchanged: 0,
+      creates: 1,
+      retires: 1,
+      variantUpdates: 0,
+      parks: 0,
+      drops: 0,
+      promotions: 0,
+      dedupeUpdates: 0,
+      unchanged: 0,
     },
     createdCopyIds: [],
     retiredCopies: [],
@@ -124,7 +130,10 @@ describe("sync apply/undo/manual-match atomicity (RPC layer, PGlite)", () => {
   it("apply: a poison op mid-batch rolls the WHOLE apply back — nothing changed", async () => {
     await seedApplyState();
     await asOwner(db);
-    const good = applyPayload("c0000000-0000-0000-0000-0000000000e2", "50000000-0000-0000-0000-00000000dead");
+    const good = applyPayload(
+      "c0000000-0000-0000-0000-0000000000e2",
+      "50000000-0000-0000-0000-00000000dead",
+    );
     const poisoned: WritePayload = {
       ops: [
         ...good.ops,
@@ -142,7 +151,10 @@ describe("sync apply/undo/manual-match atomicity (RPC layer, PGlite)", () => {
       `select state, copy_id from line_slot where id = '${SLOT}'`,
     );
     expect(slot[0]).toEqual({ state: "filled", copy_id: C_OLD });
-    expect((await q<{ dc: number }>(`select desired_count dc from presence_group where id='${GID}'`))[0].dc).toBe(99);
+    expect(
+      (await q<{ dc: number }>(`select desired_count dc from presence_group where id='${GID}'`))[0]
+        .dc,
+    ).toBe(99);
     expect((await q(`select 1 from last_sync_snapshot`)).length).toBe(1 - 1); // 0
     expect((await q<{ n: number }>(`select count(*)::int n from copy`))[0].n).toBe(2); // only the two seeded
   });
@@ -199,7 +211,10 @@ describe("sync apply/undo/manual-match atomicity (RPC layer, PGlite)", () => {
     );
     expect(slot[0]).toEqual({ state: "filled", copy_id: C_OLD });
     expect((await q(`select 1 from last_sync_snapshot`)).length).toBe(0);
-    expect((await q<{ dc: number }>(`select desired_count dc from presence_group where id='${GID}'`))[0].dc).toBe(1);
+    expect(
+      (await q<{ dc: number }>(`select desired_count dc from presence_group where id='${GID}'`))[0]
+        .dc,
+    ).toBe(1);
   });
 
   it("manual-match: learns the set alias, creates the copies, resolves the entry — or rolls back whole", async () => {
@@ -213,31 +228,87 @@ describe("sync apply/undo/manual-match atomicity (RPC layer, PGlite)", () => {
 
     const gid = "60000000-0000-0000-0000-0000000000a1";
     const goodOps: WritePayload["ops"] = [
-      { op: "upsert_set_alias", locale: "en", dex_code: "xy7", tcgdex_set_id: "setM", source: "manual" },
-      { op: "insert_presence_group", id: gid, catalog_card_id: "cardM", dex_variant_raw: "", desired_count: 0 },
-      { op: "insert_copy", id: crypto.randomUUID(), catalog_card_id: "cardM", variant: "normal", dex_variant_raw: "", presence_group_id: gid, role: "bulk" },
-      { op: "insert_copy", id: crypto.randomUUID(), catalog_card_id: "cardM", variant: "normal", dex_variant_raw: "", presence_group_id: gid, role: "bulk" },
-      { op: "update_unresolved_entry", id: entryId, patch: { status: "RESOLVED", manual_match_id: "cardM", retry_count: 1 } },
+      {
+        op: "upsert_set_alias",
+        locale: "en",
+        dex_code: "xy7",
+        tcgdex_set_id: "setM",
+        source: "manual",
+      },
+      {
+        op: "insert_presence_group",
+        id: gid,
+        catalog_card_id: "cardM",
+        dex_variant_raw: "",
+        desired_count: 0,
+      },
+      {
+        op: "insert_copy",
+        id: crypto.randomUUID(),
+        catalog_card_id: "cardM",
+        variant: "normal",
+        dex_variant_raw: "",
+        presence_group_id: gid,
+        role: "bulk",
+      },
+      {
+        op: "insert_copy",
+        id: crypto.randomUUID(),
+        catalog_card_id: "cardM",
+        variant: "normal",
+        dex_variant_raw: "",
+        presence_group_id: gid,
+        role: "bulk",
+      },
+      {
+        op: "update_unresolved_entry",
+        id: entryId,
+        patch: { status: "RESOLVED", manual_match_id: "cardM", retry_count: 1 },
+      },
     ];
 
     // Rollback first: a poison trailing op must undo the alias + copies + resolve.
     await expect(
-      applyOps(db, { ops: [...goodOps, { op: "delete_copy", id: crypto.randomUUID() } , { op: "insert_copy", id: crypto.randomUUID(), catalog_card_id: "ghost", role: "bulk" }], resyncGroupIds: [gid] }),
+      applyOps(db, {
+        ops: [
+          ...goodOps,
+          { op: "delete_copy", id: crypto.randomUUID() },
+          { op: "insert_copy", id: crypto.randomUUID(), catalog_card_id: "ghost", role: "bulk" },
+        ],
+        resyncGroupIds: [gid],
+      }),
     ).rejects.toThrow();
     await asSuperuser(db);
     expect((await q(`select 1 from set_alias`)).length).toBe(0);
     expect((await q<{ n: number }>(`select count(*)::int n from copy`))[0].n).toBe(0);
-    expect((await q<{ s: string }>(`select status s from unresolved_entry where id='${entryId}'`))[0].s).toBe("WAITING");
+    expect(
+      (await q<{ s: string }>(`select status s from unresolved_entry where id='${entryId}'`))[0].s,
+    ).toBe("WAITING");
 
     // Now the clean apply.
     await asOwner(db);
     await applyOps(db, { ops: goodOps, resyncGroupIds: [gid] });
     await asSuperuser(db);
-    expect((await q<{ tcgdex_set_id: string }>(`select tcgdex_set_id from set_alias where locale='en' and dex_code='xy7'`))[0].tcgdex_set_id).toBe("setM");
-    expect((await q<{ n: number }>(`select count(*)::int n from copy where presence_group_id='${gid}'`))[0].n).toBe(2);
-    const e = await q<{ status: string; manual_match_id: string }>(`select status, manual_match_id from unresolved_entry where id='${entryId}'`);
+    expect(
+      (
+        await q<{ tcgdex_set_id: string }>(
+          `select tcgdex_set_id from set_alias where locale='en' and dex_code='xy7'`,
+        )
+      )[0].tcgdex_set_id,
+    ).toBe("setM");
+    expect(
+      (
+        await q<{ n: number }>(`select count(*)::int n from copy where presence_group_id='${gid}'`)
+      )[0].n,
+    ).toBe(2);
+    const e = await q<{ status: string; manual_match_id: string }>(
+      `select status, manual_match_id from unresolved_entry where id='${entryId}'`,
+    );
     expect(e[0]).toEqual({ status: "RESOLVED", manual_match_id: "cardM" });
-    expect((await q<{ dc: number }>(`select desired_count dc from presence_group where id='${gid}'`))[0].dc).toBe(2);
+    expect(
+      (await q<{ dc: number }>(`select desired_count dc from presence_group where id='${gid}'`))[0]
+        .dc,
+    ).toBe(2);
   });
 });
 
@@ -273,7 +344,8 @@ class FakeQuery {
 }
 
 class FakeDb {
-  rpcCalls: { fn: string; args: { payload: { ops: unknown[]; resync_group_ids: string[] } } }[] = [];
+  rpcCalls: { fn: string; args: { payload: { ops: unknown[]; resync_group_ids: string[] } } }[] =
+    [];
   constructor(private store: Record<string, Record<string, unknown>[]>) {}
   from(table: string) {
     return new FakeQuery(this.store[table] ?? []);
@@ -302,7 +374,9 @@ function fakeClient(store: Record<string, Record<string, unknown>[]>): {
   };
 }
 
-function bundleWithCreates(creates: { catalogCardId: string; dexVariantRaw: string; variant: string }[]): SyncPlanBundle {
+function bundleWithCreates(
+  creates: { catalogCardId: string; dexVariantRaw: string; variant: string }[],
+): SyncPlanBundle {
   const plan: ReconcilePlan = {
     creates: creates.map((c) => ({ kind: "create", ...c })) as ReconcilePlan["creates"],
     retires: [],
@@ -318,19 +392,32 @@ function bundleWithCreates(creates: { catalogCardId: string; dexVariantRaw: stri
     current: [],
     queue: { parks: [], archiveEntryIds: [], dropEntryIds: [], stillWaiting: 0 },
     counts: {
-      creates: creates.length, retires: 0, variantUpdates: 0, parks: 0, drops: 0,
-      promotions: 0, dedupeUpdates: 0, unchanged: 0,
+      creates: creates.length,
+      retires: 0,
+      variantUpdates: 0,
+      parks: 0,
+      drops: 0,
+      promotions: 0,
+      dedupeUpdates: 0,
+      unchanged: 0,
     },
   };
 }
 
 describe("sync builders emit the correct ordered op set (fake DbClient)", () => {
   it("executeApply (adds-only fast path): one group + one copy per add + a snapshot, resync the group", async () => {
-    const { db: fake, captured } = fakeClient({ presence_group: [], unresolved_entry: [], last_sync_snapshot: [] });
-    const res = await executeApply(fake, bundleWithCreates([
-      { catalogCardId: "cardA", dexVariantRaw: "", variant: "normal" },
-      { catalogCardId: "cardA", dexVariantRaw: "", variant: "normal" },
-    ]));
+    const { db: fake, captured } = fakeClient({
+      presence_group: [],
+      unresolved_entry: [],
+      last_sync_snapshot: [],
+    });
+    const res = await executeApply(
+      fake,
+      bundleWithCreates([
+        { catalogCardId: "cardA", dexVariantRaw: "", variant: "normal" },
+        { catalogCardId: "cardA", dexVariantRaw: "", variant: "normal" },
+      ]),
+    );
 
     const { ops, resync_group_ids } = captured();
     const groups = ops.filter((o) => o.op === "insert_presence_group");
@@ -355,7 +442,16 @@ describe("sync builders emit the correct ordered op set (fake DbClient)", () => 
       version: 1,
       createdAt: "x",
       fastPath: true,
-      counts: { creates: 1, retires: 0, variantUpdates: 0, parks: 0, drops: 0, promotions: 0, dedupeUpdates: 0, unchanged: 0 },
+      counts: {
+        creates: 1,
+        retires: 0,
+        variantUpdates: 0,
+        parks: 0,
+        drops: 0,
+        promotions: 0,
+        dedupeUpdates: 0,
+        unchanged: 0,
+      },
       createdCopyIds: ["c-created"],
       retiredCopies: [],
       slotReverts: [],
@@ -377,7 +473,15 @@ describe("sync builders emit the correct ordered op set (fake DbClient)", () => 
   it("manualMatch (UNKNOWN_SET): emits alias + group + N copies + resolve, in that order", async () => {
     const { db: fake, captured } = fakeClient({
       unresolved_entry: [
-        { id: "entry-1", dex_id: "xy7-12", dex_variant_raw: "", quantity: 3, locale: "English", reason: "UNKNOWN_SET", retry_count: 0 },
+        {
+          id: "entry-1",
+          dex_id: "xy7-12",
+          dex_variant_raw: "",
+          quantity: 3,
+          locale: "English",
+          reason: "UNKNOWN_SET",
+          retry_count: 0,
+        },
       ],
       catalog_card: [{ tcgdex_id: "cardM", set_id: "setM" }],
       presence_group: [],
@@ -385,7 +489,12 @@ describe("sync builders emit the correct ordered op set (fake DbClient)", () => 
     const res = await manualMatch(fake, "entry-1", "cardM");
     const { ops, resync_group_ids } = captured();
 
-    expect(ops[0]).toMatchObject({ op: "upsert_set_alias", locale: "en", dex_code: "xy7", tcgdex_set_id: "setM" });
+    expect(ops[0]).toMatchObject({
+      op: "upsert_set_alias",
+      locale: "en",
+      dex_code: "xy7",
+      tcgdex_set_id: "setM",
+    });
     expect(ops[1]).toMatchObject({ op: "insert_presence_group", catalog_card_id: "cardM" });
     expect(ops.filter((o) => o.op === "insert_copy")).toHaveLength(3);
     const last = ops[ops.length - 1];

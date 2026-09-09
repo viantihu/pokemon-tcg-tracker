@@ -10,7 +10,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import type { EngineContext } from "@/lib/engine";
-import { buildHaulCommitPayload, planFromDraft, type DraftItem, type PlanContext } from "@/lib/plan";
+import {
+  buildHaulCommitPayload,
+  planFromDraft,
+  type DraftItem,
+  type PlanContext,
+} from "@/lib/plan";
 import type { Row, WritePayload } from "@/lib/repo";
 import {
   CHARIZARD_BASE1_4,
@@ -40,20 +45,46 @@ const B1 = "1c000000-0000-0000-0000-0000000000b1"; // active general binder
 const SPEC = "1c000000-0000-0000-0000-00000000c5ec"; // specialty binder
 
 const BANDS = [
-  "red", "orange", "yellow", "olive", "green",
-  "dark_blue", "light_blue", "purple", "pink", "white",
+  "red",
+  "orange",
+  "yellow",
+  "olive",
+  "green",
+  "dark_blue",
+  "light_blue",
+  "purple",
+  "pink",
+  "white",
 ];
 
 const TYPE_COLOR_MAP: Record<string, string> = {
-  Fire: "red", Fighting: "orange", Lightning: "yellow", Dragon: "olive", Grass: "green",
-  Darkness: "dark_blue", Water: "light_blue", Psychic: "purple", Fairy: "pink",
-  Colorless: "white", Metal: "white", Trainer: "white", Supporter: "white", Item: "white",
+  Fire: "red",
+  Fighting: "orange",
+  Lightning: "yellow",
+  Dragon: "olive",
+  Grass: "green",
+  Darkness: "dark_blue",
+  Water: "light_blue",
+  Psychic: "purple",
+  Fairy: "pink",
+  Colorless: "white",
+  Metal: "white",
+  Trainer: "white",
+  Supporter: "white",
+  Item: "white",
 };
 
 const CATALOG = [
-  CHARMANDER_SV03_026, CHARMELEON_SV03_027, CHARIZARD_BASE1_4,
-  CHARIZARD_EX_SV035_006, CHARIZARD_EX_SV035_183, CHARIZARD_EX_SV03_125_DARK,
-  EEVEE_SV035_133, VAPOREON_SV035_134, SCYTHER_SV035_123, NEST_BALL_SV01_181,
+  CHARMANDER_SV03_026,
+  CHARMELEON_SV03_027,
+  CHARIZARD_BASE1_4,
+  CHARIZARD_EX_SV035_006,
+  CHARIZARD_EX_SV035_183,
+  CHARIZARD_EX_SV03_125_DARK,
+  EEVEE_SV035_133,
+  VAPOREON_SV035_134,
+  SCYTHER_SV035_123,
+  NEST_BALL_SV01_181,
 ];
 
 /** Build a PlanContext with uuid binders; `owned` optionally seeds shelved copies (for holo-swap). */
@@ -92,7 +123,10 @@ function makeContext(owned: Row<"copy">[] = []): PlanContext {
     slotRowsByLine: new Map(),
     orderedBandKeys: BANDS,
     lookups: {
-      binderNameById: new Map([[B1, "Binder 1"], [SPEC, "Specialty A"]]),
+      binderNameById: new Map([
+        [B1, "Binder 1"],
+        [SPEC, "Specialty A"],
+      ]),
       bandDisplayByKey: new Map(BANDS.map((b) => [b, b])),
       collectionNameById: new Map(),
     },
@@ -128,7 +162,10 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
   it("writes the complete record set + a PlacementDecision per card", async () => {
     const pc = makeContext();
     const { planned } = planFromDraft(pc, draft);
-    const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, { source: "show", draft });
+    const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, {
+      source: "show",
+      draft,
+    });
 
     await seedFor(db, payload);
     await applyOps(db, payload);
@@ -212,7 +249,12 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
 
     await asSuperuser(db);
     for (const t of [
-      "haul", "copy", "evolution_line", "line_slot", "wishlist_item", "placement_decision",
+      "haul",
+      "copy",
+      "evolution_line",
+      "line_slot",
+      "wishlist_item",
+      "placement_decision",
     ]) {
       expect(await count(db, t)).toBe(0);
     }
@@ -239,9 +281,11 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
     expect(counts.slots).toBe(0);
     expect(await count(db, "evolution_line")).toBe(0);
     expect(await count(db, "line_slot")).toBe(0);
-    const copy = await db.query<{ role: string; binder_id: string | null; line_slot_id: string | null }>(
-      `select role, binder_id, line_slot_id from copy`,
-    );
+    const copy = await db.query<{
+      role: string;
+      binder_id: string | null;
+      line_slot_id: string | null;
+    }>(`select role, binder_id, line_slot_id from copy`);
     expect(copy.rows[0]).toMatchObject({ role: "bulk", binder_id: null, line_slot_id: null });
     const decision = await db.query<{ resolved_by: string; decision: string }>(
       `select resolved_by, decision from placement_decision`,
@@ -269,14 +313,20 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
       { id: "d-vap-holo", tcgdexId: VAPOREON_SV035_134.tcgdexId, variant: "holo" },
     ];
     const { planned } = planFromDraft(pc, swapDraft);
-    const { payload } = buildHaulCommitPayload(pc, planned, { source: "pack-rip", draft: swapDraft });
+    const { payload } = buildHaulCommitPayload(pc, planned, {
+      source: "pack-rip",
+      draft: swapDraft,
+    });
 
     // The builder must have emitted the displacement update.
     expect(payload.ops.some((o) => o.op === "update_copy" && o.id === ownedId)).toBe(true);
 
     // Seed catalog + binders + the pre-existing owned copy, then apply as owner.
     await seedCatalogCards(db, referencedCatalogIds(payload));
-    await seedBinders(db, [{ id: B1, type: "general" }, { id: SPEC, type: "specialty" }]);
+    await seedBinders(db, [
+      { id: B1, type: "general" },
+      { id: SPEC, type: "specialty" },
+    ]);
     await db.query(
       `insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band)
        values ($1, $2, $3, 'normal', 'shelved', $4, 'front', 'light_blue')`,
@@ -288,10 +338,11 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
 
     // Two copies now: the displaced normal (→ bulk, placement cleared) + the incoming holo (front).
     expect(await count(db, "copy")).toBe(2);
-    const displaced = await db.query<{ role: string; binder_id: string | null; color_band: string | null }>(
-      `select role, binder_id, color_band from copy where id = $1`,
-      [ownedId],
-    );
+    const displaced = await db.query<{
+      role: string;
+      binder_id: string | null;
+      color_band: string | null;
+    }>(`select role, binder_id, color_band from copy where id = $1`, [ownedId]);
     expect(displaced.rows[0]).toMatchObject({ role: "bulk", binder_id: null, color_band: null });
     const holo = await db.query<{ n: number }>(
       `select count(*)::int as n from copy

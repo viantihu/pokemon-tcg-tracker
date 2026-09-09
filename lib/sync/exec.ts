@@ -216,7 +216,11 @@ export async function executeApply(
     ops.push({
       op: "update_copy",
       id: copy.id,
-      patch: { variant: vu.toVariant, dex_variant_raw: vu.toVariantRaw, presence_group_id: toGroup },
+      patch: {
+        variant: vu.toVariant,
+        dex_variant_raw: vu.toVariantRaw,
+        presence_group_id: toGroup,
+      },
     });
   }
 
@@ -248,7 +252,11 @@ export async function executeApply(
       const slot = await lineSlotRepo.getByPk(db, copy.line_slot_id);
       if (slot) {
         slotReverts.push({ id: slot.id, state: slot.state, copy_id: slot.copy_id });
-        ops.push({ op: "update_slot", id: slot.id, patch: { state: "placeholder", copy_id: null } });
+        ops.push({
+          op: "update_slot",
+          id: slot.id,
+          patch: { state: "placeholder", copy_id: null },
+        });
       }
     }
     ops.push({ op: "delete_copy", id: copy.id });

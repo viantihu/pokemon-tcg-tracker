@@ -88,10 +88,12 @@ export async function seedBinders(
   binders: { id: string; type: "general" | "specialty"; name?: string }[],
 ): Promise<void> {
   for (const b of binders) {
-    await db.query(
-      `insert into binder (id, owner_id, name, type) values ($1, $2, $3, $4)`,
-      [b.id, OWNER, b.name ?? b.id, b.type],
-    );
+    await db.query(`insert into binder (id, owner_id, name, type) values ($1, $2, $3, $4)`, [
+      b.id,
+      OWNER,
+      b.name ?? b.id,
+      b.type,
+    ]);
   }
 }
 
