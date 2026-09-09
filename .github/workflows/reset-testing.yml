@@ -1,0 +1,93 @@
+name: Reset Testing DB
+
+# Manual-only. Drops the Testing database and rebuilds it from
+# supabase/migrations/* + seed.sql (docs/devops-strategy.md §5, §6: Testing holds
+# throwaway data and may be reset from seed at will; also an M10 acceptance item).
+#
+# Why this exists: `supabase db push` refuses to apply a local migration that
+# sorts BEHIND the last migration already on the remote history table. Testing
+# reached exactly that state when 0003_config.sql was authored after
+# 0004_catalog_artwork.sql had already been pushed. A reset restores a linear
+# history instead of forcing the migration in out of order with --include-all.
+#
+# NEVER point this at Production. The guard below hard-fails on the prod ref.
+# Uses the same secrets as deploy.yml (docs/devops-strategy.md §7).
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "reset-testing" to confirm. This DESTROYS all data in the Testing database.'
+        required: true
+        type: string
+
+concurrency:
+  group: reset-testing
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    environment: testing
+    steps:
+      # Typed confirmation goes through `env:` so the input is never interpolated
+      # into the script body.
+      - name: Require typed confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$CONFIRM" != "reset-testing" ]; then
+            echo "::error::confirmation phrase did not match; nothing was touched"
+            exit 1
+          fi
+
+      # Second, independent guard. `environment: testing` already scopes
+      # SUPABASE_PROJECT_REF to the Testing project, so this only fires if that
+      # wiring is wrong or someone retargets the job — which is precisely the
+      # mistake worth refusing to make. The prod ref is a project subdomain, not
+      # a secret (it is already stored as a plain repo variable).
+      - name: Refuse to reset Production
+        env:
+          TARGET_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          PROD_REF: bqqerxpdxywnpvndhxbs
+        run: |
+          set -euo pipefail
+          echo "Target project ref: $TARGET_REF"
+          if [ -z "$TARGET_REF" ]; then
+            echo "::error::SUPABASE_PROJECT_REF is empty for this environment"
+            exit 1
+          fi
+          if [ "$TARGET_REF" = "$PROD_REF" ]; then
+            echo "::error::refusing to reset the PRODUCTION project ($TARGET_REF)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - uses: supabase/setup-cli@v3
+        with:
+          version: latest
+
+      - name: Reset Testing from migrations + seed
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          supabase link --project-ref "${{ vars.SUPABASE_PROJECT_REF }}"
+          # Recreates the schema from every migration in order, then applies
+          # seed.sql. Clears auth.users too, so the next magic-link sign-in
+          # re-creates the owner account.
+          supabase db reset --linked --yes
+
+      - name: Confirm history is linear
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          supabase migration list --linked
+          # A clean reset leaves nothing pending. If push still finds work to do,
+          # the reset did not take and the deploy would fail again.
+          supabase db push --linked --dry-run
