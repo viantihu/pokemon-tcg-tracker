@@ -45,6 +45,9 @@ export interface PlanContext {
   ctx: EngineContext;
   catalogById: Map<string, CatalogCard>;
   copyRowById: Map<string, Row<"copy">>;
+  /** Raw line_slot rows grouped by line id — the commit's write set resolves slot fills against this
+   *  snapshot (M10; lib/plan/commit.ts) instead of re-reading the DB mid-commit. */
+  slotRowsByLine: Map<string, Row<"line_slot">[]>;
   orderedBandKeys: string[];
   lookups: AssembleLookups;
 }
@@ -131,6 +134,7 @@ export async function loadPlanContext(db: DbClient): Promise<PlanContext> {
     ctx,
     catalogById,
     copyRowById,
+    slotRowsByLine: slotsByLine,
     orderedBandKeys,
     lookups: { binderNameById, bandDisplayByKey, collectionNameById },
   };
