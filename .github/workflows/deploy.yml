@@ -41,13 +41,28 @@ jobs:
         with:
           version: latest
 
+      # Testing self-heals from a divergent migration history; Production keeps the
+      # strict rail. `db push` refuses any local migration that sorts behind the
+      # last version in the remote history table — the state Testing landed in when
+      # 0003_config.sql was authored after 0004 had already shipped. On Testing that
+      # refusal protects nothing (the data is throwaway, devops-strategy §5) and just
+      # blocks every deploy, so it pushes with --include-all. On Production the
+      # refusal is a real safety rail and stays on: a divergence there needs a human.
+      #
+      # The primary guard against divergence is now scripts/check-migration-order.mjs,
+      # which fails the PR before a mis-ordered migration can ever be merged.
       - name: Push migrations
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
+          set -euo pipefail
           supabase link --project-ref "${{ vars.SUPABASE_PROJECT_REF }}"
-          supabase db push
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            supabase db push
+          else
+            supabase db push --include-all
+          fi
 
   smoke:
     needs: migrate
