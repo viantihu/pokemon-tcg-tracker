@@ -711,7 +711,17 @@ export type Database = {
         Relationships: [];
       };
     };
-    Functions: Record<never, never>;
+    Functions: {
+      /**
+       * Atomic write applier for the two commit paths (migration 0006_commit_rpc.sql).
+       * SECURITY INVOKER: runs the whole ordered write set inside one transaction under the caller's
+       * RLS. `payload` is a `{ ops, resync_group_ids }` object (see lib/repo/write-ops.ts).
+       */
+      apply_write_ops: {
+        Args: { payload: Json };
+        Returns: undefined;
+      };
+    };
     Enums: Record<never, never>;
     CompositeTypes: Record<never, never>;
   };

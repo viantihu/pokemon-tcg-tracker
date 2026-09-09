@@ -85,6 +85,7 @@ function makeContext(): PlanContext {
     ctx,
     catalogById,
     copyRowById: new Map(),
+    slotRowsByLine: new Map(),
     orderedBandKeys: BANDS,
     lookups: {
       binderNameById: new Map([
