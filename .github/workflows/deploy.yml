@@ -55,10 +55,56 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'production' || 'testing' }}
     steps:
-      - name: Health check
+      # Both checks poll the deployed URL from OUTSIDE the app. They run after
+      # `migrate` (migrate-before-deploy) and after Vercel's Git integration has
+      # published the new build; the retries below absorb the gap until that
+      # deploy is actually serving. A red here means the deploy is NOT trusted,
+      # even though migrations already applied. APP_URL is env-scoped, so the
+      # correct base URL is used per environment (Testing for develop, Production
+      # for main). Context values go through `env:` rather than inline into the
+      # shell so nothing is interpolated into the script body.
+      - name: Health check (liveness + healthy payload)
+        env:
+          APP_URL: ${{ vars.APP_URL }}
         run: |
-          url="${{ vars.APP_URL }}/api/health"
+          set -euo pipefail
+          url="${APP_URL%/}/api/health"
           echo "Checking $url"
-          code=$(curl -sS -o /dev/null -w "%{http_code}" --retry 5 --retry-delay 10 --retry-all-errors "$url")
+          # One request: capture the response body and the trailing HTTP status
+          # together (-w appends "\n<code>" after the body). No --fail, so we read
+          # the code ourselves instead of letting curl swallow the body on 4xx/5xx.
+          response=$(curl -sS --retry 5 --retry-delay 10 --retry-all-errors -w $'\n%{http_code}' "$url")
+          code=${response##*$'\n'}
+          body=${response%$'\n'*}
           echo "HTTP $code"
-          test "$code" = "200"
+          echo "Body: $body"
+          if [ "$code" != "200" ]; then
+            echo "::error::health route returned HTTP $code (expected 200)"
+            exit 1
+          fi
+          status=$(printf '%s' "$body" | jq -r '.status')
+          if [ "$status" != "ok" ]; then
+            echo "::error::health payload unhealthy (status=\"$status\", expected \"ok\")"
+            exit 1
+          fi
+          echo "Health OK."
+
+      - name: Read-path check (public login page renders)
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          set -euo pipefail
+          # /login is the one route that renders 200 without a session: it exercises
+          # server rendering AND the Supabase auth client (createClient + getUser),
+          # so a 200 proves the deployed app booted and can reach Supabase. Every
+          # data route is RLS-gated and 307-redirects to /login when unauthenticated,
+          # so none can be smoke-checked for 200 without real credentials.
+          url="${APP_URL%/}/login"
+          echo "Checking $url"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --retry 5 --retry-delay 10 --retry-all-errors "$url")
+          echo "HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::read path $url returned HTTP $code (expected 200)"
+            exit 1
+          fi
+          echo "Read path OK."
