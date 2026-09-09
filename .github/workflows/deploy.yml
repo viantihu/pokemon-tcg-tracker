@@ -64,6 +64,59 @@ jobs:
             supabase db push --include-all
           fi
 
+  # The M1 acceptance suite (dev-spec §8: "worked examples ... pass as automated
+  # tests") needs a real Supabase project — it asserts that RLS denies anonymous
+  # reads on every table, which PGlite cannot model. It therefore skips in `pnpm
+  # test` and has never actually executed anywhere. This runs it against Testing
+  # right after migrations land, which is the only place it can run.
+  #
+  # Read-only (SELECTs only), so it is safe against the shared Testing project.
+  # Testing only: never point a suite that asserts on seed data at Production.
+  acceptance:
+    needs: migrate
+    if: ${{ vars.DEPLOY_ENABLED == 'true' && github.ref_name == 'develop' }}
+    runs-on: ubuntu-latest
+    environment: testing
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Skips cleanly rather than failing while the two keys are unset, so this
+      # job does not turn Deploy red before it can possibly pass.
+      - name: Check for acceptance credentials
+        id: creds
+        env:
+          ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$ANON_KEY" ] && [ -n "$SERVICE_KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped — set SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY on the testing environment to enable."
+          fi
+
+      - name: M1 acceptance suite against Testing
+        if: steps.creds.outputs.ready == 'true'
+        env:
+          M1_ACCEPTANCE_VERIFY: "1"
+          # Derived from the project ref we already store, so there is no third
+          # value to configure.
+          SUPABASE_URL: https://${{ vars.SUPABASE_PROJECT_REF }}.supabase.co
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: pnpm vitest run tests/repo/m1-acceptance.test.ts
+
   smoke:
     needs: migrate
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
