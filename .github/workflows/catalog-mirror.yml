@@ -155,19 +155,17 @@ jobs:
           echo "Mirroring $total sets into Testing."
 
           ok=0
-          failed=0
-          : > failures.txt
+          : > remaining.txt
+          cp set-ids.txt remaining.txt
 
-          while read -r set_id; do
-            [ -n "$set_id" ] || continue
-            # --get-style POST with no body; the route reads the set from the query.
-            #
-            # `Authorization: Bearer` is correct here even for a new-format secret key,
-            # and must NOT be "fixed" to an apikey header: this request goes to OUR
-            # Next.js route, which does a plain string compare against its own
-            # SUPABASE_SERVICE_ROLE_KEY env var (app/api/catalog/sync/route.ts). It never
-            # reaches Supabase's gateway, so nothing tries to parse it as a JWT. The
-            # apikey-only rule applies to the Supabase REST call in the verify step.
+          # WHY BACKOFF AND NOT A FIXED PAUSE. Across the first three full runs every failure was an
+          # upstream TCGdex 503 surfaced as our 502 — and the count GREW run over run (2, then 1, then
+          # 13), which is throttling, not bad data. The failing sets differed each time and each one
+          # succeeded on some other run, so the fix is to wait long enough for the upstream limit to
+          # relax rather than to re-run the whole mirror and add load. A 5s pause is far too short for
+          # that; these waits are minutes, and the sweep below spaces the survivors out further.
+          attempt_set() {
+            local set_id="$1"
             response=$(curl -sS -X POST \
               -H "Authorization: Bearer $SERVICE_KEY" \
               -w $'\n%{http_code}' \
@@ -175,28 +173,61 @@ jobs:
               "$base/api/catalog/sync?set=$set_id" || printf '\n000')
             code=${response##*$'\n'}
             body=${response%$'\n'*}
-            if [ "$code" = "200" ]; then
-              ok=$((ok + 1))
-              printf '  %-14s ok  %s\n' "$set_id" "$(printf '%s' "$body" | jq -c '.result' 2>/dev/null || echo '')"
-            else
-              failed=$((failed + 1))
-              printf '  %-14s FAIL (HTTP %s) %s\n' "$set_id" "$code" "$body"
-              echo "$set_id HTTP=$code $body" >> failures.txt
-              # A 401 means the bearer does not match the app's own key, so every
-              # remaining set would fail the same way. Stop rather than hammer 200+
-              # requests at a wall.
-              if [ "$code" = "401" ]; then
-                echo "::error::401 from /api/catalog/sync — the bearer does not match the SUPABASE_SERVICE_ROLE_KEY configured in Vercel for this environment."
-                exit 1
-              fi
-            fi
-            # Be a good citizen to a free community API.
-            sleep 1
-          done < set-ids.txt
+          }
 
-          echo "Mirrored $ok/$total sets; $failed failed."
+          # `attempt_set` sends `Authorization: Bearer`, which is correct even for a new-format secret
+          # key and must NOT be "fixed" to an apikey header: that request goes to OUR Next.js route,
+          # which does a plain string compare against its own SUPABASE_SERVICE_ROLE_KEY env var
+          # (app/api/catalog/sync/route.ts). It never reaches Supabase's gateway, so nothing tries to
+          # parse it as a JWT. The apikey-only rule applies to the Supabase REST call in the verify step.
+          #
+          # A 401 means the bearer does not match the app's own key, so every remaining set would fail
+          # identically. Abort rather than hammer 200+ requests at a wall, and never retry it.
+          abort_on_401() {
+            if [ "$code" = "401" ]; then
+              printf '  %-14s FAIL (HTTP 401) %s\n' "$1" "$body"
+              echo "::error::401 from /api/catalog/sync — the bearer does not match the SUPABASE_SERVICE_ROLE_KEY configured in Vercel for this environment."
+              exit 1
+            fi
+          }
+
+          # Pass 1: straight through, one request per set. Anything that fails is left in the sweep
+          # list rather than retried on the spot — pausing mid-pass just extends the window in which
+          # we are being throttled, whereas by the end of the pass minutes have already elapsed.
+          pass=1
+          while [ -s remaining.txt ] && [ "$pass" -le 3 ]; do
+            if [ "$pass" -gt 1 ]; then
+              # 2 min, then 8 — long enough for an upstream rate limit to reset, and bounded so the
+            # whole job still lands well inside `timeout-minutes` (pass 1 alone runs ~6 min).
+              wait=$((120 * 4 ** (pass - 2)))
+              echo "--- pass $pass: $(wc -l < remaining.txt | tr -d ' ') set(s) left, waiting ${wait}s for TCGdex to relax ---"
+              sleep "$wait"
+            fi
+            : > still-failing.txt
+            while read -r set_id; do
+              [ -n "$set_id" ] || continue
+              attempt_set "$set_id"
+              abort_on_401 "$set_id"
+              if [ "$code" = "200" ]; then
+                ok=$((ok + 1))
+                printf '  %-14s ok  %s\n' "$set_id" "$(printf '%s' "$body" | jq -c '.result' 2>/dev/null || echo '')"
+              else
+                printf '  %-14s FAIL (HTTP %s) %s\n' "$set_id" "$code" "$body"
+                echo "$set_id" >> still-failing.txt
+              fi
+              # Be a good citizen to a free community API.
+              sleep 1
+            done < remaining.txt
+            mv still-failing.txt remaining.txt
+            pass=$((pass + 1))
+          done
+
+          failed=$(wc -l < remaining.txt | tr -d ' ')
+          echo "Mirrored $ok/$total sets; $failed still failing."
           if [ "$failed" -gt 0 ]; then
-            echo "::error::$failed set(s) failed to mirror — see failures.txt in the job log above."
+            echo "Sets that never succeeded:"
+            sed 's/^/  /' remaining.txt
+            echo "::error::$failed set(s) failed to mirror after 3 passes with backoff. Upserts are idempotent, so re-running is safe — but if these are TCGdex 503s, wait rather than retry immediately."
             exit 1
           fi
 
@@ -209,7 +240,16 @@ jobs:
       # as a Bearer token the platform tries to parse it and rejects with "Invalid JWT".
       # A legacy `service_role` JWT still needs the Bearer header to be read as that
       # role rather than as anon. So the Bearer is added only for a JWT key.
+      #
+      # `always()`: a partial mirror is exactly when the row count is most worth knowing.
+      # The first three runs each failed on a set or two, which skipped this step, so
+      # nobody ever learned how many rows had actually landed — the one number the whole
+      # job exists to move. It now reports even on a failed run (and still exits non-zero
+      # itself if the catalog looks unpopulated), so a red run is diagnosable rather than
+      # silent. Guarded on the key having resolved, since without it there is nothing to
+      # query with.
       - name: Verify the mirror is populated
+        if: always() && env.SERVICE_KEY != ''
         env:
           PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |

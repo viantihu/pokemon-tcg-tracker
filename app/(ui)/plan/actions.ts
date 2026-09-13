@@ -22,6 +22,7 @@ import {
 } from "@/lib/plan";
 import { loadMoveOptions, type MoveOptions } from "@/lib/line";
 import { catalogCardRepo, type Row } from "@/lib/repo";
+import { errorMessage } from "@/lib/errors";
 import type { CommitCounts, DraftCard, LookupCard, RunPlanResult } from "./plan-types";
 import type { CommitActionInput } from "./plan-types";
 
@@ -119,7 +120,7 @@ export async function commitHaulAction(
     });
     return { ok: true, haulId: res.haulId, counts: res.counts };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 

@@ -14,6 +14,7 @@
 import { getServerEnv } from "@/lib/env";
 import { getOwnerContext } from "@/lib/plan";
 import { runSyncPipeline } from "@/lib/sync";
+import { errorMessage } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,10 +39,7 @@ export async function POST(request: Request) {
     // The preview is the diff/preview contract; the bundle is what an apply call would consume.
     return Response.json({ ok: true, preview, bundle });
   } catch (err) {
-    return Response.json(
-      { ok: false, error: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
-    );
+    return Response.json({ ok: false, error: errorMessage(err) }, { status: 500 });
   }
 }
 

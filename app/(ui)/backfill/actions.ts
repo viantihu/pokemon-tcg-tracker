@@ -22,6 +22,7 @@ import {
   type SpecialtyCommit,
 } from "@/lib/backfill";
 import { catalogCardRepo } from "@/lib/repo";
+import { errorMessage } from "@/lib/errors";
 import type { LookupCard } from "../plan/plan-types";
 import type { BackfillContextPayload, CommitResult } from "./backfill-types";
 
@@ -78,7 +79,7 @@ export async function commitFrontAction(input: FrontHalfCommit): Promise<CommitR
     const counts = await commitFrontHalf(db, ownerId, input);
     return { ok: true, counts };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -89,7 +90,7 @@ export async function commitLineAction(input: BackLineCommit): Promise<CommitRes
     const counts = await commitBackLine(db, ownerId, input);
     return { ok: true, counts };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -100,6 +101,6 @@ export async function commitSpecialtyAction(input: SpecialtyCommit): Promise<Com
     const counts = await commitSpecialty(db, ownerId, input);
     return { ok: true, counts };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
