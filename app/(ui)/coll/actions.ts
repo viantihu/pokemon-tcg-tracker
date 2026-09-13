@@ -26,6 +26,7 @@ import {
 } from "@/lib/repo";
 import { band } from "@/lib/engine";
 import { getOwnerContext, toCatalogCard } from "@/lib/plan";
+import { errorMessage } from "@/lib/errors";
 import {
   collectionMode,
   groupWishlist,
@@ -221,7 +222,7 @@ export async function saveCollection(input: CollectionInput): Promise<SaveResult
     }
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -232,7 +233,7 @@ export async function setCollectionMode(id: string, mode: "finite" | "open"): Pr
     await collectionRepo.update(db, id, { mode });
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -242,7 +243,7 @@ export async function deleteCollection(id: string): Promise<SaveResult> {
     await collectionRepo.remove(db, id);
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -288,7 +289,7 @@ export async function logCardIntoCollection(
     });
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -318,6 +319,6 @@ export async function wishlistCollectionCard(
     });
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }

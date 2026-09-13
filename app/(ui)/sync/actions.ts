@@ -25,6 +25,7 @@ import {
 } from "@/lib/sync";
 import { lastSyncSnapshotRepo, unresolvedEntryRepo, type Row } from "@/lib/repo";
 import type { AppliedSnapshot } from "@/lib/sync";
+import { errorMessage } from "@/lib/errors";
 import { lookupCatalog } from "../plan/actions";
 import type { LookupCard } from "../plan/plan-types";
 import type { ActionError, ApplyOutcome, QueueEntryView, SyncState } from "./sync-types";
@@ -42,7 +43,7 @@ export async function previewSync(formData: FormData): Promise<PreviewOk | Actio
     const { bundle, preview } = await runSyncPipeline(db, bytes);
     return { ok: true, preview, bundle };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -67,7 +68,7 @@ export async function applySync(
       notification: fastPathNotification(r.added, r.waiting),
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -78,7 +79,7 @@ export async function undoLastSync(): Promise<{ ok: true } | ActionError> {
     await executeUndo(db);
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -97,7 +98,7 @@ export async function retryUnresolvedNow(): Promise<
     await executeApply(db, bundle);
     return { ok: true, promoted, applied: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -159,7 +160,7 @@ export async function manualMatchEntry(
     const r = await manualMatch(db, entryId, tcgdexId);
     return { ok: true, drainedSet: r.learnedAlias !== null };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -169,7 +170,7 @@ export async function dismissEntryAction(entryId: string): Promise<{ ok: true } 
     await dismissEntry(db, entryId);
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -179,7 +180,7 @@ export async function undismissEntryAction(entryId: string): Promise<{ ok: true 
     await undismissEntry(db, entryId);
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 

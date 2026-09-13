@@ -22,6 +22,7 @@ import {
 } from "@/lib/repo";
 import { recomputeBands, type RecomputeCopy, type RecomputeLine } from "@/lib/surfaces";
 import type { CatalogCard as EngineCatalogCard } from "@/lib/engine";
+import { errorMessage } from "@/lib/errors";
 import type { BinderInput, RecomputeCounts, SettingsData, SettingsResult } from "./settings-types";
 
 export async function loadSettings(): Promise<SettingsData> {
@@ -89,7 +90,7 @@ export async function saveBinder(input: BinderInput): Promise<SettingsResult> {
     }
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -99,7 +100,7 @@ export async function deleteBinder(id: string): Promise<SettingsResult> {
     await binderRepo.remove(db, id);
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -118,7 +119,7 @@ export async function reorderBands(orderedKeys: string[]): Promise<SettingsResul
     }
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -198,6 +199,6 @@ export async function setTypeBand(
 
     return { ok: true, data: { copies: copyUpdates.length, lines: lineUpdates.length } };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }

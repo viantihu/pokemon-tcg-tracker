@@ -158,16 +158,11 @@ jobs:
           failed=0
           : > failures.txt
 
-          while read -r set_id; do
-            [ -n "$set_id" ] || continue
-            # --get-style POST with no body; the route reads the set from the query.
-            #
-            # `Authorization: Bearer` is correct here even for a new-format secret key,
-            # and must NOT be "fixed" to an apikey header: this request goes to OUR
-            # Next.js route, which does a plain string compare against its own
-            # SUPABASE_SERVICE_ROLE_KEY env var (app/api/catalog/sync/route.ts). It never
-            # reaches Supabase's gateway, so nothing tries to parse it as a JWT. The
-            # apikey-only rule applies to the Supabase REST call in the verify step.
+          # One set in the first full run came back 502 and the rest succeeded; re-fetching that
+          # set's TCGdex data afterwards found nothing wrong with it, so a single blip should not
+          # cost a 30-minute re-run of all 218. Each set therefore gets one retry after a pause.
+          attempt_set() {
+            local set_id="$1"
             response=$(curl -sS -X POST \
               -H "Authorization: Bearer $SERVICE_KEY" \
               -w $'\n%{http_code}' \
@@ -175,6 +170,34 @@ jobs:
               "$base/api/catalog/sync?set=$set_id" || printf '\n000')
             code=${response##*$'\n'}
             body=${response%$'\n'*}
+          }
+
+          while read -r set_id; do
+            [ -n "$set_id" ] || continue
+            # `attempt_set` sends `Authorization: Bearer`, which is correct even for a
+            # new-format secret key and must NOT be "fixed" to an apikey header: that
+            # request goes to OUR Next.js route, which does a plain string compare
+            # against its own SUPABASE_SERVICE_ROLE_KEY env var
+            # (app/api/catalog/sync/route.ts). It never reaches Supabase's gateway, so
+            # nothing tries to parse it as a JWT. The apikey-only rule applies to the
+            # Supabase REST call in the verify step.
+            attempt_set "$set_id"
+
+            # A 401 means the bearer does not match the app's own key, so every remaining
+            # set would fail identically. Stop rather than hammer 200+ requests at a wall,
+            # and do not waste a retry on it.
+            if [ "$code" = "401" ]; then
+              printf '  %-14s FAIL (HTTP 401) %s\n' "$set_id" "$body"
+              echo "::error::401 from /api/catalog/sync — the bearer does not match the SUPABASE_SERVICE_ROLE_KEY configured in Vercel for this environment."
+              exit 1
+            fi
+
+            if [ "$code" != "200" ]; then
+              printf '  %-14s retrying after HTTP %s: %s\n' "$set_id" "$code" "$body"
+              sleep 5
+              attempt_set "$set_id"
+            fi
+
             if [ "$code" = "200" ]; then
               ok=$((ok + 1))
               printf '  %-14s ok  %s\n' "$set_id" "$(printf '%s' "$body" | jq -c '.result' 2>/dev/null || echo '')"
@@ -182,13 +205,6 @@ jobs:
               failed=$((failed + 1))
               printf '  %-14s FAIL (HTTP %s) %s\n' "$set_id" "$code" "$body"
               echo "$set_id HTTP=$code $body" >> failures.txt
-              # A 401 means the bearer does not match the app's own key, so every
-              # remaining set would fail the same way. Stop rather than hammer 200+
-              # requests at a wall.
-              if [ "$code" = "401" ]; then
-                echo "::error::401 from /api/catalog/sync — the bearer does not match the SUPABASE_SERVICE_ROLE_KEY configured in Vercel for this environment."
-                exit 1
-              fi
             fi
             # Be a good citizen to a free community API.
             sleep 1

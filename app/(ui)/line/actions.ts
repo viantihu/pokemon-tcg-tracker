@@ -20,6 +20,7 @@ import {
   type MoveNameLookups,
 } from "@/lib/line";
 import { getOwnerContext } from "@/lib/plan/session";
+import { errorMessage } from "@/lib/errors";
 
 /** Reload the whole screen model (called after every mutation so the strip + queue stay truthful). */
 export async function loadLine(): Promise<LineScreenData> {
@@ -57,7 +58,7 @@ export async function moveCardAction(
     const data = await loadLineScreen(db);
     return { ok: true, label: res.destinationLabel, data };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }
 
@@ -75,6 +76,6 @@ export async function resolveDecisionAction(
     const data = await loadLineScreen(db);
     return { ok: true, data };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, error: errorMessage(err) };
   }
 }

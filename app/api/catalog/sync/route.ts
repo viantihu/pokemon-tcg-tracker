@@ -19,6 +19,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getServerEnv } from "@/lib/env";
 import { createTcgdexClient } from "@/lib/catalog/tcgdex";
 import { defaultArtworkHasher, regroupArtwork, syncAll, syncSet } from "@/lib/catalog/mirror";
+import { errorMessage } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,9 +47,6 @@ export async function POST(request: Request) {
     const result = setId ? await syncSet(db, tcgdex, setId) : await syncAll(db, tcgdex);
     return Response.json({ ok: true, result });
   } catch (err) {
-    return Response.json(
-      { ok: false, error: err instanceof Error ? err.message : String(err) },
-      { status: 502 },
-    );
+    return Response.json({ ok: false, error: errorMessage(err) }, { status: 502 });
   }
 }
