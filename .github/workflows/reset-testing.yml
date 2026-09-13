@@ -12,12 +12,17 @@ name: Reset Testing DB
 #
 # NEVER point this at Production. The guard below hard-fails on the prod ref.
 # Uses the same secrets as deploy.yml (docs/devops-strategy.md §7).
+#
+# STOP BEFORE RUNNING THIS UNTIL GO-LIVE. Testing is currently STICKY: it holds the
+# real collection, which is entered there and promoted to Production once at cutover
+# (docs/go-live-runbook.md). A reset in that window destroys the real data, and the
+# only copy of it. Safe again after the promotion has landed and been verified.
 
 on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Type "reset-testing" to confirm. This DESTROYS all data in the Testing database.'
+        description: 'Type "reset-testing" to confirm. DESTROYS all Testing data — which, until go-live, is the REAL collection (docs/go-live-runbook.md).'
         required: true
         type: string
 

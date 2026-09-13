@@ -137,6 +137,10 @@ Environment principles:
 - **Production database is never used for experiments.** All CSV-reconciliation and
   destructive-diff testing happens against Testing, which can be reset from
   `seed.sql` at will.
+- **Exception, until go-live:** the real collection is being entered against Testing
+  and promoted to Production once at cutover, so Testing is **sticky** and must not be
+  reset while it holds it. See `go-live-runbook.md`, which also documents the exposure
+  this creates (previews share the Testing DB).
 - Each environment gets its own set of env vars (Section 7), keyed by Vercel's
   Production / Preview / Development scopes.
 
@@ -157,6 +161,10 @@ Use the Supabase CLI with versioned SQL migrations checked into `supabase/migrat
   never seeded after its first real import.
 - Turn on Supabase automated backups / PITR for the Production project before the
   first real CSV import. This is the durability guarantee that justified the stack.
+- Production's **first real import is a data promotion from Testing**, not a hand
+  re-entry: `scripts/promote-collection.mjs`, procedure in `go-live-runbook.md`. It
+  remaps `owner_id` to the Production `auth.users` uuid, which a raw `pg_dump` restore
+  would not — that failure is silent and leaves Production looking empty forever.
 
 ---
 
@@ -282,5 +290,7 @@ Do these in order. Stop and confirm with Karvi at the two marked gates.
   allow-listed single account suffices.
 - **Custom domain** — needed for a clean PWA install, or is the Vercel URL fine to
   start?
-- **Testing data refresh cadence** — reset Testing from seed on every deploy, or
-  keep it sticky between runs?
+- ~~**Testing data refresh cadence** — reset Testing from seed on every deploy, or
+  keep it sticky between runs?~~ **RESOLVED:** sticky. The real collection is entered
+  against Testing and promoted to Production once at go-live, so Testing must not be
+  reset while it holds it (`go-live-runbook.md`). It reverts to throwaway after cutover.
