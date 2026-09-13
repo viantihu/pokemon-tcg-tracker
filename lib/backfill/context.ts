@@ -39,7 +39,7 @@ export async function loadBackfillContext(db: DbClient): Promise<BackfillContext
     collectionRepo.list(db),
     colorBandRepo.listOrdered(db),
     typeColorMapRepo.list(db),
-    catalogCardRepo.list(db),
+    catalogCardRepo.listAll(db),
   ]);
 
   const catalogById = new Map<string, CatalogCard>();

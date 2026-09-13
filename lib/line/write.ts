@@ -53,8 +53,9 @@ export async function applyMove(
 
   // Moving a card OUT of a line reopens the slot it filled and demotes a completed line.
   if (priorSlotId) {
-    const slots = await lineSlotRepo.list(db);
-    const slot = slots.find((s) => s.id === priorSlotId);
+    // By primary key: a full-table `list` is capped at the server's max-rows, so scanning for the
+    // slot could silently miss it once the collection outgrows one page.
+    const slot = await lineSlotRepo.getByPk(db, priorSlotId);
     if (slot && slot.copy_id === req.copyId) {
       await lineSlotRepo.update(db, slot.id, { state: "placeholder", copy_id: null });
       const line = await evolutionLineRepo.getByPk(db, slot.line_id);
@@ -112,7 +113,7 @@ export async function applyDecision(
 
   // Wishlist: resolve (drop) some, upsert (create/refresh) others.
   if (writes.wishlistResolveSlotIds.length > 0 || writes.wishlistUpserts.length > 0) {
-    const existing = await wishlistItemRepo.list(db);
+    const existing = await wishlistItemRepo.listAll(db);
     const openBySlot = new Map<string, string>();
     for (const w of existing) {
       if (w.resolved_at === null && w.line_slot_id) openBySlot.set(w.line_slot_id, w.id);

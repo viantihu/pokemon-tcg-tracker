@@ -253,7 +253,7 @@ export async function regroupArtwork(
   db: DbClient,
   { hasher, threshold, concurrency = 8 }: RegroupOptions = {},
 ): Promise<RegroupResult> {
-  const rows = await catalogCardRepo.list(db);
+  const rows = await catalogCardRepo.listAll(db);
 
   // 1. Fill missing hashes (skip digital-only + already-hashed + locked-without-hash-needs).
   const needHash = hasher

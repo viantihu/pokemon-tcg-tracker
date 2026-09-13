@@ -67,11 +67,11 @@ export async function loadCollHub(): Promise<CollHubData> {
     await Promise.all([
       collectionRepo.list(db),
       binderRepo.list(db),
-      catalogCardRepo.list(db),
+      catalogCardRepo.listAll(db),
       copyRepo.listShelved(db),
       wishlistItemRepo.listOpen(db),
-      lineSlotRepo.list(db),
-      evolutionLineRepo.list(db),
+      lineSlotRepo.listAll(db),
+      evolutionLineRepo.listAll(db),
       colorBandRepo.listOrdered(db),
       typeColorMapRepo.list(db),
     ]);
