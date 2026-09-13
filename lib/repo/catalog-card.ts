@@ -26,6 +26,25 @@ export const catalogCardRepo = {
     return out ?? null;
   },
 
+  /**
+   * The printings behind a known set of ids — used where the caller already holds `catalog_card_id`
+   * references (e.g. the pending-placement queue) and must NOT pull the whole ~23.5k mirror to
+   * resolve a handful of names. Chunked, because the ids ride on the request URL.
+   */
+  async listByIds(db: DbClient, ids: string[], chunkSize = 100): Promise<Row<"catalog_card">[]> {
+    const out: Row<"catalog_card">[] = [];
+    const unique = [...new Set(ids)];
+    for (let i = 0; i < unique.length; i += chunkSize) {
+      const { data, error } = await db
+        .from("catalog_card")
+        .select("*")
+        .in("tcgdex_id", unique.slice(i, i + chunkSize));
+      if (error) throw error;
+      out.push(...(data ?? []));
+    }
+    return out;
+  },
+
   /** Duplicate-key lookup half: cards sharing a (set_id, local_id). */
   async findBySetLocal(
     db: DbClient,

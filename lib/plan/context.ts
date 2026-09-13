@@ -39,6 +39,12 @@ export interface DraftItem {
   id: string;
   tcgdexId: string;
   variant: Variant;
+  /**
+   * Set when this draft entry is an EXISTING unplaced `copy` row being routed rather than a new card
+   * being taken in (UIL-003; see lib/plan/pending.ts). The commit then updates that row's placement
+   * instead of inserting a second copy of the same physical card. Absent for typed intake.
+   */
+  existingCopyId?: string | null;
 }
 
 export interface PlanContext {
@@ -52,8 +58,25 @@ export interface PlanContext {
   lookups: AssembleLookups;
 }
 
+export interface LoadPlanContextOptions {
+  /**
+   * Copy ids to withhold from `ctx.owned` — the existing copies this pass is about to ROUTE
+   * (UIL-003). They are the incoming stack, not the established collection, so the cascade must not
+   * also see them as already-owned: a copy left in `owned` could be pulled into another card's new
+   * line while its own draft entry is separately placing it, producing two conflicting writes for one
+   * row. Withholding them makes routing pending copies produce exactly the plan a freshly-typed haul
+   * of the same cards would produce, which is the invariant the tests pin.
+   *
+   * They stay in `copyRowById` (the commit still needs their rows).
+   */
+  excludeOwnedCopyIds?: Iterable<string>;
+}
+
 /** Load every table the cascade reads and assemble a ready-to-run `EngineContext` + lookups. */
-export async function loadPlanContext(db: DbClient): Promise<PlanContext> {
+export async function loadPlanContext(
+  db: DbClient,
+  options: LoadPlanContextOptions = {},
+): Promise<PlanContext> {
   const [
     catalogRows,
     copyRows,
@@ -65,11 +88,14 @@ export async function loadPlanContext(db: DbClient): Promise<PlanContext> {
     bandRows,
     sectionRows,
   ] = await Promise.all([
-    catalogCardRepo.list(db),
-    copyRepo.list(db),
+    // `listAll`, not `list`: these tables scale with the collection and the mirror (~23.5k catalog
+    // rows), and a single `select *` is silently capped at the server's `max-rows` (1000). A
+    // truncated catalog would quietly break chain-building, viability and alternate ranking.
+    catalogCardRepo.listAll(db),
+    copyRepo.listAll(db),
     binderRepo.list(db),
-    evolutionLineRepo.list(db),
-    lineSlotRepo.list(db),
+    evolutionLineRepo.listAll(db),
+    lineSlotRepo.listAll(db),
     collectionRepo.list(db),
     typeColorMapRepo.list(db),
     colorBandRepo.listOrdered(db),
@@ -82,7 +108,9 @@ export async function loadPlanContext(db: DbClient): Promise<PlanContext> {
   const copyRowById = new Map<string, Row<"copy">>();
   for (const r of copyRows) copyRowById.set(r.id, r);
 
+  const excluded = new Set(options.excludeOwnedCopyIds ?? []);
   const owned = copyRows
+    .filter((r) => !excluded.has(r.id))
     .map((r) => toOwnedCopy(r, catalogById))
     .filter((c): c is NonNullable<typeof c> => c !== null);
 
@@ -163,7 +191,13 @@ export function planFromDraft(
     const result: CascadeResult = placeCard(incoming, pc.ctx);
     const bandKey = band(incoming.card, pc.ctx.typeColorMap);
     items.push(toPlanItem(incoming, result, bandKey, pc.lookups));
-    planned.push({ incomingId: d.id, tcgdexId: d.tcgdexId, variant: d.variant, result });
+    planned.push({
+      incomingId: d.id,
+      tcgdexId: d.tcgdexId,
+      variant: d.variant,
+      existingCopyId: d.existingCopyId ?? null,
+      result,
+    });
   }
   return { items, planned };
 }

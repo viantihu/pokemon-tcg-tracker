@@ -13,4 +13,5 @@ export * from "./assemble";
 export * from "./adapt";
 export * from "./context";
 export * from "./commit";
+export * from "./pending";
 export { getOwnerContext, SEEDED_OWNER_ID, type OwnerContext } from "./session";

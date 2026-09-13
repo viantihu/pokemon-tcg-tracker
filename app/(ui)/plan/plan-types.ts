@@ -4,8 +4,10 @@
  */
 
 import type { Variant } from "@/lib/engine";
-import type { PlanBandGroup } from "@/lib/plan";
+import type { CommitCounts, PlanBandGroup } from "@/lib/plan";
 import type { MoveDestination } from "@/lib/line/types";
+
+export type { CommitCounts };
 
 /** A catalog printing surfaced by the type-ahead, trimmed to what the intake UI needs. */
 export interface LookupCard {
@@ -28,6 +30,15 @@ export interface DraftCard {
   id: string;
   card: LookupCard;
   variant: Variant;
+  /**
+   * Set when the row is an existing unplaced copy waiting to be routed rather than a new card being
+   * taken in (UIL-003). The commit updates that copy's placement instead of creating another one, so
+   * placing sync's additions can never double her counts. Its variant is Dex-owned and read-only
+   * here (sync-architecture §1.1).
+   */
+  existingCopyId?: string | null;
+  /** Raw Dex variant string, shown instead of the variant selector on a routed row. */
+  dexVariantRaw?: string | null;
 }
 
 /** What `runHaulPlan` returns for rendering. */
@@ -38,19 +49,20 @@ export interface RunPlanResult {
   summary: { total: number; decisions: number; byAction: Record<string, number> };
 }
 
-export interface CommitCounts {
-  copies: number;
-  lines: number;
-  slots: number;
-  wishlist: number;
-  decisions: number;
+/** One draft entry as it crosses the client → server boundary. */
+export interface DraftPayloadItem {
+  id: string;
+  tcgdexId: string;
+  variant: Variant;
+  /** An existing unplaced copy to route (UIL-003); absent for typed intake. */
+  existingCopyId?: string | null;
 }
 
 /** Argument to the commit server action. */
 export interface CommitActionInput {
   source: "bulk-bin" | "pack-rip" | "show" | "trade";
   notes?: string | null;
-  draft: { id: string; tcgdexId: string; variant: Variant }[];
+  draft: DraftPayloadItem[];
   /** Per-draft-id placement overrides from the spotlight move panel (M7). */
   overrides?: Record<string, MoveDestination>;
 }

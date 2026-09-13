@@ -12,15 +12,34 @@
 import { availableVariants, toCardVariants } from "@/lib/plan";
 import {
   commitHaul,
+  existingCopyIds,
   getOwnerContext,
   groupPlan,
+  loadPendingPlacements,
   loadPlanContext,
   planFromDraft,
   type DraftItem,
 } from "@/lib/plan";
 import { loadMoveOptions, type MoveOptions } from "@/lib/line";
-import { catalogCardRepo } from "@/lib/repo";
-import type { CommitActionInput, CommitCounts, LookupCard, RunPlanResult } from "./plan-types";
+import { catalogCardRepo, type Row } from "@/lib/repo";
+import type { CommitCounts, DraftCard, LookupCard, RunPlanResult } from "./plan-types";
+import type { CommitActionInput } from "./plan-types";
+
+/** A `catalog_card` row trimmed to what the intake UI renders. */
+function toLookupCard(r: Row<"catalog_card">): LookupCard {
+  return {
+    tcgdexId: r.tcgdex_id,
+    name: r.name,
+    setId: r.set_id,
+    setName: r.set_name,
+    localId: r.local_id,
+    stage: r.stage,
+    types: r.types ?? [],
+    cardClass: r.card_class === "specialty" ? "specialty" : "standard",
+    imageUrl: r.image_url,
+    variants: availableVariants(toCardVariants(r.variants)),
+  };
+}
 
 /** Type-ahead against the local mirror. Returns [] on error so typing never breaks. */
 export async function lookupCatalog(query: string): Promise<LookupCard[]> {
@@ -29,27 +48,38 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
   try {
     const { db } = await getOwnerContext();
     const rows = await catalogCardRepo.search(db, q, 12);
-    return rows.map((r) => ({
-      tcgdexId: r.tcgdex_id,
-      name: r.name,
-      setId: r.set_id,
-      setName: r.set_name,
-      localId: r.local_id,
-      stage: r.stage,
-      types: r.types ?? [],
-      cardClass: r.card_class === "specialty" ? "specialty" : "standard",
-      imageUrl: r.image_url,
-      variants: availableVariants(toCardVariants(r.variants)),
-    }));
+    return rows.map(toLookupCard);
   } catch {
     return [];
   }
 }
 
+/**
+ * Copies that exist but have never been routed, as draft rows ready to work (UIL-003).
+ *
+ * This is the receiving end of Sync's "Place new cards" handoff (sync-ui-spec §B.6): sync creates its
+ * additions unplaced on purpose, and until now the Haul Plan had no loader, so that button landed on
+ * an empty form and the imported cards had nowhere to go. Each row carries its `existingCopyId`, so
+ * committing ROUTES the copy sync already made rather than creating a second one.
+ */
+export async function loadPendingPlacementDraft(): Promise<DraftCard[]> {
+  const { db } = await getOwnerContext();
+  const pending = await loadPendingPlacements(db);
+  return pending.map((p) => ({
+    // The copy id doubles as the draft id: stable across reloads, and unique by construction.
+    id: p.copyId,
+    existingCopyId: p.copyId,
+    dexVariantRaw: p.dexVariantRaw,
+    card: toLookupCard(p.card),
+    variant: p.variant,
+  }));
+}
+
 /** Run the cascade over the whole draft and return the grouped plan for rendering. */
 export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
   const { db } = await getOwnerContext();
-  const pc = await loadPlanContext(db);
+  // Same exclusion the commit uses, so the plan she works from is the plan that gets written.
+  const pc = await loadPlanContext(db, { excludeOwnedCopyIds: existingCopyIds(draft) });
   const { items } = planFromDraft(pc, draft);
   const groups = groupPlan(items, pc.orderedBandKeys);
 
@@ -67,10 +97,17 @@ export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
   };
 }
 
-/** Commit the haul: write all records + audit trail atomically (compensating rollback on failure). */
+/**
+ * Commit the haul: write all records + audit trail in one transaction (M10).
+ *
+ * `haulId` is null when the pass only routed existing copies — no cards were acquired, so no haul
+ * event is recorded (see lib/plan/commit.ts).
+ */
 export async function commitHaulAction(
   input: CommitActionInput,
-): Promise<{ ok: true; haulId: string; counts: CommitCounts } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; haulId: string | null; counts: CommitCounts } | { ok: false; error: string }
+> {
   if (input.draft.length === 0) return { ok: false, error: "No cards in the haul." };
   try {
     const { db } = await getOwnerContext();
