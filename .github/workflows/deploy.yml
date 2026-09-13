@@ -14,6 +14,10 @@ name: Deploy
 #   secrets.SUPABASE_DB_PASSWORD       (matching env)
 #   vars.SUPABASE_PROJECT_REF          (matching env — the project subdomain, not secret)
 #   vars.APP_URL                       (matching env — deployed base URL)
+#   secrets.SUPABASE_ANON_KEY          (testing — the `acceptance` job FAILS without it;
+#                                       holds the publishable key on a current project)
+#   secrets.SUPABASE_SERVICE_ROLE_KEY  (testing — the `acceptance` job FAILS without it;
+#                                       holds the secret key on a current project)
 #
 # NOTE: the on/off gate must be a REPO-level variable, not an environment-scoped
 # one. A job's `if:` is evaluated before its `environment:` is loaded, so
@@ -72,6 +76,19 @@ jobs:
   #
   # Read-only (SELECTs only), so it is safe against the shared Testing project.
   # Testing only: never point a suite that asserts on seed data at Production.
+  #
+  # This job FAILS rather than skips when its credentials are missing. It was added
+  # (#33) to finally run that suite, then never ran once: its credential check
+  # skipped cleanly whenever SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY were
+  # unset on the `testing` environment, and neither had ever been set. Deploy
+  # therefore reported green while the suite it exists to run never executed —
+  # the same silent skip that let Testing's catalog sit empty until UAT caught it
+  # (UIL-004), which catalog-mirror.yml stopped doing for exactly this reason.
+  #
+  # Failing costs little and is honest. `smoke` is `needs: migrate`, NOT
+  # `needs: acceptance`, so a red acceptance never suppresses the migration or
+  # health-check signal, and a red Deploy blocks nothing automatically here. An
+  # advisory notice buys a green check that asserts nothing.
   acceptance:
     needs: migrate
     if: ${{ vars.DEPLOY_ENABLED == 'true' && github.ref_name == 'develop' }}
@@ -90,32 +107,205 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # Skips cleanly rather than failing while the two keys are unset, so this
-      # job does not turn Deploy red before it can possibly pass.
-      - name: Check for acceptance credentials
-        id: creds
+      # BOTH keys are required, for opposite halves of the same assertion: the
+      # client-side key proves RLS DENIES an unauthenticated read, and the
+      # server-side key proves those rows ARE present for a privileged caller.
+      # Without the second, "RLS denied me" and "the table is empty" are
+      # indistinguishable, so a pass would prove nothing.
+      #
+      # KEY FORMAT. Supabase is retiring the legacy JWT `anon` / `service_role` pair
+      # (end of 2026) in favour of `sb_publishable_…` / `sb_secret_…`, so on a current
+      # project these are the PUBLISHABLE and SECRET keys, and on a project with legacy
+      # keys still enabled they are `anon` / `service_role`. Both are handled below.
+      # The GitHub secret names stay SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY —
+      # those are historical names, not claims about the format.
+      #
+      # What actually matters is not the format but that the values MATCH what the app
+      # already has in Vercel (NEXT_PUBLIC_SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY),
+      # so the suite asserts against the same project the app talks to.
+      #
+      # Best-effort first: derive them from the Supabase PAT the deploy already
+      # uses, which saves pasting the same values twice. That needs a PAT with
+      # secret-read privileges, and a narrowly-scoped one gets a 403 (the step logs
+      # which) — expected, not a fault. The dependable path is the two environment
+      # secrets, and they always win when present.
+      #
+      # Unlike catalog-mirror.yml, nothing here curls Supabase's REST gateway directly,
+      # so that workflow's apikey-vs-Bearer rule has no call site in this job: the keys
+      # go to supabase-js inside vitest. See the note on the suite step below for the
+      # one way that distinction can still bite.
+      - name: Resolve the acceptance credentials
         env:
           ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |
           set -euo pipefail
-          if [ -n "$ANON_KEY" ] && [ -n "$SERVICE_KEY" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipped — set SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY on the testing environment to enable."
+          anon="${ANON_KEY:-}"
+          service="${SERVICE_KEY:-}"
+          # Tracked per key, so a mixed resolve (one secret, one derived) reports
+          # honestly instead of crediting everything to whichever ran last.
+          anon_src="secrets.SUPABASE_ANON_KEY"
+          service_src="secrets.SUPABASE_SERVICE_ROLE_KEY"
+
+          # GET the given Management API path, echoing the HTTP status and (on a
+          # non-200) the API's message. Only ever prints key NAMES, never values.
+          fetch() {
+            local path="$1" out code
+            out=$(curl -sS --retry 3 --retry-delay 5 -w $'\n%{http_code}' \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN:-}" \
+              "https://api.supabase.com/v1$path" || printf '\n000')
+            code=${out##*$'\n'}
+            body=${out%$'\n'*}
+            if [ "$code" != "200" ]; then
+              echo "  GET $path -> HTTP $code: $(printf '%s' "$body" | jq -r '.message // .error // "(no message)"' 2>/dev/null)"
+              body=""
+            fi
+          }
+
+          if { [ -z "$anon" ] || [ -z "$service" ]; } \
+             && [ -n "${SUPABASE_ACCESS_TOKEN:-}" ] && [ -n "${PROJECT_REF:-}" ]; then
+            # Current key list. Select on the VALUE's prefix rather than on a `name` or
+            # `type` enum: `sb_publishable_` / `sb_secret_` are documented and stable,
+            # whereas a new key's name is whatever it was created as, and only the legacy
+            # pair is reliably named `anon` / `service_role`. Filtering on the legacy
+            # names alone never matches on a new-key project. Prefer the new format, fall
+            # back to legacy.
+            fetch "/projects/$PROJECT_REF/api-keys?reveal=true"
+            if [ -n "$body" ]; then
+              echo "  keys returned: $(printf '%s' "$body" | jq -rc '[.[]? | {name, type}] // []' 2>/dev/null)"
+              if [ -z "$anon" ]; then
+                anon=$(printf '%s' "$body" | jq -r '
+                  [.[]? | .api_key // empty | select(startswith("sb_publishable_"))] | first // empty')
+                [ -n "$anon" ] || anon=$(printf '%s' "$body" | jq -r '[.[]? | select(.name == "anon") | .api_key] | first // empty')
+                [ -z "$anon" ] || anon_src="the Management API (api-keys)"
+              fi
+              if [ -z "$service" ]; then
+                service=$(printf '%s' "$body" | jq -r '
+                  [.[]? | .api_key // empty | select(startswith("sb_secret_"))] | first // empty')
+                [ -n "$service" ] || service=$(printf '%s' "$body" | jq -r '[.[]? | select(.name == "service_role") | .api_key] | first // empty')
+                [ -z "$service" ] || service_src="the Management API (api-keys)"
+              fi
+            fi
+
+            # Older projects expose the JWT pair on a separate endpoint instead.
+            if [ -z "$anon" ] || [ -z "$service" ]; then
+              fetch "/projects/$PROJECT_REF/api-keys/legacy"
+              if [ -n "$body" ]; then
+                echo "  legacy fields: $(printf '%s' "$body" | jq -rc 'if type == "array" then [.[]?.name] else keys end' 2>/dev/null)"
+                if [ -z "$anon" ]; then
+                  anon=$(printf '%s' "$body" | jq -r '
+                    if type == "array"
+                    then ([.[]? | select(.name == "anon") | (.api_key // .apiKey)] | first)
+                    else (.anon // .anon_key // .anonKey)
+                    end // empty')
+                  [ -z "$anon" ] || anon_src="the Management API (legacy)"
+                fi
+                if [ -z "$service" ]; then
+                  service=$(printf '%s' "$body" | jq -r '
+                    if type == "array"
+                    then ([.[]? | select(.name == "service_role") | (.api_key // .apiKey)] | first)
+                    else (.service_role // .service_role_key // .serviceRoleKey)
+                    end // empty')
+                  [ -z "$service" ] || service_src="the Management API (legacy)"
+                fi
+              fi
+            fi
           fi
 
+          # Name exactly which one is missing — a generic "credentials missing" sends
+          # the reader back to the workflow file to work it out.
+          missing=""
+          [ -n "$anon" ] || missing="SUPABASE_ANON_KEY"
+          [ -n "$service" ] || missing="${missing:+$missing and }SUPABASE_SERVICE_ROLE_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing $missing, so the M1 acceptance suite cannot run — and this job will NOT pretend it did. Fix: open the Supabase dashboard for project ${PROJECT_REF:-<unset vars.SUPABASE_PROJECT_REF>} -> Project Settings -> API Keys, copy the PUBLISHABLE key (sb_publishable_...) and the SECRET key (sb_secret_...) — or the legacy 'anon' and 'service_role' keys if this project still has legacy keys enabled — then add them as GitHub *environment* secrets on the 'testing' environment: the publishable/anon value as SUPABASE_ANON_KEY and the secret/service_role value as SUPABASE_SERVICE_ROLE_KEY (repo Settings -> Environments -> testing -> Environment secrets; repo-level secrets are NOT read here). The secret NAMES are historical and do not imply the legacy format. Each value must MATCH what the app already has in Vercel (NEXT_PUBLIC_SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY), so the suite asserts against the same project the app uses. A 403 above means SUPABASE_ACCESS_TOKEN lacks the secret-read privilege, which is expected for a scoped PAT and is not a fault."
+            exit 1
+          fi
+
+          # Mask before either can reach a log line, then hand them to later steps.
+          echo "::add-mask::$anon"
+          echo "::add-mask::$service"
+          echo "ACCEPTANCE_ANON_KEY=$anon" >> "$GITHUB_ENV"
+          echo "ACCEPTANCE_SERVICE_KEY=$service" >> "$GITHUB_ENV"
+
+          # Report the FORMAT (never the value). Worth logging because a format mismatch
+          # between these keys and the ones the app holds in Vercel is the likeliest
+          # cause of a confusing failure in the next step.
+          describe() {
+            case "$1" in
+              sb_publishable_*) echo "publishable key (sb_publishable_...)" ;;
+              sb_secret_*) echo "secret key (sb_secret_...)" ;;
+              sb_*) echo "an sb_ key of an unrecognized subtype" ;;
+              eyJ*) echo "legacy JWT key" ;;
+              *) echo "unrecognized format" ;;
+            esac
+          }
+          echo "client key: from $anon_src, $(describe "$anon")"
+          echo "server key: from $service_src, $(describe "$service")"
+
+      # No `if:` gate — reaching this step means the credentials resolved, and a
+      # failure here is a real failure.
+      #
+      # KNOWN RISK on a new-format key, called out so a first red run is not misread as
+      # a broken assertion. The suite builds its own clients via supabase-js
+      # `createClient`, and 2.115 still adds an Authorization: Bearer fallback on
+      # sessionless requests. Supabase's gateway rejects a non-JWT sent that way with
+      # "Invalid JWT", and the `omitApiKeyAsBearer` escape hatch is internal to the
+      # Functions client, so it is not reachable through `createClient`. If that appears
+      # here, it is a library limitation rather than an RLS or schema failure, and the
+      # fix is a supabase-js upgrade — not a change to this workflow or to the suite.
+      # The app itself is unaffected and works today.
       - name: M1 acceptance suite against Testing
-        if: steps.creds.outputs.ready == 'true'
         env:
           M1_ACCEPTANCE_VERIFY: "1"
           # Derived from the project ref we already store, so there is no third
           # value to configure.
           SUPABASE_URL: https://${{ vars.SUPABASE_PROJECT_REF }}.supabase.co
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: pnpm vitest run tests/repo/m1-acceptance.test.ts
+          SUPABASE_ANON_KEY: ${{ env.ACCEPTANCE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ env.ACCEPTANCE_SERVICE_KEY }}
+        run: |
+          set -euo pipefail
+          # `default` keeps the run readable in the log; `json` gives the next step
+          # something to assert on.
+          pnpm vitest run tests/repo/m1-acceptance.test.ts \
+            --reporter=default --reporter=json --outputFile.json=acceptance-report.json
+
+      # The suite has its OWN silent skip: it resolves its target via env or a local
+      # `supabase status`, and wraps everything in `describe.skipIf(env === null)`. So
+      # if a key were present but wrong-shaped (or M1_ACCEPTANCE_VERIFY got dropped),
+      # vitest exits 0 having run nothing — measured: 20 total, 0 passed, 20 pending,
+      # success: true. Fixing only the credential gate above would leave that second
+      # skip free to keep this job green over zero assertions, so assert on the report
+      # rather than on the exit code.
+      # No `always()`: a vitest failure is already loud and red on its own, and the
+      # only case this step exists to catch is vitest exiting 0 over zero assertions,
+      # which reaches here anyway.
+      - name: Prove the suite actually ran
+        run: |
+          set -euo pipefail
+          if [ ! -f acceptance-report.json ]; then
+            echo "::error::vitest produced no JSON report, so there is no evidence the acceptance suite ran."
+            exit 1
+          fi
+          read -r total passed pending failed < <(jq -r \
+            '[.numTotalTests, .numPassedTests, .numPendingTests, .numFailedTests] | @tsv' \
+            acceptance-report.json)
+          echo "total=$total passed=$passed pending=$pending failed=$failed"
+          if [ "$total" -eq 0 ]; then
+            echo "::error::the acceptance suite reported 0 tests — it did not run."
+            exit 1
+          fi
+          if [ "$pending" -gt 0 ]; then
+            echo "::error::$pending of $total acceptance tests were SKIPPED, not run. The suite's own describe.skipIf fired, which means it could not resolve a Supabase target: check that SUPABASE_URL points at the Testing project, that SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY hold real values for it, and that M1_ACCEPTANCE_VERIFY=1 reached the test process."
+            exit 1
+          fi
+          if [ "$passed" -ne "$total" ]; then
+            echo "::error::only $passed of $total acceptance tests passed ($failed failed). If the failures above mention \"Invalid JWT\", see the KNOWN RISK note on the previous step: that is supabase-js sending a non-JWT key as a Bearer token, not a failing assertion about RLS."
+            exit 1
+          fi
+          echo "Acceptance suite ran for real: $passed/$total passed, 0 skipped."
 
   smoke:
     needs: migrate
