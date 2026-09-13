@@ -5,11 +5,15 @@
  * POST /api/catalog/sync?set=<setId>     → mirror one set (on new-set release)
  * POST /api/catalog/sync?pass=artwork    → (re)compute artwork hashes + regroup (heavier pass)
  *
- * Writes land as the service role (catalog_card is read-only to the app under RLS), so this must
+ * Writes land with a privileged key (catalog_card is read-only to the app under RLS), so this must
  * never be reachable from the browser. Two guards: it only ever runs server-side (admin client
- * throws in a browser), and it requires the service-role key as a bearer token so a public POST
- * can't kick off a 23.5k-card sync. Full auth arrives with the app's magic-link gate (later phase);
- * until then this shared-secret check is the interim lock. Runs on the Node runtime (pngjs + fetch).
+ * throws in a browser), and it requires that same key as a bearer token so a public POST can't kick
+ * off a 23.5k-card sync. Full auth arrives with the app's magic-link gate (later phase); until then
+ * this shared-secret check is the interim lock. Runs on the Node runtime (pngjs + fetch).
+ *
+ * The bearer check below is a plain string compare against our own env var — it is NOT a Supabase
+ * credential being presented to Supabase. So it holds whatever the key's format is (legacy JWT
+ * `service_role` or the newer `sb_secret_…`); nothing here parses it as a JWT.
  */
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getServerEnv } from "@/lib/env";
