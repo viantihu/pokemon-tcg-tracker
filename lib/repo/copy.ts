@@ -34,6 +34,28 @@ export const copyRepo = {
     return data ?? [];
   },
 
+  /**
+   * Copies that hold NO placement: in the bulk box, in no binder, in no line slot. This is the raw
+   * candidate set for the Haul Plan's pending-placement queue (UIL-003) — the shape sync's `creates`
+   * and manual-match leave behind (`role: 'bulk'`, everything else null; lib/sync/exec.ts). It also
+   * catches copies the cascade legitimately ROUTED to bulk, so the caller must still subtract the
+   * ones that already have a `placement_decision`; `lib/plan/pending.ts` does that.
+   *
+   * Oldest first, so the queue is worked in the order the cards entered the collection.
+   */
+  async listUnplaced(db: DbClient): Promise<Row<"copy">[]> {
+    const { data, error } = await db
+      .from("copy")
+      .select("*")
+      .eq("role", "bulk")
+      .is("binder_id", null)
+      .is("line_slot_id", null)
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true });
+    if (error) throw error;
+    return data ?? [];
+  },
+
   /** Copies in one presence group — the reconciliation unit's ordered members (sync-arch §1.5). */
   async listByPresenceGroup(db: DbClient, presenceGroupId: string): Promise<Row<"copy">[]> {
     const { data, error } = await db

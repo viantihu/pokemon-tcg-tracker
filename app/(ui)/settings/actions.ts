@@ -141,10 +141,10 @@ export async function setTypeBand(
 
     // 2. Load everything the recompute needs.
     const [copies, catalogRows, lines, slots, typeMapRows] = await Promise.all([
-      copyRepo.list(db),
-      catalogCardRepo.list(db),
-      evolutionLineRepo.list(db),
-      lineSlotRepo.list(db),
+      copyRepo.listAll(db),
+      catalogCardRepo.listAll(db),
+      evolutionLineRepo.listAll(db),
+      lineSlotRepo.listAll(db),
       typeColorMapRepo.list(db),
     ]);
 

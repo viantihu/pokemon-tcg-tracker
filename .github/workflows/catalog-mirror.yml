@@ -3,9 +3,10 @@ name: Catalog Mirror (Testing)
 # Populates the Testing catalog_card mirror from TCGdex, one set per request.
 #
 # Why this exists: lib/sync/catalog-lookup.ts resolves a Dex CSV row ONLY against
-# the local mirror — there is no lazy fetch from TCGdex on a miss. Testing currently
-# holds just the handful of real cards in seed.sql, so a real CSV import would send
-# almost every row to the unresolved queue. The mirror has never been run anywhere.
+# the local mirror — there is no lazy fetch from TCGdex on a miss. Testing held
+# just the handful of real cards in seed.sql, so a real CSV import sent almost
+# every row to the unresolved queue and the sync could report "complete" having
+# added nothing at all (UIL-004).
 #
 # Why one request per set instead of a single POST /api/catalog/sync: `syncAll`
 # walks every set serially in one invocation (~23.5k cards), which will not finish
@@ -37,24 +38,86 @@ jobs:
     environment: testing
     timeout-minutes: 60
     steps:
-      - name: Check for the service-role key
+      # The service-role key is the bearer /api/catalog/sync checks, and it is the
+      # reason this workflow had never run: nothing had ever set it on the `testing`
+      # environment, so the job skipped itself every time — silently, which is how a
+      # never-populated catalog went unnoticed until UAT (UIL-004). Deploy's
+      # `acceptance` job skips on the same missing secret.
+      #
+      # So it now FAILS LOUDLY instead of skipping. It first tries to derive the key
+      # from the Supabase PAT the deploy already uses, which saves pasting the same
+      # value twice — but that needs a PAT with secret-read privileges, and a
+      # narrowly-scoped one gets a 403 (the step logs which). The dependable path is
+      # to set secrets.SUPABASE_SERVICE_ROLE_KEY on the `testing` environment; it
+      # always wins when present.
+      #
+      # It must be the key literally named `service_role`, not any other project key:
+      # the route compares the bearer against the app's own SUPABASE_SERVICE_ROLE_KEY
+      # env var in Vercel, so anything else 401s.
+      - name: Resolve the service-role key
         id: creds
         env:
           SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |
           set -euo pipefail
-          if [ -n "$SERVICE_KEY" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipped — set SUPABASE_SERVICE_ROLE_KEY on the testing environment to enable."
+          key="$SERVICE_KEY"
+          origin="secrets.SUPABASE_SERVICE_ROLE_KEY"
+
+          # GET the given Management API path, echoing the HTTP status and (on a
+          # non-200) the API's message. Only ever prints key NAMES, never values.
+          fetch() {
+            local path="$1" out code
+            out=$(curl -sS --retry 3 --retry-delay 5 -w $'\n%{http_code}' \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              "https://api.supabase.com/v1$path" || printf '\n000')
+            code=${out##*$'\n'}
+            body=${out%$'\n'*}
+            if [ "$code" != "200" ]; then
+              echo "  GET $path -> HTTP $code: $(printf '%s' "$body" | jq -r '.message // .error // "(no message)"' 2>/dev/null)"
+              body=""
+            fi
+          }
+
+          if [ -z "$key" ] && [ -n "$SUPABASE_ACCESS_TOKEN" ] && [ -n "$PROJECT_REF" ]; then
+            origin="Supabase Management API"
+
+            # Current key list. `service_role` is what the app's env var holds, so it
+            # is the only entry that will satisfy the route's bearer check.
+            fetch "/projects/$PROJECT_REF/api-keys?reveal=true"
+            if [ -n "$body" ]; then
+              echo "  keys returned: $(printf '%s' "$body" | jq -rc '[.[]?.name] // []' 2>/dev/null)"
+              key=$(printf '%s' "$body" | jq -r '[.[]? | select(.name == "service_role") | .api_key] | first // empty')
+            fi
+
+            # Older projects expose the JWT pair on a separate endpoint instead.
+            if [ -z "$key" ]; then
+              fetch "/projects/$PROJECT_REF/api-keys/legacy"
+              if [ -n "$body" ]; then
+                echo "  legacy fields: $(printf '%s' "$body" | jq -rc 'if type == "array" then [.[]?.name] else keys end' 2>/dev/null)"
+                key=$(printf '%s' "$body" | jq -r '
+                  if type == "array"
+                  then ([.[]? | select(.name == "service_role") | (.api_key // .apiKey)] | first)
+                  else (.service_role // .service_role_key // .serviceRoleKey)
+                  end // empty')
+              fi
+            fi
           fi
 
+          if [ -z "$key" ]; then
+            echo "::error::No service-role key, so the mirror cannot run. Fix: copy the 'service_role' key from the Supabase dashboard (project $PROJECT_REF -> Project Settings -> API) into a GitHub environment secret named SUPABASE_SERVICE_ROLE_KEY on the 'testing' environment. It must be the same value the app has in Vercel, or the route will 401. A 403 above means SUPABASE_ACCESS_TOKEN lacks the secret-read privilege, which is expected for a scoped PAT and is not a fault."
+            exit 1
+          fi
+
+          # Mask before it can reach a log line, then hand it to later steps.
+          echo "::add-mask::$key"
+          echo "SERVICE_KEY=$key" >> "$GITHUB_ENV"
+          echo "Using the service-role key from: $origin"
+
       - name: Mirror every set
-        if: steps.creds.outputs.ready == 'true'
         env:
           APP_URL: ${{ vars.APP_URL }}
-          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           # Public community catalog, no key required.
           TCGDEX_BASE_URL: https://api.tcgdex.net/v2
         run: |
@@ -88,6 +151,13 @@ jobs:
               failed=$((failed + 1))
               printf '  %-14s FAIL (HTTP %s) %s\n' "$set_id" "$code" "$body"
               echo "$set_id HTTP=$code $body" >> failures.txt
+              # A 401 means the bearer does not match the app's own key, so every
+              # remaining set would fail the same way. Stop rather than hammer 200+
+              # requests at a wall.
+              if [ "$code" = "401" ]; then
+                echo "::error::401 from /api/catalog/sync — the bearer does not match the SUPABASE_SERVICE_ROLE_KEY configured in Vercel for this environment."
+                exit 1
+              fi
             fi
             # Be a good citizen to a free community API.
             sleep 1
@@ -99,14 +169,32 @@ jobs:
             exit 1
           fi
 
-      - name: Report catalog size
-        if: steps.creds.outputs.ready == 'true'
+      # The point of the run is rows in the table, so verify that directly instead of
+      # inferring it from the app still being up. Reads catalog_card as the service
+      # role (it is read-only to the app under RLS) and asks PostgREST for an exact
+      # count via Content-Range.
+      - name: Verify the mirror is populated
         env:
-          APP_URL: ${{ vars.APP_URL }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |
           set -euo pipefail
-          # The catalog is read-only to anon under RLS, so this only confirms the app
-          # is still serving after ~170 upsert requests, not the row count.
-          code=$(curl -sS -o /dev/null -w '%{http_code}' "${APP_URL%/}/api/health")
-          echo "Post-mirror health: HTTP $code"
-          [ "$code" = "200" ]
+          headers=$(curl -sS -D - -o /dev/null \
+            -H "apikey: $SERVICE_KEY" \
+            -H "Authorization: Bearer $SERVICE_KEY" \
+            -H "Prefer: count=exact" \
+            -H "Range: 0-0" \
+            "https://$PROJECT_REF.supabase.co/rest/v1/catalog_card?select=tcgdex_id")
+          # content-range looks like "0-0/23500"; the total is after the slash.
+          rows=$(printf '%s' "$headers" | tr -d '\r' | awk 'tolower($1) == "content-range:" { split($2, a, "/"); print a[2] }')
+          echo "catalog_card rows: ${rows:-unknown}"
+          if [ -z "${rows:-}" ] || [ "$rows" = "*" ]; then
+            echo "::error::could not read a row count for catalog_card."
+            exit 1
+          fi
+          # seed.sql ships 3 cards. Anything in that neighbourhood means the mirror
+          # did not actually land, which is the exact state UIL-004 describes.
+          if [ "$rows" -lt 1000 ]; then
+            echo "::error::catalog_card holds only $rows rows — the mirror did not populate."
+            exit 1
+          fi
+          echo "Mirror populated."

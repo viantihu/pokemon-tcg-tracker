@@ -45,6 +45,11 @@ export interface PlannedCard {
   incomingId: string;
   tcgdexId: string;
   variant: Variant;
+  /**
+   * An existing unplaced `copy.id` this entry ROUTES rather than creates (UIL-003; see
+   * lib/plan/pending.ts). Null for ordinary typed intake.
+   */
+  existingCopyId?: string | null;
   result: CascadeResult;
 }
 

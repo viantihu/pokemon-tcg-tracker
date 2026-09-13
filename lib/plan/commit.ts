@@ -6,6 +6,18 @@
  * for existing lines, holo-swap displacements, WishlistItems for placeholders, and a
  * PlacementDecision per card (reason + resolvedBy — the audit trail is not optional, dev-spec §4).
  *
+ * TWO KINDS OF DRAFT ENTRY (UIL-003). An entry either takes in a NEW card (typed intake → a fresh
+ * `copy` row stamped with this haul) or ROUTES AN EXISTING unplaced one (`existingCopyId` set → the
+ * placement columns of that row are updated in place). The second kind is how sync's additions reach
+ * the cascade: sync creates copies unplaced on purpose (sync-architecture §1.1) and the plan is where
+ * they get a home. Creating new rows for them instead would DOUBLE her counts, so the distinction is
+ * load-bearing, not cosmetic.
+ *
+ * A routed copy is never stamped with a `haul_id` — it was not acquired in this haul — and its
+ * `variant` / `dex_variant_raw` are left alone, because Dex owns the variant field (sync-architecture
+ * §1.1) and the next import would overwrite anything we wrote. A pass made up entirely of routed
+ * copies writes NO haul row at all; its decisions carry `haul_id: null`.
+ *
  * ATOMICITY (M10). The whole write set is computed here in TS — the cascade/decision logic stays
  * pure — then applied in ONE transaction by the `apply_write_ops` RPC (migration 0006). Row UUIDs are
  * generated client-side (`crypto.randomUUID`) so line→slot→copy cross-references resolve before
@@ -15,6 +27,7 @@
  * the RLS `with check (owner_id = auth.uid())` policy enforces it.
  */
 
+import type { Role } from "@/lib/engine";
 import { applyWriteOps, type DbClient, type WriteOp, type WritePayload } from "@/lib/repo";
 // Leaf import (lib/line/move depends only on lib/line/types → lib/engine; no cycle back to lib/plan).
 import { placementForMove } from "@/lib/line/move";
@@ -38,9 +51,30 @@ export interface CommitInput {
   overrides?: Record<string, MoveDestination>;
 }
 
+export interface CommitCounts {
+  /** NEW copy rows written (typed intake). */
+  copies: number;
+  /** EXISTING unplaced copies given a placement (UIL-003) — no new rows. */
+  routed: number;
+  lines: number;
+  slots: number;
+  wishlist: number;
+  decisions: number;
+}
+
 export interface CommitResult {
-  haulId: string;
-  counts: { copies: number; lines: number; slots: number; wishlist: number; decisions: number };
+  /** Null when the pass only routed existing copies, so no acquisition event happened. */
+  haulId: string | null;
+  counts: CommitCounts;
+}
+
+/**
+ * The existing copies a draft is routing (UIL-003). Both the plan run and the commit must withhold
+ * these from `ctx.owned` — see `LoadPlanContextOptions.excludeOwnedCopyIds` for why — so the helper
+ * lives here and is shared with the server actions rather than re-derived at each call site.
+ */
+export function existingCopyIds(draft: DraftItem[]): string[] {
+  return draft.map((d) => d.existingCopyId).filter((id): id is string => !!id);
 }
 
 /** A line slot as the builder tracks it, mutated in place as fills are recorded so a later card in
@@ -57,7 +91,9 @@ interface MutableSlot {
  * and applies it in one transaction via the RPC. Returns the new haul id and per-table counts.
  */
 export async function commitHaul(db: DbClient, input: CommitInput): Promise<CommitResult> {
-  const pc = await loadPlanContext(db);
+  const pc = await loadPlanContext(db, {
+    excludeOwnedCopyIds: existingCopyIds(input.draft),
+  });
   const { planned } = planFromDraft(pc, input.draft);
   const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, input);
   await applyWriteOps(db, payload);
@@ -72,9 +108,16 @@ export function buildHaulCommitPayload(
   pc: PlanContext,
   planned: PlannedCard[],
   input: CommitInput,
-): { payload: WritePayload; haulId: string; counts: CommitResult["counts"] } {
+): { payload: WritePayload; haulId: string | null; counts: CommitCounts } {
   const ops: WriteOp[] = [];
-  const counts = { copies: 0, lines: 0, slots: 0, wishlist: 0, decisions: 0 };
+  const counts: CommitCounts = {
+    copies: 0,
+    routed: 0,
+    lines: 0,
+    slots: 0,
+    wishlist: 0,
+    decisions: 0,
+  };
   const now = new Date().toISOString();
 
   // Live-slot mirror: seeded from the DB snapshot, mutated as fills are recorded this pass.
@@ -94,17 +137,24 @@ export function buildHaulCommitPayload(
   // Lines created THIS pass, so a second card of the same (root, band) fills instead of duplicating.
   const passLines = new Map<string, { lineId: string }>();
 
-  const haulId = crypto.randomUUID();
-  ops.push({ op: "insert_haul", id: haulId, source: input.source, notes: input.notes ?? null });
+  // Only a pass that actually takes in a new card is an acquisition event. A pure routing pass over
+  // copies sync already created gets no haul row (see the file header).
+  const hasNewCards = planned.some((p) => !p.existingCopyId);
+  const haulId = hasNewCards ? crypto.randomUUID() : null;
+  if (haulId) {
+    ops.push({ op: "insert_haul", id: haulId, source: input.source, notes: input.notes ?? null });
+  }
 
   for (const p of planned) {
+    // A routed copy belongs to no haul, even when the same pass also takes in new cards.
+    const decisionHaulId = p.existingCopyId ? null : haulId;
     const override = input.overrides?.[p.incomingId];
     if (override) {
       // Manual placement wins: place the copy where she said, skip all cascade side effects.
       const copyId = writeOverriddenCard(ops, haulId, p, override, now, counts);
       ops.push({
         op: "insert_decision",
-        haul_id: haulId,
+        haul_id: decisionHaulId,
         copy_id: copyId,
         decision: "placement-override",
         reason: `Manual placement override at intake (your call, cascade skipped): ${p.result.reason}`,
@@ -116,7 +166,7 @@ export function buildHaulCommitPayload(
     const copyId = writeCard(ops, haulId, p, pc, slotsByLine, passLines, now, counts);
     ops.push({
       op: "insert_decision",
-      haul_id: haulId,
+      haul_id: decisionHaulId,
       copy_id: copyId,
       decision: p.result.step,
       reason: p.result.reason,
@@ -131,13 +181,13 @@ export function buildHaulCommitPayload(
 /** Emit the incoming copy with its placement, then the step's line/swap side effects. Returns id. */
 function writeCard(
   ops: WriteOp[],
-  haulId: string,
+  haulId: string | null,
   p: PlannedCard,
   pc: PlanContext,
   slotsByLine: Map<string, MutableSlot[]>,
   passLines: Map<string, { lineId: string }>,
   now: string,
-  counts: CommitResult["counts"],
+  counts: CommitCounts,
 ): string {
   const { result } = p;
 
@@ -152,20 +202,7 @@ function writeCard(
       }
     : copyPlacementFromTarget(result.target);
 
-  const copyId = crypto.randomUUID();
-  ops.push({
-    op: "insert_copy",
-    id: copyId,
-    catalog_card_id: p.tcgdexId,
-    variant: p.variant,
-    haul_id: haulId,
-    acquired_at: now,
-    role: placement.role,
-    binder_id: placement.binderId,
-    binder_half: placement.binderHalf,
-    color_band: placement.colorBand,
-  });
-  counts.copies += 1;
+  const copyId = emitIncomingCopy(ops, haulId, p, placement, now, counts);
 
   if (swap) {
     // Incoming holo takes over the line slot, if any; the displaced normal goes to bulk.
@@ -224,13 +261,70 @@ function writeCard(
 /** Emit a copy at a manual override placement (M7). No line/swap side effects; audited as user. */
 function writeOverriddenCard(
   ops: WriteOp[],
-  haulId: string,
+  haulId: string | null,
   p: PlannedCard,
   dest: MoveDestination,
   now: string,
-  counts: CommitResult["counts"],
+  counts: CommitCounts,
 ): string {
   const placement = placementForMove(dest);
+  return emitIncomingCopy(
+    ops,
+    haulId,
+    p,
+    {
+      role: placement.role,
+      binderId: placement.binder_id,
+      binderHalf: placement.binder_half,
+      colorBand: placement.color_band,
+      lineSlotId: placement.line_slot_id,
+    },
+    now,
+    counts,
+  );
+}
+
+/**
+ * Write the incoming card's placement and return the copy id it lives on.
+ *
+ * The ONE place the new-vs-routed split is decided (UIL-003): a typed card gets a fresh `copy` row
+ * stamped with the haul, while an entry carrying `existingCopyId` patches the placement of the row
+ * sync already created. The routed patch names all five placement columns explicitly because
+ * `CopyPatch` writes exactly the keys present (a missing key is left unchanged, which would strand a
+ * stale placement); it deliberately omits `variant` / `dex_variant_raw` / `haul_id`, which are not
+ * this pass's to change.
+ */
+function emitIncomingCopy(
+  ops: WriteOp[],
+  haulId: string | null,
+  p: PlannedCard,
+  placement: {
+    // `Role`, not just shelved/bulk: a move override can place a card as a repurposed binder block.
+    role: Role;
+    binderId: string | null;
+    binderHalf: "front" | "back" | null;
+    colorBand: string | null;
+    lineSlotId?: string | null;
+  },
+  now: string,
+  counts: CommitCounts,
+): string {
+  if (p.existingCopyId) {
+    ops.push({
+      op: "update_copy",
+      id: p.existingCopyId,
+      patch: {
+        role: placement.role,
+        binder_id: placement.binderId,
+        binder_half: placement.binderHalf,
+        color_band: placement.colorBand,
+        line_slot_id: placement.lineSlotId ?? null,
+      },
+    });
+    counts.routed += 1;
+    return p.existingCopyId;
+  }
+
   const copyId = crypto.randomUUID();
   ops.push({
     op: "insert_copy",
@@ -240,10 +334,10 @@ function writeOverriddenCard(
     haul_id: haulId,
     acquired_at: now,
     role: placement.role,
-    binder_id: placement.binder_id,
-    binder_half: placement.binder_half,
-    color_band: placement.color_band,
-    line_slot_id: placement.line_slot_id,
+    binder_id: placement.binderId,
+    binder_half: placement.binderHalf,
+    color_band: placement.colorBand,
+    line_slot_id: placement.lineSlotId ?? null,
   });
   counts.copies += 1;
   return copyId;
@@ -257,7 +351,7 @@ function writeNewLine(
   pc: PlanContext,
   slotsByLine: Map<string, MutableSlot[]>,
   passLines: Map<string, { lineId: string }>,
-  counts: CommitResult["counts"],
+  counts: CommitCounts,
 ): void {
   const plan = p.result.newLine!;
   const key = `${plan.rootDexId}:${plan.colorBand}`;

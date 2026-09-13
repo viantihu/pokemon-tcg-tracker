@@ -7,9 +7,16 @@
  * cascade over the whole haul → a placement plan GROUPED to mirror the physical sort (band in
  * rainbow order → basics vs non-basics → action), worked top-to-bottom with check-off → commit,
  * which writes every record + audit trail atomically on the server.
+ *
+ * TWO WAYS CARDS ARRIVE HERE (UIL-003). Typed intake is one. The other is the Sync screen's "Place
+ * new cards" handoff (sync-ui-spec §B.6): the draft is SEEDED from `initialPending` — every copy that
+ * exists but has never been routed, which is the state sync leaves its additions in on purpose. Those
+ * rows are tagged and carry their `existingCopyId`, so committing routes the copy sync already created
+ * instead of taking the same card in twice. The queue is read on the server (./page.tsx) so the cards
+ * are there in the first paint; `reloadPending` re-reads it after a commit.
  */
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Variant } from "@/lib/engine";
 import type { PlanItem } from "@/lib/plan";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
@@ -19,8 +26,20 @@ import { CardLookup } from "../_components/CardLookup";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { VariantSelector } from "../_components/VariantSelector";
 import { ACTION_META, bandMeta } from "../_components/plan-meta";
-import { commitHaulAction, getMoveOptions, lookupCatalog, runHaulPlan } from "./actions";
-import type { CommitCounts, DraftCard, LookupCard, RunPlanResult } from "./plan-types";
+import {
+  commitHaulAction,
+  getMoveOptions,
+  loadPendingPlacementDraft,
+  lookupCatalog,
+  runHaulPlan,
+} from "./actions";
+import type {
+  CommitCounts,
+  DraftCard,
+  DraftPayloadItem,
+  LookupCard,
+  RunPlanResult,
+} from "./plan-types";
 
 const SOURCES: { v: "bulk-bin" | "pack-rip" | "show" | "trade"; l: string }[] = [
   { v: "bulk-bin", l: "Bulk bin" },
@@ -35,10 +54,20 @@ function newId(): string {
     : `d-${Math.random().toString(36).slice(2)}`;
 }
 
-export function PlanScreen() {
+/** The draft as the server actions want it — drops the display payload, keeps the routing link. */
+function toPayload(draft: DraftCard[]): DraftPayloadItem[] {
+  return draft.map((d) => ({
+    id: d.id,
+    tcgdexId: d.card.tcgdexId,
+    variant: d.variant,
+    existingCopyId: d.existingCopyId ?? null,
+  }));
+}
+
+export function PlanScreen({ initialPending = [] }: { initialPending?: DraftCard[] }) {
   const [source, setSource] = useState<(typeof SOURCES)[number]["v"]>("bulk-bin");
   const [notes, setNotes] = useState("");
-  const [draft, setDraft] = useState<DraftCard[]>([]);
+  const [draft, setDraft] = useState<DraftCard[]>(initialPending);
   const [plan, setPlan] = useState<RunPlanResult | null>(null);
   const [running, setRunning] = useState(false);
   const [committing, setCommitting] = useState(false);
@@ -51,6 +80,25 @@ export function PlanScreen() {
   const [moveOptions, setMoveOptions] = useState<MoveOptions | null>(null);
   const [moveTarget, setMoveTarget] = useState<MoveTargetCard | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // Pending-placement queue (UIL-003). Seeded from the server render, then re-read after a commit.
+  const [pendingState, setPendingState] = useState<"loading" | "ready">("ready");
+  const [seededCount, setSeededCount] = useState(initialPending.length);
+
+  /** Re-read the queue and seed the draft from it. Only ever called from an event handler. */
+  const reloadPending = useCallback(() => {
+    setPendingState("loading");
+    loadPendingPlacementDraft()
+      .then((rows) => {
+        setSeededCount(rows.length);
+        // Only seed when nothing is in progress, so a re-read never discards typed entry.
+        setDraft((cur) => (cur.length === 0 ? rows : cur));
+      })
+      .catch(() => {
+        setSeededCount(0);
+        setError("Could not load the cards waiting to be placed.");
+      })
+      .finally(() => setPendingState("ready"));
+  }, []);
 
   // Editing the draft invalidates a computed plan / prior commit (and its overrides).
   function mutateDraft(next: DraftCard[]) {
@@ -111,9 +159,7 @@ export function PlanScreen() {
     setError(null);
     setRunning(true);
     try {
-      const result = await runHaulPlan(
-        draft.map((d) => ({ id: d.id, tcgdexId: d.card.tcgdexId, variant: d.variant })),
-      );
+      const result = await runHaulPlan(toPayload(draft));
       setPlan(result);
       setCur(0);
       setDone(new Set());
@@ -131,7 +177,7 @@ export function PlanScreen() {
       const res = await commitHaulAction({
         source,
         notes: notes.trim() || null,
-        draft: draft.map((d) => ({ id: d.id, tcgdexId: d.card.tcgdexId, variant: d.variant })),
+        draft: toPayload(draft),
         overrides,
       });
       if (res.ok) setCommitted(res.counts);
@@ -153,6 +199,9 @@ export function PlanScreen() {
     setError(null);
     setOverrides({});
     setMoveTarget(null);
+    // Re-read the queue: what we just placed is gone from it, and anything she pulled off the draft
+    // is still waiting. Runs after the draft is cleared so the seed is not skipped as "in progress".
+    reloadPending();
   }
 
   const flatItems = useMemo<PlanItem[]>(
@@ -200,6 +249,9 @@ export function PlanScreen() {
           onRemove={removeCard}
           onRun={onRun}
           running={running}
+          pendingState={pendingState}
+          seededCount={seededCount}
+          onReloadPending={reloadPending}
         />
       ) : (
         <PlanView
@@ -241,6 +293,51 @@ export function PlanScreen() {
 
 /* --------------------------------- intake --------------------------------- */
 
+/**
+ * The pending-placement status line (UIL-003). It exists so arriving from Sync's "Place new cards"
+ * never looks like an empty form with no explanation: it says how many copies are waiting, that they
+ * are already counted in the collection, and that this pass gives them a home rather than re-adding
+ * them. Silent only when the queue is genuinely empty and nothing was seeded.
+ */
+function PendingBar({
+  state,
+  seededCount,
+  routedInDraft,
+  onReload,
+}: {
+  state: "loading" | "ready";
+  seededCount: number;
+  routedInDraft: number;
+  onReload: () => void;
+}) {
+  if (state === "loading") {
+    return (
+      <div className="alertbar" style={{ marginBottom: 12 }}>
+        <span>…</span>
+        <b>Checking for cards waiting to be placed…</b>
+      </div>
+    );
+  }
+  if (seededCount === 0) return null;
+  return (
+    <div className="alertbar" style={{ marginBottom: 12 }}>
+      <span>↯</span>
+      <b>
+        {routedInDraft > 0
+          ? `${routedInDraft} card${routedInDraft === 1 ? "" : "s"} from your Dex sync, waiting to be placed.`
+          : `${seededCount} card${seededCount === 1 ? "" : "s"} from your Dex sync are still waiting to be placed.`}
+      </b>
+      <span style={{ fontSize: 11, color: "var(--ink-2)", flexBasis: "100%" }}>
+        These are already in your collection — running the plan gives them a home, it does not add
+        them again.
+      </span>
+      <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={onReload}>
+        Refresh
+      </button>
+    </div>
+  );
+}
+
 function IntakePanel(props: {
   source: (typeof SOURCES)[number]["v"];
   setSource: (v: (typeof SOURCES)[number]["v"]) => void;
@@ -252,11 +349,34 @@ function IntakePanel(props: {
   onRemove: (id: string) => void;
   onRun: () => void;
   running: boolean;
+  pendingState: "loading" | "ready";
+  seededCount: number;
+  onReloadPending: () => void;
 }) {
-  const { source, setSource, notes, setNotes, draft, onAdd, onVariant, onRemove, onRun, running } =
-    props;
+  const {
+    source,
+    setSource,
+    notes,
+    setNotes,
+    draft,
+    onAdd,
+    onVariant,
+    onRemove,
+    onRun,
+    running,
+    pendingState,
+    seededCount,
+    onReloadPending,
+  } = props;
+  const routedInDraft = draft.filter((d) => d.existingCopyId).length;
   return (
     <div className="entry panel">
+      <PendingBar
+        state={pendingState}
+        seededCount={seededCount}
+        routedInDraft={routedInDraft}
+        onReload={onReloadPending}
+      />
       <div className="entryhead">
         <span className="hk u" style={{ fontSize: 11, letterSpacing: "0.14em" }}>
           New haul
@@ -302,11 +422,19 @@ function IntakePanel(props: {
                   {d.card.localId ? ` · ${d.card.localId}` : ""}
                 </div>
                 <div style={{ marginTop: 6 }}>
-                  <VariantSelector
-                    variants={d.card.variants}
-                    value={d.variant}
-                    onChange={(v) => onVariant(d.id, v)}
-                  />
+                  {d.existingCopyId ? (
+                    // Dex owns the variant of a synced copy (sync-architecture §1.1), so it is shown,
+                    // not edited: a local change here would be silently reverted by the next import.
+                    <span className="tag u" title="Already in your collection from a Dex sync">
+                      Waiting from sync · {d.dexVariantRaw ?? d.variant}
+                    </span>
+                  ) : (
+                    <VariantSelector
+                      variants={d.card.variants}
+                      value={d.variant}
+                      onChange={(v) => onVariant(d.id, v)}
+                    />
+                  )}
                 </div>
               </div>
               <button
@@ -393,8 +521,14 @@ function PlanView(props: {
           <b>Haul committed.</b>
         </div>
         <p style={{ fontSize: 12, lineHeight: 1.9 }}>
-          Wrote {committed.copies} copies · {committed.lines} new lines · {committed.slots} slots ·{" "}
-          {committed.wishlist} wishlist items · {committed.decisions} placement decisions.
+          {committed.routed > 0
+            ? `Placed ${committed.routed} card${committed.routed === 1 ? "" : "s"} already in your collection`
+            : null}
+          {committed.routed > 0 && committed.copies > 0 ? " · " : null}
+          {committed.copies > 0 ? `Wrote ${committed.copies} new copies` : null}
+          {committed.routed > 0 || committed.copies > 0 ? " · " : null}
+          {committed.lines} new lines · {committed.slots} slots · {committed.wishlist} wishlist
+          items · {committed.decisions} placement decisions.
         </p>
         <button
           type="button"
