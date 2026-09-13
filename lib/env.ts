@@ -7,6 +7,10 @@ import { z } from "zod";
  */
 const serverSchema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.string().min(1),
+  // The two SUPABASE_*_KEY names below are historical. Supabase is retiring the legacy JWT
+  // `anon` / `service_role` keys in favour of `sb_publishable_…` / `sb_secret_…`; either format is
+  // accepted in these vars and nothing here inspects the value. See lib/supabase/admin.ts for the
+  // one caveat that bites on the privileged key after a format migration.
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   TCGDEX_BASE_URL: z.string().min(1).default("https://api.tcgdex.net/v2"),

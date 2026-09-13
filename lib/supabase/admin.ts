@@ -3,14 +3,23 @@ import { getServerEnv } from "@/lib/env";
 import type { Database } from "@/lib/repo/database.types";
 
 /**
- * SERVICE-ROLE Supabase client — bypasses row-level security. SERVER ONLY.
+ * PRIVILEGED Supabase client — bypasses row-level security. SERVER ONLY.
  *
  * The catalog mirror (M2) writes `catalog_card`, which is read-only to the app under RLS
- * (0002_domain.sql). Those writes land as the service role, which is why this client exists
- * separately from `client.ts` / `server.ts` (both anon-key + RLS).
+ * (0002_domain.sql). Those writes need a key that bypasses RLS, which is why this client exists
+ * separately from `client.ts` / `server.ts` (both RLS-scoped).
+ *
+ * KEY FORMAT. `SUPABASE_SERVICE_ROLE_KEY` is a historical NAME, not a claim about the value.
+ * Supabase is retiring the legacy JWT `service_role` key in favour of `sb_secret_…`, and either
+ * works here — supabase-js takes the key as an opaque string. One caveat if this project moves to
+ * the new format: `sb_secret_…` keys are not JWTs and are meant to travel on the `apikey` header
+ * only, but supabase-js still adds an `Authorization: Bearer` fallback when there is no user
+ * session (its `omitApiKeyAsBearer` escape hatch is internal to the Functions client and is not
+ * exposed through `createClient`). If privileged reads/writes start failing with "Invalid JWT"
+ * after a key migration, that is the reason — upgrade supabase-js rather than patching here.
  *
  * NEVER import this into a Client Component or anything that ships to the browser: it carries the
- * service-role key. It has no cookie/session wiring on purpose — it is not a user session.
+ * privileged key. It has no cookie/session wiring on purpose — it is not a user session.
  */
 export function createAdminClient(): SupabaseClient<Database> {
   if (typeof window !== "undefined") {

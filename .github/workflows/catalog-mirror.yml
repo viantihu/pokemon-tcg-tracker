@@ -51,10 +51,14 @@ jobs:
       # to set secrets.SUPABASE_SERVICE_ROLE_KEY on the `testing` environment; it
       # always wins when present.
       #
-      # It must be the key literally named `service_role`, not any other project key:
-      # the route compares the bearer against the app's own SUPABASE_SERVICE_ROLE_KEY
-      # env var in Vercel, so anything else 401s.
-      - name: Resolve the service-role key
+      # KEY FORMAT. Supabase is retiring the legacy JWT `anon` / `service_role` keys
+      # in favour of `sb_publishable_…` / `sb_secret_…`, so the server-side key this
+      # needs is a SECRET key on a current project and a `service_role` key on one
+      # that still has legacy keys enabled. Both are handled below; the constraint
+      # that actually matters is not the format but that the value MATCHES the app's
+      # own SUPABASE_SERVICE_ROLE_KEY env var in Vercel, because /api/catalog/sync
+      # compares the bearer against it as a plain string. Any other project key 401s.
+      - name: Resolve the server-side API key
         id: creds
         env:
           SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -83,15 +87,21 @@ jobs:
           if [ -z "$key" ] && [ -n "$SUPABASE_ACCESS_TOKEN" ] && [ -n "$PROJECT_REF" ]; then
             origin="Supabase Management API"
 
-            # Current key list. `service_role` is what the app's env var holds, so it
-            # is the only entry that will satisfy the route's bearer check.
+            # Current key list. Select on the VALUE's prefix rather than on a `name` or
+            # `type` enum: `sb_secret_` is documented and stable, whereas a secret key's
+            # name is whatever it was created as, and only the legacy pair is reliably
+            # named `service_role`. Prefer a secret key, fall back to legacy.
             fetch "/projects/$PROJECT_REF/api-keys?reveal=true"
             if [ -n "$body" ]; then
-              echo "  keys returned: $(printf '%s' "$body" | jq -rc '[.[]?.name] // []' 2>/dev/null)"
-              key=$(printf '%s' "$body" | jq -r '[.[]? | select(.name == "service_role") | .api_key] | first // empty')
+              echo "  keys returned: $(printf '%s' "$body" | jq -rc '[.[]? | {name, type}] // []' 2>/dev/null)"
+              key=$(printf '%s' "$body" | jq -r '
+                [.[]? | .api_key // empty | select(startswith("sb_secret_"))] | first // empty')
+              if [ -z "$key" ]; then
+                key=$(printf '%s' "$body" | jq -r '[.[]? | select(.name == "service_role") | .api_key] | first // empty')
+              fi
             fi
 
-            # Older projects expose the JWT pair on a separate endpoint instead.
+            # Projects still on the legacy JWT pair expose it on its own endpoint.
             if [ -z "$key" ]; then
               fetch "/projects/$PROJECT_REF/api-keys/legacy"
               if [ -n "$body" ]; then
@@ -106,14 +116,28 @@ jobs:
           fi
 
           if [ -z "$key" ]; then
-            echo "::error::No service-role key, so the mirror cannot run. Fix: copy the 'service_role' key from the Supabase dashboard (project $PROJECT_REF -> Project Settings -> API) into a GitHub environment secret named SUPABASE_SERVICE_ROLE_KEY on the 'testing' environment. It must be the same value the app has in Vercel, or the route will 401. A 403 above means SUPABASE_ACCESS_TOKEN lacks the secret-read privilege, which is expected for a scoped PAT and is not a fault."
+            echo "::error::No server-side API key, so the mirror cannot run. Fix: in the Supabase dashboard for project $PROJECT_REF (Project Settings -> API Keys), copy the SECRET key (sb_secret_...) — or the legacy 'service_role' key if this project still has legacy keys enabled — into a GitHub ENVIRONMENT secret named SUPABASE_SERVICE_ROLE_KEY on the 'testing' environment. Whichever you copy must be the SAME value the app already has in Vercel as SUPABASE_SERVICE_ROLE_KEY, or /api/catalog/sync will 401 on the bearer check. A 403 above just means SUPABASE_ACCESS_TOKEN lacks the secret-read privilege, which is expected for a scoped PAT and is not a fault."
             exit 1
           fi
 
           # Mask before it can reach a log line, then hand it to later steps.
           echo "::add-mask::$key"
           echo "SERVICE_KEY=$key" >> "$GITHUB_ENV"
-          echo "Using the service-role key from: $origin"
+          case "$key" in
+            sb_secret_*) fmt="secret key (sb_secret_...)" ;;
+            sb_*) fmt="an sb_ key of an unrecognized subtype" ;;
+            eyJ*) fmt="legacy JWT key (service_role)" ;;
+            *) fmt="unrecognized format" ;;
+          esac
+          echo "Key format: $fmt"
+          # Whether the key is a JWT decides how the Supabase REST gateway must be
+          # addressed in the verify step: new-format keys are NOT JWTs and are rejected
+          # ("Invalid JWT") if sent as a Bearer token, so they go on `apikey` alone.
+          case "$key" in
+            eyJ*) echo "KEY_IS_JWT=1" >> "$GITHUB_ENV" ;;
+            *) echo "KEY_IS_JWT=0" >> "$GITHUB_ENV" ;;
+          esac
+          echo "Using the server-side key from: $origin"
 
       - name: Mirror every set
         env:
@@ -137,6 +161,13 @@ jobs:
           while read -r set_id; do
             [ -n "$set_id" ] || continue
             # --get-style POST with no body; the route reads the set from the query.
+            #
+            # `Authorization: Bearer` is correct here even for a new-format secret key,
+            # and must NOT be "fixed" to an apikey header: this request goes to OUR
+            # Next.js route, which does a plain string compare against its own
+            # SUPABASE_SERVICE_ROLE_KEY env var (app/api/catalog/sync/route.ts). It never
+            # reaches Supabase's gateway, so nothing tries to parse it as a JWT. The
+            # apikey-only rule applies to the Supabase REST call in the verify step.
             response=$(curl -sS -X POST \
               -H "Authorization: Bearer $SERVICE_KEY" \
               -w $'\n%{http_code}' \
@@ -170,25 +201,37 @@ jobs:
           fi
 
       # The point of the run is rows in the table, so verify that directly instead of
-      # inferring it from the app still being up. Reads catalog_card as the service
-      # role (it is read-only to the app under RLS) and asks PostgREST for an exact
-      # count via Content-Range.
+      # inferring it from the app still being up: ask PostgREST for an exact
+      # catalog_card count via Content-Range.
+      #
+      # HEADERS. This one DOES go to Supabase's gateway, so the key format matters. A
+      # new-format key (`sb_secret_…`) is not a JWT and belongs on `apikey` ALONE — sent
+      # as a Bearer token the platform tries to parse it and rejects with "Invalid JWT".
+      # A legacy `service_role` JWT still needs the Bearer header to be read as that
+      # role rather than as anon. So the Bearer is added only for a JWT key.
       - name: Verify the mirror is populated
         env:
           PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |
           set -euo pipefail
-          headers=$(curl -sS -D - -o /dev/null \
-            -H "apikey: $SERVICE_KEY" \
-            -H "Authorization: Bearer $SERVICE_KEY" \
-            -H "Prefer: count=exact" \
-            -H "Range: 0-0" \
-            "https://$PROJECT_REF.supabase.co/rest/v1/catalog_card?select=tcgdex_id")
+          url="https://$PROJECT_REF.supabase.co/rest/v1/catalog_card?select=tcgdex_id"
+          # Two explicit invocations rather than a conditionally-expanded array: an empty
+          # array under `set -u` is a portability trap not worth the cleverness here.
+          if [ "${KEY_IS_JWT:-0}" = "1" ]; then
+            headers=$(curl -sS -D - -o /dev/null \
+              -H "apikey: $SERVICE_KEY" \
+              -H "Authorization: Bearer $SERVICE_KEY" \
+              -H "Prefer: count=exact" -H "Range: 0-0" "$url")
+          else
+            headers=$(curl -sS -D - -o /dev/null \
+              -H "apikey: $SERVICE_KEY" \
+              -H "Prefer: count=exact" -H "Range: 0-0" "$url")
+          fi
           # content-range looks like "0-0/23500"; the total is after the slash.
           rows=$(printf '%s' "$headers" | tr -d '\r' | awk 'tolower($1) == "content-range:" { split($2, a, "/"); print a[2] }')
           echo "catalog_card rows: ${rows:-unknown}"
           if [ -z "${rows:-}" ] || [ "$rows" = "*" ]; then
-            echo "::error::could not read a row count for catalog_card."
+            echo "::error::could not read a row count for catalog_card. If the response mentioned \"Invalid JWT\", the key was sent as a Bearer token but is not a JWT."
             exit 1
           fi
           # seed.sql ships 3 cards. Anything in that neighbourhood means the mirror
