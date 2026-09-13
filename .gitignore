@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+# Deploy's `acceptance` job writes this vitest JSON report into the workspace root to
+# prove the suite really ran; a local run of the same command leaves one behind too.
+acceptance-report.json
 
 # next.js
 /.next/
