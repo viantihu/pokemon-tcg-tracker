@@ -713,7 +713,8 @@ export type Database = {
     };
     Functions: {
       /**
-       * Atomic write applier for the two commit paths (migration 0006_commit_rpc.sql).
+       * Atomic write applier for all three commit paths — haul, sync, and backfill
+       * (migrations 0006_commit_rpc.sql + 0007_backfill_ops.sql).
        * SECURITY INVOKER: runs the whole ordered write set inside one transaction under the caller's
        * RLS. `payload` is a `{ ops, resync_group_ids }` object (see lib/repo/write-ops.ts).
        */

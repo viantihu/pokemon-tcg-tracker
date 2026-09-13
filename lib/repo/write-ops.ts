@@ -1,12 +1,14 @@
 /**
- * The atomic write-orchestration boundary (dev-spec §5 M10; migration 0006_commit_rpc.sql).
+ * The atomic write-orchestration boundary (dev-spec §5 M10; migrations 0006_commit_rpc.sql +
+ * 0007_backfill_ops.sql).
  *
- * Both commit paths (lib/plan/commit.ts, lib/sync/exec.ts) keep ALL the pure cascade / reconcile /
- * decision logic in TS and compute a fully-resolved, ORDERED write set — generating row UUIDs
- * client-side (crypto.randomUUID) so line→slot→copy cross-references resolve before insert — then
- * hand it here. `applyWriteOps` posts the whole set to the `apply_write_ops` Postgres function, which
- * runs every op inside one implicit transaction: it all commits, or it all rolls back. This replaces
- * the interim compensating-rollback that lived in those two files.
+ * All THREE commit paths (lib/plan/commit.ts haul, lib/sync/exec.ts sync, lib/backfill/commit.ts
+ * backfill) keep ALL the pure cascade / reconcile / decision logic in TS and compute a
+ * fully-resolved, ORDERED write set — generating row UUIDs client-side (crypto.randomUUID) so
+ * line→slot→copy cross-references resolve before insert — then hand it here. `applyWriteOps` posts
+ * the whole set to the `apply_write_ops` Postgres function, which runs every op inside one implicit
+ * transaction: it all commits, or it all rolls back. This replaces the interim
+ * compensating-rollback that lived in those three files.
  *
  * `owner_id` is NEVER carried in a payload: every insert omits it so the column defaults to
  * `auth.uid()` under the SECURITY INVOKER function and the 0002 `owner_all` RLS `with check` enforces
@@ -88,6 +90,8 @@ export type WriteOp =
     }
   | {
       op: "insert_wishlist";
+      /** Optional: the RPC defaults it to `gen_random_uuid()`. Backfill supplies its planner's id. */
+      id?: string;
       line_slot_id: string | null;
       required_dex_id: number | null;
       required_type: string | null;
@@ -99,11 +103,25 @@ export type WriteOp =
     }
   | {
       op: "insert_decision";
+      /** Optional: the RPC defaults it to `gen_random_uuid()`. Backfill supplies its planner's id. */
+      id?: string;
       haul_id: string | null;
       copy_id: string | null;
       decision: string;
       reason: string;
       resolved_by: string;
+    }
+  /** M5 backfill only — a reserved pocket run (0007). `copy_id` is set iff a duplicate was sacrificed. */
+  | {
+      op: "insert_binder_block";
+      id: string;
+      binder_id: string;
+      half: string;
+      pocket_count: number;
+      purpose: string;
+      material: string;
+      copy_id: string | null;
+      line_id: string | null;
     }
   | {
       op: "insert_presence_group";
@@ -141,6 +159,12 @@ export type WriteOp =
   | { op: "update_copy"; id: string; patch: CopyPatch }
   | { op: "update_slot"; id: string; patch: SlotPatch }
   | { op: "update_unresolved_entry"; id: string; patch: EntryPatch }
+  /**
+   * Union catalog ids into `collection.target_catalog_card_ids` (0007). The union happens SERVER-SIDE
+   * in one statement, so it is atomic AND free of the lost update a read-modify-write would have:
+   * two interleaved taggings compose. Idempotent — re-tagging the same card changes nothing.
+   */
+  | { op: "union_collection_targets"; collection_id: string; catalog_card_ids: string[] }
   | { op: "delete_copy"; id: string }
   | { op: "delete_unresolved_entry"; id: string }
   | { op: "delete_snapshot"; id: string };
