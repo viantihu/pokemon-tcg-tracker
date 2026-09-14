@@ -33,6 +33,8 @@ function item(over: Partial<PlanItem> & { bandKey: string; action: PlanActionKin
     name: over.name ?? `Card ${seq}`,
     setId: null,
     localId: null,
+    // Display-only (UIL-016); grouping is by band/basic/action and never reads it.
+    imageUrl: null,
     variant: "normal",
     stage: over.isBasic ? "Basic" : "Stage1",
     isBasic: over.isBasic ?? false,

@@ -12,16 +12,26 @@ import { describe, expect, it } from "vitest";
 import { loadPendingPlacements } from "@/lib/plan";
 import type { DbClient } from "@/lib/repo";
 
-/** Thenable builder over an in-memory row set: eq / is / in filtering, order ignored (rows presorted). */
+/**
+ * Thenable builder over an in-memory row set: eq / is / in filtering, and REAL ordering.
+ *
+ * `order()` used to be a no-op with the rows written in the expected sequence, which made every
+ * ordering assertion below vacuous — `listUnplaced` could have sorted backwards and this suite would
+ * still have passed. Rows are now stored out of order and the fake composes the requested keys, so the
+ * "oldest first" contract is actually tested. (UIL-015: a double that flatters the code certifies the
+ * wrong behaviour.)
+ */
 class FakeQuery {
   private filters: ((r: Record<string, unknown>) => boolean)[] = [];
   private columns: string[] | null = null;
+  private orderKeys: string[] = [];
   constructor(private rows: Record<string, unknown>[]) {}
   select(cols: string) {
     this.columns = cols === "*" ? null : cols.split(",").map((c) => c.trim());
     return this;
   }
-  order() {
+  order(col: string) {
+    this.orderKeys.push(col);
     return this;
   }
   eq(col: string, val: unknown) {
@@ -38,7 +48,19 @@ class FakeQuery {
     return this;
   }
   private filtered() {
-    const rows = this.rows.filter((r) => this.filters.every((f) => f(r)));
+    let rows = this.rows.filter((r) => this.filters.every((f) => f(r)));
+    if (this.orderKeys.length > 0) {
+      // Compose keys in call order, comparing by code unit as Postgres does.
+      rows = [...rows].sort((a, b) => {
+        for (const key of this.orderKeys) {
+          const av = String(a[key] ?? "");
+          const bv = String(b[key] ?? "");
+          if (av < bv) return -1;
+          if (av > bv) return 1;
+        }
+        return 0;
+      });
+    }
     if (!this.columns) return rows;
     return rows.map((r) => Object.fromEntries(this.columns!.map((c) => [c, r[c] ?? null])));
   }
@@ -143,6 +165,35 @@ describe("loadPendingPlacements (UIL-003)", () => {
 
     const pending = await loadPendingPlacements(db);
     expect(pending.map((p) => p.copyId)).toEqual(["copy-a"]);
+  });
+
+  /**
+   * The queue's "oldest first" contract was never actually asserted: every other case here has a
+   * single expected row, so the order was unobservable and `listUnplaced` could have sorted backwards
+   * unnoticed. Order matters — she works the stack top to bottom, and the pips in the haul bar are
+   * indexed by it. Rows are stored NEWEST first so only real ordering produces the expected sequence.
+   */
+  it("returns the queue oldest-first, whatever order the rows come back in", async () => {
+    const db = fakeDb({
+      copy: [
+        copy("third", "sv03-026", {
+          created_at: "2026-09-13T03:00:00.000Z",
+          acquired_at: "2026-09-13T03:00:00.000Z",
+        }),
+        copy("first", "sv03-026", {
+          created_at: "2026-09-13T01:00:00.000Z",
+          acquired_at: "2026-09-13T01:00:00.000Z",
+        }),
+        copy("second", "sv03-026", {
+          created_at: "2026-09-13T02:00:00.000Z",
+          acquired_at: "2026-09-13T02:00:00.000Z",
+        }),
+      ],
+      placement_decision: [],
+      catalog_card: [CARD("sv03-026", "Charmander")],
+    });
+    const pending = await loadPendingPlacements(db);
+    expect(pending.map((p) => p.copyId)).toEqual(["first", "second", "third"]);
   });
 
   it("short-circuits with no queries to run when nothing is unplaced", async () => {

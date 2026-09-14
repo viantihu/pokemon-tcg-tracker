@@ -99,6 +99,15 @@ function makeContext(): PlanContext {
         ["white", "White"],
       ]),
       collectionNameById: new Map(),
+      // UIL-016: artwork is resolved from the catalog ROW here, not from the engine's CatalogCard.
+      // Charmeleon is deliberately absent so the "mirror has no image for this printing" path is
+      // covered as well as the happy one.
+      imageUrlByTcgdexId: new Map(
+        CATALOG.filter((c) => c.tcgdexId !== CHARMELEON_SV03_027.tcgdexId).map((c) => [
+          c.tcgdexId,
+          `https://assets.tcgdex.net/en/${c.tcgdexId}`,
+        ]),
+      ),
     },
   };
 }
@@ -159,5 +168,19 @@ describe("planFromDraft + groupPlan (mixed haul)", () => {
   it("gives the new Fire line a workable destination in the active binder's back half", () => {
     const charmeleon = byId.get(CHARMELEON_SV03_027.tcgdexId)!;
     expect(charmeleon.destination).toBe("Binder 1 · Back · Red");
+  });
+
+  it("carries each row's artwork through the whole run, null only where the mirror has none", () => {
+    // UIL-016: `imageUrl` is display data resolved off the catalog ROW, so it has to survive
+    // planFromDraft → groupPlan rather than being re-fetched per row on the client.
+    const vaporeon = byId.get(VAPOREON_SV035_134.tcgdexId)!;
+    expect(vaporeon.imageUrl).toBe(`https://assets.tcgdex.net/en/${VAPOREON_SV035_134.tcgdexId}`);
+
+    // The one printing deliberately left out of the lookup map.
+    expect(byId.get(CHARMELEON_SV03_027.tcgdexId)!.imageUrl).toBeNull();
+
+    // And it is still there after grouping, which is what the worklist actually renders from.
+    const red = groups.find((g) => g.bandKey === "red")!;
+    expect(red.subgroups.flatMap((s) => s.rows).every((r) => "imageUrl" in r)).toBe(true);
   });
 });

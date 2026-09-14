@@ -130,6 +130,8 @@ function makeContext(owned: Row<"copy">[] = []): PlanContext {
       ]),
       bandDisplayByKey: new Map(BANDS.map((b) => [b, b])),
       collectionNameById: new Map(),
+      // Display-only (UIL-016); this suite asserts writes, not artwork.
+      imageUrlByTcgdexId: new Map(),
     },
   };
 }

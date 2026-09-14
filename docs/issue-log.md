@@ -27,7 +27,7 @@ the entry records both.
 ## UIL-001 — "Back half from page" gives no indication of what it means
 
 - **Reported:** 2026-09-13
-- **Status:** Fixed — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42), awaiting QA review
+- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
 - **Priority:** Low
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -50,7 +50,7 @@ step she can be walked through. Copy-only fix, safe to ship after go-live.
 ## UIL-002 — No definition of what counts as a "page"
 
 - **Reported:** 2026-09-13
-- **Status:** Fixed — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42), awaiting QA review
+- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
 - **Priority:** Medium
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -530,7 +530,9 @@ expensive. Worth fixing before the first real sorting session, not necessarily b
 ## UIL-007 — Scroll bar under the card list renders outside the panel border
 
 - **Reported:** 2026-09-13
-- **Status:** Fixed — PR [#47](https://github.com/viantihu/pokemon-tcg-tracker/pull/47), awaiting QA review
+- **Status:** **Closed** — PR [#47](https://github.com/viantihu/pokemon-tcg-tracker/pull/47) MERGED to
+  `develop` (squash `0224383`), and **confirmed resolved by Karvi on Testing 2026-09-14**. The strip was
+  measured in a 375px harness during development; her pass is the confirmation in the running app.
 - **Priority:** **Medium** (raised from Low — see the reproduction below; it is not cosmetic)
 - **Area:** Plan — **confirmed by Karvi 2026-09-13**
 - **Env:** Testing
@@ -615,7 +617,11 @@ Plan.
 ## UIL-008 — No progress indication during long operations
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Fixed** — PR [#64](https://github.com/viantihu/pokemon-tcg-tracker/pull/64) MERGED to
+  `develop` (squash `88a546c`), QA-reviewed, confirmed **deployed** to Testing. Shipped **option (1)
+  only**, an indeterminate activity bar, and the PR argues *against* the determinate bar this entry
+  recommended — see the resolution note. Awaiting Karvi's confirmation, including the question of whether
+  the bar still earns its place now that UIL-020 has made the sync much faster.
 - **Priority:** Medium (Claude's read — could argue Low)
 - **Area:** Sync, Plan
 - **Env:** Testing
@@ -1294,7 +1300,11 @@ apply instead of a raw grep count.
 ## UIL-014 — No way to remove a card from a collection on the Collections page
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Fixed** — PR [#67](https://github.com/viantihu/pokemon-tcg-tracker/pull/67) MERGED to
+  `develop` (squash `c99bd080`), QA-reviewed, and confirmed **deployed** to Testing — all four conditions
+  green, and `migrate` success means **migration 0008 reached Testing**, which this fix does not work
+  without. Awaiting Karvi's confirmation; the behaviour is interaction-only and never rendered in a
+  browser during development.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Collections
 - **Env:** Testing
@@ -1364,7 +1374,9 @@ file.
 ## UIL-015 — Collector-number search returns unrelated cards while the actual match is missing
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Fixed** — PR [#73](https://github.com/viantihu/pokemon-tcg-tracker/pull/73) MERGED to
+  `develop` (squash `a88dc5c`), QA-reviewed, confirmed **deployed** to Testing. Awaiting Karvi's
+  confirmation: search `011/217`, and also a bare `11` for the symmetric case.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Lookup / Collections
 - **Env:** Testing
@@ -1442,6 +1454,28 @@ but it's the strongest evidence available without DB access.
 **What the fix above still leaves arbitrary.** `set_id` alphabetical ordering was never a design choice
 — there's no release-date column to sort by instead. So after this fix, a tie between two *padded exact
 matches* in different sets is still broken arbitrarily. See UIL-026.
+
+**Scale is why this stayed invisible until 23,548 rows, the same shape as UIL-007.** `.order("set_id")`
+being alphabetical, and digits sorting before letters, was true on day one — it just had nothing to bite
+on with the 3-row seed catalog. At real scale, twelve numerically-named sets happened to sort ahead of a
+real card's set and fill the limit first. Fine at small scale, wrong at production scale, same lesson
+UIL-007's progress strip already recorded.
+
+**The fix (PR [#73](https://github.com/viantihu/pokemon-tcg-tracker/pull/73), squash `a88dc5c`) is
+independently reproduced, not just claimed.** Ran the revert check myself in an isolated worktree:
+pre-fix `search()` against the current, corrected test double fails 5 of 15 tests, including both
+original UIL-010 assertions by name ("ranks the exact number match first, ahead of name matches",
+"finds both cards for a name plus a number, number first"); 10 pass. Third independent confirmation of
+the same result, from a third starting point. Status transition is the Senior BA's to record.
+
+**The `sync` safety claim in the resolution below needs the right discriminator, and it isn't "is the
+file in the diff."** `catalog-card.ts` serves both Lookup's `search()` (this fix) and sync's
+`findBySetLocal`/`findBySetLocalMany` (reached through `lib/sync/catalog-lookup.ts`, itself called from
+`lib/sync/resolve.ts`). PR #73's diff touches only `search()` — confirmed directly against the PR's
+patch, one hunk, starting well after `findBySetLocalMany`'s definition — and `lib/sync/resolve.ts` isn't
+in the diff at all. That's the correct way to state sync is unaffected: at the *function* level, not by
+checking whether a particular file appears in the changed-files list, since the same file serves both
+call paths and "the file changed" would have proved nothing either way.
 
 ## UIL-016 — No card images on the Haul Plan worklist or spotlight panel
 
@@ -1525,13 +1559,45 @@ screen with no copy-editing layer in between:
 
 **Related but distinct from UIL-011.** UIL-011 catalogues internal "mirror/sync" jargon (a different
 table of 6 strings, none in `cascade.ts`). This is confirmed a new location and a different class of
-leak — engine field/type names, not sync terminology. The same problem exists in several other `reason`
-strings in `cascade.ts` (at least lines 197, 279, 313, 334, 380, 389) — worth fixing as one pass rather
-than one string at a time.
+leak — engine field/type names, not sync terminology.
+
+**Correction — the original line list was wrong, verified line by line against `cascade.ts` directly.**
+Lines **197** ("collection-claim") and **279** ("duplicate", bulk box) have **no leak** — neither reads
+from `b`. Line **380** ("trainer" step) is a hardcoded `"White"` string literal, not a variable read —
+also not a leak. Retracting all three from the original list.
+
+**What's actually there is a second, distinct leak: the raw DB key for a colour band reaching the
+screen, not `cardClass`-shaped at all.** Every one of these embeds `b` — the band in DB-key space
+(`dark_blue`), not the display form (`Dark blue`) the rest of the panel uses — directly into a
+user-facing sentence:
+
+- [`:295`](../lib/engine/cascade.ts:295) ("line-existing," the fill branch): `` `Fills the open
+  ${existing.slot.stage} slot of the existing ${b} line, in the back half.` ``
+- [`:313`](../lib/engine/cascade.ts:313) ("line-existing," the already-holds branch): `` `The ${b} line
+  already holds this stage...` ``
+- [`:334`](../lib/engine/cascade.ts:334) ("line-new"): `` `Creates a viable ${b}
+  ${via.chain[0]?.name ?? ""} line...` ``
+- [`:364-366`](../lib/engine/cascade.ts:364) ("line-nonviable," the fallback — easy to miss because the
+  `${b}` sits at the tail of a multi-line template literal): `` `Not viable (...); to the front half,
+  ${b} band.` ``
+- [`:389`](../lib/engine/cascade.ts:389) ("basic-no-line," twice in one string): `` `Basic with no
+  line; to the front half, ${b} band (prefer a binder with open ${b} space...` ``
+
+Five sites, all the same shape, two of them (`:295`, `:364-366`) easy to miss on a quick grep because
+the leak isn't in the same line as the `reason:` keyword. PR #77 (open) restructures the same-colour
+member *count* out of these strings into a new `sameColorMembers` field, but its diff doesn't touch
+`b` in any of the five lines above — this leak is still live regardless of what #77 lands.
+
+**This is the display half of UIL-013's two-vocabulary problem, opposite direction.** UIL-012 was a
+display name (`"White"`) reaching the database. This is a database key (`dark_blue`) reaching the
+screen. Three entries now trace to the same unenforced display/key boundary — UIL-012, UIL-013, and
+this one.
 
 **Suggested fix.** Keep `reason` as an internal trace field for debugging/logs, and add a display-copy
-layer (a lookup by `step`, e.g. `"card-class"` → "Specialty card — goes to your specialty binder.") the
-same way UIL-011 proposes for mirror/sync copy.
+layer that translates `step` + the band's own `bandDisplayByKey` lookup (already loaded at plan-context
+time) into a sentence, rather than string-interpolating `b` directly — the same shape UIL-011 proposes
+for mirror/sync copy, and the same lookup `app/(ui)/coll/actions.ts` already builds for this exact
+purpose on the Collections screen.
 
 **Priority rationale (Karvi's call): Medium.** Lower than UIL-011's own Low-by-default because this
 string sits mid-workflow, in the panel she reads on every single card while sorting, rather than in an
@@ -1623,7 +1689,11 @@ annoyance on a long haul but doesn't block anything — she can still scroll bac
 ## UIL-020 — Sync resolves Dex rows one at a time, serially, and the slowness was already known
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-008's progress bar)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#70](https://github.com/viantihu/pokemon-tcg-tracker/pull/70) MERGED to
+  `develop` (squash `585e8d9`), QA-reviewed, confirmed **deployed** to Testing. Round trips on her export
+  drop from ~1,000 to roughly one per set she owns cards from. **The improvement is arithmetic from query
+  counts, not a measured wall-clock time** — nobody here can run a real import, so her next sync is the
+  measurement. Stated that way to her too.
 - **Priority:** Medium (Senior BA's read)
 - **Area:** Sync
 - **Env:** n/a — the defect is in the repo, not a running environment
@@ -1815,9 +1885,9 @@ before secrets exist). So the missing GitHub secrets block `acceptance` (and any
 data-API access) on the `main` rail — they do not, by themselves, stop the app from serving. Still a real
 gap, just a narrower one than "the app can't serve real data."
 
-**Part 2 — `main` is a pre-UI stub, not a working app missing credentials, and the gap is larger than
-previously recorded.** Verified directly: `git rev-list --count origin/main..origin/develop` is **56**,
-not the 28 first logged or the 52 estimated afterward. `main` (commit `b9c5cdc`, PR #12) contains:
+**Part 2 — `main` is a pre-UI stub, not a working app missing credentials.** Lead with what can't
+drift: `main` is pinned at commit `b9c5cdc` (PR #12) and has not moved once through any of this UAT
+cycle. It contains:
 
 - **Routes:** only `app/page.tsx` and `app/api/health/route.ts`. No `/plan`, `/sync`, `/look`, `/coll`,
   `/settings`, no `/login` — confirmed by listing `main`'s tree directly, not by guessing from a live
@@ -1825,6 +1895,14 @@ not the 28 first logged or the 52 estimated afterward. `main` (commit `b9c5cdc`,
 - **Migrations:** only `0001_init.sql` and `0002_domain.sql`. **Production's `color_band` and
   `type_color_map` are empty** — 0003 (which fills them) has never reached `main`.
 - **Workflows:** only `ci.yml` and `deploy.yml`. No `catalog-mirror.yml`, no `reset-testing.yml`.
+
+**The commit-gap number is illustrative, not a fact to restate.** It was 28 as first logged, 52 when the
+tech-lead measured it, 56 when re-verified minutes later, 58 an hour after that, 61 as of this
+correction — every increment is `develop` advancing (several of them this log's own PRs), never `main`
+moving. Re-check live rather than trust any number here: `git fetch origin && git rev-list --count
+origin/main..origin/develop`. **The gap widening for as long as UAT continues is normal, not
+deterioration** — a reader in two weeks seeing 90-odd commits should read a branch doing its job, not
+neglect.
 
 Live confirmation from the tech-lead session: `https://pokemon-tcg-tracker-sooty.vercel.app/api/health`
 returns 200 (a dependency-free check — proves only that the process booted);
@@ -1923,11 +2001,12 @@ border hugs its two buttons regardless of which `.orow` rule wins.
 **Priority rationale (Karvi's call): Low.** Purely visual — Finite/Open both still work correctly, and
 nothing is mis-recorded.
 
-## UIL-026 — Mirror the printed set total so tied collector-number matches can be ranked, not sorted alphabetically
+## UIL-026 — Mirror the printed set total AND release date, so tied collector-number matches can be ranked instead of sorted alphabetically
 
 - **Reported:** 2026-09-13 (not from Karvi — surfaced by the tech-lead session while reviewing UIL-015)
 - **Status:** Open
-- **Priority:** Medium (Senior BA's read)
+- **Priority:** Medium (Senior BA's read) — 5th in queue; UIL-022/023 are dev-assigned Highs, three
+  other Highs are ahead of it, and Karvi's rule is Lows/Mediums wait for all Highs.
 - **Area:** Catalog, Lookup / Collections
 - **Env:** n/a — the defect is in the repo, not a running environment
 
@@ -1943,22 +2022,362 @@ can't be used as a filter: there's no set-total column on `catalog_card`, and pr
 secret rares, so a real card like `Shuckle 136/132` legitimately exceeds its own denominator — counting
 rows per set would wrongly disqualify it. That reasoning holds. But TCGdex separately publishes exactly
 this number as `cardCount.official` — for `me02.5` it's confirmed **217**, the exact denominator Karvi
-typed. It simply isn't mirrored: verified directly against `0002_domain.sql`, `catalog_card` has
-`set_id`, `set_name`, `set_series` and no count column at all.
+typed (verified live against TCGdex directly). It simply isn't mirrored: verified against
+`0002_domain.sql`, `catalog_card` has `set_id`, `set_name`, `set_series` and no count column at all.
 
-**Suggested fix: a ranking signal, not a filter.** Mirror `cardCount.official` per set, then prefer a
-result whose set's official count equals the typed denominator — never exclude the others, which is what
-keeps the `Shuckle` case safe. For Karvi's query it's decisive: `me02.5` is 217 and none of the twelve
-competing McDonald's sets are (their totals are 12–25).
+**Scope grew to two columns, not one — `set_card_count_official` AND `set_release_date`, in the same
+pass.** Both are already in hand at upsert time: [`lib/catalog/mirror.ts:166`](../lib/catalog/mirror.ts:166)
+calls `tcgdex.getSet(setId, locale)`, and that same response carries `cardCount` and `releaseDate`
+alongside `serie.name`/`serie.id`, which the mirror already extracts — confirmed directly against
+`TcgdexSet` in [`lib/catalog/tcgdex.ts:73-78`](../lib/catalog/tcgdex.ts:73). Zero extra requests, no new
+API surface; both thread through `toCatalogRow`'s existing `opts` bag the same way `setSeries` does
+today. The reason to do both at once is cost, not tidiness: the expensive part isn't the columns, it's
+the `force_all` mirror re-run below, and paying that cost once for two columns beats paying it twice for
+one.
 
-**Two operational facts that have to ship with this, or it looks done and isn't:**
+**What the two columns buy together, so this doesn't read as a solved problem:** exact-padded-form
+match, then denominator match, then most-recent set — a real three-level ordering instead of an
+alphabetical accident. Only the first level exists today (UIL-015); this entry builds the other two.
 
-- It needs a migration (add the count column) plus populating it in `toCatalogRow`.
-- It needs a mirror re-run with `force_all: true` — the resume logic added for UIL-004 reads stored card
-  counts per set and would otherwise treat every one of the 218 sets as already complete and skip all of
-  them, silently leaving the new column null everywhere.
+**Three specifics that would otherwise get lost:**
+
+1. **Only the set-DETAIL response carries both fields — the card-detail's embedded `set` object has
+   `cardCount` but NOT `releaseDate`.** Verified live: `GET /cards/me02.5-011`'s embedded `set` is
+   `{cardCount, id, logo, name, symbol}` — no `releaseDate` key at all. This only works from the
+   set-detail path, which is the path the mirror already uses (`getSet`, not the per-card embed). Worth
+   recording so nobody later "simplifies" this to read from the card payload and silently drops the
+   date — the same shape of hazard as `localIdCandidates` being load-bearing for search with nothing in
+   the file saying so.
+2. **Coverage is sampled, not proven.** 25 of 218 sets checked; all 25 had a `releaseDate`, including
+   four of the six UIL-004 pseudo-sets (`miscp` 1996-01-01, `wp` 1999-09-01, `jumbo` 2000-02-01, `sp`
+   2002-08-01 — spot-checked live, exact matches). Encouraging, not proof. Both columns must be
+   **nullable, with NULLs ordered last**, rather than assuming full coverage.
+3. **The old placeholder dates are stand-ins, not real ship dates.** `1996-01-01`, `2000-02-01`,
+   `2002-08-01` are first-of-month/year placeholders — fine for *ordering*, but this column is
+   **ordering-only as a hard constraint, not a caveat to read past**: if a release date is ever surfaced
+   in the UI, it needs a real source, not this column. `1996-01-01` shown to Karvi as Base Set's actual
+   release date would be a small, quiet lie in her own app about her own hobby, and it cannot decide
+   which of two 1990s promos actually came first.
+
+**The `force_all` requirement is not "remember to pass a flag" — without it, the run reports success
+while doing nothing.** The resume check (added for UIL-004) sees 23,548 rows across 214 sets already at
+their full `cardCount.total` and reports "Every set is already mirrored… Nothing to do," exiting 0. A
+run that populates **nothing** reports **success**: both new columns stay NULL on every existing row,
+ordering silently falls back to arbitrary, and the log says it worked. Naming this explicitly because
+it's precisely the failure shape that let UIL-004 hide in the first place — a green result nobody
+interrogated is worse than a red one, and this is the same trap on the same workflow.
+
+**Migration numbering needs no coordination — it's enforced mechanically, not negotiated between
+sessions.** `scripts/check-migration-order.mjs` runs as a required `migration-order` job on every PR
+([`ci.yml:16-31`](../.github/workflows/ci.yml:16), gated on `pull_request`, checked against
+`origin/${{ github.base_ref }}`) and fails the PR if a new migration sorts behind one already merged to
+the base branch. Its own header records why: PR #13's `0003` landing after `0004` had shipped cost 18
+consecutive red Deploys. `develop` is at `0008` now; whoever merges second here simply renumbers and
+pushes.
+
+**Suggested fix: a ranking signal, not a filter.** Prefer a result whose set's official count equals the
+typed denominator, then prefer the most recent `set_release_date` among remaining ties — never exclude
+on either, which is what keeps the `Shuckle 136/132` case safe. For Karvi's query the count alone is
+already decisive: `me02.5` is 217 and none of the twelve competing McDonald's sets are (12–25).
 
 **Priority rationale (Senior BA's read): Medium.** The search already works correctly after UIL-015;
 this makes the ranking principled rather than an alphabetical accident. Not High — nothing is broken and
 no data is at risk right now. Not Low either, because the current tie-break is genuinely arbitrary rather
 than merely imperfect, and this is the only available principled disambiguator.
+
+## UIL-027 — "Commit the haul" is the wrong model: a card should be shelved the moment "Done" is clicked
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** High (Claude's read — this is a core-workflow redesign, needs Karvi's confirmation)
+- **Area:** Plan
+- **Env:** Testing
+
+In her words: "We need to rework the haul workflow. Every single card will require a decision, so
+'committing the haul' does not make sense. That button basically treats unshelved cards as being in
+inventory, when that defeats the entire purpose of the app. When the user clicks 'Done', that card has
+been shelved and should be put in inventory. Any card that has not received a location should still
+appear on that 'haul plan' page. That said, I don't see a purpose for 'Committing the haul'."
+
+**This is not a bug in the sense the rest of this log uses the word — it's a deliberate design that her
+mental model doesn't match, and the log should say precisely what today's design is before proposing to
+change it.**
+
+**What "Done, next card" actually does today: nothing persists.** It's pure client state
+([`PlanScreen.tsx:326-333`](<../app/(ui)/plan/PlanScreen.tsx>:326), `toggleDone` mutates a `Set<string>`)
+— no network call, no server action. It drives the worklist checkmarks, the progress pips, and the
+`cur`/`advance` cursor, and nothing else. `done` never appears in `CommitActionInput`, `CommitInput`, or
+`DraftItem` — confirmed by grepping `lib/plan/*.ts`.
+
+**What "Commit the haul" actually does: everything, unconditionally, in one shot.**
+[`PlanScreen.tsx:279-296`](<../app/(ui)/plan/PlanScreen.tsx>:279) sends the **entire draft array** to
+`commitHaulAction` → `commitHaul` ([`lib/plan/commit.ts:93-102`](../lib/plan/commit.ts:93)), with no
+filter by `done` anywhere in the path. `commitHaul` re-runs the cascade over the whole draft and writes
+every card — ticked or not — in one `apply_write_ops` transaction. Her framing is exactly accurate:
+clicking "Done" is a physical worklist aid with zero database effect; the placement she just decided on
+doesn't exist until a single all-or-nothing click covers every card in the haul, including the hundreds
+she never looked at. This is already independently confirmed in UIL-012's own record: "check-off is a
+physical worklist aid only; `commitHaulAction` sends the whole `input.draft` regardless of what is
+ticked."
+
+**And the inverse is also true: nothing persists if she never clicks Commit.** Working through 50 of 700
+cards and closing the tab writes zero rows — not even those 50. The `done` set, the cursor, and the
+computed plan live only in a `sessionStorage` cache (UIL-006), explicitly documented as a client
+convenience, not a database record, and it evaporates on cache clear or another device.
+
+**Why it's built this way — a real tradeoff, not an oversight.** `lib/plan/commit.ts`'s own header is
+explicit: the whole write set is computed in TS, then applied in **one transaction**, specifically so "a
+commit that fails partway now leaves ZERO rows" — this replaced an earlier per-row
+compensating-rollback design. `PlanScreen.tsx` states the same intent in its commit-button copy: "The
+commit is the one write that must not be interrupted... Saying so is the point: it discourages a
+reload." This is the M10 atomicity guarantee, and it is deliberately whole-haul, not per-card. Nothing in
+the code shows any consideration of a per-card commit model — check-off was designed purely as a
+worklist aid, never as a trigger for a write.
+
+**The tension her request surfaces.** Her model — each "Done" immediately shelves that card — requires
+converting the unit of atomicity from "the whole haul" to "one card." That's buildable (there's already
+a per-card write shape: `union_collection_targets`/single-copy ops in `lib/coll/remove.ts` show the
+pattern), but it changes what "atomic" protects: today, a mid-haul failure (like UIL-012's FK violation)
+rolls back everything, so a bad haul never leaves a half-sorted mess in the database. Under her model, a
+failure on card 340 of 700 would leave cards 1–339 genuinely shelved and 341–700 untouched — which is
+**closer to what she's asking for**, not further from it (partial real progress instead of an
+all-or-nothing gate), but it is a different integrity guarantee than the one M10 was built to provide,
+and whoever picks this up should say so rather than quietly narrowing it.
+
+**What already satisfies half of her request today, with no change needed.** "Any card that has not
+received a location should still appear on that haul plan page" — this already works: `/plan` re-derives
+its pending queue from the DB's actually-unplaced copies (`loadPendingPlacementDraft`, UIL-003's fix),
+not from a session cache. The part that needs to change is only the "Done" side — turning it from a
+no-op checkbox into a real write.
+
+**Suggested direction, not a final design:** convert "Done, next card" into a per-card `apply_write_ops`
+call for just that one card's routing decision, and either remove "Commit the haul" entirely (her
+stated read) or repurpose it into something that only matters if a hybrid batch/manual mode survives —
+that's a call for whoever designs this, not something to guess at here.
+
+**Ambiguity left for the implementer, explicitly not resolved by this entry:**
+
+- Does removing "Commit the haul" mean *every* Done click is its own transaction (matching her words
+  exactly), or does she want a lighter-weight batching (e.g. commit every N cards) for reasons of
+  server load or undo-ability? Worth confirming before building, since "no purpose for committing the
+  haul" could mean either.
+- What replaces the "commit is the one write that must not be interrupted" framing in the UI once writes
+  happen continuously per card — does "Undo" (the toggle-done reversal) need to become a real undo of a
+  real write, not just an unchecked box? Today `Undo` on a done row only flips `done` back to false; it
+  writes nothing, so under her model it would need to actually reverse the shelving.
+- Does the haul-level progress bar / haul_id concept still make sense once there's no single haul-level
+  commit event — `commitHaul` currently stamps a `haul_id` on every copy it writes in one call
+  ([`lib/plan/commit.ts`](../lib/plan/commit.ts)); a per-card model needs to decide whether a `haul_id`
+  still groups "cards decided in this sitting" or is dropped.
+
+**Priority rationale.** High: this is her own description of the core screen defeating the app's stated
+purpose, not a peripheral complaint, and it changes the transaction model for every future haul. Not
+something to patch quietly — flagging as a redesign that needs its own scoped implementation, likely
+larger than any single entry above it today.
+
+## UIL-028 — The batched catalog lookup is unpaged, so raising its chunk size would silently truncate results
+
+- **Reported:** 2026-09-13 (not from Karvi — found by QA reviewing #70's sync batching, corroborated
+  independently)
+- **Status:** Open
+- **Priority:** Low, held behind all open Highs and Mediums per Karvi's queue rule
+- **Area:** Sync, Catalog
+- **Env:** n/a — latent in the repo, not currently reachable
+
+**Nothing is broken today.** Stating that first so this doesn't read as a live bug.
+
+**Root cause.** [`lib/repo/catalog-card.ts:71-85`](<../lib/repo/catalog-card.ts>:71),
+`findBySetLocalMany(db, setId, localIds, chunkSize = 200)`, issues a plain
+`.select("*").eq("set_id", setId).in("local_id", chunk)` per chunk with **no `.range()` paging** —
+verified directly, confirmed absent. Each chunk is subject to PostgREST's `max-rows` cap (1000 on
+Supabase).
+
+**Why it's safe today, and only today.** A 200-`localId` chunk within one `set_id` returns roughly 200
+rows — you'd need an average of five duplicate printings per `(set_id, local_id)` to reach the cap,
+which a healthy mirror never has. But nothing in the code states that coupling: the comment at
+[`catalog-card.ts:69`](<../lib/repo/catalog-card.ts>:69) explains the chunking as being about **URL
+length** — confirmed, that's the only reason given — a different constraint from the row cap, and
+reading it would actively suggest that raising `chunkSize` for speed (2000 looks harmless) is safe. It
+isn't: it would silently truncate results.
+
+**The failure mode if that happens.** [`lib/sync/catalog-lookup.ts:203-206`](../lib/sync/catalog-lookup.ts:203)
+marks every requested `localId` as `fetched` once the query for its chunk returns — regardless of
+whether a matching row actually came back for that specific id (confirmed: `fetched.add` runs over every
+requested id, not over the rows actually returned). A key marked fetched but truncated by the cap reads
+as a **proven absence** rather than an unchecked one — real cards would quietly park in the unresolved
+queue, looking like a catalog gap rather than a bug. No error, no test failure; existing tests use small
+fixtures well under any cap.
+
+**What's correctly safe, recorded so nobody re-audits it.** `fetched.add` running *after* the awaited
+query returns (not before) means a failed query throws and propagates before anything is marked
+fetched — the dangerous direction (treating an un-run query as a proven absence) is closed. Chunking
+does correctly prevent the URL itself from blowing up.
+
+**Suggested fix.** Page the chunk query the way `lib/repo`'s `listAll` already does for UIL-004 — advance
+by rows *received*, not rows requested — so the coupling between `chunkSize` and `max-rows` stops
+mattering regardless of what either value is set to. Cheap alternative: a comment on `chunkSize` naming
+the `max-rows` constraint explicitly, though that only protects for as long as someone reads it.
+
+**Priority rationale: Low, and explicitly not for being unimportant.** Not reachable at current values,
+no data at risk today, small fix. Held Low because it needs a code change to become live — but it's the
+same class as the `list()` truncation found earlier today and the same class as UIL-004 itself: a silent
+partial result that reads as a complete one, invisible until the exact moment it isn't. Recorded as its
+own entry rather than left in a message, per the lesson UIL-020 already recorded: a finding with no
+owner and no tracking item doesn't get deprioritized, it evaporates.
+
+## UIL-029 — Hand-written `DbClient` test doubles are unverified, so a fixture can certify the wrong behaviour
+
+- **Reported:** 2026-09-13 (not from Karvi — found by the UIL-010/015 dev session, in its own test file,
+  reported against itself)
+- **Status:** Open
+- **Priority:** Medium (Senior BA's read) — the one Medium with a live argument for jumping the queue,
+  since it protects every fix currently being written; not reassigned ahead of the four open Highs unless
+  Karvi says otherwise
+- **Area:** all (test infrastructure)
+- **Env:** n/a — in the repo, not a running environment
+
+**The concrete instance, already fixed in this one file as part of landing UIL-015.** Two of that
+session's own UIL-010 tests asserted "exact match ranks first" and **passed while the bug was live** and
+Karvi was seeing five wrong McDonald's cards. The fake `DbClient` in
+[`tests/catalog/card-search.test.ts`](../tests/catalog/card-search.test.ts) re-sorted on each `.order()`
+call instead of composing them the way PostgREST does, and compared with `localeCompare`, which does not
+put digits before letters — the exact mechanism of UIL-015 (`2011bw` sorting before `me02.5`). Confirmed
+directly: the file's current comment names both defects explicitly (`:110-116`) as the reason the fake
+used to mask the bug. Measured against pre-fix source: the unfaithful fake (as it shipped) failed 1 test;
+a faithful one fails 5, including the two that should have caught it.
+
+**Why Medium, not Low.** This is UIL-013's failure mode — a fixture contradicting production — in a
+different file, found hours after the same session helped diagnose UIL-012, which was itself hidden by
+display-form band fixtures. Three occurrences of one shape in one day, by different people, is the tool
+permitting it silently rather than anyone being careless. Unlike UIL-013, this one demonstrably hid a
+live High-priority bug from a green suite rather than being a latent risk. `tests/support/pglite-client.ts`
+says the same thing in its own header, independently: "[a hand-rolled fake] cannot prove those ops do
+what the author expected once Postgres runs them... UIL-012 shipped through a fully green suite exactly
+that way." Not High: no user-facing defect exists right now, and every fix currently in flight is being
+revert-checked against pre-fix source, which is the active mitigation.
+
+**The risk is not uniform across the six files — triaged by class, which narrows the fix.**
+
+- **Dangerous: doubles modelling PostgREST query semantics** — ordering, `limit`, `in`, filter
+  composition. These can disagree with the server about *which rows come back*, which is exactly how
+  this bug hid. `tests/catalog/card-search.test.ts`, `tests/catalog/mirror.test.ts`,
+  `tests/sync/catalog-prefetch.test.ts`, `tests/repo/list-all-paging.test.ts` (the last as an inline fake
+  table object, `db: { from: () => query } as unknown as DbClient`, same exposure with no named
+  function).
+- **Harmless: call-recorders that only assert an emitted op set.** They cannot produce this failure mode
+  at all — there's no query result to get wrong. `tests/sync/exec-atomicity.test.ts` is additionally
+  **mixed**: its "builder logic" layer uses its own `FakeDb`/`fakeClient`, but a separate layer in the
+  same file already goes through real PGlite via `pglite-rpc`'s `freshRpcDb`/`applyOps` — already
+  half-following the pattern this entry asks for.
+- **`tests/plan/pending-placements.test.ts` — and I got this one wrong first and am correcting it in
+  place.** I earlier concluded its no-op `order()` was harmless because `lib/plan/pending.ts` never calls
+  `.order()`. That checked the wrong file: `loadPendingPlacements` calls `copyRepo.listUnplaced`, and
+  [`lib/repo/copy.ts:52-53`](../lib/repo/copy.ts:52) **does** order `.order("created_at").order("id")`,
+  documented as "oldest first, so the queue is worked in the order the cards entered the collection."
+  So the fake's no-op `order()` meant that contract was **never assertable** — and it matters concretely:
+  she works the stack top to bottom and the haul-bar pips are indexed by that order, so a silent reversal
+  in `listUnplaced` would be a real, visible-to-her defect the suite could not have caught. This belongs
+  in the dangerous bucket, not a harmless third case. (The lesson repeats today's recurring one: I
+  checked `pending.ts` because it's the file the test is named for, not `copy.ts` where the ordering
+  actually lives — a claim answering the wrong question.)
+
+**#80 (open) fixes two of the dangerous set — `pending-placements` and `list-all-paging` — and the
+audit that produced it is the most useful part.** All numbers below observed by reverting and running,
+not predicted:
+
+- `tests/repo/list-all-paging.test.ts` was a **near-miss**: its `order()` was a no-op, so nothing
+  noticed if the paged read stopped ordering by primary key. Removing `.order(pk)` from `pageAll`
+  ([`lib/repo/base.ts:49`](../lib/repo/base.ts:49)) now fails **4 tests**; before, **zero**. Not
+  cosmetic: paging is only coherent over a stable window — without a stable order a paged walk can repeat
+  or skip rows between requests, which is UIL-004's "partial result reads as complete" through a
+  different door, and `listAll` is what reads the 23,548-row `catalog_card`.
+- `tests/sync/catalog-prefetch.test.ts` needed **nothing** — it implements only `eq`/`in` for a query
+  that uses only `eq`/`in`. Worth recording as the discriminator working: the risk isn't "hand-rolled,"
+  it's "hand-rolled *and* modelling an operator the assertions depend on." A double that implements
+  exactly what's called is correct scope.
+
+**So the remaining scope after #80 is `tests/catalog/card-search.test.ts` (already fixed landing
+UIL-015), `tests/catalog/mirror.test.ts`, and the mixed `tests/sync/exec-atomicity.test.ts`** — move the
+query-semantics ones onto `tests/support/pglite-client.ts`; leave the pure call-recorders alone.
+
+**#80 buys time, not immunity — the entry stays open with reduced scope, not closed.** The doubles still
+model only the operators the code under test happens to call today, so the next new operator is
+unprotected again. The durable answer remains the real-Postgres client: repo-level query behaviour tested
+through `tests/support/pglite-client.ts` cannot drift the way a hand-rolled fake silently can.
+
+**`tests/support/pglite-client.ts` is the mitigation pattern, not a suggestion — it already exists.**
+Backed by real Postgres, real migrations, real RLS, real `apply_write_ops`; deliberately narrow (only
+the read surface `lib/repo` actually uses), and throws loudly rather than lying if a repo call shape
+grows past what it models. This is what made PR #67's suite trustworthy, and it's the same class of
+fidelity issue UIL-013 already described for engine-test fixtures, generalized: **a hand-written test
+double is production code with no tests of its own.** Nothing checks that ours models PostgREST
+correctly, and this entry is the second and third time in one day that gap produced a real miss.
+
+**Suggested fix.** Move the four query-semantics doubles above onto `tests/support/pglite-client.ts`.
+Where a real DB is genuinely too heavy for a given test, add a conformance test that runs the same
+queries through both the fake and PGlite and asserts identical results instead — the durable version,
+since it makes the double's fidelity a tested property instead of an assumption.
+
+**How this was found, and the sharper rule it implies.** The revert check (run a test against pre-fix
+source, confirm it fails) was adopted to prove a test catches its own bug. It turns out to do more: it
+audits the test double itself. The precise logic — a test that passes pre-fix is *positive* evidence the
+harness is wrong, because a correct harness, a live bug, and a correct assertion cannot all hold at
+once. So the rule isn't "revert-check migrations" — it's **run the revert check on every fix, and treat
+an unexpected pass as a harness bug until proven otherwise.** The dev session found this only because the
+headline test passed pre-fix, made no sense, and got chased down instead of accepted as green.
+
+**Independently reproduced twice more, from two different starting points.** One session reverted
+`search()` to its pre-fix form while keeping the current, corrected fake and got 5 failures naming both
+original UIL-010 tests explicitly. A second, isolated run (this session, in a throwaway worktree, node
+untouched) reproduced the identical result: 5 of 15 fail, 10 pass, same two named tests among the
+failures. Three sessions, three different entry points, same number.
+
+**Priority rationale (Senior BA's read): Medium.** Not High — nothing user-facing is broken right now,
+and the fixes currently in flight are already being revert-checked as a mitigation. Genuinely the one
+open Medium with an argument for jumping ahead of it, since a fix here protects every other fix's own
+tests from the same failure mode — flagging that explicitly rather than letting it sit purely on
+priority-number ordering. Karvi has not seen this yet.
+
+## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
+
+- **Reported:** 2026-09-14 (not from Karvi — found by the Senior Dev session while fixing UIL-017)
+- **Status:** Open
+- **Priority:** Low (Senior BA's read)
+- **Area:** Plan / Engine
+- **Env:** n/a — in the repo, not a running environment
+
+**Root cause: a declared-and-read engine field that no caller ever writes.** Verified directly on
+`origin/develop`:
+
+- [`lib/engine/cascade.ts:56`](../lib/engine/cascade.ts:56) — `openBlockNeeds?: number;` declared on the
+  context.
+- [`lib/engine/cascade.ts:245`](../lib/engine/cascade.ts:245) — read: `resolveDuplicate(…,
+  ctx.openBlockNeeds ?? 0)`.
+- [`lib/engine/duplicate.ts:79`](../lib/engine/duplicate.ts:79) / [`:101`](../lib/engine/duplicate.ts:101)
+  — read again, and `offerBlockRepurpose: openBlockNeeds > 0`.
+
+A grep across `lib/` and `app/` finds **no writer** — nothing ever sets it. So it is always 0,
+`offerBlockRepurpose` is always `false`, and the "Offered as a repurposed binder block." clause on the
+duplicate/bulk path ([`cascade.ts:279`](../lib/engine/cascade.ts:279)) **has never rendered in the
+shipped app.**
+
+**Two possibilities, and this entry deliberately does not pick one — because only Karvi can.** Either
+the feature was designed and never wired (then the gap is the *wiring*, and deleting the field would
+quietly drop a real product intent), or it's a vestige (then the field, the copy, and `duplicate.ts`'s
+`openBlockNeeds` parameter should all go). Deciding requires knowing whether "repurpose an open binder
+block" is still a product idea — a product call, not an engineering one.
+
+**Why the Senior Dev was right to leave it while fixing UIL-017.** It declined to add an engine field
+just to make the unreachable copy explainable — that would be building plumbing for a message nobody
+can see. Recording the decision is the point here, more than the code.
+
+**Second instance of dead-guard code today, worth a cross-reference.** `app/(ui)/coll/actions.ts:87`'s
+`band(...) ?? "white"` fallback can never fire (noted in UIL-012's record — `band()` always returns a
+value). Two independent unreachable-defensive-code findings in one day suggests a dedicated pass for
+dead guards might eventually be worth more than either individual fix.
+
+**Priority rationale (Senior BA's read): Low.** Genuinely Low, not "Low because we're busy" — nothing
+malfunctions, no data is at risk, and no user-visible behaviour changes either way until someone decides
+which direction to resolve it. **Flagging specifically for Karvi:** the decision of whether the
+binder-block repurposing idea is live or vestigial is hers, and it determines whether the fix is "wire
+it up" or "delete it."
