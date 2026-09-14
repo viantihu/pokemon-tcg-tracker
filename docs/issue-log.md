@@ -1588,24 +1588,34 @@ user-facing sentence:
   line; to the front half, ${b} band (prefer a binder with open ${b} space...` ``
 
 Five sites, all the same shape, two of them (`:295`, `:364-366`) easy to miss on a quick grep because
-the leak isn't in the same line as the `reason:` keyword. PR #77 (open) restructures the same-colour
-member *count* out of these strings into a new `sameColorMembers` field, but its diff doesn't touch
-`b` in any of the five lines above — this leak is still live regardless of what #77 lands.
+the leak isn't in the same line as the `reason:` keyword. PR #77 (merged) restructures the same-colour
+member *count* out of these strings into a new `sameColorMembers` field.
 
-**This is the display half of UIL-013's two-vocabulary problem, opposite direction.** UIL-012 was a
-display name (`"White"`) reaching the database. This is a database key (`dark_blue`) reaching the
-screen. Three entries now trace to the same unenforced display/key boundary — UIL-012, UIL-013, and
-this one.
+**Correction (2026-09-14) — I asked the wrong question and the leak is actually fixed. Retracting "still
+live regardless of what #77 lands."** I checked *"does #77 edit `b` at these five lines?"* — no — and
+concluded the leak survives. Wrong question. #77 fixes it one layer up, by **replacing the pass-through
+entirely** rather than editing the leaking lines: [`lib/plan/assemble.ts`](../lib/plan/assemble.ts) adds
+`describeReason(incoming, result, l)`, and `toPlanItem` now uses that instead of `reason: result.reason`
+([`assemble.ts:130`](../lib/plan/assemble.ts:130)). The engine's raw trace — `b` included — never reaches
+the screen at all any more; `describeReason` builds new reader-facing copy per `CascadeStep`, translating
+the band through `bandName`/`bandDisplayByKey` at the display boundary instead. `cascade.ts` keeping the
+raw key at those five lines is now correct and intended: the engine stays in DB-key space, exactly as
+UIL-013's contract says it should, and the translation happens where it's rendered, not where it's
+decided. The PR's own tests pin the refuting check directly: `expect(reason).not.toMatch(/\bred\b/)` next
+to `expect(reason).toMatch(/\bRed\b/)`, same for green and white.
 
-**Suggested fix.** Keep `reason` as an internal trace field for debugging/logs, and add a display-copy
-layer that translates `step` + the band's own `bandDisplayByKey` lookup (already loaded at plan-context
-time) into a sentence, rather than string-interpolating `b` directly — the same shape UIL-011 proposes
-for mirror/sync copy, and the same lookup `app/(ui)/coll/actions.ts` already builds for this exact
-purpose on the Collections screen.
+**The generalizable rule, worth stating outright since this is the third time today the wrong-question
+version of this mistake has been made:** when a claim is "X isn't fixed," the check is *"can the bad
+output still occur?"*, never *"was line N edited?"* A fix one layer away from the line you're
+watching passes the second question and fails the first.
 
-**Priority rationale (Karvi's call): Medium.** Lower than UIL-011's own Low-by-default because this
-string sits mid-workflow, in the panel she reads on every single card while sorting, rather than in an
-occasional empty state — more exposure, more confusion per haul.
+**What still stands: the connection to UIL-013, and the priority.** This was the display half of
+UIL-013's two-vocabulary problem — UIL-012 a display name reaching the database, this a database key
+reaching the screen — and it's now **fixed** rather than open, closing the loop on all three: UIL-012,
+UIL-013, and this one all trace to the same boundary, and all three are now addressed.
+
+**Priority rationale (Karvi's call): Medium** — recorded for history; the underlying leak this rated is
+resolved by #77. Status transition is the Senior BA's to record.
 
 ## UIL-018 — Colour band sections have no way to collapse
 
