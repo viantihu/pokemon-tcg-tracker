@@ -5,15 +5,19 @@
  * `cappedCountingTable` below models the ONE thing this bug hinges on: the SAME request that caps
  * `data` at `maxRows` still reports the true FILTERED total via `count` when asked for
  * `{ count: "exact" }` — that is PostgREST's documented `Content-Range` behaviour, not a guess. What
- * this suite proves is that `list()` / `listWaiting()` / `listUnplaced()` react correctly to that
- * combination once it happens. It does NOT prove PostgREST actually sends that combination against a
- * live, truly-capped table — no real PostgREST server is reachable in this environment (PGlite is
- * real Postgres with no REST layer in front of it, so it has no `max-rows` or `Content-Range` to
- * model), and forcing a real 1000+-row table on Testing's Supabase project is out of scope here. See
- * the PR description for that distinction.
+ * this suite proves is that `list()` / `listWaiting()` react correctly to that combination once it
+ * happens. It does NOT prove PostgREST actually sends that combination against a live, truly-capped
+ * table — no real PostgREST server is reachable in this environment (PGlite is real Postgres with no
+ * REST layer in front of it, so it has no `max-rows` or `Content-Range` to model), and forcing a real
+ * 1000+-row table on Testing's Supabase project is out of scope here. See the PR description for
+ * that distinction.
+ *
+ * `copyRepo.listUnplaced` USED to be covered here too, but it no longer detects-and-throws: a short
+ * read on the Haul Plan's own queue would lock her out of the one screen that lets her work the
+ * queue down below the cap, so it pages instead (see `tests/repo/list-unplaced-paging.test.ts`).
  */
 import { describe, expect, it } from "vitest";
-import { copyRepo, createRepo, unresolvedEntryRepo, type DbClient } from "@/lib/repo";
+import { createRepo, unresolvedEntryRepo, type DbClient } from "@/lib/repo";
 
 type Row = Record<string, unknown>;
 
@@ -100,40 +104,5 @@ describe("UIL-031 — unresolvedEntryRepo.listWaiting throws rather than silentl
     const db = cappedCountingTable(rows, 1000);
     const out = await unresolvedEntryRepo.listWaiting(db);
     expect(out.map((r) => r.id)).toEqual(["w1", "w2"]);
-  });
-});
-
-describe("UIL-031 — copyRepo.listUnplaced throws rather than silently truncate", () => {
-  const unplaced = (id: string, createdAt: string) => ({
-    id,
-    role: "bulk",
-    binder_id: null,
-    line_slot_id: null,
-    created_at: createdAt,
-  });
-  const placed = { id: "p0", role: "shelved", binder_id: "b1", line_slot_id: null, created_at: "" };
-
-  it("throws when unplaced copies alone exceed the cap, even with placed copies present", async () => {
-    const rows = [
-      placed,
-      unplaced("u3", "2026-09-03"),
-      unplaced("u1", "2026-09-01"),
-      unplaced("u2", "2026-09-02"),
-      unplaced("u4", "2026-09-04"),
-    ];
-    const db = cappedCountingTable(rows, 3);
-    await expect(copyRepo.listUnplaced(db)).rejects.toThrow(/truncated/i);
-  });
-
-  it("returns every unplaced copy, oldest first, when under the cap", async () => {
-    const rows = [
-      placed,
-      unplaced("u3", "2026-09-03"),
-      unplaced("u1", "2026-09-01"),
-      unplaced("u2", "2026-09-02"),
-    ];
-    const db = cappedCountingTable(rows, 1000);
-    const out = await copyRepo.listUnplaced(db);
-    expect(out.map((r) => r.id)).toEqual(["u1", "u2", "u3"]);
   });
 });
