@@ -344,7 +344,7 @@ jobs:
           PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |
           set -euo pipefail
-          cat > /tmp/premise.mjs <<'JS'
+          cat > premise.mjs <<'JS'
           import { createClient } from "@supabase/supabase-js";
           const db = createClient(
             `https://${process.env.PROJECT_REF}.supabase.co`,
@@ -361,7 +361,7 @@ jobs:
             error: error ? error.message : null,
           }));
           JS
-          node /tmp/premise.mjs > out.json
+          node premise.mjs > out.json
           cat out.json
           rows=$(jq -r '.rows' out.json); cnt=$(jq -r '.count' out.json); err=$(jq -r '.error' out.json)
           if [ "$err" != "null" ]; then
