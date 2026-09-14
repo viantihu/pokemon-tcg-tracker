@@ -335,9 +335,12 @@ an allow-list, since a genuinely truncated set could later hide behind one.
 ## UIL-005 — Deploy's migration step is dead: the Supabase access token lost its privileges
 
 - **Reported:** 2026-09-13 (found while running the catalog mirror for UIL-004)
-- **Status:** Fixed — PR [#46](https://github.com/viantihu/pokemon-tcg-tracker/pull/46) removes the
-  Management-API dependency entirely, so the revoked token is no longer a blocker. **Not caused by a
-  misconfiguration on Karvi's side** — see the correction at the end of this entry.
+- **Status:** **Closed** — PR [#46](https://github.com/viantihu/pokemon-tcg-tracker/pull/46) removed the
+  Management-API dependency entirely, and the last outstanding item (`SUPABASE_ANON_KEY` on the `testing`
+  environment) was set by Karvi 2026-09-14 02:23Z. **Deploy is now green end to end** — run
+  [`34799214277`](https://github.com/viantihu/pokemon-tcg-tracker/actions/runs/34799214277) on `15a79de`:
+  `Vercel` · `migrate` · `smoke` · `acceptance` all success. **Not caused by a misconfiguration on
+  Karvi's side** — see the correction at the end of this entry.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Deploy
 - **Env:** Testing (and Production, once it is used)
@@ -646,7 +649,10 @@ three, though — nothing is broken, so Low is defensible if she would rather th
 ## UIL-009 — Clicking outside the collection popup discards everything typed
 
 - **Reported:** 2026-09-13
-- **Status:** Fixed — PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56), awaiting QA review
+- **Status:** **Fixed** — PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56) MERGED to
+  `develop` 2026-09-14 (squash `0f16007`), QA-reviewed, and confirmed **deployed** to Testing on
+  `258db13` (`Vercel`/`migrate`/`smoke`/`acceptance` all green). Awaiting Karvi's confirmation — the
+  behaviour is interaction-only and was never exercised in a browser.
 - **Priority:** High (Karvi's call)
 - **Area:** Collections
 - **Env:** Testing
@@ -716,7 +722,12 @@ nothing; Close and Escape should ask), then confirm an untouched dialog still cl
 ## UIL-010 — Card search returns nothing for a full collector number like "099/182"
 
 - **Reported:** 2026-09-13
-- **Status:** Fixed — PR [#55](https://github.com/viantihu/pokemon-tcg-tracker/pull/55), awaiting QA review
+- **Status:** **Fixed** — PR [#55](https://github.com/viantihu/pokemon-tcg-tracker/pull/55) MERGED to
+  `develop` 2026-09-14 (squash `15a79de`), QA-reviewed, and confirmed **deployed** to Testing. Awaiting
+  Karvi's confirmation. Note PR [#58](https://github.com/viantihu/pokemon-tcg-tracker/pull/58) (squash
+  `d40536c`) follows it with a comment-only change recording that `localIdCandidates` in
+  `lib/sync/resolve.ts` is now load-bearing for **search** as well as sync — a change to its padding
+  rules moves two subsystems, and nothing in the file said so.
 - **Priority:** High (Karvi's call)
 - **Area:** Lookup / Collections
 - **Env:** Testing
@@ -846,7 +857,11 @@ doing alongside UIL-010 anyway, since the two land on the same screen and the sa
 ## UIL-012 — Committing a haul fails with a foreign-key violation on `color_band`
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Fixed** — PR [#57](https://github.com/viantihu/pokemon-tcg-tracker/pull/57) MERGED to
+  `develop` 2026-09-14 (squash `474df08`), QA-reviewed, deployed to Testing on `258db13`. Awaiting
+  Karvi's confirmation: commit a haul containing a Trainer or Energy card. **The trigger was NOT the
+  config tables** — see the correction at the end of this entry, which overturns the two narrowings
+  above it.
 - **Priority:** High
 - **Area:** Plan
 - **Env:** Testing
@@ -1060,6 +1075,52 @@ the wrong place — worth fixing alongside, since it currently reads as protecti
 
 `bandPosition()` remains wrong for the same reason noted in the original entry: it indexes
 `BAND_ORDER`, so every real key-form band scores "unknown, sort last."
+
+### Resolution 2026-09-14, PR [#57](https://github.com/viantihu/pokemon-tcg-tracker/pull/57) — and both narrowings above were wrong about the trigger
+
+**The config tables were never at fault.** Read twice against live Testing nine minutes apart, via a
+read-only `workflow_dispatch` job using the existing `SUPABASE_SERVICE_ROLE_KEY` (runs
+[`34798772519`](https://github.com/viantihu/pokemon-tcg-tracker/actions/runs/34798772519) and
+[`34799273970`](https://github.com/viantihu/pokemon-tcg-tracker/actions/runs/34799273970)): **ten
+key-form bands, all fourteen mappings, no orphans, nothing capitalised** — matching `0003_config.sql`
+exactly. So no missing row, no mis-cased row, and **no corrective migration was needed.**
+
+**The real trigger bypasses the map entirely.** `lib/engine/cascade.ts:378` — STEP 6, Trainer /
+Supporter / Item / Energy — hard-coded the display literal:
+
+```ts
+target: { kind: "front-half", binderId: frontHalfBinderId(ctx, "White"), band: "White" },
+```
+
+Every other cascade step routes through the injected key-form map. STEP 6 alone stored `"White"`, which
+no `color_band` row matches. And `lib/plan/adapt.ts:82` sets `category: isNonPokemon ? "Trainer" :
+"Pokemon"`, so **every** non-Pokémon card lands there — one Trainer or Energy card in a haul killed the
+entire commit. This was never an edge case; it fired on any real haul.
+
+It also explains the symptom nobody had accounted for: the **plan preview** computed the band via
+`band(card, map)` and got `white`, while the **commit** used `result.target.band` and got `"White"`. The
+preview looked correct and only the commit failed, after she had built the whole haul.
+
+**Shipped in #57:** STEP 6 uses the map's white key; `band()`'s fallback resolves via `whiteKey(map)`
+rather than a constant; `assertPlacementBandsConfigured` guards the write set in `commitHaul` so any
+future band mismatch names **the card and its type** instead of surfacing a raw 23503;
+`assertBandConfig` fails fast at plan-context load if the config tables are empty or hold a non-key
+band; `bandPosition` accepts DB keys. Reproduction pinned on PGlite against the real 0001–0007
+migrations and the real `apply_write_ops`: a Nest Ball (Trainer/Item) now commits with
+`color_band = 'white'`, and **reverting only the STEP 6 line makes that test fail with
+`copy_color_band_fkey`**. 370 passing, +12 new. No worked example changed its answer.
+
+Note `assertBandConfig` is **provably not the fix** — the config read shows it passes on Testing today.
+It guards a future hand-edit. Recording that explicitly so it is not later remembered as what resolved
+UIL-012.
+
+**Process lesson, worth more than the bug.** This entry was narrowed twice toward the config tables, and
+by the third round the narrowing was being treated as a premise rather than a hypothesis. Three sessions
+agreed with each other; none had checked whether `copy.color_band` had a second writer. It does. The
+available inference from *"the map is clean and has no unmapped types"* was that **something bypasses the
+map** — and that inference was reachable without any new data. A fourth session found it by testing the
+narrowing instead of building on it. When writing a narrowing, mark plainly what is **verified** versus
+what is **inferred**.
 
 ## UIL-013 — Engine tests run in a colour-band vocabulary production never uses, so band bugs pass a green suite
 
