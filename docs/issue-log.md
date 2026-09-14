@@ -940,3 +940,72 @@ capitalised or missing is the bug.
 **The `band()` fallback should still be fixed** — returning a display-name constant from a function
 documented to work in DB-key space is a latent defect that will bite the next unmapped type whether or
 not it is what broke this commit. But it is now the *second* thing to do, not the first.
+
+### Corrected 2026-09-14 — the fallback IS the defect, and the trigger is a missing config row
+
+**Retracting the two candidates above.** The "display-name row in `type_color_map`" and "`color_band`
+missing the row the map points at" hypotheses are both impossible, for one reason I missed:
+[`0002_domain.sql:38`](../supabase/migrations/0002_domain.sql:38) constrains the map to the band table.
+
+```sql
+create table type_color_map (
+  card_type text primary key,
+  band      text not null references color_band (band)   -- <-- FK
+);
+```
+
+Every value the runtime map can hold is therefore FK-guaranteed to exist in `color_band` already. A
+`type_color_map` row reading `'White'` would *require* a `color_band` row `'White'`, and if that row
+exists then `copy.color_band = 'White'` satisfies `copy_color_band_fkey` and there is no error. The
+hypothesis cancels itself. Credit to the tech-lead session for catching it.
+
+**What remains is a single path, and it is a code defect.** Since every *successful* lookup returns an
+FK-valid key, the only way `copy.color_band` receives an absent value is the fallback:
+
+```ts
+export const WHITE: Band = "White";           // DISPLAY name
+export function band(card, map): Band {
+  const resolved = map[effectiveType(card)];
+  return (resolved as Band) ?? WHITE;          // fires only when the lookup is UNDEFINED
+}
+```
+
+`lib/engine/bands.ts` is written wholly in **display space** — `BAND_ORDER` is `"Red"…"White"` and
+`DEFAULT_TYPE_COLOR_MAP` is `Fire: "Red"`. Production runs it in **key space**, because
+`lib/plan/context.ts:144` builds the map straight from DB rows (`'red'`, `'dark_blue'`, `'white'`). A
+hit returns key form and inserts cleanly; the fallback returns `"White"`, which no `color_band` row
+matches, and the insert dies with exactly the error she saw.
+
+**So the trigger is a `type_color_map` row that is *absent*, not mis-cased.** The fallback fires only on
+`undefined`. Karvi is the only one who can check this — the DB password and secret key exist only in
+GitHub secrets and Vercel env, and nothing surfaces their values, so no session here can query Testing.
+Supabase SQL editor, project `cpmwdcmokbgcpmkvbtsw`:
+
+```sql
+select count(*) from type_color_map;                       -- expect 14
+select card_type, band from type_color_map order by card_type;
+```
+
+Expected rows: `Colorless→white, Darkness→dark_blue, Dragon→olive, Fairy→pink, Fighting→orange,
+Fire→red, Grass→green, Item→white, Lightning→yellow, Metal→white, Psychic→purple, Supporter→white,
+Trainer→white, Water→light_blue`. **A missing `card_type` names the card class that crashes her commit.**
+If all 14 are present and correct, this trace is wrong and it goes back to the drawing board.
+
+**Both halves need fixing, and the order matters for the write-up:** the missing row is the *trigger*,
+the broken fallback is the *defect*. Restoring the row unblocks her; leaving the fallback alone means
+the next missing row does this again. A missing config row should degrade to the white band, which is
+what the catch-all was written to do.
+
+**Why 374 green tests missed it.** Every engine test injects `DEFAULT_TYPE_COLOR_MAP`, which is display
+form (`tests/engine/bands.test.ts`, `cascade.test.ts`, `line.test.ts` all set `MAP =
+DEFAULT_TYPE_COLOR_MAP`). Nothing anywhere exercises `band()` against a key-form map, so the engine is
+verified only in a space production never uses. **A regression test for this has to inject key-form
+bands**, or it will pass while the bug is live.
+
+**Related dead code, same root confusion.** `app/(ui)/coll/actions.ts:87` reads
+`band(toCatalogCard(row), typeColorMap) ?? "white"`. The `?? "white"` can never fire, because `band()`
+returns the `WHITE` constant rather than anything nullish. Someone sensed the hazard and guarded it in
+the wrong place — worth fixing alongside, since it currently reads as protection that does not exist.
+
+`bandPosition()` remains wrong for the same reason noted in the original entry: it indexes
+`BAND_ORDER`, so every real key-form band scores "unknown, sort last."
