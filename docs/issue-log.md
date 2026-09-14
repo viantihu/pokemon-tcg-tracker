@@ -1484,7 +1484,11 @@ call paths and "the file changed" would have proved nothing either way.
 ## UIL-016 — No card images on the Haul Plan worklist or spotlight panel
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Closed** — PR [#78](https://github.com/viantihu/pokemon-tcg-tracker/pull/78) MERGED to
+  `develop` (squash `ff4afa4`), confirmed deployed to Testing, and **confirmed resolved by Karvi on
+  Testing 2026-09-14**. `imageUrl` is threaded onto `PlanItem` at the adapter boundary as
+  required-not-optional, so unwired plumbing is a compile error rather than a silent blank. A third site
+  (`:238`, feeding `MoveTargetCard`) was fixed too — the entry named two.
 - **Priority:** High (Karvi's call)
 - **Area:** Plan
 - **Env:** Testing
@@ -1538,7 +1542,11 @@ just to patch the one screen where it's currently missing.
 ## UIL-017 — Internal field name "cardClass" leaks into the routing explanation
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Closed** — PR [#77](https://github.com/viantihu/pokemon-tcg-tracker/pull/77) MERGED to
+  `develop` (squash `99877b3`), confirmed deployed, and **confirmed resolved by Karvi on Testing
+  2026-09-14**. Fixed at the display boundary: `toPlanItem` now calls `describeReason` instead of passing
+  `result.reason` through, so the engine's internal trace never reaches the screen. See the correction
+  below — three of the six lines this entry accused do not leak, and two it missed do.
 - **Priority:** Medium (Karvi's call)
 - **Area:** Plan
 - **Env:** Testing
@@ -1620,7 +1628,12 @@ resolved by #77. Status transition is the Senior BA's to record.
 ## UIL-018 — Colour band sections have no way to collapse
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Closed** — PR [#78](https://github.com/viantihu/pokemon-tcg-tracker/pull/78) MERGED to
+  `develop` (squash `ff4afa4`), confirmed deployed, and **confirmed resolved by Karvi on Testing
+  2026-09-14**. A folded band renders **nothing below its header** — rows absent from the tree, not
+  CSS-hidden (measured 702 rows / 381 KB expanded → 0 rows / 7.6 KB folded). Fold state rides in the
+  resume payload but deliberately **not** in the plan fingerprint, so folding a band cannot invalidate a
+  computed plan.
 - **Priority:** High (Karvi's call)
 - **Area:** Plan
 - **Env:** Testing
@@ -1795,7 +1808,11 @@ suite meaning something. Still lands on Low; both readings flagged for Karvi.
 ## UIL-022 — Moving a card into a collection from the Line or Plan screen orphans it
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
+  `develop` (squash `e0773e2`), QA-reviewed, confirmed deployed. **No migration needed** — every op
+  already existed (`union_collection_targets` shipped in 0007). Awaiting Karvi's confirmation, and note
+  the Haul Plan path is the one to test: it is a **separate** code path from the Line screen, so fixing
+  only `applyMove` would have left half of this live. See the corrections below.
 - **Priority:** High (Senior BA's read)
 - **Area:** Line, Plan, Collections
 - **Env:** Testing
@@ -1868,7 +1885,11 @@ wrong too. Fixed now; both corrected here rather than left standing.**
 ## UIL-023 — `applyMove` is a fourth write path and it is not atomic
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
+  `develop` (squash `e0773e2`), QA-reviewed, confirmed deployed. `applyMove` is now **one**
+  `apply_write_ops` call, verified by QA at `write.ts:87` with only reads preceding it. `applyDecision`
+  remains un-transacted **deliberately** — converting it needs a migration, since `wishlist_item` can
+  only be INSERTed through the RPC, and this entry's root cause was scoped to `applyMove`.
 - **Priority:** Medium (Senior BA's read)
 - **Area:** Line
 - **Env:** Testing
