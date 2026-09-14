@@ -1038,3 +1038,56 @@ the wrong place — worth fixing alongside, since it currently reads as protecti
 
 `bandPosition()` remains wrong for the same reason noted in the original entry: it indexes
 `BAND_ORDER`, so every real key-form band scores "unknown, sort last."
+
+## UIL-013 — Engine tests run in a colour-band vocabulary production never uses, so band bugs pass a green suite
+
+- **Reported:** 2026-09-13 (not from Karvi — surfaced during UIL-012's investigation, independently
+  confirmed from two directions)
+- **Status:** Open
+- **Priority:** Medium (Senior BA's proposed read — Karvi has not ruled yet)
+- **Area:** Plan / Engine (test infrastructure)
+- **Env:** n/a — the defect is in the repo, not a running environment
+
+Not a UAT report. Logged here because it is the reason a High-priority, core-loop-breaking defect
+(UIL-012) shipped past a fully green test suite, and it will do so again on the next band change.
+
+**The finding.** Two vocabularies exist for a colour band, deliberately kept apart: DB keys (`red`,
+`dark_blue`, `white`) and engine display names (`Red`, `Dark blue`, `White`).
+[`lib/plan/adapt.ts:9-10`](../lib/plan/adapt.ts:9) documents the contract — the engine is fed the DB
+`type_color_map` "and it operates entirely in DB-key space." [`lib/plan/context.ts:143-144`](../lib/plan/context.ts:143)
+honours it: `typeColorMap` is built straight from DB rows (`t.band`), always key-form. Production is
+**always** key-form.
+
+Every engine test instead feeds `DEFAULT_TYPE_COLOR_MAP` ([`lib/engine/bands.ts:40`](../lib/engine/bands.ts:40)),
+which is **display-form** (`Fire: "Red"`). Its only callers are three test files —
+`tests/engine/cascade.test.ts`, `tests/engine/line.test.ts`, `tests/engine/bands.test.ts` — and its own
+definition. Nothing in `lib/` or `app/` reads it. The entire band system has only ever been exercised in
+a vocabulary nothing in production uses.
+
+**Why it's a defect, not a curiosity.** [`lib/engine/cascade.ts:378`](../lib/engine/cascade.ts:378)
+hard-codes `band: "White"` for Trainer / Supporter / Item / Energy, bypassing the injected map entirely.
+In production that stores a value `color_band` has no row for, so any haul containing a Trainer or
+Energy card died on `copy_color_band_fkey` — the app's core action, broken (UIL-012). In a test built on
+`DEFAULT_TYPE_COLOR_MAP`, that same literal is indistinguishable from the correct value, so 258 passing
+tests certified code that could not commit a real haul.
+
+**Corroborating detail.** [`lib/backfill/resolve.ts:31`](../lib/backfill/resolve.ts:31) falls back to
+`"white"` (key-form, FK-valid); [`lib/engine/bands.ts:84`](../lib/engine/bands.ts:84) falls back to
+`WHITE`, i.e. `"White"` (display-form, not FK-valid). Same intent, two spellings — nothing anywhere
+enforces which vocabulary a given code path owes the database.
+
+**Suggested fix.** Either delete `DEFAULT_TYPE_COLOR_MAP` and move engine tests onto key-form fixtures,
+or keep both vocabularies and make the boundary impossible to cross — a branded type so a display name
+cannot type-check where a key is expected. The second is the durable version. PR #57 fixes the concrete
+UIL-012 instances and gives the tests it touches key-form fixtures; it does not touch the suite-wide
+fixture problem, which is why this needs its own entry rather than a line inside UIL-012.
+
+**Ambiguity left for the implementer:** whether display names (`BAND_ORDER`, `DEFAULT_TYPE_COLOR_MAP`)
+are still needed anywhere, or are vestigial from before the DB owned the band vocabulary. If vestigial,
+deleting one vocabulary beats policing the boundary between two.
+
+**Priority rationale (Senior BA's read, Medium).** Nothing a user can see is broken by this entry on its
+own — normally Low. But it is the mechanism that let UIL-012 stay invisible behind a green suite, and it
+will hide the next band-related regression the same way. Argued against High because nothing is
+*currently* broken by it once UIL-012's fix lands. Flagging to Karvi for her ruling; record her read here
+once she gives it.
