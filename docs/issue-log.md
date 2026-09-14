@@ -1254,11 +1254,35 @@ the whole suite's vocabulary," and it's the rule that would actually have caught
 - **The test for whether any fix actually worked:** after it lands, is there exactly **one** definition
   of "the white key" that both the engine and backfill consult? Today there are two.
 
-**Priority, revised: Low (down from Medium), with the Medium argument recorded rather than dropped.** The
-hole that let UIL-012 through is closed — #57 added the missing Trainer/Energy commit case, so nothing is
-currently unprotected — which is what moves this to Low. The counter-argument for Medium: the cheap fix
-above eliminates an entire class of future mistake rather than one instance, for near-zero cost, which is
-a fair reason not to let it drift to the bottom of the queue. Both reads recorded; Karvi has not ruled.
+**Priority: Low — joint read, QA withdrew its Medium counter-argument rather than never having raised
+it.** The hole that let UIL-012 through is closed — #57 added the missing Trainer/Energy commit case, so
+nothing is currently unprotected. QA's original counter-argument (the cheap fix eliminates a class of
+mistake, not just an instance, which is worth doing regardless of cost) still stands as a reason to do the
+fix, just not as a reason to rank the entry above Low. Karvi has not ruled.
+
+**Addendum (2026-09-13) — checked the "clean 3-vs-8 split" claim itself, since QA flagged it as a crude
+grep rather than a finding.** A wider grep for display-form band strings across the test suite also hits
+`tests/backfill/{binder-section,commit-atomicity,plan}`, `tests/engine/bands`, `tests/line/{decisions,move}`,
+`tests/plan/plan-run`, and `tests/surfaces/{lookup,wishlist}` — which sounds like it breaks the clean
+split. Read all nine directly rather than trusting the grep's shape:
+
+- **Eight of the nine** (every one except `bands.test.ts`) hit only because they build a `bandDisplayByKey`
+  map or a `bandDisplay` field — e.g. `new Map([["red", "Red"], ["white", "White"]])`
+  ([`tests/plan/plan-run.test.ts:95-99`](../tests/plan/plan-run.test.ts:95)). That is a key→label lookup
+  table, the exact shape `lib/plan/context.ts` builds in production for rendering — not a competing
+  `TypeColorMap` fixture. Their actual band-map fixtures are unambiguously key-form, matching the original
+  count.
+- **`tests/engine/bands.test.ts`** is the one genuine exception, and it's the legitimate case QA flagged:
+  it feeds `whiteKey()` both a key-form map and `DEFAULT_TYPE_COLOR_MAP` directly, on purpose, to prove the
+  function returns the *caller's own* white key regardless of which vocabulary it was handed
+  ([`tests/engine/bands.test.ts:102`](../tests/engine/bands.test.ts:102), `expect(whiteKey(DEFAULT_TYPE_COLOR_MAP)).toBe("White")`).
+  That's a test of the boundary itself, which is exactly where both forms belong.
+
+**The answerable version of "which vocabulary is this fixture asserting in":** a display-form string
+counts against the rule only when it appears inside the file's own `TypeColorMap`/`color_band` fixture —
+not when it's inside a `bandDisplayByKey`/`bandDisplay` lookup, which is legitimate in any file. By that
+test the 3-vs-8 split holds exactly as first counted, and now has a criterion a reviewer can actually
+apply instead of a raw grep count.
 
 ## UIL-014 — No way to remove a card from a collection on the Collections page
 
