@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import type { EngineContext } from "@/lib/engine";
 import {
+  assertPlacementBandsConfigured,
   buildHaulCommitPayload,
   planFromDraft,
   type DraftItem,
@@ -292,6 +293,54 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
     );
     expect(decision.rows[0].resolved_by).toBe("user");
     expect(decision.rows[0].decision).toBe("placement-override");
+  });
+
+  it("commits a Trainer into the DB-key white band — no color_band FK violation (UIL-012)", async () => {
+    // The DB `type_color_map` uses band KEYS; the cascade's Trainer step must place a Trainer in the
+    // white band's KEY ("white"), not the display literal "White" that is not a color_band row and
+    // fails copy_color_band_fkey. Nest Ball (Trainer/Item) exercises exactly that path.
+    const pc = makeContext();
+    const trainerDraft: DraftItem[] = [
+      { id: "d-nestball", tcgdexId: NEST_BALL_SV01_181.tcgdexId, variant: "normal" },
+    ];
+    const { planned } = planFromDraft(pc, trainerDraft);
+    const { payload } = buildHaulCommitPayload(pc, planned, {
+      source: "bulk-bin",
+      draft: trainerDraft,
+    });
+
+    const copyOp = payload.ops.find((o) => o.op === "insert_copy");
+    expect(copyOp && copyOp.op === "insert_copy" ? copyOp.color_band : null).toBe("white");
+
+    await seedFor(db, payload);
+    await applyOps(db, payload); // before the fix this rejected with copy_color_band_fkey (23503)
+    await asSuperuser(db);
+
+    const stored = await db.query<{ color_band: string | null }>(
+      `select color_band from copy where catalog_card_id = $1`,
+      [NEST_BALL_SV01_181.tcgdexId],
+    );
+    expect(stored.rows[0].color_band).toBe("white");
+  });
+
+  it("guard rejects an unconfigured band before the write, naming the card + type (UIL-012)", () => {
+    const pc = makeContext();
+    const trainerDraft: DraftItem[] = [
+      { id: "d-nestball", tcgdexId: NEST_BALL_SV01_181.tcgdexId, variant: "normal" },
+    ];
+    const { planned } = planFromDraft(pc, trainerDraft);
+    const { payload } = buildHaulCommitPayload(pc, planned, {
+      source: "bulk-bin",
+      draft: trainerDraft,
+    });
+
+    // Simulate the color_band table missing the white row the map points at: the guard must fail
+    // BEFORE the RPC with a message that names the card and its type, not an opaque 23503.
+    const brokenPc: PlanContext = { ...pc, orderedBandKeys: BANDS.filter((b) => b !== "white") };
+    expect(() => assertPlacementBandsConfigured(payload, brokenPc)).toThrow(/Nest Ball/);
+    expect(() => assertPlacementBandsConfigured(payload, brokenPc)).toThrow(/type Item/);
+    // The correctly-configured context passes the guard untouched.
+    expect(() => assertPlacementBandsConfigured(payload, pc)).not.toThrow();
   });
 
   it("holo-swap: incoming holo inherits the shelved normal's role; the normal is displaced to bulk", async () => {
