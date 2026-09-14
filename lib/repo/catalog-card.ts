@@ -61,6 +61,34 @@ export const catalogCardRepo = {
     return data ?? [];
   },
 
+  /**
+   * Cards at any of `localIds` within ONE set — the batched form of `findBySetLocal`.
+   *
+   * The sync resolves ~685 rows and asked for each `(set, localId)` separately, which is one serial
+   * round trip per candidate: the wait she sees on an import. Grouping by set collapses that to one
+   * query per distinct set. Chunked because the ids ride on the request URL.
+   */
+  async findBySetLocalMany(
+    db: DbClient,
+    setId: string,
+    localIds: string[],
+    chunkSize = 200,
+  ): Promise<Row<"catalog_card">[]> {
+    const unique = [...new Set(localIds)];
+    if (unique.length === 0) return [];
+    const out: Row<"catalog_card">[] = [];
+    for (let i = 0; i < unique.length; i += chunkSize) {
+      const { data, error } = await db
+        .from("catalog_card")
+        .select("*")
+        .eq("set_id", setId)
+        .in("local_id", unique.slice(i, i + chunkSize));
+      if (error) throw error;
+      out.push(...(data ?? []));
+    }
+    return out;
+  },
+
   /** All printings of a species (dexId is the species key, never the name). */
   async findByDexId(db: DbClient, dexId: number): Promise<Row<"catalog_card">[]> {
     const { data, error } = await db.from("catalog_card").select("*").contains("dex_id", [dexId]);
