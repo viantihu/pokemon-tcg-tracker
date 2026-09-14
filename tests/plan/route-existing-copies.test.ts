@@ -23,11 +23,12 @@ import {
   type DraftItem,
   type PlanContext,
 } from "@/lib/plan";
-import type { Row, WritePayload } from "@/lib/repo";
+import type { Row, WriteOp, WritePayload } from "@/lib/repo";
 import {
   CHARMANDER_SV03_026,
   CHARMELEON_SV03_027,
   EEVEE_SV035_133,
+  NEST_BALL_SV01_181,
   SCYTHER_SV035_123,
   VAPOREON_SV035_134,
 } from "../engine/fixtures";
@@ -78,6 +79,7 @@ const CATALOG = [
   CHARMANDER_SV03_026,
   CHARMELEON_SV03_027,
   EEVEE_SV035_133,
+  NEST_BALL_SV01_181,
   SCYTHER_SV035_123,
   VAPOREON_SV035_134,
 ];
@@ -357,6 +359,65 @@ describe("routing existing unplaced copies through the plan (UIL-003)", () => {
       `select count(*)::int as n from placement_decision where haul_id is null`,
     );
     expect(byHaul.rows[0].n).toBe(1);
+    expect(await pendingIds(db)).toEqual([]);
+  });
+
+  /**
+   * UIL-012's defect was a display-form band literal (`"White"`) reaching a DB key column, and #57
+   * pinned it on the INSERT path by committing a Nest Ball. This is the same value arriving through the
+   * other write path: routing an EXISTING copy emits `update_copy`, not `insert_copy`, so a green
+   * insert test proves nothing here. Trainers are the only cards that take the White branch, and no
+   * case in this file routed one — the identical coverage gap, one write path over.
+   */
+  it("routes a Trainer to the White front half with a KEY-form band, through update_copy", async () => {
+    const NEST_COPY = "c0000000-0000-0000-0000-00000000dd77";
+    const pending = unplacedCopy(NEST_COPY, NEST_BALL_SV01_181.tcgdexId);
+    const pc = makeContext([pending], [NEST_COPY]);
+    const draft: DraftItem[] = [
+      {
+        id: NEST_COPY,
+        tcgdexId: NEST_BALL_SV01_181.tcgdexId,
+        variant: "normal",
+        existingCopyId: NEST_COPY,
+      },
+    ];
+    const { items, planned } = planFromDraft(pc, draft);
+    expect(items[0].action).toBe("FRONT");
+
+    const { payload } = buildHaulCommitPayload(pc, planned, { source: "bulk-bin", draft });
+    // The band must be the DB KEY "white", never the display name "White". Asserted on the payload as
+    // well as on the row, so the failure names the band rather than surfacing as an opaque 23503.
+    // Narrow to update_copy specifically: update_slot also carries a `patch`, so a loose
+    // `"patch" in op` check unions the two and loses `color_band`.
+    const patch = payload.ops.find(
+      (o): o is Extract<WriteOp, { op: "update_copy" }> =>
+        o.op === "update_copy" && o.id === NEST_COPY,
+    );
+    expect(patch).toBeDefined();
+    expect(patch?.patch.color_band).toBe("white");
+    expect(payload.ops.some((o) => o.op === "insert_copy")).toBe(false);
+
+    await seedFor(db, payload, [NEST_BALL_SV01_181.tcgdexId]);
+    await seedCopy(db, pending);
+    await asOwner(db);
+    // The real RPC against real Postgres: a display-form band here violates copy_color_band_fkey.
+    await applyOps(db, payload);
+    await asSuperuser(db);
+
+    const row = await db.query<{
+      role: string;
+      binder_id: string | null;
+      binder_half: string | null;
+      color_band: string | null;
+    }>(`select role, binder_id, binder_half, color_band from copy where id = $1`, [NEST_COPY]);
+    expect(row.rows[0]).toMatchObject({
+      role: "shelved",
+      binder_id: B1,
+      binder_half: "front",
+      color_band: "white",
+    });
+    // Still one copy — routed, not duplicated.
+    expect(await count(db, "copy")).toBe(1);
     expect(await pendingIds(db)).toEqual([]);
   });
 
