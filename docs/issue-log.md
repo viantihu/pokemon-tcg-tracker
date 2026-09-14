@@ -328,7 +328,7 @@ export now resolves against everything TCGdex is willing to serve.**
 
 Those sets can never satisfy `stored >= cardCount.total`, so every future run re-requests them. That is
 6 requests, and it errs safe — the check never *skips* a set that needs mirroring. PR
-[#47](https://github.com/viantihu/pokemon-tcg-tracker/pull/47) makes the run log say so explicitly
+[#49](https://github.com/viantihu/pokemon-tcg-tracker/pull/49) makes the run log say so explicitly
 rather than leaving six phantom gaps for the next reader to chase. Deliberately **not** suppressed with
 an allow-list, since a genuinely truncated set could later hide behind one.
 
