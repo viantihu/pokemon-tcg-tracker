@@ -646,7 +646,7 @@ three, though — nothing is broken, so Low is defensible if she would rather th
 ## UIL-009 — Clicking outside the collection popup discards everything typed
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** Fixed — PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56), awaiting QA review
 - **Priority:** High (Karvi's call)
 - **Area:** Collections
 - **Env:** Testing
@@ -690,6 +690,28 @@ Likely fix, in order of preference:
 **Priority rationale:** High, agreed. It destroys work she has already done, with no recovery and no
 warning, in the normal course of using the feature — and misclicks near the edge of a dialog are
 routine, not exotic. Nothing about it is cosmetic.
+
+**Resolution (2026-09-13, PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56)).** Took
+option (1) as recommended — **the backdrop no longer dismisses the editor at all.** It is a form, not a
+lightbox.
+
+Went further than the entry on the other two exits, because they would have left the same hole: Close
+and Escape destroyed the same work just as silently. Both now confirm, but **only once something has
+changed**, so dismissing an untouched dialog is still a single click. "Dirty" is measured against the
+state captured when the editor opened, not against emptiness — editing an existing collection starts
+populated, so an emptiness test would nag on every open. Escape had **no handler at all** before, which
+the entry assumed it did; it has one now, routed through the same guard, since a modal with no keyboard
+exit is its own problem.
+
+Option (3) — keeping the draft alive across an accidental close — is not needed once none of the three
+exits can discard silently, and it would mean lifting editor state out of the modal for a case that can
+no longer happen. Left undone deliberately rather than overlooked.
+
+The read-only log modal keeps backdrop-dismiss: nothing there can be lost.
+
+Not verified in a browser — the screen needs credentials this session lacks, so the guard logic is not
+exercised end to end. Worth one pass: try all three exits on a part-built collection (backdrop should do
+nothing; Close and Escape should ask), then confirm an untouched dialog still closes in one click.
 
 ## UIL-010 — Card search returns nothing for a full collector number like "099/182"
 
