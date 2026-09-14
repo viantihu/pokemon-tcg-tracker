@@ -157,10 +157,10 @@ routed-to-bulk case. No migration needed.
 ## UIL-004 — Testing's catalog holds 3 cards, so a real Dex export resolves almost nothing
 
 - **Reported:** 2026-09-13 (found while diagnosing UIL-003)
-- **Status:** Investigating — **205 of 218** sets mirrored, not 217 (see the correction at the end of
-  this entry; `dp5` landed, thirteen *other* sets did not). The mirror now resumes rather than
-  re-requesting all 218 (PR [#46](https://github.com/viantihu/pokemon-tcg-tracker/pull/46)); a run is
-  needed to close the remaining thirteen.
+- **Status:** **Closed** — Testing's catalog holds **23,548 cards across 214 sets** (run
+  [`34795733862`](https://github.com/viantihu/pokemon-tcg-tracker/actions/runs/34795733862),
+  2026-09-13), against the 3 `seed.sql` shipped. The 4 sets still absent return zero cards from TCGdex
+  itself. Not "217/218 with `dp5` pending" — see the corrections at the end of this entry.
 - **Priority:** High
 - **Area:** Catalog
 - **Env:** Testing
@@ -308,6 +308,29 @@ Verified against mocked PostgREST pages with a deliberate server cap (75) below 
 (1000): it read all 153 rows across 3 pages, skipped the complete sets, and requested the absent one,
 the partial one, and one with an unknown card count. Not verified against the live table, which needs
 the run itself.
+
+**CLOSED (2026-09-13) — the catalog is fully mirrored.** Resume run
+[`34795733862`](https://github.com/viantihu/pokemon-tcg-tracker/actions/runs/34795733862) succeeded and
+settles it:
+
+- `catalog_card currently holds 23548 rows across 214 sets` — so the thirteen TCGdex-503 sets from the
+  previous run (`sv10`, `swsh4`, `me01` and the rest) **had already landed** across earlier runs. The
+  catalog was never missing them by the time this ran.
+- The resume check found **6** sets to request rather than 218, and all 6 returned 200. No throttling,
+  because 6 requests do not trigger it. This is the mechanism working as designed on its first real run.
+- Final count `23548`, `Mirror populated`.
+
+**The remaining 6 are TCGdex disagreeing with itself, not a gap.** The set detail endpoint returns
+fewer cards than the brief set list advertises: `wp` 0 of 7, `jumbo` 0 of 160, `sp` 0 of 10, `rc` 0 of
+25 (all `fetched: 0`), `tk-sm-l` 18 of 30, `mfb` 34 of 48 — promo, sample and jumbo pseudo-sets. The row
+count did not move (23548 before, 23548 after), which confirms there was nothing to add. **A real Dex
+export now resolves against everything TCGdex is willing to serve.**
+
+Those sets can never satisfy `stored >= cardCount.total`, so every future run re-requests them. That is
+6 requests, and it errs safe — the check never *skips* a set that needs mirroring. PR
+[#49](https://github.com/viantihu/pokemon-tcg-tracker/pull/49) makes the run log say so explicitly
+rather than leaving six phantom gaps for the next reader to chase. Deliberately **not** suppressed with
+an allow-list, since a genuinely truncated set could later hide behind one.
 
 ## UIL-005 — Deploy's migration step is dead: the Supabase access token lost its privileges
 
