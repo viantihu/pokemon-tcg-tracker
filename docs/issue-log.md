@@ -9,8 +9,9 @@ Anything that becomes real work gets a linked PR in the entry.
 
 ## Fields
 
-- **Status** — `Open` · `Investigating` · `Fixed` (code merged) · `Closed` (Karvi confirmed on a
-  running environment) · `Won't fix` · `Not a bug`
+- **Status** — `Open` · `Investigating` · `Fixed` (code merged — not the same as deployed and
+  confirmed; entries carry that distinction in prose when it matters) · `Closed` (Karvi confirmed
+  on a running environment) · `Won't fix` · `Not a bug`
 - **Priority** — set jointly by Karvi and Claude. Claude proposes, Karvi has final say.
   - `High` — the app is not functional. Cannot go live without a resolution.
   - `Medium` — should be addressed sooner rather than later, but not urgent.
@@ -21,6 +22,14 @@ Anything that becomes real work gets a linked PR in the entry.
 
 Priority is about impact on go-live, not effort to fix. When Claude's and Karvi's reads differ,
 the entry records both.
+
+**This file lags live status by design, and that is a known cost of the write convention, not an
+error.** Status transitions batch behind a single owning session rather than racing each entry's
+write to avoid clobbering concurrent writers — so at any given moment some entries may show `Open`
+after being confirmed Fixed or Closed elsewhere. **For a queue-gating question — "is X actually
+unblocked, can Y start now" — check with whoever currently owns status transitions; do not read
+that answer off this file alone.** Content (root cause, evidence, priority rationale) is always
+current as of its last write; only the Status field itself can lag.
 
 ---
 
@@ -3165,3 +3174,34 @@ reconstructible.
 result standing in for a correct one. Here the plausible result is "the queue is full of unplaced
 cards," which is true, and gives no hint that it's true because history was cleared rather than because
 a sync ran.
+
+## UIL-043 — Offer the move inline from the collection editor's owned-target row
+
+- **Reported:** 2026-09-14 (not from Karvi — a follow-up suggestion from QA and the UX Dev, on
+  UIL-014's shipped behaviour)
+- **Status:** Open
+- **Priority:** Low
+- **Area:** Collections
+- **Env:** Testing
+
+**Not a defect in UIL-014 — a convenience on top of a design Karvi already chose.** UIL-014's fix
+put three options to her: refuse-and-direct, make the "✕" perform the move directly, or hide "✕"
+for owned rows with a server-side refusal as a stale-tab backstop. **She chose the third, and it
+shipped as chosen** — [`CollHub.tsx:758-760`](<../app/(ui)/coll/CollHub.tsx>:758) shows `Owned ·
+remove on the card` in place of the "✕" for an owned target, and
+[`app/(ui)/coll/actions.ts:196`](<../app/(ui)/coll/actions.ts>:196) documents the server-side guard
+as the backstop, not the primary path: "Dropping an un-owned target — a gap she has stopped
+chasing — strands nothing and is still allowed." The guard only refuses the one case that would
+orphan a physical card; every other drop already goes through.
+
+**The suggestion.** Since the collection's binder is already on screen at that row, offer the move
+inline from the owned-row state itself rather than sending her to the card to remove it from there
+— saving the one extra hop the current design accepts as its cost.
+
+**Framing that must survive into any implementation:** this is additive, not corrective. Nothing
+about the shipped behaviour is wrong, and a future session reading this entry should not treat it
+as license to change what Karvi already decided — hiding "✕" and refusing server-side stays exactly
+as shipped; this only adds a shortcut next to it.
+
+**Priority rationale.** Low: nothing is broken, the current behaviour was a deliberate choice, and
+the cost being addressed is one extra click, not a data risk or a blocked workflow.
