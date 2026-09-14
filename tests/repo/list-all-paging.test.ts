@@ -14,23 +14,50 @@
 import { describe, expect, it } from "vitest";
 import { createRepo, type DbClient } from "@/lib/repo";
 
-/** A fake table that honours `range()` and truncates every response at `maxRows`, like PostgREST. */
+/**
+ * A fake table that honours `range()`, truncates at `maxRows` like PostgREST — and ORDERS.
+ *
+ * `order()` used to be a no-op here, which made this suite unable to notice if `listAll` stopped
+ * ordering by primary key. That matters: paging is only coherent over a STABLE window, so without the
+ * `.order(pk)` the walk can repeat or skip rows between requests. The rows below are therefore stored
+ * deliberately OUT of key order, so a fake that ignores `order` — or a `listAll` that stops calling it
+ * — produces a visibly wrong walk instead of an accidentally correct one. (UIL-015's lesson: a double
+ * that flatters the code under test certifies the wrong behaviour.)
+ */
 function cappedDb(rowCount: number, maxRows: number) {
-  const rows = Array.from({ length: rowCount }, (_, i) => ({
+  const inKeyOrder = Array.from({ length: rowCount }, (_, i) => ({
     tcgdex_id: `card-${String(i).padStart(5, "0")}`,
   }));
+  // Stored shuffled, deterministically: the table has no intrinsic order, so the repo must impose one.
+  const rows = [...inKeyOrder].reverse();
   const ranges: [number, number][] = [];
   const selects: string[] = [];
+  const orderedBy: string[] = [];
 
   const query = {
     select: (cols: string) => {
       selects.push(cols);
       return query;
     },
-    order: () => query,
+    order: (col: string) => {
+      orderedBy.push(col);
+      return query;
+    },
     range(from: number, to: number) {
       ranges.push([from, to]);
-      const window = rows.slice(from, to + 1).slice(0, maxRows);
+      // Compose the requested order keys, code-unit comparison (Postgres, not `localeCompare`).
+      const sorted = orderedBy.length
+        ? [...rows].sort((a, b) => {
+            for (const key of orderedBy) {
+              const av = String((a as Record<string, unknown>)[key]);
+              const bv = String((b as Record<string, unknown>)[key]);
+              if (av < bv) return -1;
+              if (av > bv) return 1;
+            }
+            return 0;
+          })
+        : rows;
+      const window = sorted.slice(from, to + 1).slice(0, maxRows);
       return Promise.resolve({ data: window, error: null });
     },
   };
@@ -38,7 +65,8 @@ function cappedDb(rowCount: number, maxRows: number) {
     db: { from: () => query } as unknown as DbClient,
     ranges,
     selects,
-    ids: rows.map((r) => r.tcgdex_id),
+    orderedBy,
+    ids: inKeyOrder.map((r) => r.tcgdex_id),
   };
 }
 
