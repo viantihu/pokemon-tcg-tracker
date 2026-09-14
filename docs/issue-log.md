@@ -1181,9 +1181,17 @@ instance has actually landed.
 - **The `cascade.ts:378` literal is gone, not just isolated.** PR #57 changed STEP 6 to pass `b` (the
   map's own white key) instead of the literal, and gave `band()`'s fallback the same treatment
   (`whiteKey(map)`, [`lib/engine/bands.ts`](../lib/engine/bands.ts)). Verified directly against
-  `origin/develop` (not a local checkout, which had gone stale by this point): zero hard-coded
-  display-form band literals remain anywhere in `lib/engine/`. A claim that `cascade.ts:378` was "the
-  only one left" was itself already stale by the time it was raised — it was zero, not one.
+  `origin/develop` (not a local checkout, which had gone stale by this point): **no display-form literal
+  is used as a placement band value anywhere in `lib/engine/` any more.** A claim that `cascade.ts:378`
+  was "the only one left" was itself already stale by the time it was raised — as a *misuse*, it was
+  zero, not one.
+
+  **Narrower than "zero literals remain", and the difference is this entry's whole premise.** Verified on
+  `origin/develop` after #57: `WHITE: Band = "White"` still exists (`bands.ts:34`) as `whiteKey`'s
+  last-resort constant, `BAND_ORDER` is still ten display-form strings, and **`DEFAULT_TYPE_COLOR_MAP` is
+  still display-form** (`Fire: "Red"`, `Colorless: "White"`). `BAND_ORDER` is legitimate — display names
+  are what it is *for*. The other two are what items (1) and (2) below are about. An unqualified "zero
+  literals remain" would read as though this entry had already been fixed by #57, which it has not.
 - **Two distinct problems remain here, not one.** (1) The engine test suite still runs entirely on
   `DEFAULT_TYPE_COLOR_MAP` (display-form), so it still certifies a vocabulary nothing in production uses
   — PR #57 added key-form fixtures only to the tests it touched, not suite-wide. (2) The display/key
