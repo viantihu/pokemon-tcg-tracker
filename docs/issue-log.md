@@ -2627,3 +2627,86 @@ risk, and it depends on how many finite collections she actually builds. Not Low
 workflow she is using right now, arrives without warning as she adds collections, and the fix already
 exists one screen over — cheap to do, expensive to leave. Flagging explicitly that Karvi rated the
 identical Haul Plan case High, so this read shouldn't be treated as settled if she hits it first.
+
+## UIL-035 — Search and lookup swallow every error and report "not found," so an outage looks like a missing card
+
+- **Reported:** 2026-09-14 (not from Karvi — found proactively)
+- **Status:** Open
+- **Priority:** Medium (Senior BA's read)
+- **Area:** Lookup, Plan, Backfill
+- **Env:** Testing
+
+**Verified on `origin/develop`. Three sites, escalating:**
+
+```ts
+// app/(ui)/plan/actions.ts:46-56, lookupCatalog
+/** Type-ahead against the local mirror. Returns [] on error so typing never breaks. */
+...
+} catch {
+  return [];
+}
+```
+
+```ts
+// app/(ui)/backfill/actions.ts:48-50
+} catch {
+  return [];
+}
+```
+
+```ts
+// app/(ui)/look/LookupScreen.tsx:32-35, onPick
+} catch {
+  setAnswer(null);
+  setNotFound(true);
+}
+```
+
+The first two turn any failure — a Supabase outage, an expired session, a malformed query — into an
+empty result set. The third is worse: it **explicitly sets "not found,"** so an infrastructure failure
+renders as a factual claim that her card is not in the app.
+
+**Checked and correctly NOT swept into this entry:**
+[`CollHub.tsx:508`](<../app/(ui)/coll/CollHub.tsx>:508)'s `catch { setCopied(false) }` is a clipboard
+write failing and being reported as "didn't copy" — that's the right behaviour for that failure, not
+this pattern.
+
+**Why this is worth an entry, not a shrug.** The intent behind all three is legitimate — don't let a
+transient blip break type-ahead. But the trade converts an **infrastructure failure** into a **factual
+assertion about her collection**, and that shape has already produced a real confused report: UIL-015's
+search returned nothing and her words were "In fact, it does not return anything at all" — a reasonable
+conclusion that the card wasn't there. It was; twelve McDonald's sets sorted ahead of it. An error path
+that renders identically to a genuine miss makes that whole class of confusion unfalsifiable from the
+screen alone.
+
+**A house-style violation this project has already corrected three times elsewhere: skip/fail
+distinctions matter here too.** The catalog mirror's skip-turned-fail-loudly (#38), `acceptance` failing
+rather than skipping (#38), `migrate` reading `schema_migrations` back rather than trusting `db push`'s
+exit code (#46), and #39 — which exists *because* database errors used to render as `"[object Object]"`
+and told her nothing. Same principle, not yet applied to search.
+
+**Direct interaction with UIL-011, which must be read alongside this entry, not after it.** UIL-011 is
+rewriting these exact empty states — "No match in the local mirror. (Full catalog needs a sync run.)"
+toward something like "No card found." That change makes the copy **more confident and more wrong**:
+today's wording at least hints at machinery; a clean "No card found." asserts a fact about the catalog
+that an error path can produce just as easily as a genuine miss. **UIL-011's implementer must not ship
+copy that claims a card doesn't exist unless the query actually succeeded** — if this entry isn't fixed
+first, UIL-011's rewrite needs its own distinguishable error state to render instead of reusing the
+not-found copy. Recording the constraint here since it's the entry a UIL-011 implementer needs to read.
+
+**Suggested fix.** Distinguish failure from emptiness explicitly — a discriminated result
+(`{ ok: true, rows }` / `{ ok: false, error }`) from each action, or let it throw and have the caller
+render "couldn't search just now" separately from "no match." Type-ahead's non-breaking behaviour is
+preserved either way; what changes is that a failure says so. #39's error-message work already produces
+a legible message to show, rather than needing new plumbing.
+
+**Priority rationale (Senior BA's read): Medium.** Not High: nothing is corrupted, no data is at risk,
+and all three paths work correctly when the database does. Not Low: it makes a real failure
+indistinguishable from a normal answer on the surfaces she uses most, it has already contributed to one
+confused report, and UIL-011 is about to sharpen the misleading version rather than fix it. Karvi hasn't
+seen this yet.
+
+**Cross-reference: the fifth instance today of the dominant pattern** — a silent partial or failed
+result reading as a complete, valid one. UIL-004 (job skipped, reported success), UIL-028/UIL-031
+(unpaged/chunked reads truncate silently), UIL-029 (a test double lying in agreement with a live bug),
+and this. Five in one day is a property of the codebase, not five coincidences.
