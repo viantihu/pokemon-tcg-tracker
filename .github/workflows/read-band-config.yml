@@ -227,3 +227,42 @@ jobs:
           fi
           echo "VERDICT: $unplaced unplaced-shaped copies, under the cap — listUnplaced is LATENT too."
           echo "Headroom: $((1000 - unplaced)) more."
+
+          # ---- Is the WAITING queue benign, and has reconciliation ever actually RUN?
+          #
+          # `total == WAITING` with zero RESOLVED/DISMISSED could mean the archive/drop path has never
+          # executed against real data, OR that it runs every sync and correctly finds nothing to
+          # archive because these entries are genuinely unresolvable. `retry_count` settles it
+          # DIRECTLY: the auto-retry is what bumps it, so a non-zero count is proof the pipeline has
+          # processed these rows rather than never reaching them. That is stronger evidence than
+          # inferring from the absence of archived rows.
+          #
+          # WHAT IS PRINTED. `reason` is a CHECK-constrained enum (UNKNOWN_SET / UNKNOWN_CARD),
+          # `retry_count` is an integer, `last_retry_sync` a timestamp. `dex_set_name` is SET-level
+          # metadata from the Dex export, not card identity — no card name, number or quantity is
+          # printed. Judged in-bounds to answer "are these the zero-card pseudo-sets?" definitively in
+          # one run rather than costing a second push; say so if you'd rather it were omitted.
+          echo
+          echo "--- the WAITING entries, aggregated (no card identities) ---"
+          rows=$(case "$SERVICE_KEY" in
+            eyJ*) curl -sS --retry 3 -H "apikey: $SERVICE_KEY" -H "Authorization: Bearer $SERVICE_KEY" \
+                    "$rest/unresolved_entry?select=reason,retry_count,last_retry_sync,dex_set_name&status=eq.WAITING" ;;
+            *)    curl -sS --retry 3 -H "apikey: $SERVICE_KEY" \
+                    "$rest/unresolved_entry?select=reason,retry_count,last_retry_sync,dex_set_name&status=eq.WAITING" ;;
+          esac)
+          if ! printf '%s' "$rows" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            echo "::warning::could not read the WAITING entries — reason breakdown undetermined. Counts above stand."
+            exit 0
+          fi
+          echo "by reason:"
+          printf '%s' "$rows" | jq -r 'group_by(.reason)[] | "  \(.[0].reason): \(length)"'
+          echo "by dex set name:"
+          printf '%s' "$rows" | jq -r 'group_by(.dex_set_name)[] | "  \(.[0].dex_set_name // "(null)"): \(length)"'
+          echo "retry_count: min=$(printf '%s' "$rows" | jq '[.[].retry_count] | min') max=$(printf '%s' "$rows" | jq '[.[].retry_count] | max')"
+          echo "rows with a last_retry_sync set: $(printf '%s' "$rows" | jq '[.[] | select(.last_retry_sync != null)] | length') of $(printf '%s' "$rows" | jq 'length')"
+          maxretry=$(printf '%s' "$rows" | jq '[.[].retry_count] | max')
+          if [ "${maxretry:-0}" -gt 0 ]; then
+            echo "VERDICT: retry_count reaches $maxretry, so the auto-retry HAS processed these rows — the reconciliation path is exercised, not unexercised. They stay WAITING because they genuinely do not resolve."
+          else
+            echo "VERDICT: every retry_count is 0, so these rows have NEVER been re-examined by a sync — the archive/drop path really may be unexercised. Worth deliberately exercising."
+          fi
