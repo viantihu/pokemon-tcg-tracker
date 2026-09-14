@@ -535,6 +535,9 @@ function planContext(): PlanContext {
       ]),
       bandDisplayByKey: new Map(BANDS.map((b) => [b, b])),
       collectionNameById: new Map([[COL2, "Kagemaru"]]),
+      // Required by AssembleLookups since UIL-016 (#78) put card artwork on the plan rows. Empty
+      // here: these cases assert the collection-join write set, not how a row renders.
+      imageUrlByTcgdexId: new Map(),
     },
   };
 }
