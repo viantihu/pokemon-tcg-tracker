@@ -123,6 +123,8 @@ export interface CascadeResult {
   wishlist?: WishlistProposal[];
   /** Blocks, caps, terminations, holo-swaps, collection conflicts — all need confirmation. */
   proposals?: DecisionProposal[];
+  /** Same-colour chain members counted by the viability test (steps "line-new"/"line-nonviable"). */
+  sameColorMembers?: number;
 }
 
 const defaultPriceOf: PriceOf = (c) => c.priceMarket;
@@ -343,6 +345,7 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
         pullActions,
         wishlist: gen.wishlist,
         proposals: gen.proposals,
+        sameColorMembers: via.members,
       };
     }
 
@@ -365,6 +368,7 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
         via.members === 1 ? "" : "s"
       }); to the front half, ${b} band.`,
       target: { kind: "front-half", binderId: frontHalfBinderId(ctx, b), band: b },
+      sameColorMembers: via.members,
       proposals,
     };
   }
