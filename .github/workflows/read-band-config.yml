@@ -1,0 +1,154 @@
+name: Read band config (Testing)
+
+# DIAGNOSTIC for UIL-012 — dumps and VERDICTS the two config tables that decide a card's
+# colour band, `color_band` and `type_color_map`, on the Testing project.
+#
+# WHY THIS NEEDS CI AT ALL. Both tables are RLS'd `for all to authenticated` with no grant to
+# `anon` (0002_domain.sql:382-386), so the publishable key cannot read them — it needs a real
+# authenticated session, which no agent has. The credential that can is
+# secrets.SUPABASE_SERVICE_ROLE_KEY on the `testing` environment, which lives only in GitHub and
+# is never printed. So this is the only programmatic path to the answer.
+#
+# WHAT IT IS LOOKING FOR. Committing a haul fails with
+#   copy_color_band_fkey [23503]: Key is not present in table "color_band".
+# `copy.color_band` is FK'd to `color_band(band)`, and every value in the runtime map is itself
+# FK'd there (`type_color_map.band references color_band (band)`), so a mapped card can never
+# produce this. The one value that can is the unmapped fallback in lib/engine/bands.ts:
+#   export const WHITE: Band = "White";   // a DISPLAY name
+# while lib/plan/context.ts:144 builds the map from the DB in KEY form (`red`, `dark_blue`,
+# `white`). So a MISSING `type_color_map` row makes `band()` return the literal "White", which is
+# absent from `color_band`, and the insert dies. A mis-CASED row cannot be the cause: the FK means
+# `type_color_map.band = 'White'` requires `color_band.band = 'White'` to exist, and then the copy
+# insert would satisfy the FK and there would be no error.
+#
+# So the question this answers is narrow: are all ten bands and all fourteen mappings present, in
+# key form? A missing mapping names the card class that crashes.
+#
+# TRIGGER. Push to `ops/read-band-config`. `workflow_dispatch` is declared too, but on its own it
+# is a DEAD BUTTON: GitHub only renders the Run button for workflows on the DEFAULT branch, and
+# `main` deliberately lags `develop` until the production cutover — no workflow file is on `main`
+# yet. Same reason catalog-mirror.yml triggers on a branch push. The button starts working for
+# free after the cutover.
+#
+# READ-ONLY. Two GETs, no writes, no card data — ten band rows and fourteen mappings. The repo is
+# private, so the log is not public; even so, nothing here is sensitive.
+#
+# DELETE ME once UIL-012 closes and any corrective migration is verified. Kept as a separate file
+# precisely so it can go without touching the deploy path, and so a diagnostic can never wedge a
+# deploy.
+
+on:
+  push:
+    branches: [ops/read-band-config]
+  workflow_dispatch:
+
+concurrency:
+  group: read-band-config
+  cancel-in-progress: true
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    environment: testing
+    timeout-minutes: 5
+    steps:
+      - name: Read color_band and type_color_map, and verdict them
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SERVICE_KEY:-}" ] || [ -z "${PROJECT_REF:-}" ]; then
+            echo "::error::Need secrets.SUPABASE_SERVICE_ROLE_KEY and vars.SUPABASE_PROJECT_REF on the 'testing' environment. Both are already configured for the catalog mirror, so an absence here means this job is running against the wrong environment."
+            exit 1
+          fi
+
+          # KEY FORMAT decides the headers, and getting this wrong looks like an empty table rather
+          # than an auth error. A new-format key (`sb_secret_…`) is NOT a JWT and belongs on `apikey`
+          # ALONE — sent as a Bearer token Supabase's gateway tries to parse it and rejects with
+          # "Invalid JWT". A legacy `service_role` JWT needs the Bearer to be read as that role
+          # rather than as anon. Measured: this project is on `sb_secret_…` (mirror run 34787934423).
+          rest="https://$PROJECT_REF.supabase.co/rest/v1"
+          get() {
+            case "$SERVICE_KEY" in
+              eyJ*) curl -sS --retry 3 --retry-delay 5 -H "apikey: $SERVICE_KEY" \
+                      -H "Authorization: Bearer $SERVICE_KEY" "$rest/$1" ;;
+              *)    curl -sS --retry 3 --retry-delay 5 -H "apikey: $SERVICE_KEY" "$rest/$1" ;;
+            esac
+          }
+
+          # An error body is an object, not an array. Checking the type first means a permissions or
+          # gateway failure reports itself instead of being counted as "0 rows", which would read as
+          # "the table is empty" and send the reader down entirely the wrong path.
+          fetch_table() {
+            local path="$1" out="$2"
+            get "$path" > "$out"
+            if ! jq -e 'type == "array"' "$out" > /dev/null 2>&1; then
+              echo "::error::could not read $path — $(jq -rc '.message // .hint // .' "$out" 2>/dev/null | head -c 300). If this mentions \"Invalid JWT\", the key was sent as a Bearer token but is not a JWT."
+              exit 1
+            fi
+          }
+
+          fetch_table "color_band?select=band,display_name,position&order=position.asc" bands.json
+          fetch_table "type_color_map?select=card_type,band&order=card_type.asc" map.json
+
+          echo "=============== color_band ($(jq 'length' bands.json) rows) ==============="
+          jq -r '.[] | "  \(.position | tostring | (" " * (2 - length)) + .)  \(.band)\(" " * (12 - (.band | length)))\(.display_name)"' bands.json
+          echo
+          echo "=============== type_color_map ($(jq 'length' map.json) rows) ==============="
+          jq -r '.[] | "  \(.card_type)\(" " * (12 - (.card_type | length)))-> \(.band)"' map.json
+          echo
+
+          # ---- Verdict. A dump alone puts the interpretation on whoever reads the log; these are
+          # the four things that actually distinguish the hypotheses, so assert them here.
+          fail=0
+
+          # 1. The ten key-form bands from 0003_config.sql.
+          expected_bands='["dark_blue","green","light_blue","olive","orange","pink","purple","red","white","yellow"]'
+          actual_bands=$(jq -c '[.[].band] | sort' bands.json)
+          if [ "$actual_bands" != "$expected_bands" ]; then
+            echo "::error::color_band does not hold exactly the ten key-form bands from 0003_config.sql."
+            echo "  expected: $expected_bands"
+            echo "  actual:   $actual_bands"
+            fail=1
+          fi
+
+          # 2. Any capitalised band key is a hand-entered display-name row that 0003's
+          #    `on conflict do nothing` would have sat alongside rather than replaced.
+          caps=$(jq -rc '[.[].band | select(test("[A-Z]"))]' bands.json)
+          if [ "$caps" != "[]" ]; then
+            echo "::error::color_band contains DISPLAY-NAME keys: $caps. 0003_config.sql inserts key-form bands with 'on conflict do nothing', so these were added separately and the migration skipped past them. A corrective migration has to displace them, not politely skip them."
+            fail=1
+          fi
+
+          # 3. The fourteen mappings from 0003_config.sql. A MISSING row is the trigger for
+          #    UIL-012 — it is what makes band() fall through to the literal "White".
+          expected_types='["Colorless","Darkness","Dragon","Fairy","Fighting","Fire","Grass","Item","Lightning","Metal","Psychic","Supporter","Trainer","Water"]'
+          actual_types=$(jq -c '[.[].card_type] | sort' map.json)
+          if [ "$actual_types" != "$expected_types" ]; then
+            echo "::error::type_color_map does not hold exactly the fourteen card types from 0003_config.sql. A MISSING row is the UIL-012 trigger: any card whose effective type is absent here makes lib/engine/bands.ts return the display name \"White\", which is not in color_band, and the copy insert fails with 23503."
+            echo "  expected: $expected_types"
+            echo "  actual:   $actual_types"
+            echo "  missing:  $(jq -nc --argjson e "$expected_types" --argjson a "$actual_types" '$e - $a')"
+            echo "  extra:    $(jq -nc --argjson e "$expected_types" --argjson a "$actual_types" '$a - $e')"
+            fail=1
+          fi
+
+          # 4. Referential sanity. The FK should make this impossible, so a hit here means the
+          #    constraint is missing on this environment, which is a much bigger finding.
+          orphans=$(jq -nc --slurpfile m map.json --slurpfile b bands.json \
+            '[$m[0][] | . as $r | select(([$b[0][].band] | index($r.band)) == null) | {card_type, band}]')
+          if [ "$orphans" != "[]" ]; then
+            echo "::error::type_color_map rows point at bands absent from color_band: $orphans. The FK `type_color_map.band references color_band (band)` should make this impossible, so the constraint is missing on this environment — a bigger problem than UIL-012."
+            fail=1
+          fi
+
+          if [ "$fail" -eq 0 ]; then
+            echo "VERDICT: both config tables match 0003_config.sql exactly — ten key-form bands, fourteen mappings, no orphans."
+            echo "So the data is NOT the trigger, and UIL-012 needs another explanation. Next place to look: whether anything other than lib/plan/context.ts builds the map (a caller passing DEFAULT_TYPE_COLOR_MAP, which is display-form, would produce this error for EVERY card), and whether the failing commit ran through a path that bypasses loadPlanContext."
+            exit 0
+          fi
+
+          echo "::error::VERDICT: the config tables diverge from 0003_config.sql — see the errors above. A corrective migration is needed, and it must UPDATE or DELETE the bad rows rather than `insert ... on conflict do nothing`, which is what let this persist."
+          exit 1
