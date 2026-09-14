@@ -1962,3 +1962,93 @@ competing McDonald's sets are (their totals are 12–25).
 this makes the ranking principled rather than an alphabetical accident. Not High — nothing is broken and
 no data is at risk right now. Not Low either, because the current tie-break is genuinely arbitrary rather
 than merely imperfect, and this is the only available principled disambiguator.
+
+## UIL-027 — "Commit the haul" is the wrong model: a card should be shelved the moment "Done" is clicked
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** High (Claude's read — this is a core-workflow redesign, needs Karvi's confirmation)
+- **Area:** Plan
+- **Env:** Testing
+
+In her words: "We need to rework the haul workflow. Every single card will require a decision, so
+'committing the haul' does not make sense. That button basically treats unshelved cards as being in
+inventory, when that defeats the entire purpose of the app. When the user clicks 'Done', that card has
+been shelved and should be put in inventory. Any card that has not received a location should still
+appear on that 'haul plan' page. That said, I don't see a purpose for 'Committing the haul'."
+
+**This is not a bug in the sense the rest of this log uses the word — it's a deliberate design that her
+mental model doesn't match, and the log should say precisely what today's design is before proposing to
+change it.**
+
+**What "Done, next card" actually does today: nothing persists.** It's pure client state
+([`PlanScreen.tsx:326-333`](<../app/(ui)/plan/PlanScreen.tsx>:326), `toggleDone` mutates a `Set<string>`)
+— no network call, no server action. It drives the worklist checkmarks, the progress pips, and the
+`cur`/`advance` cursor, and nothing else. `done` never appears in `CommitActionInput`, `CommitInput`, or
+`DraftItem` — confirmed by grepping `lib/plan/*.ts`.
+
+**What "Commit the haul" actually does: everything, unconditionally, in one shot.**
+[`PlanScreen.tsx:279-296`](<../app/(ui)/plan/PlanScreen.tsx>:279) sends the **entire draft array** to
+`commitHaulAction` → `commitHaul` ([`lib/plan/commit.ts:93-102`](../lib/plan/commit.ts:93)), with no
+filter by `done` anywhere in the path. `commitHaul` re-runs the cascade over the whole draft and writes
+every card — ticked or not — in one `apply_write_ops` transaction. Her framing is exactly accurate:
+clicking "Done" is a physical worklist aid with zero database effect; the placement she just decided on
+doesn't exist until a single all-or-nothing click covers every card in the haul, including the hundreds
+she never looked at. This is already independently confirmed in UIL-012's own record: "check-off is a
+physical worklist aid only; `commitHaulAction` sends the whole `input.draft` regardless of what is
+ticked."
+
+**And the inverse is also true: nothing persists if she never clicks Commit.** Working through 50 of 700
+cards and closing the tab writes zero rows — not even those 50. The `done` set, the cursor, and the
+computed plan live only in a `sessionStorage` cache (UIL-006), explicitly documented as a client
+convenience, not a database record, and it evaporates on cache clear or another device.
+
+**Why it's built this way — a real tradeoff, not an oversight.** `lib/plan/commit.ts`'s own header is
+explicit: the whole write set is computed in TS, then applied in **one transaction**, specifically so "a
+commit that fails partway now leaves ZERO rows" — this replaced an earlier per-row
+compensating-rollback design. `PlanScreen.tsx` states the same intent in its commit-button copy: "The
+commit is the one write that must not be interrupted... Saying so is the point: it discourages a
+reload." This is the M10 atomicity guarantee, and it is deliberately whole-haul, not per-card. Nothing in
+the code shows any consideration of a per-card commit model — check-off was designed purely as a
+worklist aid, never as a trigger for a write.
+
+**The tension her request surfaces.** Her model — each "Done" immediately shelves that card — requires
+converting the unit of atomicity from "the whole haul" to "one card." That's buildable (there's already
+a per-card write shape: `union_collection_targets`/single-copy ops in `lib/coll/remove.ts` show the
+pattern), but it changes what "atomic" protects: today, a mid-haul failure (like UIL-012's FK violation)
+rolls back everything, so a bad haul never leaves a half-sorted mess in the database. Under her model, a
+failure on card 340 of 700 would leave cards 1–339 genuinely shelved and 341–700 untouched — which is
+**closer to what she's asking for**, not further from it (partial real progress instead of an
+all-or-nothing gate), but it is a different integrity guarantee than the one M10 was built to provide,
+and whoever picks this up should say so rather than quietly narrowing it.
+
+**What already satisfies half of her request today, with no change needed.** "Any card that has not
+received a location should still appear on that haul plan page" — this already works: `/plan` re-derives
+its pending queue from the DB's actually-unplaced copies (`loadPendingPlacementDraft`, UIL-003's fix),
+not from a session cache. The part that needs to change is only the "Done" side — turning it from a
+no-op checkbox into a real write.
+
+**Suggested direction, not a final design:** convert "Done, next card" into a per-card `apply_write_ops`
+call for just that one card's routing decision, and either remove "Commit the haul" entirely (her
+stated read) or repurpose it into something that only matters if a hybrid batch/manual mode survives —
+that's a call for whoever designs this, not something to guess at here.
+
+**Ambiguity left for the implementer, explicitly not resolved by this entry:**
+
+- Does removing "Commit the haul" mean *every* Done click is its own transaction (matching her words
+  exactly), or does she want a lighter-weight batching (e.g. commit every N cards) for reasons of
+  server load or undo-ability? Worth confirming before building, since "no purpose for committing the
+  haul" could mean either.
+- What replaces the "commit is the one write that must not be interrupted" framing in the UI once writes
+  happen continuously per card — does "Undo" (the toggle-done reversal) need to become a real undo of a
+  real write, not just an unchecked box? Today `Undo` on a done row only flips `done` back to false; it
+  writes nothing, so under her model it would need to actually reverse the shelving.
+- Does the haul-level progress bar / haul_id concept still make sense once there's no single haul-level
+  commit event — `commitHaul` currently stamps a `haul_id` on every copy it writes in one call
+  ([`lib/plan/commit.ts`](../lib/plan/commit.ts)); a per-card model needs to decide whether a `haul_id`
+  still groups "cards decided in this sitting" or is dropped.
+
+**Priority rationale.** High: this is her own description of the core screen defeating the app's stated
+purpose, not a peripheral complaint, and it changes the transaction model for every future haul. Not
+something to patch quietly — flagging as a redesign that needs its own scoped implementation, likely
+larger than any single entry above it today.
