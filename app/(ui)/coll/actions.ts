@@ -27,7 +27,13 @@ import {
 import { band } from "@/lib/engine";
 import { getOwnerContext, toCatalogCard } from "@/lib/plan";
 import { errorMessage } from "@/lib/errors";
-import { applyCollectionRemoval, blockedTargetDrops, blockedTargetDropsMessage } from "@/lib/coll";
+import {
+  applyCollectionRemoval,
+  blockedBinderRebind,
+  blockedBinderRebindMessage,
+  blockedTargetDrops,
+  blockedTargetDropsMessage,
+} from "@/lib/coll";
 import { buildMoveOptions, type MoveDestination, type MoveNameLookups } from "@/lib/line";
 import {
   collectionMode,
@@ -193,24 +199,18 @@ export async function loadCollHub(): Promise<CollHubData> {
  * binder first, so the collection — and its binder — surface in the binder list and placement picker
  * immediately (COLLS is the single source of truth).
  *
- * REFUSES a save that drops a target she still owns in the collection's binder (UIL-014 defect 2).
- * `target_catalog_card_ids` is half of how membership is derived, so persisting the shorter list
- * without moving the `copy` row leaves an untracked physical card in a real pocket. Removing an owned
- * card is a move; it goes through `removeCardFromCollection`. Dropping an un-owned target — a gap she
- * has stopped chasing — strands nothing and is still allowed.
+ * REFUSES a save that drops a target she still owns in the collection's binder (UIL-014 defect 2), or
+ * that rebinds to a different specialty binder while owned copies are still shelved in the old one
+ * (UIL-040) — same orphan class, `target_catalog_card_ids` and `current_binder_ids` are the two halves
+ * of how membership is derived, and either one changing out from under a shelved copy strands it.
+ * Removing an owned card is a move; it goes through `removeCardFromCollection`. Dropping an un-owned
+ * target — a gap she has stopped chasing — strands nothing and is still allowed.
  */
 export async function saveCollection(input: CollectionInput): Promise<SaveResult> {
   const name = input.name.trim();
   if (!name) return { ok: false, error: "A collection needs a name." };
   try {
     const { db, ownerId } = await getOwnerContext();
-
-    if (input.id) {
-      const existing = await collectionRepo.getByPk(db, input.id);
-      if (!existing) return { ok: false, error: "That collection no longer exists." };
-      const blocked = await blockedTargetDrops(db, existing, input.targetTcgdexIds);
-      if (blocked.length > 0) return { ok: false, error: blockedTargetDropsMessage(blocked) };
-    }
 
     let binderId = input.binderId;
     if (binderId === "__new") {
@@ -225,6 +225,19 @@ export async function saveCollection(input: CollectionInput): Promise<SaveResult
         is_active: false,
       });
       binderId = created.id;
+    }
+
+    if (input.id) {
+      const existing = await collectionRepo.getByPk(db, input.id);
+      if (!existing) return { ok: false, error: "That collection no longer exists." };
+
+      const blocked = await blockedTargetDrops(db, existing, input.targetTcgdexIds);
+      if (blocked.length > 0) return { ok: false, error: blockedTargetDropsMessage(blocked) };
+
+      const blockedBinder = await blockedBinderRebind(db, existing, [binderId]);
+      if (blockedBinder.length > 0) {
+        return { ok: false, error: blockedBinderRebindMessage(blockedBinder) };
+      }
     }
 
     const patch = {
