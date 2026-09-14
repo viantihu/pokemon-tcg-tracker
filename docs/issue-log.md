@@ -154,6 +154,10 @@ Verified on real Postgres (PGlite) through the real `apply_write_ops` RPC: one c
 out, no haul row, audit with `haul_id: null`, and the queue empty afterwards including the
 routed-to-bulk case. No migration needed.
 
+**Confirmed exercised end to end at real scale, not just PGlite (2026-09-14).** Read from Testing:
+**702** `placement_decision` rows against her ~685-row export, **0** unplaced copies remaining. Not
+just merged — she has placed essentially her entire import through this path.
+
 ## UIL-004 — Testing's catalog holds 3 cards, so a real Dex export resolves almost nothing
 
 - **Reported:** 2026-09-13 (found while diagnosing UIL-003)
@@ -1829,6 +1833,28 @@ not two separate efforts — worth sequencing together rather than assigning sep
 produces wrong data about live inventory, no error, no indication, on two screens used every sorting
 pass. Not a missing feature; an action that appears to succeed and leaves the collection wrong.
 
+**Correction (2026-09-14, PR #82) — the suggested fix above was wrong, and "two screens, one path" was
+wrong too. Fixed now; both corrected here rather than left standing.**
+
+- **No migration was needed.** `union_collection_targets` already shipped in migration 0007 — every op
+  the fix needed already existed (`update_copy`, `update_slot`, `update_line` from 0008, the union from
+  0007, `insert_decision`). The "add the equivalent forward op" line above sent the next reader looking
+  for work that was already done.
+- **Two separate code paths, not one path reached from two screens.** `moveCardAction` has exactly one
+  caller ([`app/(ui)/line/LineScreen.tsx:136`](<../app/(ui)/line/LineScreen.tsx>:136)) — it never runs
+  for the Plan screen. Plan's placement override is draft-time, keyed by draft id, and applied at commit
+  by `writeOverriddenCard` ([`lib/plan/commit.ts:198`](../lib/plan/commit.ts:198),
+  [`:306`](../lib/plan/commit.ts:306)). The orphan was real at **both**, independently, and fixing
+  `applyMove` alone would have left half of this bug live on the Plan screen — the surface she uses
+  most — while the Line-screen fix tested green. Recorded as two sites sharing one defect, not one
+  path with two entry points.
+- **A third orphan path, found and closed in the same PR:** `union_collection_targets` silently writes
+  nothing when no row matches ([`0007_backfill_ops.sql:251-253`](../supabase/migrations/0007_backfill_ops.sql:251)
+  documents this as intentional for the backfill tagger it was built for) — but here, a no-op union is
+  indistinguishable from this entry's bug. Reachable from a tab left open across a Collections edit: the
+  destination collection deleted, or re-pointed to a different binder mid-move. Both cases are now
+  refused server-side rather than silently swallowed.
+
 ## UIL-023 — `applyMove` is a fourth write path and it is not atomic
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
@@ -2264,11 +2290,15 @@ revert-checked against pre-fix source, which is the active mitigation.
   `tests/sync/catalog-prefetch.test.ts`, `tests/repo/list-all-paging.test.ts` (the last as an inline fake
   table object, `db: { from: () => query } as unknown as DbClient`, same exposure with no named
   function).
-- **Harmless: call-recorders that only assert an emitted op set.** They cannot produce this failure mode
-  at all — there's no query result to get wrong. `tests/sync/exec-atomicity.test.ts` is additionally
-  **mixed**: its "builder logic" layer uses its own `FakeDb`/`fakeClient`, but a separate layer in the
-  same file already goes through real PGlite via `pglite-rpc`'s `freshRpcDb`/`applyOps` — already
-  half-following the pattern this entry asks for.
+- **Harmless: call-recorders that only assert on what was *sent*, not what comes back.** Corrected
+  classification for `tests/sync/exec-atomicity.test.ts`: not "mixed," genuinely **safe**. Verified its
+  `FakeDb.rpc` captures the call and every assertion checks the captured payload
+  (`expect(fake.rpcCalls[0].fn).toBe("apply_write_ops")`, checks on `ops`/`resync_group_ids`) — it
+  emulates no query semantics because nothing in the file asserts on a query *result* from the fake; the
+  data-shape assertions in the same file go through real Postgres via `pglite-rpc`. **The sharper
+  discriminator, checkable from a test's assertions alone rather than requiring a read of the fake
+  itself: a double that asserts on what was *sent* is safe; a double that asserts on what comes *back* is
+  exposed.** That makes the count **five** files, not six.
 - **`tests/plan/pending-placements.test.ts` — and I got this one wrong first and am correcting it in
   place.** I earlier concluded its no-op `order()` was harmless because `lib/plan/pending.ts` never calls
   `.order()`. That checked the wrong file: `loadPendingPlacements` calls `copyRepo.listUnplaced`, and
@@ -2296,9 +2326,8 @@ not predicted:
   it's "hand-rolled *and* modelling an operator the assertions depend on." A double that implements
   exactly what's called is correct scope.
 
-**So the remaining scope after #80 is `tests/catalog/card-search.test.ts` (already fixed landing
-UIL-015), `tests/catalog/mirror.test.ts`, and the mixed `tests/sync/exec-atomicity.test.ts`** — move the
-query-semantics ones onto `tests/support/pglite-client.ts`; leave the pure call-recorders alone.
+**So the remaining scope after #80 is `tests/catalog/mirror.test.ts` only** — `card-search.test.ts` was
+already fixed landing UIL-015, and `exec-atomicity.test.ts` is confirmed safe above, not scope at all.
 
 **#80 buys time, not immunity — the entry stays open with reduced scope, not closed.** The doubles still
 model only the operators the code under test happens to call today, so the next new operator is
@@ -2313,10 +2342,18 @@ fidelity issue UIL-013 already described for engine-test fixtures, generalized: 
 double is production code with no tests of its own.** Nothing checks that ours models PostgREST
 correctly, and this entry is the second and third time in one day that gap produced a real miss.
 
-**Suggested fix.** Move the four query-semantics doubles above onto `tests/support/pglite-client.ts`.
-Where a real DB is genuinely too heavy for a given test, add a conformance test that runs the same
-queries through both the fake and PGlite and asserts identical results instead — the durable version,
-since it makes the double's fidelity a tested property instead of an assumption.
+**Suggested fix.** Move `mirror.test.ts` onto `tests/support/pglite-client.ts`, the one file left after
+#80 and the reclassification above. Where a real DB is genuinely too heavy for a given test, add a
+conformance test that runs the same queries through both the fake and PGlite and asserts identical
+results instead — the durable version, since it makes the double's fidelity a tested property instead of
+an assumption.
+
+**A related failure mode in the *mutation* check, worth recording alongside the revert-check rule
+above.** A mutation test on a different PR produced a false negative: its first mutation added a dead
+statement instead of neutering the branch it was meant to test, and reported "0 failed" — which reads as
+"the suite would catch a real mutation" when it proves nothing. Same family as the revert-check finding
+above: **a check meant to catch a lying test can lie in the same way the test does**, and the fix is the
+same — verify the check itself changed something observable, don't trust a clean report on faith.
 
 **How this was found, and the sharper rule it implies.** The revert check (run a test against pre-fix
 source, confirm it fails) was adopted to prove a test catches its own bug. It turns out to do more: it
@@ -2381,3 +2418,146 @@ malfunctions, no data is at risk, and no user-visible behaviour changes either w
 which direction to resolve it. **Flagging specifically for Karvi:** the decision of whether the
 binder-block repurposing idea is live or vestigial is hers, and it determines whether the fix is "wire
 it up" or "delete it."
+
+## UIL-031 — Four unpaged reads on tables her usage grows, so each can silently start returning a partial result
+
+- **Reported:** 2026-09-14 (not from Karvi — found proactively, looking for the "fine at small scale,
+  wrong at real scale" pattern rather than waiting for her to hit it)
+- **Status:** Open
+- **Priority:** Medium
+- **Area:** Sync, Plan
+- **Env:** Testing — **latent, not live**, confirmed by a live count (see below)
+
+**Four call sites, all confirmed unpaged on `origin/develop`:**
+
+- [`lib/repo/sync.ts:29-33`](../lib/repo/sync.ts:29), `unresolvedEntryRepo.listWaiting` —
+  `select("*").eq("status","WAITING")`, no `.range()`.
+- [`app/(ui)/sync/actions.ts:130`](<../app/(ui)/sync/actions.ts>:130) — plain
+  `unresolvedEntryRepo.list(db)`, same exposure.
+- [`lib/repo/copy.ts:46-57`](../lib/repo/copy.ts:46), `copyRepo.listUnplaced` — filtered and ordered
+  correctly, but still a bare `select("*")` with no `.range()`.
+- [`lib/repo/base.ts:87-94`](../lib/repo/base.ts:87), `createRepo(...).list` generically — its own
+  doc comment already says why this is dangerous: "PostgREST caps every response at the project's
+  server-side `max-rows`... this SILENTLY TRUNCATES on any table bigger than that. Use it only where the
+  table is known-small."
+
+**Why this one is worse than UIL-028's chunked-lookup risk.** UIL-028 is latent behind a config change
+nobody has made yet. These four degrade **on their own**, purely as a function of her using the app —
+the unresolved queue and the pending-placement queue both only grow.
+
+**Reconciliation depends on `listWaiting` returning everything.**
+[`lib/sync/pipeline.ts:146`](../lib/sync/pipeline.ts:146) drives archive/drop decisions straight off its
+result — `if (resolvedCsvKeys.has(rk)) archiveEntryIds.push(e.id); else if (!csvKeys.has(rk))
+dropEntryIds.push(e.id)`. Truncated past the cap, every entry past the first page is silently never
+reconciled: never archived when the catalog resolves it, never dropped when it leaves her export.
+`lib/sync/exec.ts:266`'s `liveWaiting` has the same exposure. That directly contradicts a promise the
+Sync screen makes — "they self-heal when the catalog catches up," one of the strings UIL-011 is
+rewriting. Past the cap, self-healing silently stops and nothing says so.
+
+**`listUnplaced` truncating is a different, arguably worse failure: cards past the cap never appear in
+the Haul Plan and never get placed, with no error at all** — not a slow-healing queue, an invisible one.
+
+**Latent, not live — verified by a live read-only count against Testing, not assumed:**
+
+```
+unresolved_entry WAITING:            8   (992 headroom below the 1000-row cap)
+copy unplaced (bulk, no binder/slot): 0
+placement_decision rows:            702
+```
+
+Both queues are nowhere near the cap today. **This also settles an old worry from UIL-004**, which
+raised concern that thirteen unmirrored TCGdex sets would park "cards she is most likely to own" in the
+unresolved queue — that did not materialize; only 8 rows total ever parked, against a 23,548-card
+catalog. Anywhere this log frames the unresolved queue as a live problem, it should stop; an overstated
+worry misleads the same way an understated bug does.
+
+**The fix is stronger than "add paging," and this supersedes an earlier, weaker version of this
+recommendation.** A filtered variant of `pageAll` is opt-in — and opt-in is exactly what failed four
+times today. A fifth call site can still write a bare `.select()`, pass every test at fixture scale, and
+go wrong only in production, only silently. The better property: **make truncation impossible to ignore
+rather than merely avoidable.** PostgREST reports the true row count in `Content-Range` when asked; a
+repo-layer read can detect its own truncation — if rows returned equals the server cap and the reported
+total exceeds it, throw rather than return a plausible short list. That converts the whole class from
+*silent wrong answer* to *loud failure at the call site*, matching three deliberate choices this project
+has already made the same way: the mirror's skip-turned-fail (#38), `acceptance` failing rather than
+skipping, and `migrate` reading `schema_migrations` back rather than trusting `db push`'s exit code.
+
+**Caveat that keeps this from over-scoping:** some reads legitimately want a bounded page (search
+results with an explicit `limit`, like UIL-015's fix). Detection has to key on *"the cap truncated me,"*
+not *"I got fewer rows than exist,"* or every deliberately-limited search becomes a false error.
+
+**Suggested fix, in order:** build the detection on the unfiltered read path first — that's the part
+that turns a silent defect into a loud one, and it protects every call site including ones not yet
+written. Add the filtered `pageAll` variant alongside it for the four call sites above, since paging is
+still correct and desirable where it applies; keep `pageAll`'s existing `LIST_ALL_HARD_CAP` behaviour
+(it throws rather than paging forever) as the model.
+
+**Third instance of the unpaged-read shape today** — `list()` truncation fixed in #39, UIL-028's chunk
+cap, this. Three of one shape says the guard belongs at the repo layer, not remembered per call site.
+
+**One open question, deliberately not logged as a finding.** `WAITING` = 8 and `RESOLVED`/`DISMISSED`
+both = 0 — no entry has ever been archived or dropped, so `pipeline.ts`'s reconciliation may never have
+actually run against real data. Worth a `reason`-enum breakdown before treating that as a defect; it may
+be entirely explained by what's actually in the queue.
+
+**Priority rationale.** Medium: not High, since nothing is broken at today's queue sizes and no data is
+corrupted — the sync still adds copies correctly. Not Low: it degrades silently as she uses the app,
+defeats a behaviour the UI explicitly promises, and is the third instance of one unaddressed class.
+Not assigned — two Highs are in flight.
+
+## UIL-032 — The plan fingerprint doesn't cover `current_binder_ids`, so a cached plan can survive a collection being re-pointed
+
+- **Reported:** 2026-09-14 (not from Karvi — found reviewing UIL-022's fix)
+- **Status:** Open
+- **Priority:** Medium
+- **Area:** Plan, Collections
+- **Env:** Testing
+
+**Root cause.** [`lib/plan/fingerprint.ts:172`](../lib/plan/fingerprint.ts:172) stamps collections into
+the cache key as `[id, targetCount]` pairs only. Deleting a collection changes its id set and correctly
+invalidates a cached plan. Re-pointing a collection at a **different** binder — same id, same target
+count, different `current_binder_ids` — changes nothing the stamp looks at, so a cached plan stays
+"valid" against state that has actually moved.
+
+**This is the same gap UIL-006 was fixed twice for, one field over.** #44 hashed plain counts; #48 had
+to carry the placement-bearing columns themselves because in-place edits (moving a copy, resolving a
+line slot) left the count-based stamp unchanged while what the cascade would route had changed. This is
+that exact failure mode, on a field #44/#48 never had reason to consider because collection-rebinding
+didn't exist as an action yet when the stamp was designed.
+
+**Suggested fix.** Add `current_binder_ids` (or a hash of it) to the collection entry the fingerprint
+already carries — same shape as the existing `[id, targetCount]` pair, just one field wider.
+
+**Priority rationale.** Medium rather than High because it needs a Collections edit mid-plan to reach,
+and the failure is a stale plan rather than corrupted data — but UIL-006's own precedent is that a
+stale plan misleads her at the binder, which is exactly the moment a wrong answer costs the most.
+
+## UIL-033 — `logCardIntoCollection` is a fourth definition of "joining a collection," and it isn't atomic
+
+- **Reported:** 2026-09-14 (not from Karvi — found reviewing UIL-022's fix)
+- **Status:** Open
+- **Priority:** Medium
+- **Area:** Collections
+- **Env:** Testing
+
+**Root cause.** [`app/(ui)/coll/actions.ts:271-296`](<../app/(ui)/coll/actions.ts>:271),
+`logCardIntoCollection`, does three separate awaited writes with no transaction: `copyRepo.insert`,
+then a **TypeScript read-modify-write** union on `target_catalog_card_ids`
+(`const targets = col.target_catalog_card_ids ?? []; ... [...targets, tcgdexId]`), then
+`placementDecisionRepo.insert`. It never goes through `apply_write_ops` or the RPC's
+`union_collection_targets`.
+
+**Two problems, not one.** First, it's a non-atomic multi-step write on live inventory — UIL-023's
+class of defect, on a fourth write path. Second, and worse for the long run: it is now the **fourth**
+independent implementation of "what joining a collection means" after `lib/backfill/commit.ts`,
+`lib/coll/remove.ts`, and #82's Line/Plan move-path fix. Four places that must independently agree on
+one piece of domain logic is the same shape as UIL-012's white-key problem — two places spelling the
+same intent differently, and one eventually drifting — except at four sites instead of two, which is
+worse odds, not better.
+
+**Suggested fix.** Frame as consolidation, not just an atomicity patch: route this through the same
+`apply_write_ops` op set the other three already use (`insert_copy`, `union_collection_targets`,
+`insert_decision`), rather than adding a fifth bespoke implementation to fix a fourth one.
+
+**Priority rationale.** Medium: same class as UIL-023 (small ordered writes, no report of a real
+partial-write incident), raised by the four-site drift risk rather than by an observed failure.
