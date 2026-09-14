@@ -2406,6 +2406,14 @@ open Medium with an argument for jumping ahead of it, since a fix here protects 
 tests from the same failure mode — flagging that explicitly rather than letting it sit purely on
 priority-number ordering. Karvi has not seen this yet.
 
+**The revert-check rule catching itself, before review this time.** Building the fix for UIL-031's fifth
+site, a page-tracking test double reset its own counter on every `.from()` call — and since the
+production paging function calls `.from()` fresh per page, the test could only ever observe the last
+page. It would have passed against a fake that couldn't distinguish paged from unpaged reads. Caught by
+the author, pre-review, by applying this entry's own rule ("an unexpected pass is a harness bug until
+proven otherwise") to the harness being written for the fix. Second time today the rule has caught a
+lying double; the first time before anyone else needed to.
+
 ## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
 
 - **Reported:** 2026-09-14 (not from Karvi — found by the Senior Dev session while fixing UIL-017)
@@ -2561,14 +2569,29 @@ be entirely explained by what's actually in the queue.
 **Priority rationale.** Medium for the four display/small-table sites: not High, since nothing is
 broken at today's queue sizes and no data is corrupted there. Not Low: it degrades silently as she uses
 the app, defeats a behaviour the UI explicitly promises, and is the third instance of one unaddressed
-class. **The fifth site (`pipeline.ts:106`) is deliberately left unrated here** — severity is pending
-the `copy`/`presence_group` counts, and a confirmed-live truncation there is grounds for its own High
-entry rather than a quiet upgrade of this one's rating.
+class.
 
-**In progress on the four sites originally in scope:** PR [#90](https://github.com/viantihu/pokemon-tcg-tracker/pull/90)
-(open) implements the detection approach this entry recommended (`assertReadComplete`, per its title).
-Status transition is the Senior BA's to record once it lands. The fifth site's fix, if the counts
-warrant one, is separate work.
+**Completeness audit — the open-ended "are there more of these" question is now closed, not just
+narrowed.** Every exported repo in `lib/repo/` was checked for its own bespoke `list()` that would
+bypass `base.ts`'s guard (added by #90) entirely — `base.ts`'s detection lives inside the shared
+`createRepo(...)` implementation, so a repo defining its own `list()` method skips it regardless of what
+that guard does. Of every repo, exactly two escape it, and both are checked, not merely unexamined:
+[`lib/repo/binder-section.ts:5`](../lib/repo/binder-section.ts:5) (`binderSectionRepo.list`, a **view**
+over binders — structurally bounded by binder count) and
+[`lib/repo/sync.ts:40`](../lib/repo/sync.ts:40) (`setAliasRepo.list`, bounded by ~218 TCGdex sets).
+Neither can approach four digits. **After #90 and #96, no read that can grow with her usage is
+unguarded.** The one residual risk: a *future* bespoke repo would silently escape the guard the same
+way these two structurally-safe ones do — worth a comment on `base.ts`'s `list()` saying so, as a small
+follow-up rather than a defect, since the guard protects the shared implementation, not the pattern.
+
+**The fifth site is fixed, independently of whether the detection guard fires.**
+[`lib/sync/pipeline.ts:106`](../lib/sync/pipeline.ts:106)'s two reconciler-input reads
+(`presenceGroupRepo.list`/`copyRepo.list`) now use `listAll` via PR #96 — the severity split above is
+resolved by removing the exposure rather than by the counts landing one way or the other.
+
+**Fixed** — PR [#90](https://github.com/viantihu/pokemon-tcg-tracker/pull/90) shipped the detection
+approach this entry recommended (`assertReadComplete`); PR [#96](https://github.com/viantihu/pokemon-tcg-tracker/pull/96)
+paged the fifth site. Both merged. Status transition is the Senior BA's to record.
 
 ## UIL-032 — The plan fingerprint doesn't cover `current_binder_ids`, so a cached plan can survive a collection being re-pointed
 
@@ -2952,23 +2975,41 @@ name/set name/local id/tcgdex id — nothing else. Every add path (`CollectionEd
 `LogCardModal`, `StageRow`) is a single `onPick` callback; a repo-wide search for a multi-select
 mechanism found none anywhere in the app.
 
-**What each requested filter needs, checked individually rather than assumed available:**
+**What each requested filter needs, checked individually rather than assumed available. The hardest-
+sounding one is actually the cheapest, and it's her real workflow, not just a filter.**
 
-- **Illustrator** — the column exists (`catalog_card.illustrator`,
-  [`0002_domain.sql`](../supabase/migrations/0002_domain.sql)) but isn't wired end to end: `search()`
-  never references it, and `LookupCard` ([`lib/plan/plan-types.ts:13-25`](../lib/plan/plan-types.ts:13))
-  doesn't even carry it to the client. Column exists, plumbing doesn't.
+- **Illustrator — already fully mirrored, and it's not just a filter, it's the primary use case this
+  page is for.** Verified end to end: the column ([`0002_domain.sql:57`](../supabase/migrations/0002_domain.sql:57))
+  is populated by the mirror ([`lib/catalog/mirror.ts:96`](../lib/catalog/mirror.ts:96),
+  `illustrator: card.illustrator ?? null`) from a typed TCGdex field
+  ([`lib/catalog/tcgdex.ts:55`](../lib/catalog/tcgdex.ts:55)) — **all 23,548 rows already have it.** No
+  schema change, no 218-request re-mirror, nothing queued behind UIL-026's work. It's a pure
+  query-and-UI job: `search()` doesn't select it and `LookupCard`
+  ([`lib/plan/plan-types.ts:13-25`](../lib/plan/plan-types.ts:13)) doesn't carry it to the client, but
+  the data itself is done. And the app's own design document names this as the actual reason the
+  feature exists — [`docs/design/prototype.html:1198`](../docs/design/prototype.html:1198), the
+  collections rationale: "A collection is a themed group (**illustrator sets are Karvi's real case**)
+  that she sizes herself." So this isn't the fourth filter in a list — it's the workflow the other three
+  filters support.
 - **Expansion (set)** — already filterable in principle (`set_name`/`set_id` are searched today), just
   not exposed as a distinct filter control separate from free text.
 - **Pokémon (species)** — a repo primitive already exists,
   `catalogCardRepo.findByDexId` ([`lib/repo/catalog-card.ts:93`](<../lib/repo/catalog-card.ts>:93)), but
   it's called nowhere — dead code today, reusable rather than needing to be written from scratch.
 - **Collector number** — already solved by UIL-010/UIL-015's fix; reusable as-is.
-- **Bulk add** — genuinely greenfield; no partial version exists to extend.
+
+**So of the four filters, none needs new data, and only species-by-name needs any new query logic at
+all** — the rest is wiring existing columns and an unused repo primitive to a new UI. **Bulk add** is
+the one genuinely greenfield piece: no partial version exists to extend.
 
 **Aligns with the visual-search design principle already on record.** A grid of card art with filters
 is exactly the "thumbnail as the primary identifying element" direction she stated after UIL-016 — this
 request is that principle applied to the search surface specifically, not a new, separate idea.
+
+**Cross-reference UIL-034 — build this on a page that already folds, don't fight one that doesn't.** A
+block-grid page with bulk-add lands on exactly the same surface UIL-034 flags for having no fold at all.
+Whoever builds this should sequence it so the search results grid doesn't inherit UIL-034's problem on
+day one of existing.
 
 **Suggested scope, not a full design:** a dedicated search page/panel with a grid of `CardFace`-style
 tiles, filter controls for set and species reusing `findByDexId`, illustrator wired through `search()`
@@ -2978,9 +3019,10 @@ become a second implementation to keep in sync with the first (the class of prob
 collection-joining logic).
 
 **Priority rationale.** Medium: nothing here is broken — today's search finds cards correctly, just
-one at a time with one field. This is a workflow improvement for a specific task (building a finite
-collection from a checklist), not a bug, so it competes with other Mediums rather than jumping the
-queue. Karvi's own priority read wasn't given for this one specifically; flagging for hers.
+one at a time with one field. This is a workflow improvement, not a bug, so it competes with other
+Mediums rather than jumping the queue — but the illustrator finding above is worth weighing if Karvi
+reads this, since it means her stated primary use case is currently entirely unsupported, not merely
+inconvenient. Karvi's own priority read wasn't given for this one specifically; flagging for hers.
 
 ## UIL-040 — Rebinding a collection to a different specialty binder changes the record but silently orphans the cards already shelved in the old one
 
@@ -3030,3 +3072,96 @@ path that already runs today and already produces the orphan hazard the moment s
 picker in an edit, whether or not she's found it yet. Same reasoning Karvi accepted for UIL-014 and
 UIL-022. Flagging for her confirmation since severity calls are hers, but recommending this not be
 treated as merely a feature request.
+
+## UIL-041 — Audit the design prototype against the shipped app, once, rather than finding gaps one at a time
+
+- **Reported:** 2026-09-14 (not from Karvi — the Senior BA's suggestion, prompted by UIL-036)
+- **Status:** Open
+- **Priority:** Low as a defect, high value as process
+- **Area:** Plan, Lookup, Collections, Backfill
+- **Env:** n/a — a process gap, not a code defect
+
+**Why this entry exists.** UIL-036 (card-thumbnail enlarge) turned out to be a feature fully designed in
+[`docs/design/prototype.html`](../docs/design/prototype.html) — CSS, HTML, and JS all present — that
+simply never got ported to the React app. That is unlikely to be the only one:
+`docs/design/prototype.html` contains interactive functions beyond `openZoom`/`closeZoom` with no
+obvious React counterpart checked yet, including collection-editor and log-search flows. Left as is,
+Karvi discovers each gap the same way she found UIL-036 — by remembering the prototype and noticing the
+app doesn't match it, one surprise at a time.
+
+**Suggested fix: a single enumeration pass, not a redesign.** List every interactive feature in the
+prototype (buttons, modals, hover/click behaviors, transitions) and mark each one ported / not ported /
+deliberately dropped, with a one-line reason for anything marked dropped. The deliverable is a checklist
+she can read once, not code — closing the open-ended "what else is in there" question rather than
+leaving it to surface piecemeal.
+
+**Priority rationale.** Low as a defect, since nothing here is broken — the prototype not matching the
+app isn't itself a bug, and several mismatches may be intentional design evolution rather than gaps.
+High value as process: one list beats six more surprises, and it's cheap relative to the alternative
+(each surprise costing its own investigation, as UIL-036 did).
+
+## UIL-042 — `placement_decision` is load-bearing for queue state, not just an audit trail — clearing it silently re-queues the whole collection
+
+- **Reported:** 2026-09-14 (not from Karvi — surfaced investigating today's 702-decision event; credit
+  the tech-lead session)
+- **Status:** Open
+- **Priority:** Medium
+- **Area:** Plan, Collections
+- **Env:** Testing
+
+**Context, stated first because it explains why this is worth an entry rather than a bug report.** All
+702 of Karvi's placement decisions were deleted at some point today, and all 702 copies reset to
+`role=bulk` with null binder and slot. **The application cannot do this** — verified independently:
+
+- No `delete_decision` op exists in `apply_write_ops` — checked identically across
+  [`0006_commit_rpc.sql:212-218`](../supabase/migrations/0006_commit_rpc.sql:212),
+  [`0007_backfill_ops.sql:275-281`](../supabase/migrations/0007_backfill_ops.sql:275), and
+  [`0008_collection_removal_ops.sql:276-282`](../supabase/migrations/0008_collection_removal_ops.sql:276)
+  — only `delete_copy`, `delete_unresolved_entry`, `delete_snapshot`. No
+  `delete from placement_decision` exists anywhere in `supabase/` or `lib/`.
+- FKs on `copy_id`/`haul_id` are `on delete set null`, so deleting copies could never cascade into this
+  table — and copies weren't deleted anyway (`copy` held at 702 throughout).
+- A sync undo is separately ruled out three ways: `invertSnapshot`
+  ([`lib/sync/undo.ts:132-147`](../lib/sync/undo.ts:132)) never references `placement_decision` at
+  all; undo would have deleted the copies sync created (`copy` didn't move); and it would have removed
+  newly parked queue entries (`unresolved_entry` held at 8).
+- `reset-testing.yml` is ruled out — confirmed present on `develop` but absent from `main`, so not
+  dispatchable as the default-branch workflow.
+
+**So this was a manual database operation. The entry is about the consequence, not who did it.**
+
+**The finding.** `loadPendingPlacements` uses the *absence* of a `placement_decision` row as its
+discriminator for "this copy is still waiting to be placed"
+([`lib/plan/pending.ts:13-17`](../lib/plan/pending.ts:13)) — and that design is correct, not the
+problem. The cascade can legitimately route a card *to* bulk, which leaves the placement columns
+indistinguishable from an untouched sync add; only the audit row tells them apart, which is also what
+makes the queue self-clearing regardless of destination. UIL-003's own resolution documents exactly this
+reasoning.
+
+**The consequence nobody had written down: clearing this table doesn't just lose history, it re-queues
+everything.** The table's name reads as a log — "it's the audit trail, it's safe to clear" is exactly
+how a reasonable person would reason about a table with that name — but it is queue *state*. Deleting it
+resets the whole placement pass.
+
+**The loss is asymmetric, and that's what matters for anyone who does this again.** No cards are lost —
+all 702 copies stayed intact, and re-running the plan writes fresh decision rows and drains the queue
+normally. But the record of which card went where and *why*, from her first placement pass, is gone
+permanently — nothing reconstructs it.
+
+**Suggested fix, deliberately presented as two readings rather than one recommendation.** (1) Document
+the table's load-bearing role in a migration comment and in `pending.ts`, so the name stops implying
+it's safe to clear. (2) Consider an explicit "pending" marker instead of inferring it from absence —
+but the counter-argument is real: the current design is deliberate and well-reasoned (per UIL-003's own
+account), and an explicit flag introduces a second source of truth that can disagree with the placement
+columns. Documentation over redesign is the lighter-weight fix; recording both since this is a real
+design tradeoff, not an obvious call.
+
+**Priority rationale.** Medium: no code defect exists and no user-facing behaviour is currently wrong.
+Not Low, because the failure mode is silent, total, and reachable by routine maintenance on a table
+whose own name invites exactly that mistake, and it destroys the one thing in this system that isn't
+reconstructible.
+
+**Cross-reference: the sixth instance of the day's dominant pattern** — a silent, plausible-looking
+result standing in for a correct one. Here the plausible result is "the queue is full of unplaced
+cards," which is true, and gives no hint that it's true because history was cleared rather than because
+a sync ran.
