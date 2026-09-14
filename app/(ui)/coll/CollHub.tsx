@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import type { MoveDestination } from "@/lib/line/types";
 import {
   buildWishlistCopyText,
   buildWishlistCsv,
@@ -22,17 +23,24 @@ import {
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
 import { CardLookup } from "../_components/CardLookup";
+import { MoveOverlay } from "../_components/MoveOverlay";
 import type { LookupCard } from "../plan/plan-types";
 import {
   deleteCollection,
   loadCollHub,
   logCardIntoCollection,
+  removeCardFromCollection,
   saveCollection,
   searchCatalog,
   setCollectionMode,
   wishlistCollectionCard,
 } from "./actions";
-import type { CollectionInput, CollectionView, CollHubData } from "./coll-types";
+import type {
+  CollectionCardView,
+  CollectionInput,
+  CollectionView,
+  CollHubData,
+} from "./coll-types";
 
 type Tab = "coll" | "wish";
 
@@ -42,6 +50,20 @@ interface DraftTarget {
   name: string;
   setName: string | null;
   localId: string | null;
+  /**
+   * She holds a copy of this card in the collection's binder. Dropping it from the list here would
+   * strand that physical copy, so the row's "✕" is not offered (UIL-014 defect 2) — removal is a move,
+   * done from the card in the grid. Always false for a card added in this session: ownership is
+   * derived server-side, so a freshly-added target is only known to be owned after the next load, and
+   * `saveCollection` refuses the drop regardless.
+   */
+  owned: boolean;
+}
+
+/** The card whose new home she is picking, with the collection it is leaving. */
+interface RemovalTarget {
+  collection: CollectionView;
+  card: CollectionCardView;
 }
 
 interface EditorState {
@@ -60,6 +82,7 @@ export function CollHub() {
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [logFor, setLogFor] = useState<CollectionView | null>(null);
+  const [removeFor, setRemoveFor] = useState<RemovalTarget | null>(null);
 
   // Reused by mutation handlers. setState lands only inside .then/.catch (never synchronously).
   const refresh = useCallback(
@@ -129,8 +152,28 @@ export function CollHub() {
         name: k.name,
         setName: k.setName,
         localId: k.localId,
+        owned: k.owned,
       })),
     });
+  }
+
+  /**
+   * UIL-014: removal is a MOVE. A card she holds needs a new home, so it opens the shared move picker.
+   * A card on the list she does NOT hold in this collection's binder has nothing to re-home (an open
+   * collection whose copy has since moved on), so there is no home to pick — that one is just a
+   * chase-list edit, confirmed inline.
+   */
+  async function requestRemove(collection: CollectionView, card: CollectionCardView) {
+    if (card.copyIds.length > 0) {
+      setRemoveFor({ collection, card });
+      return;
+    }
+    const ok = window.confirm(
+      `Remove "${card.name}" from ${collection.name}? You do not hold a copy of it in this ` +
+        `collection's binder, so no card moves.`,
+    );
+    if (!ok) return;
+    await run(() => removeCardFromCollection(collection.id, card.tcgdexId, { kind: "bulk" }));
   }
 
   async function submitEditor() {
@@ -192,6 +235,7 @@ export function CollHub() {
           onDelete={(id) => run(() => deleteCollection(id))}
           onLog={setLogFor}
           onWishlist={(cid, tid) => run(() => wishlistCollectionCard(cid, tid))}
+          onRemove={requestRemove}
         />
       ) : (
         <WishlistView data={data} />
@@ -219,6 +263,34 @@ export function CollHub() {
           }}
         />
       )}
+
+      {/*
+        UIL-014: removing a card from a collection is a MOVE — `copy` has no `collection_id`, so the
+        card has to be given somewhere else to live. Reuses the same picker the line strip and the plan
+        spotlight use, seeded on the bulk box so the common case is one more click, with every shelf and
+        collection right there when she wants to place it properly.
+      */}
+      {removeFor && data && (
+        <MoveOverlay
+          card={{
+            copyId: removeFor.card.copyIds[0] ?? "",
+            name: removeFor.card.name,
+            localId: removeFor.card.localId,
+            imageUrl: removeFor.card.imageUrl,
+            bandKey: removeFor.card.bandKey,
+            currentLabel: `${removeFor.collection.binderNames[0] ?? "No binder"} · ${removeFor.collection.name}`,
+            initial: { kind: "bulk" },
+          }}
+          options={data.moveOptions}
+          onClose={() => setRemoveFor(null)}
+          onConfirm={async (dest: MoveDestination) => {
+            const ok = await run(() =>
+              removeCardFromCollection(removeFor.collection.id, removeFor.card.tcgdexId, dest),
+            );
+            if (ok) setRemoveFor(null);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -234,8 +306,9 @@ function CollectionsView(props: {
   onDelete: (id: string) => void;
   onLog: (c: CollectionView) => void;
   onWishlist: (collectionId: string, tcgdexId: string) => void;
+  onRemove: (c: CollectionView, k: CollectionCardView) => void;
 }) {
-  const { data, busy, onNew, onEdit, onMode, onDelete, onLog, onWishlist } = props;
+  const { data, busy, onNew, onEdit, onMode, onDelete, onLog, onWishlist, onRemove } = props;
   return (
     <div className="collwrap">
       <div className="collnew">
@@ -318,7 +391,10 @@ function CollectionsView(props: {
                       <div className="cn u">{k.name}</div>
                       {k.localId ? <div className="cno">{k.localId}</div> : null}
                       {k.owned ? (
-                        <span className="cpill have u">Owned</span>
+                        <>
+                          <span className="cpill have u">Owned</span>
+                          <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
+                        </>
                       ) : k.wished ? (
                         <span className="cpill wish u">On wishlist</span>
                       ) : (
@@ -357,6 +433,7 @@ function CollectionsView(props: {
                         <div className="cn u">{k.name}</div>
                         {k.localId ? <div className="cno">{k.localId}</div> : null}
                         <span className="cpill have u">In collection</span>
+                        <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
                       </div>
                     ))}
                   </div>
@@ -368,6 +445,39 @@ function CollectionsView(props: {
       })}
       <div className="foot">FINITE · A SET LIST YOU CHASE. OPEN · A RUNNING COUNT WITH NO END.</div>
     </div>
+  );
+}
+
+/**
+ * The per-card removal control (UIL-014). Labelled with the count when the collection's binder holds
+ * more than one copy of the printing, because all of them move: membership is per catalog card, so
+ * leaving one behind would leave it shelved in the collection's binder and on no list — the exact
+ * orphan this fix exists to prevent.
+ */
+function RemoveCardButton({
+  card,
+  busy,
+  onClick,
+}: {
+  card: CollectionCardView;
+  busy: boolean;
+  onClick: () => void;
+}) {
+  const count = card.copyIds.length;
+  return (
+    <button
+      className="wbtn u"
+      style={{ background: "var(--panel)" }}
+      disabled={busy}
+      onClick={onClick}
+      title={
+        count === 0
+          ? "Take this card off the collection's list. You hold no copy of it here, so nothing moves."
+          : `Give ${count > 1 ? `these ${count} copies` : "this card"} a new home — removing it from a collection is a move, not a delete.`
+      }
+    >
+      {count > 1 ? `Remove ${count} ▸` : "Remove ▸"}
+    </button>
   );
 }
 
@@ -530,11 +640,26 @@ function CollectionEditor(props: {
       ...state,
       targets: [
         ...state.targets,
-        { tcgdexId: card.tcgdexId, name: card.name, setName: card.setName, localId: card.localId },
+        {
+          tcgdexId: card.tcgdexId,
+          name: card.name,
+          setName: card.setName,
+          localId: card.localId,
+          owned: false,
+        },
       ],
     });
   }
+
+  /**
+   * Drop a card from the chase list. UIL-014 defect 2: this only ever edited the draft, and
+   * `saveCollection` persisted it as `target_catalog_card_ids` without touching the `copy` row — so for
+   * a card she owns it silently produced an untracked copy, still shelved in the collection's binder
+   * but invisible in every collection and wishlist view. Owned rows no longer offer it (the server
+   * refuses the drop either way); their removal is a move, from the card in the collection's grid.
+   */
   function removeTarget(id: string) {
+    if (state.targets.find((t) => t.tcgdexId === id)?.owned) return;
     onChange({ ...state, targets: state.targets.filter((t) => t.tcgdexId !== id) });
   }
 
@@ -622,7 +747,7 @@ function CollectionEditor(props: {
               <CardLookup search={searchCatalog} onPick={addTarget} placeholder="Add a card…" />
               <div className="celist">
                 {state.targets.map((t) => (
-                  <div key={t.tcgdexId} className="cerow">
+                  <div key={t.tcgdexId} className={"cerow" + (t.owned ? " own" : "")}>
                     <span className="cei">
                       <b>{t.name}</b>
                       <i>
@@ -630,15 +755,32 @@ function CollectionEditor(props: {
                         {t.localId ? ` · ${t.localId}` : ""}
                       </i>
                     </span>
-                    <button className="cex" onClick={() => removeTarget(t.tcgdexId)}>
-                      ✕
-                    </button>
+                    {t.owned ? (
+                      <span className="cpill have u" style={{ marginTop: 0 }}>
+                        Owned · remove on the card
+                      </span>
+                    ) : (
+                      <button
+                        className="cex"
+                        title={`Take ${t.name} off the list. You hold no copy of it here, so nothing moves.`}
+                        onClick={() => removeTarget(t.tcgdexId)}
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                 ))}
                 {state.targets.length === 0 && (
                   <div className="cehint u">No cards yet. Search above to build the set list.</div>
                 )}
               </div>
+              {state.targets.some((t) => t.owned) && (
+                <div className="hint u">
+                  A card you own cannot be dropped from the list here — the physical card would stay
+                  in the binder with nothing tracking it. Close this and use Remove on the card to
+                  give it a new home.
+                </div>
+              )}
             </>
           )}
 

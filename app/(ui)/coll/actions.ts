@@ -27,6 +27,8 @@ import {
 import { band } from "@/lib/engine";
 import { getOwnerContext, toCatalogCard } from "@/lib/plan";
 import { errorMessage } from "@/lib/errors";
+import { applyCollectionRemoval, blockedTargetDrops, blockedTargetDropsMessage } from "@/lib/coll";
+import { buildMoveOptions, type MoveDestination, type MoveNameLookups } from "@/lib/line";
 import {
   collectionMode,
   groupWishlist,
@@ -87,13 +89,14 @@ export async function loadCollHub(): Promise<CollHubData> {
     band(toCatalogCard(row), typeColorMap) ?? "white";
 
   // What she owns, per binder (a target card is "owned" if a shelved copy of it sits in a binder
-  // the collection lives in).
-  const ownedByBinder = new Map<string, Set<string>>();
+  // the collection lives in). Keeps the copy ids, not just the catalog id: removing a card from a
+  // collection re-homes those physical copies, so the view has to know they exist (UIL-014).
+  const ownedByBinder = new Map<string, Map<string, string[]>>();
   for (const c of shelved) {
     if (!c.binder_id) continue;
-    const set = ownedByBinder.get(c.binder_id) ?? new Set<string>();
-    set.add(c.catalog_card_id);
-    ownedByBinder.set(c.binder_id, set);
+    const byCard = ownedByBinder.get(c.binder_id) ?? new Map<string, string[]>();
+    byCard.set(c.catalog_card_id, [...(byCard.get(c.catalog_card_id) ?? []), c.id]);
+    ownedByBinder.set(c.binder_id, byCard);
   }
 
   const wishedCatalogIds = new Set<string>();
@@ -107,8 +110,8 @@ export async function loadCollHub(): Promise<CollHubData> {
       .map((id) => cardById.get(id))
       .filter((r): r is Row<"catalog_card"> => !!r)
       .map((r) => {
-        const owned = (col.current_binder_ids ?? []).some((bid) =>
-          ownedByBinder.get(bid)?.has(r.tcgdex_id),
+        const copyIds = (col.current_binder_ids ?? []).flatMap(
+          (bid) => ownedByBinder.get(bid)?.get(r.tcgdex_id) ?? [],
         );
         return {
           tcgdexId: r.tcgdex_id,
@@ -117,8 +120,9 @@ export async function loadCollHub(): Promise<CollHubData> {
           localId: r.local_id,
           bandKey: bandKeyForCard(r),
           imageUrl: r.image_url,
-          owned,
+          owned: copyIds.length > 0,
           wished: wishedCatalogIds.has(r.tcgdex_id),
+          copyIds,
         };
       });
     return {
@@ -179,6 +183,8 @@ export async function loadCollHub(): Promise<CollHubData> {
       .filter((b) => b.type === "specialty")
       .map((b) => ({ id: b.id, name: b.name })),
     wishlist: { groups: groupWishlist(entries), entries },
+    // The same picker the line strip and the plan spotlight use, built from rows already in hand.
+    moveOptions: buildMoveOptions(binders, collections, bands),
   };
 }
 
@@ -186,12 +192,25 @@ export async function loadCollHub(): Promise<CollHubData> {
  * Create or update a collection. A new binder (`binderId === "__new"`) is created as a specialty
  * binder first, so the collection — and its binder — surface in the binder list and placement picker
  * immediately (COLLS is the single source of truth).
+ *
+ * REFUSES a save that drops a target she still owns in the collection's binder (UIL-014 defect 2).
+ * `target_catalog_card_ids` is half of how membership is derived, so persisting the shorter list
+ * without moving the `copy` row leaves an untracked physical card in a real pocket. Removing an owned
+ * card is a move; it goes through `removeCardFromCollection`. Dropping an un-owned target — a gap she
+ * has stopped chasing — strands nothing and is still allowed.
  */
 export async function saveCollection(input: CollectionInput): Promise<SaveResult> {
   const name = input.name.trim();
   if (!name) return { ok: false, error: "A collection needs a name." };
   try {
     const { db, ownerId } = await getOwnerContext();
+
+    if (input.id) {
+      const existing = await collectionRepo.getByPk(db, input.id);
+      if (!existing) return { ok: false, error: "That collection no longer exists." };
+      const blocked = await blockedTargetDrops(db, existing, input.targetTcgdexIds);
+      if (blocked.length > 0) return { ok: false, error: blockedTargetDropsMessage(blocked) };
+    }
 
     let binderId = input.binderId;
     if (binderId === "__new") {
@@ -287,6 +306,41 @@ export async function logCardIntoCollection(
       reason: `Logged into ${col.name}`,
       resolved_by: "user",
     });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * Remove a card from a collection (UIL-014) — a MOVE, not a delete.
+ *
+ * `copy` has no `collection_id`, so there is no field to clear: the physical copies shelved in the
+ * collection's binder are re-homed to the destination she picked AND the card comes off the chase
+ * list, in ONE transaction (`lib/coll/remove.ts` → `apply_write_ops`). Half of that is corrupt data,
+ * so it is never allowed to half-apply.
+ *
+ * Only the collection, the catalog id and the destination cross the wire; which copies exist, which
+ * line slots they fill and which lines that demotes are all re-derived from fresh state server-side.
+ */
+export async function removeCardFromCollection(
+  collectionId: string,
+  tcgdexId: string,
+  destination: MoveDestination,
+): Promise<SaveResult> {
+  try {
+    const { db } = await getOwnerContext();
+    const [binders, collections, bands] = await Promise.all([
+      binderRepo.list(db),
+      collectionRepo.list(db),
+      colorBandRepo.listOrdered(db),
+    ]);
+    const names: MoveNameLookups = {
+      binderName: (id) => (id && binders.find((b) => b.id === id)?.name) || "Binder",
+      collectionName: (id) => collections.find((c) => c.id === id)?.name ?? null,
+      bandDisplay: (key) => bands.find((b) => b.band === key)?.display_name ?? key,
+    };
+    await applyCollectionRemoval(db, { collectionId, tcgdexId, destination }, names);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };

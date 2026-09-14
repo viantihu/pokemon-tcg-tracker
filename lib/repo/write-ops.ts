@@ -1,9 +1,10 @@
 /**
  * The atomic write-orchestration boundary (dev-spec §5 M10; migrations 0006_commit_rpc.sql +
- * 0007_backfill_ops.sql).
+ * 0007_backfill_ops.sql + 0008_collection_removal_ops.sql).
  *
  * All THREE commit paths (lib/plan/commit.ts haul, lib/sync/exec.ts sync, lib/backfill/commit.ts
- * backfill) keep ALL the pure cascade / reconcile / decision logic in TS and compute a
+ * backfill) — plus the collection-removal path (lib/coll/remove.ts, UIL-014) — keep ALL the pure
+ * cascade / reconcile / decision logic in TS and compute a
  * fully-resolved, ORDERED write set — generating row UUIDs client-side (crypto.randomUUID) so
  * line→slot→copy cross-references resolve before insert — then hand it here. `applyWriteOps` posts
  * the whole set to the `apply_write_ops` Postgres function, which runs every op inside one implicit
@@ -35,6 +36,11 @@ export interface SlotPatch {
   copy_id?: string | null;
   target_catalog_card_id?: string | null;
   note?: string | null;
+}
+
+/** An evolution-line patch (0008). Only `status` is expressible — nothing else needs patching. */
+export interface LinePatch {
+  status?: string;
 }
 
 export interface EntryPatch {
@@ -158,6 +164,12 @@ export type WriteOp =
     }
   | { op: "update_copy"; id: string; patch: CopyPatch }
   | { op: "update_slot"; id: string; patch: SlotPatch }
+  /**
+   * Patch a line's status (0008). The removal/move path demotes a `complete` line back to `open` when
+   * the copy filling its last slot leaves (removal symmetry, sync-arch §1.6) — inside the same
+   * transaction as the placement rewrite, which 0006/0007 could not express.
+   */
+  | { op: "update_line"; id: string; patch: LinePatch }
   | { op: "update_unresolved_entry"; id: string; patch: EntryPatch }
   /**
    * Union catalog ids into `collection.target_catalog_card_ids` (0007). The union happens SERVER-SIDE
@@ -165,6 +177,13 @@ export type WriteOp =
    * two interleaved taggings compose. Idempotent — re-tagging the same card changes nothing.
    */
   | { op: "union_collection_targets"; collection_id: string; catalog_card_ids: string[] }
+  /**
+   * The inverse (0008): drop catalog ids OUT of `collection.target_catalog_card_ids`. Same
+   * single-statement, column-derived shape as the union, so it is atomic, order-preserving, free of
+   * the lost update a read-modify-write would have, and idempotent. Removal from a collection is a
+   * MOVE plus this list edit; the two must land in one transaction or the copy is orphaned (UIL-014).
+   */
+  | { op: "subtract_collection_targets"; collection_id: string; catalog_card_ids: string[] }
   | { op: "delete_copy"; id: string }
   | { op: "delete_unresolved_entry"; id: string }
   | { op: "delete_snapshot"; id: string };

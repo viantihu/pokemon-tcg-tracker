@@ -6,7 +6,14 @@ export type { DbClient, TableName, ViewName, Row, Insert, Update, ViewRow } from
 export { createRepo } from "./base";
 export type { Database, Json } from "./database.types";
 export { applyWriteOps } from "./write-ops";
-export type { WriteOp, WritePayload, CopyPatch, SlotPatch, EntryPatch } from "./write-ops";
+export type {
+  WriteOp,
+  WritePayload,
+  CopyPatch,
+  SlotPatch,
+  LinePatch,
+  EntryPatch,
+} from "./write-ops";
 
 export { catalogCardRepo } from "./catalog-card";
 export { copyRepo } from "./copy";

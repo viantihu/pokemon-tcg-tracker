@@ -362,41 +362,21 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
     });
   }
 
-  const specialtyBinderIds = new Set(
-    binderRows.filter((b) => b.type === "specialty").map((b) => b.id),
-  );
-  const collectionsByBinder: MoveOptions["collectionsByBinder"] = {};
-  for (const c of collectionRows) {
-    for (const bid of c.current_binder_ids ?? []) {
-      if (!specialtyBinderIds.has(bid)) continue;
-      (collectionsByBinder[bid] ??= []).push({ id: c.id, name: c.name });
-    }
-  }
-
-  const moveOptions: MoveOptions = {
-    binders: binderRows.map((b) => ({
-      id: b.id,
-      name: b.name,
-      type: b.type === "specialty" ? "specialty" : "general",
-    })),
-    collectionsByBinder,
-    bands: bandRows.map((b) => ({ key: b.band, display: b.display_name })),
-  };
+  const moveOptions = buildMoveOptions(binderRows, collectionRows, bandRows);
 
   return { lines: lineViews, derived: deriveAllDecisions(decisionInputs), moveOptions };
 }
 
 /**
- * Just the move-panel options (binders, their collections, ordered bands). Lightweight loader for
- * surfaces that only need the picker — e.g. the plan spotlight's placement override — without the
- * full line + decision model.
+ * The move-panel options from already-loaded rows. PURE, so any surface that has these three lists in
+ * hand can offer the picker without three more queries (the Collections hub already loads all three
+ * for its own read model — UIL-014).
  */
-export async function loadMoveOptions(db: DbClient): Promise<MoveOptions> {
-  const [binderRows, collectionRows, bandRows] = await Promise.all([
-    binderRepo.list(db),
-    collectionRepo.list(db),
-    colorBandRepo.listOrdered(db),
-  ]);
+export function buildMoveOptions(
+  binderRows: Row<"binder">[],
+  collectionRows: Row<"collection">[],
+  bandRows: Row<"color_band">[],
+): MoveOptions {
   const specialtyBinderIds = new Set(
     binderRows.filter((b) => b.type === "specialty").map((b) => b.id),
   );
@@ -416,6 +396,20 @@ export async function loadMoveOptions(db: DbClient): Promise<MoveOptions> {
     collectionsByBinder,
     bands: bandRows.map((b) => ({ key: b.band, display: b.display_name })),
   };
+}
+
+/**
+ * Just the move-panel options (binders, their collections, ordered bands). Lightweight loader for
+ * surfaces that only need the picker — e.g. the plan spotlight's placement override — without the
+ * full line + decision model.
+ */
+export async function loadMoveOptions(db: DbClient): Promise<MoveOptions> {
+  const [binderRows, collectionRows, bandRows] = await Promise.all([
+    binderRepo.list(db),
+    collectionRepo.list(db),
+    colorBandRepo.listOrdered(db),
+  ]);
+  return buildMoveOptions(binderRows, collectionRows, bandRows);
 }
 
 /** The client-facing screen data (decisions flattened to their cards). */
