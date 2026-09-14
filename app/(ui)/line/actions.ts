@@ -46,15 +46,21 @@ function nameLookups(data: LineScreenData): MoveNameLookups {
 export type MoveActionResult =
   { ok: true; label: string; data: LineScreenData } | { ok: false; error: string };
 
-/** Move an owned/shelved card: rewrite placement + write the user audit row, then return fresh data. */
+/**
+ * Move an owned/shelved card: rewrite placement, join the destination collection's chase list when
+ * there is one, write the user audit row — all in one transaction — then return fresh data.
+ *
+ * No `ownerId` is passed: the move now goes through the SECURITY INVOKER `apply_write_ops` RPC, where
+ * `owner_id` defaults to `auth.uid()` and RLS enforces it rather than being carried in a payload.
+ */
 export async function moveCardAction(
   copyId: string,
   destination: MoveDestination,
 ): Promise<MoveActionResult> {
   try {
-    const { db, ownerId } = await getOwnerContext();
+    const { db } = await getOwnerContext();
     const before = await loadLineScreen(db);
-    const res = await applyMove(db, ownerId, { copyId, destination }, nameLookups(before));
+    const res = await applyMove(db, { copyId, destination }, nameLookups(before));
     const data = await loadLineScreen(db);
     return { ok: true, label: res.destinationLabel, data };
   } catch (err) {

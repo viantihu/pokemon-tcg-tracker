@@ -30,7 +30,7 @@
 import { effectiveType, type Role } from "@/lib/engine";
 import { applyWriteOps, type DbClient, type WriteOp, type WritePayload } from "@/lib/repo";
 // Leaf import (lib/line/move depends only on lib/line/types → lib/engine; no cycle back to lib/plan).
-import { placementForMove } from "@/lib/line/move";
+import { collectionTargetJoinOp, placementForMove } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
 import { copyPlacementFromTarget } from "./placement";
 import { loadPlanContext, planFromDraft, type DraftItem, type PlanContext } from "./context";
@@ -302,7 +302,20 @@ function writeCard(
   return copyId;
 }
 
-/** Emit a copy at a manual override placement (M7). No line/swap side effects; audited as user. */
+/**
+ * Emit a copy at a manual override placement (M7). No line/swap side effects; audited as user.
+ *
+ * An override into a `{kind: "collection"}` destination has to do BOTH halves of collection membership
+ * (UIL-022): shelve the copy in the collection's binder AND put the catalog id on that collection's
+ * `target_catalog_card_ids`. Doing only the first leaves the card invisible in the very collection
+ * holding it while occupying a real pocket — a card she would have to find by hand to discover.
+ *
+ * The membership op comes from `collectionTargetJoinOp` (lib/line/move.ts), the same single definition
+ * the Line-screen move and the collection-removal path use, so "joining a collection" cannot mean two
+ * different things depending on which screen she used. Unlike the Line move, this path needed no
+ * atomicity work: the haul commit was already one `apply_write_ops` transaction, so the union simply
+ * joins the payload and lands with the copy or not at all.
+ */
 function writeOverriddenCard(
   ops: WriteOp[],
   haulId: string | null,
@@ -312,7 +325,7 @@ function writeOverriddenCard(
   counts: CommitCounts,
 ): string {
   const placement = placementForMove(dest);
-  return emitIncomingCopy(
+  const copyId = emitIncomingCopy(
     ops,
     haulId,
     p,
@@ -326,6 +339,11 @@ function writeOverriddenCard(
     now,
     counts,
   );
+
+  const join = collectionTargetJoinOp(dest, p.tcgdexId);
+  if (join) ops.push(join);
+
+  return copyId;
 }
 
 /**
