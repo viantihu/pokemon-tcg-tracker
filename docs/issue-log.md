@@ -2871,3 +2871,141 @@ and swap the chip label to the override's destination when one exists, same sour
 make irreversible-feeling by clicking "Commit the haul" (see UIL-027), and right now it actively shows
 her the wrong thing for every card she's deliberately overridden. She can't verify her own decisions on
 the one screen built for verifying them. Flagging for her confirmation since severity calls are hers.
+
+## UIL-038 — No concept of a draft collection; saving is immediately live
+
+- **Reported:** 2026-09-14 (surfaced while retesting UIL-009, not the same defect — see note below)
+- **Status:** Open
+- **Priority:** Unscoped — needs Karvi's clarification before a priority means anything
+- **Area:** Collections
+- **Env:** Testing
+
+In her words: "Concept of active and draft collections."
+
+**Not a UIL-009 regression or a UIL-009 rescope — a separate, larger idea that surfaced while retesting
+it.** UIL-009 was specifically about a backdrop click discarding an in-progress edit; that entry's own
+status is untouched by this one. Recording that explicitly since the ambiguity was flagged rather than
+assumed either way.
+
+**Confirmed: no draft state exists today.** `collection.status` is a real column
+([`0002_domain.sql:109`](../supabase/migrations/0002_domain.sql:109), `default 'active'`) but has no
+CHECK constraint and is dead: a repo-wide search finds nothing in `app/` or `lib/` that ever reads or
+writes it. `saveCollection` ([`app/(ui)/coll/actions.ts`](<../app/(ui)/coll/actions.ts>)) never touches
+`status`. The moment a collection saves, `target_catalog_card_ids` is live and immediately read by
+`loadCollHub` for ownership/wishlist derivation — `CollHub.tsx`'s own empty-state copy says as much:
+"Create one — it becomes a placement target immediately." The only existing toggle,
+`mode` (`finite`/`open`, migration 0005), is orthogonal — it governs set-list vs. running-count, not
+draft-vs-real.
+
+**Left deliberately unscoped rather than guessed at.** "Draft" could mean several different things —
+a collection she's still deciding whether to keep, one she's partway through building the chase list for
+and doesn't want counted yet, or something else entirely — and each implies a different fix (a status
+flag that hides it from stats, a genuinely separate staging table, an explicit "publish" step). This
+entry exists to record that the gap is real and total; scoping the actual design needs her input on what
+"draft" is protecting her from.
+
+**Priority rationale.** Not rated. A priority on an unscoped idea would be a guess dressed as a
+judgment. Recommend treating this as a question to put back to her before it becomes a numbered
+priority at all.
+
+## UIL-039 — Card search for building a collection needs to be its own filterable, grid page with bulk add
+
+- **Reported:** 2026-09-14 (surfaced while retesting UIL-009)
+- **Status:** Open
+- **Priority:** Medium (Claude's read — a redesign of working functionality, not a defect; needs
+  Karvi's confirmation)
+- **Area:** Collections
+- **Env:** Testing
+
+In her words: "Card search shouldn't be a scrollable inline search — it should be its own page, cards
+displayed in a block/grid format, filterable by illustrator, expansion, Pokémon, and collector number,
+with a bulk selector to add multiple cards at once."
+
+**Confirmed: today's search is one component, one text field, one-at-a-time, used everywhere.**
+[`CardLookup.tsx`](<../app/(ui)/_components/CardLookup.tsx>) is a single free-text `<input>` with an
+inline absolutely-positioned dropdown (`role="listbox"`) — not a page, not a grid — reused unchanged
+across the Collections editor, the Log-card modal, Backfill's `StageRow`, and the Lookup screen. Its
+only search entry point, `catalogCardRepo.search(db, query: string, limit = 12)`
+([`lib/repo/catalog-card.ts:105`](<../lib/repo/catalog-card.ts>:105)), takes one string and matches
+name/set name/local id/tcgdex id — nothing else. Every add path (`CollectionEditor.addTarget`,
+`LogCardModal`, `StageRow`) is a single `onPick` callback; a repo-wide search for a multi-select
+mechanism found none anywhere in the app.
+
+**What each requested filter needs, checked individually rather than assumed available:**
+
+- **Illustrator** — the column exists (`catalog_card.illustrator`,
+  [`0002_domain.sql`](../supabase/migrations/0002_domain.sql)) but isn't wired end to end: `search()`
+  never references it, and `LookupCard` ([`lib/plan/plan-types.ts:13-25`](../lib/plan/plan-types.ts:13))
+  doesn't even carry it to the client. Column exists, plumbing doesn't.
+- **Expansion (set)** — already filterable in principle (`set_name`/`set_id` are searched today), just
+  not exposed as a distinct filter control separate from free text.
+- **Pokémon (species)** — a repo primitive already exists,
+  `catalogCardRepo.findByDexId` ([`lib/repo/catalog-card.ts:93`](<../lib/repo/catalog-card.ts>:93)), but
+  it's called nowhere — dead code today, reusable rather than needing to be written from scratch.
+- **Collector number** — already solved by UIL-010/UIL-015's fix; reusable as-is.
+- **Bulk add** — genuinely greenfield; no partial version exists to extend.
+
+**Aligns with the visual-search design principle already on record.** A grid of card art with filters
+is exactly the "thumbnail as the primary identifying element" direction she stated after UIL-016 — this
+request is that principle applied to the search surface specifically, not a new, separate idea.
+
+**Suggested scope, not a full design:** a dedicated search page/panel with a grid of `CardFace`-style
+tiles, filter controls for set and species reusing `findByDexId`, illustrator wired through `search()`
+and `LookupCard` the same way the other fields already are, and a multi-select-and-add-all action —
+built once, reused by Collections, Backfill, and Lookup the way `CardLookup` already is, so this doesn't
+become a second implementation to keep in sync with the first (the class of problem UIL-033 flagged for
+collection-joining logic).
+
+**Priority rationale.** Medium: nothing here is broken — today's search finds cards correctly, just
+one at a time with one field. This is a workflow improvement for a specific task (building a finite
+collection from a checklist), not a bug, so it competes with other Mediums rather than jumping the
+queue. Karvi's own priority read wasn't given for this one specifically; flagging for hers.
+
+## UIL-040 — Rebinding a collection to a different specialty binder changes the record but silently orphans the cards already shelved in the old one
+
+- **Reported:** 2026-09-14 (surfaced while retesting UIL-009)
+- **Status:** Open
+- **Priority:** High (Claude's read — this is a live orphan hazard, not just a missing feature; needs
+  Karvi's confirmation)
+- **Area:** Collections
+- **Env:** Testing
+
+In her words: "After a collection is created, the user should be able to move it to a different
+specialty binder." Investigated expecting a missing feature; found a partially-working one with a real
+data hazard underneath — worth reading past the request as stated.
+
+**The UI capability already exists and already writes to the database — that's not the gap.**
+`CollHub.tsx`'s edit flow (`openEdit`) opens pre-populated with the current binder, and the same
+`CollectionEditor` form used for creation is reused for edit with its binder picker fully clickable, not
+locked. `saveCollection` ([`app/(ui)/coll/actions.ts`](<../app/(ui)/coll/actions.ts>), the update path)
+writes `current_binder_ids: [binderId]` unconditionally — picking a different binder and saving really
+does change the association. So the reason she couldn't find this may be that it's not discoverable
+(no obvious "this changes the binder" affordance), not that it's missing — worth confirming with her
+which it was before scoping a fix.
+
+**The real defect: this only rewrites the collection record, never the physical copies.** `saveCollection`
+never touches `copy.binder_id` — nothing relocates the cards already shelved in the old binder to the
+new one. `loadCollHub`'s "owned" derivation is keyed off `col.current_binder_ids` matched against
+shelved copies (the same mechanism UIL-014/UIL-022 describe): after a rebind, any card physically
+shelved in the *old* binder no longer matches the collection's (new) binder list, and **reads as
+un-owned** — invisible in the collection and back on the wishlist, while still occupying a real pocket
+in the old binder. `blockedTargetDrops` ([`lib/coll/remove.ts:308-338`](../lib/coll/remove.ts:308)),
+built to guard exactly this class of orphan for target-list *drops*, is never invoked for a binder-id
+*change* with the target list unchanged — so the one guard already built for this shape of bug doesn't
+cover this path.
+
+**Same orphan class as UIL-014/UIL-022, a fourth site.** Every prior instance was found by proactive
+review; this one is a live, user-requested feature. If it's implemented literally as it works today —
+letting the edit form's existing write path stand in as "the fix" — it ships the orphan hazard as a
+feature.
+
+**Suggested fix.** A binder change must relocate the collection's shelved copies as part of the same
+atomic write that updates `current_binder_ids` — reusing the placement-rewrite machinery UIL-014's fix
+(`lib/coll/remove.ts` → `apply_write_ops`) already established, not the current bare
+`collectionRepo.update`.
+
+**Priority rationale.** High: this isn't a feature request that happens to be missing — it's a write
+path that already runs today and already produces the orphan hazard the moment someone uses the binder
+picker in an edit, whether or not she's found it yet. Same reasoning Karvi accepted for UIL-014 and
+UIL-022. Flagging for her confirmation since severity calls are hers, but recommending this not be
+treated as merely a feature request.
