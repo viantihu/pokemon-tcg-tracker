@@ -2571,3 +2571,59 @@ worse odds, not better.
 
 **Priority rationale.** Medium: same class as UIL-023 (small ordered writes, no report of a real
 partial-write incident), raised by the four-site drift risk rather than by an observed failure.
+
+## UIL-034 — The Collections page mounts every card of every collection at once, with no fold
+
+- **Reported:** 2026-09-14 (not from Karvi — found proactively, looking for the next instance of the
+  "fine at small scale, wrong at real scale" pattern)
+- **Status:** Open
+- **Priority:** Medium (Senior BA's read — flagged that Karvi rated the equivalent Haul Plan issue
+  High, so this may come in above Medium if she reports it first)
+- **Area:** Collections
+- **Env:** Testing
+
+**Verified on `origin/develop`.** [`app/(ui)/coll/CollHub.tsx:326`](<../app/(ui)/coll/CollHub.tsx>:326)
+maps every collection; [`:388`](<../app/(ui)/coll/CollHub.tsx>:388) (finite mode) and
+[`:430`](<../app/(ui)/coll/CollHub.tsx>:430) (open mode) each map every card within it, each rendering
+a `<CardFace ... size="m" />`. No fold, no cap, no windowing anywhere in the file — confirmed by
+grepping for any collapse/fold/expanded state, which returns nothing.
+
+**Imminent, not theoretical, because of the workflow this page exists for.** She is actively building
+finite collections from set checklists — the workflow UIL-010 and UIL-015 exist to support. A modern
+set is 200–300+ cards (`me02.5`, UIL-015's own example, is 295 per TCGdex). Three or four finite
+collections is 600–1,200 card tiles with artwork, all mounted, on one page load.
+
+**This is UIL-018's defect on a different screen, with images instead of text rows.** UIL-018 was 702
+rows all mounted on the Haul Plan — Karvi rated it High, fixed in #78. Same mechanism, same cause.
+
+**One thing already mitigating it, so this entry isn't overstated.** #78 added `loading="lazy"
+decoding="async"` to the shared `CardFace`
+([`app/(ui)/_components/CardFace.tsx`](<../app/(ui)/_components/CardFace.tsx>), confirmed present, with
+a comment explicitly citing UIL-016's mount-scale reasoning). That stops off-screen tiles from firing
+image requests. It does **not** stop the mount cost — the DOM is still fully built for every tile.
+
+**Suggested fix: reuse UIL-018's fold, don't invent a new one.** #78 built real per-band folding on the
+Haul Plan where a folded section renders nothing below its header — rows absent from the tree, not
+CSS-hidden. Confirmed directly in [`PlanScreen.tsx`](<../app/(ui)/plan/PlanScreen.tsx>): its own comment
+states the same constraint this entry is raising — "Hiding a folded band with CSS would fix the
+scrolling and none of the cost — the rows would still be [mounted]." A collection card is the same shape
+as a band section: a header with counts, a grid beneath. Point at that implementation rather than
+inventing a second one, since "add a collapse" too easily means `display: none`, which fixes nothing.
+
+**Ambiguity left for the implementer.** Whether a collection defaults folded or expanded — UIL-018
+chose all-expanded because she works one band at a time on the Haul Plan, but Collections is a browse
+surface with a different rhythm, and defaulting folded may suit it better. Whether fold state persists
+across visits. And whether the progress bar / `n / total` stays visible when folded — it should, since
+that's the reason to look at the page at all even when collapsed.
+
+**Cross-reference: the fourth instance of one pattern today.** UIL-007 (progress strip, one pip per
+card, 4,447px of sideways scroll at 685 cards), UIL-015 (search limit filled by alphabetically-earlier
+sets at 23,548 rows), UIL-018 (702 rows mounted), and this. All four were invisible at seed scale.
+Worth stating plainly somewhere durable: **"works with three cards in the catalog" has never been
+evidence of anything in this app.**
+
+**Priority rationale (Senior BA's read): Medium.** Not High: nothing is wrong today, no data is at
+risk, and it depends on how many finite collections she actually builds. Not Low: it degrades the exact
+workflow she is using right now, arrives without warning as she adds collections, and the fix already
+exists one screen over — cheap to do, expensive to leave. Flagging explicitly that Karvi rated the
+identical Haul Plan case High, so this read shouldn't be treated as settled if she hits it first.
