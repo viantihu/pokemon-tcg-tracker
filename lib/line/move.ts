@@ -23,7 +23,7 @@
  */
 
 import type { WriteOp } from "@/lib/repo";
-import type { CopyPlacementPatch, MoveDestination } from "./types";
+import type { CopyPlacementPatch, MoveDestination, MoveOptions } from "./types";
 
 /** Derive the four placement columns (+ cleared line link) for a moved copy. */
 export function placementForMove(dest: MoveDestination): CopyPlacementPatch {
@@ -80,6 +80,31 @@ export interface MoveNameLookups {
   binderName: (id: string | null) => string;
   collectionName: (id: string) => string | null;
   bandDisplay: (key: string) => string;
+}
+
+/**
+ * `describeMove`'s name lookups, resolved from the same `MoveOptions` the move panel is driven by.
+ *
+ * Lives here rather than beside its first caller because it now has two: the Line screen's server
+ * action (which labels the move it just applied) and the Haul Plan, which labels an override she has
+ * set but not yet shelved (UIL-037). Two copies of this would be free to drift, and a drift here does
+ * not throw — it shows her a destination name that is subtly not the one she picked, which is the same
+ * failure mode UIL-037 is itself about.
+ *
+ * Pure and dependency-free on purpose: the Plan caller is a client component.
+ */
+export function moveNameLookups(options: MoveOptions): MoveNameLookups {
+  return {
+    binderName: (id) => (id && options.binders.find((b) => b.id === id)?.name) || "Binder",
+    collectionName: (id) => {
+      for (const list of Object.values(options.collectionsByBinder)) {
+        const hit = list.find((c) => c.id === id);
+        if (hit) return hit.name;
+      }
+      return null;
+    },
+    bandDisplay: (key) => options.bands.find((b) => b.key === key)?.display ?? key,
+  };
 }
 
 /** The `PlacementDecision.reason` recorded for a manual move (always `resolved_by: 'user'`). */
