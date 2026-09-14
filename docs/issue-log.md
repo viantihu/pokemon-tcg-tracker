@@ -867,3 +867,59 @@ whole point of the product, and it appeared on the first real run against the po
 it is squarely in the way of go-live rather than an edge case. It is loud and non-corrupting (atomic
 rollback, nothing partially saved), which is the good version of this failure, but the operation is
 unavailable until it is fixed. If cause (2) is what happened, *no* haul can commit on Testing at all.
+
+### Narrowed 2026-09-14 — real card data cannot trigger this; suspect the config tables
+
+Two checks changed the diagnosis, so whoever picks this up should **not** go hunting for an exotic card
+type.
+
+**1. Every type real data can produce is mapped.** TCGdex's canonical lists:
+
+- `GET /v2/en/types` → `Colorless, Darkness, Dragon, Fairy, Fighting, Fire, Grass, Lightning, Metal,
+  Psychic, Water` — **all 11 are in `type_color_map`.**
+- `GET /v2/en/trainer-types` → `Item, Rocket's Secret Machine, Stadium, Supporter, Technical Machine,
+  Tool`. Four of those are *not* mapped — but they can never reach the map, because
+  `toCatalogCard` hardcodes `trainerType: null` (the column does not exist on `catalog_card`), so
+  `effectiveType` collapses every Trainer to the literal `"Trainer"`, which **is** mapped.
+
+Tracing `effectiveType` for a DB-loaded card, all three branches land on a mapped key: `types[0]` (11/11
+mapped), `"Trainer"` (mapped), or the `"Colorless"` fallthrough (mapped). **So hypothesis (1) is out.**
+
+**2. Migration `0003_config.sql` *is* applied on Testing.** Verified in Deploy run `34796853747`:
+
+```
+Local migrations:              0001 0002 0003 0004 0005 0006 0007
+Applied on this environment:   0001 0002 0003 0004 0005 0006 0007
+Schema matches the repo: all 7 migrations applied.
+```
+
+So the migration that fills both config tables has run. That weakens the plain "empty table" version of
+hypothesis (2) — but **it does not clear the data**, for a specific reason: 0003 inserts with
+`on conflict do nothing`. If either table was ever populated by hand with **display-name** values
+(`color_band.band = 'Red'`, or `type_color_map.band = 'White'`), those hand-written rows do not conflict
+with the migration's key-form rows, so the migration would silently add its own alongside them and
+report success. A `type_color_map` row whose `band` reads `'White'` returns `'White'` straight out of
+the map — no fallback involved — and violates the FK exactly as observed.
+
+**Therefore the remaining candidates, in order:**
+
+1. `type_color_map` holds one or more rows whose `band` value is a display name rather than a key, so
+   the map returns an invalid band without ever touching the fallback.
+2. `color_band` is missing the row the map legitimately points at (e.g. no `white`), so a correct
+   lookup still fails the constraint.
+3. The `band()` fallback is genuinely being hit because a needed `type_color_map` row is absent.
+
+All three are **data** questions answerable in one query, which this session cannot run (no service
+key):
+
+```sql
+select band, display_name, position from color_band order by position;
+select card_type, band from type_color_map order by card_type;
+```
+
+Expect exactly the ten key-form bands and the fourteen mappings listed in `0003_config.sql`. Anything
+capitalised or missing is the bug.
+
+**The `band()` fallback should still be fixed** — returning a display-name constant from a function
+documented to work in DB-key space is a latent defect that will bite the next unmapped type whether or
+not it is what broke this commit. But it is now the *second* thing to do, not the first.
