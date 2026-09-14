@@ -266,3 +266,116 @@ jobs:
           else
             echo "VERDICT: every retry_count is 0, so these rows have NEVER been re-examined by a sync — the archive/drop path really may be unexercised. Worth deliberately exercising."
           fi
+
+          # ---- THE RECONCILER'S OWN INPUTS. lib/sync/pipeline.ts:106 loads the reconciler's `current`
+          # with `presenceGroupRepo.list(db)` and `copyRepo.list(db)` — and `list()` is the UNPAGED
+          # variant by design (lib/repo/base.ts:89-91 says outright: "correctness depends on
+          # completeness, use listAll"). So if either table passes the cap, the reconciler concludes she
+          # owns LESS than she does and the sync ADDS copies for cards she already has. That is not a
+          # short list, it is wrong data — the "silently doubles her counts" outcome UIL-003 warned of.
+          echo
+          echo "--- the reconciler's inputs (pipeline.ts:106) ---"
+          copies=$(count_of "copy?select=id")
+          groups=$(count_of "presence_group?select=id")
+          echo "copy:           $copies"
+          echo "presence_group: $groups"
+          over=0
+          for pair in "copy:$copies" "presence_group:$groups"; do
+            t=${pair%%:*}; n=${pair#*:}
+            [ "$n" = "unknown" ] && continue
+            if [ "$n" -ge 1000 ]; then
+              echo "::error::LIVE DATA DEFECT — $t holds $n rows, at or past the 1000-row cap. loadCurrentGroups reconciles against a TRUNCATED view of her collection, so a sync can add copies for cards she already owns."
+              over=1
+            fi
+          done
+          if [ "$over" -eq 0 ]; then
+            echo "VERDICT: both under the cap — loadCurrentGroups sees her whole collection today. Latent."
+            [ "$copies" = "unknown" ] || echo "Headroom on copy: $((1000 - copies)) more physical cards before the reconciler starts lying."
+          fi
+
+      # ---- PR #90's PREMISE. Its `assertReadComplete` guard assumes supabase-js's `count: "exact"`
+      # reports the UNTRUNCATED total even when `data` was capped at max-rows. That is documented but was
+      # never observed here: PGlite is real Postgres with no REST layer, so it has no cap and no
+      # Content-Range to reproduce the pair. If `count` were itself capped, the guard would compare 1000
+      # against 1000, never fire, and ship as protection that does nothing — the dead-guard shape this
+      # project has already produced twice.
+      #
+      # `catalog_card` holds ~23.5k rows, so it is the natural probe. Tested BOTH ways: raw PostgREST
+      # headers (what is actually on the wire) and through supabase-js itself (what #90 will really see).
+      - name: "PR #90 premise: does count:exact survive max-rows truncation?"
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          echo "--- (a) raw PostgREST: Prefer: count=exact, NO Range header ---"
+          case "$SERVICE_KEY" in
+            eyJ*) hdrs=$(curl -sS -D - -o body.json --retry 3 -H "apikey: $SERVICE_KEY" \
+                    -H "Authorization: Bearer $SERVICE_KEY" -H "Prefer: count=exact" \
+                    "https://$PROJECT_REF.supabase.co/rest/v1/catalog_card?select=tcgdex_id") ;;
+            *)    hdrs=$(curl -sS -D - -o body.json --retry 3 -H "apikey: $SERVICE_KEY" \
+                    -H "Prefer: count=exact" \
+                    "https://$PROJECT_REF.supabase.co/rest/v1/catalog_card?select=tcgdex_id") ;;
+          esac
+          cr=$(printf '%s' "$hdrs" | tr -d '\r' | awk 'tolower($1) == "content-range:" { print $2 }')
+          returned=$(jq 'length' body.json)
+          echo "content-range: ${cr:-<absent>}"
+          echo "rows actually returned: $returned"
+          total=${cr#*/}
+          if [ "$returned" -lt "${total:-0}" ]; then
+            echo "  => PostgREST DID cap the rows ($returned) while reporting the true total ($total)."
+          else
+            echo "  => no truncation observed here (returned $returned, total ${total:-?}) — the cap may be higher than the table."
+          fi
+
+      # First checkout in this job — every step above talks to PostgREST over curl and needs no repo.
+      # supabase-js does: it needs .nvmrc, package.json and the lockfile.
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: "PR #90 premise, through supabase-js (the code path #90 relies on)"
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          cat > /tmp/premise.mjs <<'JS'
+          import { createClient } from "@supabase/supabase-js";
+          const db = createClient(
+            `https://${process.env.PROJECT_REF}.supabase.co`,
+            process.env.SERVICE_KEY,
+            { auth: { persistSession: false, autoRefreshToken: false } },
+          );
+          // EXACTLY #90's shape: count:"exact" WITHOUT head, so data and count arrive together.
+          const { data, count, error } = await db
+            .from("catalog_card")
+            .select("tcgdex_id", { count: "exact" });
+          console.log(JSON.stringify({
+            rows: data ? data.length : null,
+            count,
+            error: error ? error.message : null,
+          }));
+          JS
+          node /tmp/premise.mjs > out.json
+          cat out.json
+          rows=$(jq -r '.rows' out.json); cnt=$(jq -r '.count' out.json); err=$(jq -r '.error' out.json)
+          if [ "$err" != "null" ]; then
+            echo "::error::supabase-js errored: $err — premise UNVERIFIED."
+            exit 1
+          fi
+          if [ "$rows" = "null" ] || [ "$cnt" = "null" ]; then
+            echo "::error::supabase-js returned rows=$rows count=$cnt — #90's guard cannot work on this pair. Premise FALSIFIED."
+            exit 1
+          fi
+          echo "supabase-js: data.length=$rows  count=$cnt"
+          if [ "$cnt" -gt "$rows" ]; then
+            echo "VERDICT: PREMISE HOLDS — count ($cnt) exceeds the returned rows ($rows), so assertReadComplete can detect a truncated read. #90's guard will fire."
+          else
+            echo "::error::PREMISE FALSIFIED — count ($cnt) does NOT exceed the returned rows ($rows). #90 would compare equal values, never fire, and ship as protection that does nothing. Do not merge it on this assumption."
+            exit 1
+          fi
