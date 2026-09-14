@@ -530,10 +530,9 @@ expensive. Worth fixing before the first real sorting session, not necessarily b
 ## UIL-007 — Scroll bar under the card list renders outside the panel border
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#47](https://github.com/viantihu/pokemon-tcg-tracker/pull/47) MERGED to
-  `develop` (squash `0224383`), QA-reviewed, confirmed **deployed** to Testing. Awaiting Karvi's
-  confirmation. Measured in a standalone harness at 375px, **not** in the running app — her pass is the
-  visual verification.
+- **Status:** **Closed** — PR [#47](https://github.com/viantihu/pokemon-tcg-tracker/pull/47) MERGED to
+  `develop` (squash `0224383`), and **confirmed resolved by Karvi on Testing 2026-09-14**. The strip was
+  measured in a 375px harness during development; her pass is the confirmation in the running app.
 - **Priority:** **Medium** (raised from Low — see the reproduction below; it is not cosmetic)
 - **Area:** Plan — **confirmed by Karvi 2026-09-13**
 - **Env:** Testing
