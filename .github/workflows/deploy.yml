@@ -10,14 +10,18 @@ name: Deploy
 # Requires these secrets/vars to be configured before it can pass (deferred to
 # the external-wiring step — see docs/devops-strategy.md §7, §11):
 #   vars.DEPLOY_ENABLED = "true"       (REPO-level flag that turns this workflow on)
-#   secrets.SUPABASE_ACCESS_TOKEN      (account-level, both envs)
-#   secrets.SUPABASE_DB_PASSWORD       (matching env)
+#   secrets.SUPABASE_DB_PASSWORD       (matching env — `migrate` connects with this)
+#   vars.SUPABASE_DB_POOLER_HOST       (matching env — Supavisor host, see `migrate` below)
 #   vars.SUPABASE_PROJECT_REF          (matching env — the project subdomain, not secret)
 #   vars.APP_URL                       (matching env — deployed base URL)
 #   secrets.SUPABASE_ANON_KEY          (testing — the `acceptance` job FAILS without it;
 #                                       holds the publishable key on a current project)
 #   secrets.SUPABASE_SERVICE_ROLE_KEY  (testing — the `acceptance` job FAILS without it;
 #                                       holds the secret key on a current project)
+#   secrets.SUPABASE_ACCESS_TOKEN      (OPTIONAL. `migrate` no longer uses it at all —
+#                                       see UIL-005. The `acceptance` job still tries it
+#                                       as a best-effort shortcut for deriving its two
+#                                       keys, and tolerates a 403.)
 #
 # NOTE: the on/off gate must be a REPO-level variable, not an environment-scoped
 # one. A job's `if:` is evaluated before its `environment:` is loaded, so
@@ -45,6 +49,43 @@ jobs:
         with:
           version: latest
 
+      # NO `supabase link`, DELIBERATELY (UIL-005). `link` is a Management API call, so
+      # it depends on secrets.SUPABASE_ACCESS_TOKEN having project privileges — and that
+      # PAT started returning
+      #
+      #   403 "Your account does not have the necessary privileges to access this endpoint"
+      #
+      # on 2026-09-13 without anything in this repo changing (the secret was last written
+      # 2026-09-08, before the last green run). Every push to `develop` for a full day
+      # failed here, which means Testing kept running new code against an old schema —
+      # exactly what the migrate-before-deploy ordering above exists to prevent, silently
+      # inverted. Vercel deploys the app on push regardless of this workflow, so a red
+      # `migrate` does not hold the app back; it only removes the schema half.
+      #
+      # `db push --db-url` talks to Postgres directly and never touches the Management
+      # API, so migrations no longer depend on a PAT's privileges at all. The credential
+      # it does need, secrets.SUPABASE_DB_PASSWORD, was already configured on both
+      # environments. Deleting the coupling is better than restoring the token: the
+      # account-level privileges of a PAT are outside this repo's control and can be
+      # narrowed again at any time, whereas the DB password is per-project and is the
+      # thing `db push` actually authenticates with either way.
+      #
+      # THE POOLER IS NOT OPTIONAL. `db.<ref>.supabase.co` publishes AAAA records only —
+      # no A record — and GitHub-hosted runners have no IPv6, so the direct host is
+      # unreachable from CI (`dial error ... connect ECONNREFUSED 2600:1f18:...`). Supavisor
+      # is dual-stack, hence vars.SUPABASE_DB_POOLER_HOST. It is region-pinned per project
+      # and is NOT derivable from the project ref, so it is stored per environment:
+      #   testing    cpmwdcmokbgcpmkvbtsw -> aws-0-us-east-1.pooler.supabase.com
+      #   production bqqerxpdxywnpvndhxbs -> aws-0-us-west-2.pooler.supabase.com
+      # To find it for a new project, read it off the dashboard (Connect -> Session pooler),
+      # or probe: the wrong host answers `tenant/user postgres.<ref> not found`, the right
+      # one gets as far as real Postgres authentication.
+      #
+      # PORT 5432, NOT 6543. 5432 is Supavisor's SESSION mode, which holds one dedicated
+      # backend per connection and so supports the multi-statement transactions and
+      # advisory locks that `db push` wraps each migration in. 6543 is TRANSACTION mode and
+      # would break them — the same distinction scripts/promote-collection.mjs documents.
+      #
       # Testing self-heals from a divergent migration history; Production keeps the
       # strict rail. `db push` refuses any local migration that sorts behind the
       # last version in the remote history table — the state Testing landed in when
@@ -57,16 +98,97 @@ jobs:
       # which fails the PR before a mis-ordered migration can ever be merged.
       - name: Push migrations
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          # Read via env, never interpolated into the script body.
+          DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          POOLER_HOST: ${{ vars.SUPABASE_DB_POOLER_HOST }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          supabase link --project-ref "${{ vars.SUPABASE_PROJECT_REF }}"
-          if [ "${{ github.ref_name }}" = "main" ]; then
-            supabase db push
-          else
-            supabase db push --include-all
+
+          # Name whichever one is missing. A generic "not configured" sends the reader
+          # back into this file to work out which of three things to go and set.
+          missing=""
+          [ -n "${PROJECT_REF:-}" ] || missing="vars.SUPABASE_PROJECT_REF"
+          [ -n "${POOLER_HOST:-}" ] || missing="${missing:+$missing, }vars.SUPABASE_DB_POOLER_HOST"
+          [ -n "${DB_PASSWORD:-}" ] || missing="${missing:+$missing, }secrets.SUPABASE_DB_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Cannot push migrations — missing $missing on the '${REF_NAME}' environment. See the comment above this step: migrations connect straight to Postgres through the session-mode pooler and need the project ref, the pooler host for that project's region, and the database password. SUPABASE_ACCESS_TOKEN is deliberately NOT used here."
+            exit 1
           fi
+
+          # `--db-url` requires a percent-encoded connection string, and a database
+          # password is free to contain '@', '/', ':' or '#' — any of which silently
+          # reshapes the URL into a different host or database rather than failing.
+          # jq's @uri is on every runner and gets the escaping right.
+          enc_password=$(jq -rn --arg v "$DB_PASSWORD" '$v | @uri')
+          # Encoding a secret produces a NEW string that GitHub's log masking does not
+          # know about, so register it before it can be echoed by anything below.
+          echo "::add-mask::$enc_password"
+          db_url="postgresql://postgres.${PROJECT_REF}:${enc_password}@${POOLER_HOST}:5432/postgres"
+          echo "::add-mask::$db_url"
+
+          # Log the target with the credential left out, so a run is diagnosable without
+          # relying on masking to hold.
+          echo "Pushing migrations to postgres.${PROJECT_REF}@${POOLER_HOST}:5432 (session mode)."
+
+          if [ "$REF_NAME" = "main" ]; then
+            supabase db push --db-url "$db_url"
+          else
+            supabase db push --db-url "$db_url" --include-all
+          fi
+
+      # `db push` exits 0 when there is nothing to do, which is correct but
+      # indistinguishable from "it applied everything" in a log — and this workflow just
+      # spent a day reporting a schema state that was not real. So state the schema
+      # version the environment is actually on, and fail if the newest local migration is
+      # not in its history table.
+      #
+      # This is the assertion UIL-005 was missing. `migrate` going green while Testing sat
+      # on 0006 is what let a 0007-era backfill reach a 0006 `apply_write_ops`.
+      # Asserted with SQL rather than by parsing `supabase migration list`, whose table
+      # layout is presentation and could change under a `version: latest` CLI. The history
+      # table is the same thing the CLI reads and its shape is fixed. `psql` is part of the
+      # postgresql-client package preinstalled on GitHub's ubuntu runner images; the check
+      # below says so out loud rather than letting a missing binary read as a schema fault.
+      - name: Prove the migrations actually landed
+        env:
+          DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          POOLER_HOST: ${{ vars.SUPABASE_DB_POOLER_HOST }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          if ! command -v psql > /dev/null; then
+            echo "::error::psql is not on this runner, so the applied schema version cannot be read back. psql ships with the postgresql-client package that GitHub's ubuntu images preinstall; if that changed, add \`sudo apt-get install -y postgresql-client\` before this step. This is a tooling gap, NOT a migration failure — the push above already succeeded."
+            exit 1
+          fi
+
+          # Migration versions are the leading digits of the filename: 0007_x.sql -> 0007,
+          # which is what the CLI records in the history table.
+          ls supabase/migrations/*.sql | sed 's#.*/##; s#_.*##' | sort > local-versions.txt
+          echo "Local migrations: $(tr '\n' ' ' < local-versions.txt)"
+
+          enc_password=$(jq -rn --arg v "$DB_PASSWORD" '$v | @uri')
+          echo "::add-mask::$enc_password"
+          db_url="postgresql://postgres.${PROJECT_REF}:${enc_password}@${POOLER_HOST}:5432/postgres"
+          echo "::add-mask::$db_url"
+
+          # -t no header, -A unaligned, -X ignore ~/.psqlrc, ON_ERROR_STOP so a missing
+          # table fails the step instead of printing to stderr and exiting 0.
+          psql "$db_url" -tAX -v ON_ERROR_STOP=1 \
+            -c "select version from supabase_migrations.schema_migrations order by version" \
+            | sed '/^$/d' | sort > applied-versions.txt
+          echo "Applied on this environment: $(tr '\n' ' ' < applied-versions.txt)"
+
+          # A set difference, not a max() comparison: `--include-all` can leave a HOLE in
+          # the middle of the history (a migration authored behind one already applied),
+          # and comparing only the newest version would call that fully migrated.
+          comm -23 local-versions.txt applied-versions.txt > unapplied.txt
+          if [ -s unapplied.txt ]; then
+            echo "::error::these migrations are in the repo but NOT in this environment's history table: $(tr '\n' ' ' < unapplied.txt). New code is about to serve against an older schema — the condition the migrate-before-deploy ordering at the top of this file exists to prevent, and the state Testing sat in through 2026-09-13 while \`migrate\` died at \`supabase link\` (UIL-005). If EVERY version is listed as unapplied and the app is plainly working, suspect this check rather than the schema: it assumes the CLI records the filename's digit prefix ('0007') as the version, so compare against the applied list printed above."
+            exit 1
+          fi
+          echo "Schema matches the repo: all $(wc -l < local-versions.txt | tr -d ' ') migrations applied."
 
   # The M1 acceptance suite (dev-spec §8: "worked examples ... pass as automated
   # tests") needs a real Supabase project — it asserts that RLS denies anonymous
