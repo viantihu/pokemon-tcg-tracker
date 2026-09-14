@@ -14,6 +14,7 @@ import type { SyncOverrides, SyncPlanBundle, SyncPreview } from "@/lib/sync";
 import { CardFace } from "../_components/CardFace";
 import { BandChip } from "../_components/BandChip";
 import { CardLookup } from "../_components/CardLookup";
+import { ProgressBar } from "../_components/ProgressBar";
 import {
   applySync,
   dismissEntryAction,
@@ -54,6 +55,13 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
   }, []);
 
   const busy = phase === "parsing" || phase === "working";
+  /**
+   * Stage text for the activity bar (UIL-008). Sourced from the real `Phase` transitions, so it can
+   * only ever say what is actually happening. "Reading" covers parse + per-row catalog resolve, which
+   * is the slow half — it walks every owned CSV row.
+   */
+  const busyLabel =
+    phase === "parsing" ? "Reading your export and matching cards…" : "Saving your changes…";
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -166,6 +174,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
             style={{ display: "none" }}
           />
         </label>
+        {busy ? <ProgressBar label={busyLabel} /> : null}
       </div>
 
       {error ? (

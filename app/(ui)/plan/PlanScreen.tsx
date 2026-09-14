@@ -27,6 +27,7 @@ import type { MoveDestination, MoveOptions } from "@/lib/line/types";
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
 import { CardLookup } from "../_components/CardLookup";
+import { ProgressBar } from "../_components/ProgressBar";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { VariantSelector } from "../_components/VariantSelector";
 import { ACTION_META, bandMeta } from "../_components/plan-meta";
@@ -573,6 +574,9 @@ function IntakePanel(props: {
           {running ? "Running…" : "Run the plan ▶"}
         </button>
       </div>
+      {/* UIL-008: the cascade over a synced stack takes long enough that a dead button reads as a
+          hang. Indeterminate by necessity — `runHaulPlan` is one server action that returns once. */}
+      {running ? <ProgressBar label={`Routing ${draft.length} cards…`} /> : null}
     </div>
   );
 }
@@ -922,6 +926,9 @@ function Spotlight(props: {
       >
         {committing ? "Committing…" : "Commit the haul"}
       </button>
+      {/* The commit is the one write that must not be interrupted — a single transaction over every
+          copy, line, slot and decision (UIL-008). Saying so is the point: it discourages a reload. */}
+      {committing ? <ProgressBar label="Writing the haul — do not close" /> : null}
     </>
   );
 }

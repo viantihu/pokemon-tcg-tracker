@@ -2545,3 +2545,49 @@ nav.menu .tab .n {
     width: 100%;
   }
 }
+
+/* ---- Activity bar (UIL-008) -------------------------------------------------
+   Indeterminate on purpose: neither the sync nor the cascade can report real
+   progress (single server action, returns once), and a timer-driven bar that
+   pretends otherwise teaches her to distrust it. This says "working", nothing
+   more. Motion is suppressed under prefers-reduced-motion, where the striped
+   fill still reads as busy without moving. */
+.pbar {
+  position: relative;
+  height: 18px;
+  margin-top: 10px;
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.pbar .pbfill {
+  position: absolute;
+  inset: 0;
+  /* Chunky pixel stripes rather than a gradient — same 16-bit vocabulary as .xp. */
+  background: repeating-linear-gradient(90deg, var(--lime) 0 10px, var(--panel-2) 10px 20px);
+  animation: pbslide 900ms linear infinite;
+}
+.pbar .pblabel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--ink);
+}
+@keyframes pbslide {
+  /* One stripe period, so the loop is seamless. */
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(20px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pbar .pbfill {
+    animation: none;
+  }
+}
