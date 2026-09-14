@@ -1140,6 +1140,57 @@ instance has actually landed.
 Neither (1) nor (2) blocks anything — UIL-012 itself is fixed by #57. This entry is now purely about the
 suite's ability to catch the *next* one.
 
+**Correction (2026-09-13) — the addendum above overstated the finding, and this supersedes it.**
+QA checked the premise directly on `origin/develop` rather than accepting it, and found "every engine
+test uses display form" is true of exactly **three** files, not the suite:
+
+| Form | Files |
+| --- | --- |
+| DISPLAY (`Fire: "Red"`) | `tests/engine/{cascade,bands,line}.test.ts` |
+| KEY (`Fire: "red"`) | `tests/plan/{commit-atomicity,plan-run,route-existing-copies}`, `tests/backfill/{commit-atomicity,binder-section,plan}`, `tests/surfaces/recompute`, `tests/repo/m1-acceptance` |
+
+The split is **by layer, not universal**: only `lib/engine`'s own unit tests use display form; every
+layer above already exercises DB keys. [`lib/plan/adapt.ts:8-11`](../lib/plan/adapt.ts:8) documents the
+engine as deliberately agnostic to which form it's fed — those three files passing with `"Red"` is
+arguably that design working as intended, not a gap. An entry saying they were wrong would have someone
+rewrite tests that demonstrate the thing they were written to demonstrate.
+
+**The real defect was narrower: a coverage gap on the cascade's STEP 6 write path, not a vocabulary
+mismatch.** `tests/plan/commit-atomicity.test.ts` already used key form (`Trainer: "white"`) **and**
+already wrote through the real `apply_write_ops` RPC on PGlite — it was already positioned to catch
+`cascade.ts:378`. It didn't, because no case in it ever committed a Trainer or Energy card. PR #57 added
+exactly that case ([`commit-atomicity.test.ts:298`](../tests/plan/commit-atomicity.test.ts:298), "commits
+a Trainer into the DB-key white band"); reverting only the STEP 6 line makes it fail with
+`copy_color_band_fkey` (2 tests fail, 408 pass). The vocabulary framing was a plausible-sounding red
+herring that more than one of us accepted before checking it.
+
+**The rule to record** (the dev session's formulation, which caught this): require key-form fixtures for
+code that **resolves or defaults** a band, not for code that merely **carries** one. Narrower than "fix
+the whole suite's vocabulary," and it's the rule that would actually have caught this.
+
+**What still stands from the addendum above, unchanged:**
+
+- The `backfill/resolve.ts:31` (`"white"`) vs. `bands.ts`'s `WHITE` (`"White"`) pair — the strongest
+  single piece of evidence in this entry. Same intent, two spellings, one FK-valid, no single owner for
+  "the white key."
+- The suggested fix, **re-ordered**: the cheap version is to make `DEFAULT_TYPE_COLOR_MAP` itself
+  key-form — it has no live caller, so the change is free — and derive display names from
+  `color_band.display_name` rather than keeping two constants that can drift. A branded `BandKey` type
+  is now the nice-to-have, not the primary recommendation; it's a large surface change for a symptom the
+  cheap fix already removes.
+- `bandPosition()` accepting both a display name and a DB key (added in #57) is a temporary shim, not a
+  feature — it fixed a real bug (a key-form value used to sort "unknown, sort last") but means the
+  function can never tell a caller they're in the wrong space. Worth narrowing to keys-only once fixtures
+  are converted, as part of this cleanup rather than a permanent behaviour.
+- **The test for whether any fix actually worked:** after it lands, is there exactly **one** definition
+  of "the white key" that both the engine and backfill consult? Today there are two.
+
+**Priority, revised: Low (down from Medium), with the Medium argument recorded rather than dropped.** The
+hole that let UIL-012 through is closed — #57 added the missing Trainer/Energy commit case, so nothing is
+currently unprotected — which is what moves this to Low. The counter-argument for Medium: the cheap fix
+above eliminates an entire class of future mistake rather than one instance, for near-zero cost, which is
+a fair reason not to let it drift to the bottom of the queue. Both reads recorded; Karvi has not ruled.
+
 ## UIL-014 — No way to remove a card from a collection on the Collections page
 
 - **Reported:** 2026-09-13
