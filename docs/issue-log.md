@@ -2154,3 +2154,75 @@ same class as the `list()` truncation found earlier today and the same class as 
 partial result that reads as a complete one, invisible until the exact moment it isn't. Recorded as its
 own entry rather than left in a message, per the lesson UIL-020 already recorded: a finding with no
 owner and no tracking item doesn't get deprioritized, it evaporates.
+
+## UIL-029 — Hand-written `DbClient` test doubles are unverified, so a fixture can certify the wrong behaviour
+
+- **Reported:** 2026-09-13 (not from Karvi — found by the UIL-010/015 dev session, in its own test file,
+  reported against itself)
+- **Status:** Open
+- **Priority:** Medium (Senior BA's read) — the one Medium with a live argument for jumping the queue,
+  since it protects every fix currently being written; not reassigned ahead of the four open Highs unless
+  Karvi says otherwise
+- **Area:** all (test infrastructure)
+- **Env:** n/a — in the repo, not a running environment
+
+**The concrete instance, already fixed in this one file as part of landing UIL-015.** Two of that
+session's own UIL-010 tests asserted "exact match ranks first" and **passed while the bug was live** and
+Karvi was seeing five wrong McDonald's cards. The fake `DbClient` in
+[`tests/catalog/card-search.test.ts`](../tests/catalog/card-search.test.ts) re-sorted on each `.order()`
+call instead of composing them the way PostgREST does, and compared with `localeCompare`, which does not
+put digits before letters — the exact mechanism of UIL-015 (`2011bw` sorting before `me02.5`). Confirmed
+directly: the file's current comment names both defects explicitly (`:110-116`) as the reason the fake
+used to mask the bug. Measured against pre-fix source: the unfaithful fake (as it shipped) failed 1 test;
+a faithful one fails 5, including the two that should have caught it.
+
+**Why Medium, not Low.** This is UIL-013's failure mode — a fixture contradicting production — in a
+different file, found hours after the same session helped diagnose UIL-012, which was itself hidden by
+display-form band fixtures. Three occurrences of one shape in one day, by different people, is the tool
+permitting it silently rather than anyone being careless. Unlike UIL-013, this one demonstrably hid a
+live High-priority bug from a green suite rather than being a latent risk. `tests/support/pglite-client.ts`
+says the same thing in its own header, independently: "[a hand-rolled fake] cannot prove those ops do
+what the author expected once Postgres runs them... UIL-012 shipped through a fully green suite exactly
+that way." Not High: no user-facing defect exists right now, and every fix currently in flight is being
+revert-checked against pre-fix source, which is the active mitigation.
+
+**Scope of the exposure, verified directly.** Each of these hand-rolls its own query-builder fake rather
+than using the PGlite-backed harness:
+
+- `tests/catalog/card-search.test.ts`, `tests/catalog/mirror.test.ts`,
+  `tests/plan/pending-placements.test.ts`, `tests/sync/catalog-prefetch.test.ts` — each defines its own
+  `function fakeDb(...)`.
+- `tests/repo/list-all-paging.test.ts` — an inline fake table object
+  (`db: { from: () => query } as unknown as DbClient`), same exposure, no named function.
+- `tests/sync/exec-atomicity.test.ts` — **mixed, not purely unverified**: it runs one layer
+  ("builder logic") against its own `FakeDb`/`fakeClient`, but a separate layer in the same file already
+  goes through real PGlite via `pglite-rpc`'s `freshRpcDb`/`applyOps`. Worth being precise about this one
+  rather than counting it the same as the other five — it's a partial exception, already following the
+  pattern for half its assertions.
+
+**`tests/support/pglite-client.ts` is the mitigation pattern, not a suggestion — it already exists.**
+Backed by real Postgres, real migrations, real RLS, real `apply_write_ops`; deliberately narrow (only
+the read surface `lib/repo` actually uses), and throws loudly rather than lying if a repo call shape
+grows past what it models. This is what made PR #67's suite trustworthy, and it's the same class of
+fidelity issue UIL-013 already described for engine-test fixtures, generalized: **a hand-written test
+double is production code with no tests of its own.** Nothing checks that ours models PostgREST
+correctly, and this entry is the second and third time in one day that gap produced a real miss.
+
+**Suggested fix.** Move these onto `tests/support/pglite-client.ts` where practical. Where a real DB is
+genuinely too heavy for a given test, add a conformance test that runs the same queries through both the
+fake and PGlite and asserts identical results — the durable version, since it makes the double's
+fidelity a tested property instead of an assumption, rather than trusting whoever writes the next fake to
+get `.order()` composition and PostgREST's actual comparison semantics right by hand.
+
+**How this was found, worth recording as a review-bar addition, not just a fix.** The revert check
+(run a test against pre-fix source, confirm it fails) was adopted to prove a test catches its own bug. It
+turns out to do more: it audits the test double itself. A test that *passes* pre-fix isn't merely weak —
+it's evidence the harness is lying. The dev session found this only because the headline test passed
+pre-fix, made no sense, and got chased down instead of accepted as green. Worth keeping the revert check
+as standard practice specifically because of this second effect, not only the first.
+
+**Priority rationale (Senior BA's read): Medium.** Not High — nothing user-facing is broken right now,
+and the fixes currently in flight are already being revert-checked as a mitigation. Genuinely the one
+open Medium with an argument for jumping ahead of it, since a fix here protects every other fix's own
+tests from the same failure mode — flagging that explicitly rather than letting it sit purely on
+priority-number ordering. Karvi has not seen this yet.
