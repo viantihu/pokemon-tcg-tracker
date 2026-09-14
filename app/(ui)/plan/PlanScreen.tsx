@@ -22,7 +22,7 @@ import type { Variant } from "@/lib/engine";
 // ./session, which pulls lib/supabase/server (and `next/headers`) into the browser bundle. The
 // `import type` below is fine because types are erased; a VALUE import is not.
 import { progressPips } from "@/lib/plan/progress";
-import type { PlanItem } from "@/lib/plan";
+import type { PlanBandGroup, PlanItem } from "@/lib/plan";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
@@ -84,6 +84,17 @@ interface ResumeState {
   done: string[];
   cur: number;
   overrides: Record<string, MoveDestination>;
+  /**
+   * Band keys she has folded away (UIL-018). Rides in this payload for the same reason `done` does:
+   * she bounces to Lines to resolve a decision and comes back, and re-folding six finished bands
+   * every time would make the feature useless in the one workflow it exists for.
+   *
+   * It is deliberately NOT part of `stamp`. The stamp is a digest of DB state (lib/plan/fingerprint.ts)
+   * and folding a band changes nothing the cascade read, so putting it there would throw away a
+   * perfectly good plan — the exact failure UIL-006 was fixed twice for. Client-only view state
+   * cannot reach the stamp anyway: it is computed on the server.
+   */
+  collapsed: string[];
 }
 
 function readResume(stamp: string): ResumeState | null {
@@ -158,6 +169,9 @@ export function PlanScreen({
   const [error, setError] = useState<string | null>(null);
   const [cur, setCur] = useState(resumed?.cur ?? 0);
   const [done, setDone] = useState<Set<string>>(() => new Set(resumed?.done ?? []));
+  // Folded band sections (UIL-018). Everything expanded is the default: a fresh plan should look like
+  // the plan, and the screen is worked top-to-bottom so the first band she needs is already open.
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(resumed?.collapsed ?? []));
   // Placement overrides (M7): draft id → chosen destination, applied at commit (cascade skipped).
   const [overrides, setOverrides] = useState<Record<string, MoveDestination>>(
     resumed?.overrides ?? {},
@@ -186,8 +200,9 @@ export function PlanScreen({
       done: [...done],
       cur,
       overrides,
+      collapsed: [...collapsed],
     });
-  }, [stateStamp, source, notes, draft, plan, done, cur, overrides]);
+  }, [stateStamp, source, notes, draft, plan, done, cur, overrides, collapsed]);
 
   /** Re-read the queue and seed the draft from it. Only ever called from an event handler. */
   const reloadPending = useCallback(() => {
@@ -269,6 +284,8 @@ export function PlanScreen({
       setPlanIsResumed(false);
       setCur(0);
       setDone(new Set());
+      // A new run is new work: nothing is finished yet, so nothing should arrive folded.
+      setCollapsed(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not run the plan.");
     } finally {
@@ -300,6 +317,7 @@ export function PlanScreen({
     setPlan(null);
     setCommitted(null);
     setDone(new Set());
+    setCollapsed(new Set());
     setNotes("");
     setCur(0);
     setError(null);
@@ -328,6 +346,15 @@ export function PlanScreen({
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }
+  /** Fold / unfold one band (UIL-018). Same shape as `toggleDone` — a set of keys, not a flag map. */
+  function toggleCollapse(bandKey: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(bandKey)) next.delete(bandKey);
+      else next.add(bandKey);
       return next;
     });
   }
@@ -380,6 +407,9 @@ export function PlanScreen({
           overrides={overrides}
           onMove={openMove}
           resumed={planIsResumed}
+          collapsed={collapsed}
+          setCollapsed={setCollapsed}
+          toggleCollapse={toggleCollapse}
         />
       )}
 
@@ -601,6 +631,10 @@ function PlanView(props: {
   onMove: (item: PlanItem) => void;
   /** True when this plan was restored from a parked run rather than just computed (UIL-006). */
   resumed: boolean;
+  /** Band keys currently folded away (UIL-018). */
+  collapsed: Set<string>;
+  setCollapsed: (next: Set<string>) => void;
+  toggleCollapse: (bandKey: string) => void;
 }) {
   const {
     plan,
@@ -619,10 +653,32 @@ function PlanView(props: {
     overrides,
     onMove,
     resumed,
+    collapsed,
+    setCollapsed,
+    toggleCollapse,
   } = props;
 
   const total = flatItems.length;
   const doneCount = flatItems.filter((it) => done.has(it.incomingId)).length;
+
+  /* ---- band folding (UIL-018) ----
+     Per-band check-off counts. A folded band is otherwise opaque: its rows are gone from the tree, so
+     without a count on the header she cannot tell a finished band from one she has not started. Same
+     O(total) walk the `doneCount` line above already does, and it recomputes on the same renders. */
+  const doneByBand = new Map<string, number>();
+  for (const g of plan.groups) {
+    let n = 0;
+    for (const sub of g.subgroups) {
+      for (const it of sub.rows) if (done.has(it.incomingId)) n += 1;
+    }
+    doneByBand.set(g.bandKey, n);
+  }
+  // "Settled" = nothing left to do here: every row checked off, or the band is a reserved zero.
+  const settled = plan.groups
+    .filter((g) => g.count === 0 || (doneByBand.get(g.bandKey) ?? 0) >= g.count)
+    .map((g) => g.bandKey);
+  const curBandKey = flatItems[cur]?.bandKey ?? null;
+
   const a = plan.summary.byAction;
   const back = (a.FILL ?? 0) + (a.NEWLINE ?? 0) + (a.PULL ?? 0);
   const destSummary = `Front ${a.FRONT ?? 0} · Back ${back} · Specialty ${a.SPEC ?? 0} · Bulk ${
@@ -702,45 +758,52 @@ function PlanView(props: {
 
       <div className="planwrap">
         <div className="worklist panel">
-          {plan.groups.map((g) => {
-            const meta = bandMeta(g.bandKey);
-            return (
-              <div key={g.bandKey} className="bandgroup">
-                <div className="bandhead">
-                  <BandChip bandKey={g.bandKey} />
-                  <span className="nm u">{meta.display}</span>
-                  <span className="ty">{meta.types}</span>
-                  <span className="ct">{g.count ? `${g.count} CARDS` : "RESERVED · 0"}</span>
-                </div>
-                {g.count === 0 ? (
-                  <div className="emptyband">
-                    <span className="resv" />
-                    <span>
-                      {g.bandKey === "pink"
-                        ? "Reserved. The slot holds even at zero."
-                        : "Nothing this haul."}
-                    </span>
-                  </div>
-                ) : (
-                  g.subgroups.map((sub) => (
-                    <div key={sub.kind}>
-                      <div className="subhead u">{sub.label}</div>
-                      {sub.rows.map((it) => (
-                        <PlanRow
-                          key={it.incomingId}
-                          item={it}
-                          current={flatIndex.get(it.incomingId) === cur}
-                          done={done.has(it.incomingId)}
-                          onSelect={() => setCur(flatIndex.get(it.incomingId) ?? 0)}
-                          onToggle={() => toggleDone(it.incomingId)}
-                        />
-                      ))}
-                    </div>
-                  ))
-                )}
-              </div>
-            );
-          })}
+          {/* Per-band folding is the fine control; these are the bulk ones (UIL-018). At ten bands,
+              clearing a finished stack one header at a time is its own chore. Deliberately NOT sticky:
+              the document body is the scroll container on this screen (see UIL-019), and a second
+              sticky element competing with the band headers would make that worse, not better. */}
+          <div className="worktools">
+            <span className="hk">BANDS</span>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setCollapsed(new Set(settled))}
+              disabled={settled.length === 0}
+              title="Fold away every band with nothing left to do"
+            >
+              Collapse finished · {settled.length}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setCollapsed(new Set(plan.groups.map((g) => g.bandKey)))}
+            >
+              Collapse all
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setCollapsed(new Set())}
+              disabled={collapsed.size === 0}
+            >
+              Expand all
+            </button>
+          </div>
+          {plan.groups.map((g) => (
+            <BandSection
+              key={g.bandKey}
+              group={g}
+              collapsed={collapsed.has(g.bandKey)}
+              onToggleCollapse={() => toggleCollapse(g.bandKey)}
+              doneCount={doneByBand.get(g.bandKey) ?? 0}
+              holdsCurrent={curBandKey === g.bandKey}
+              cur={cur}
+              flatIndex={flatIndex}
+              done={done}
+              onSelect={setCur}
+              onToggleDone={toggleDone}
+            />
+          ))}
         </div>
 
         <aside className="spot panel">
@@ -767,6 +830,98 @@ function PlanView(props: {
 
       <div className="foot">BAND → BASIC / NON-BASIC → ACTION · WORK TOP TO BOTTOM</div>
     </>
+  );
+}
+
+/**
+ * One colour band, foldable (UIL-018).
+ *
+ * WHY IT UNMOUNTS. Karvi's haul was 702 cards, and every row of every band mounted unconditionally.
+ * Hiding a folded band with CSS would fix the scrolling and none of the cost — the rows would still be
+ * in the tree, still re-render on every check-off, still hold a `CardFace` each (and, since UIL-016,
+ * an `<img>` each). So a folded band renders NOTHING below its header. The header stays, because
+ * finding the band she is on is the whole point.
+ *
+ * The header itself is the control rather than a separate caret button: she is standing at a binder
+ * with cards in one hand, and a full-width target beats a 20px one. It keeps `.bandhead`'s existing
+ * sticky positioning untouched — that rule was already correct and is not re-implemented here.
+ */
+export function BandSection(props: {
+  group: PlanBandGroup;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  /** Rows checked off inside this band — the only progress signal left once it is folded. */
+  doneCount: number;
+  /** True when the spotlight's current card lives in this band. Surfaced only while folded. */
+  holdsCurrent: boolean;
+  cur: number;
+  flatIndex: Map<string, number>;
+  done: Set<string>;
+  onSelect: (index: number) => void;
+  onToggleDone: (incomingId: string) => void;
+}) {
+  const {
+    group,
+    collapsed,
+    onToggleCollapse,
+    doneCount,
+    holdsCurrent,
+    cur,
+    flatIndex,
+    done,
+    onSelect,
+    onToggleDone,
+  } = props;
+  const meta = bandMeta(group.bandKey);
+  return (
+    <div className="bandgroup">
+      <button
+        type="button"
+        className={"bandhead" + (collapsed ? " folded" : "")}
+        aria-expanded={!collapsed}
+        onClick={onToggleCollapse}
+        title={collapsed ? `Show ${meta.display}` : `Hide ${meta.display}`}
+      >
+        <span className="fold u" aria-hidden>
+          {collapsed ? "▶" : "▼"}
+        </span>
+        <BandChip bandKey={group.bandKey} />
+        <span className="nm u">{meta.display}</span>
+        <span className="ty">{meta.types}</span>
+        <span className="ct">
+          {group.count === 0 ? "RESERVED · 0" : `${doneCount} / ${group.count} CARDS`}
+          {/* Folded and holding the spotlight card: say so, or the worklist looks like it lost her
+              place. The spotlight keeps working either way — it reads `flatItems`, not the DOM. */}
+          {collapsed && holdsCurrent ? " · HOLDING NOW" : null}
+        </span>
+      </button>
+      {collapsed ? null : group.count === 0 ? (
+        <div className="emptyband">
+          <span className="resv" />
+          <span>
+            {group.bandKey === "pink"
+              ? "Reserved. The slot holds even at zero."
+              : "Nothing this haul."}
+          </span>
+        </div>
+      ) : (
+        group.subgroups.map((sub) => (
+          <div key={sub.kind}>
+            <div className="subhead u">{sub.label}</div>
+            {sub.rows.map((it) => (
+              <PlanRow
+                key={it.incomingId}
+                item={it}
+                current={flatIndex.get(it.incomingId) === cur}
+                done={done.has(it.incomingId)}
+                onSelect={() => onSelect(flatIndex.get(it.incomingId) ?? 0)}
+                onToggle={() => onToggleDone(it.incomingId)}
+              />
+            ))}
+          </div>
+        ))
+      )}
+    </div>
   );
 }
 
