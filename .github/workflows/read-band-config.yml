@@ -150,5 +150,56 @@ jobs:
             exit 0
           fi
 
-          echo "::error::VERDICT: the config tables diverge from 0003_config.sql — see the errors above. A corrective migration is needed, and it must UPDATE or DELETE the bad rows rather than `insert ... on conflict do nothing`, which is what let this persist."
+          echo "::error::VERDICT: the config tables diverge from 0003_config.sql — see the errors above. A corrective migration is needed, and it must UPDATE or DELETE the bad rows rather than 'insert ... on conflict do nothing', which is what let this persist."
           exit 1
+
+      # UIL-029 severity check. `unresolvedEntryRepo.listWaiting` (lib/repo/sync.ts:29-33) is a bare
+      # `select("*").eq("status","WAITING")` with NO `.range()`, so it is subject to PostgREST's
+      # 1000-row cap. lib/sync/pipeline.ts:146 drives archive/drop reconciliation off that list, so
+      # every entry past row 1000 is silently never archived when the catalog resolves it and never
+      # dropped when it leaves her export — the queue stops self-healing while the Sync screen still
+      # promises it will. Whether that is LIVE or merely LATENT is one number.
+      #
+      # COUNTS ONLY. `Prefer: count=exact` with `Range: 0-0` returns the total in the Content-Range
+      # header and no rows, so nothing about the contents of her collection is printed.
+      - name: Count unresolved_entry (severity for the unpaged listWaiting)
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          rest="https://$PROJECT_REF.supabase.co/rest/v1"
+
+          count_of() {
+            local query="$1" headers total
+            case "$SERVICE_KEY" in
+              eyJ*) headers=$(curl -sS -D - -o /dev/null --retry 3 --retry-delay 5 \
+                      -H "apikey: $SERVICE_KEY" -H "Authorization: Bearer $SERVICE_KEY" \
+                      -H "Prefer: count=exact" -H "Range: 0-0" "$rest/$query") ;;
+              *)    headers=$(curl -sS -D - -o /dev/null --retry 3 --retry-delay 5 \
+                      -H "apikey: $SERVICE_KEY" \
+                      -H "Prefer: count=exact" -H "Range: 0-0" "$rest/$query") ;;
+            esac
+            # content-range is "0-0/1234"; the total follows the slash.
+            total=$(printf '%s' "$headers" | tr -d '\r' \
+              | awk 'tolower($1) == "content-range:" { split($2, a, "/"); print a[2] }')
+            printf '%s' "${total:-unknown}"
+          }
+
+          waiting=$(count_of "unresolved_entry?select=id&status=eq.WAITING")
+          allrows=$(count_of "unresolved_entry?select=id")
+          echo "unresolved_entry total:    $allrows"
+          echo "unresolved_entry WAITING:  $waiting"
+
+          if [ "$waiting" = "unknown" ] || [ "$allrows" = "unknown" ]; then
+            echo "::warning::could not read a count for unresolved_entry — severity undetermined. Not failing: the band-config verdict above is this job's primary purpose."
+            exit 0
+          fi
+
+          # PostgREST's default max-rows is 1000. At or above it, listWaiting is already truncating.
+          if [ "$waiting" -ge 1000 ]; then
+            echo "::error::LIVE, not latent — $waiting WAITING entries is at or past PostgREST's 1000-row cap, so listWaiting is ALREADY truncating and entries past row 1000 can never be archived or dropped. Re-rank UIL-029 and page it."
+            exit 1
+          fi
+          echo "VERDICT: $waiting WAITING entries, under the 1000-row cap — the unpaged listWaiting is LATENT, not live. Reconciliation is currently reaching every entry."
+          echo "Headroom before it bites: $((1000 - waiting)) more WAITING entries."
