@@ -2800,3 +2800,74 @@ close.
 **Priority rationale (Karvi's call): Medium.** Not a bug — a designed feature that never shipped. Worth
 doing because it's a designed, already-scoped piece of the product (down to the CSS and JS existing
 verbatim) rather than a new idea to evaluate, and it's on the screen she uses most.
+
+## UIL-037 — After overriding a card's placement, both the spotlight panel and the worklist row still show the original suggestion
+
+- **Reported:** 2026-09-14
+- **Status:** Open
+- **Priority:** High (Claude's read — needs Karvi's confirmation)
+- **Area:** Plan
+- **Env:** Testing
+
+In her words: "When an override occurs, I need to be able to see where the new card is being placed on
+the main haul plan page itself. In the screenshot, I overrode the placement from specialty binder to
+bulk bin, but that's not obvious in the screen. The big block that says 'specialty binder' should
+actually say where the card is moving to, not the suggestion." Screenshot confirms: after overriding
+Infernape, the spotlight panel's destination block still reads "To the specialty binder / KB-S01," and
+the "MOVED · OVERRIDE AT COMMIT" badge names no destination at all. On the worklist, Infernape,
+Clobbopus, and Great Tusk ex — all overridden — still show a plain "SPECIALTY BINDER" chip.
+
+**Confirmed: two distinct gaps, not one, and the first is a pure display bug while the second is a real
+plumbing gap.**
+
+**Gap 1 — the spotlight panel has the override in scope and simply doesn't read it.**
+[`PlanScreen.tsx:1038-1041`](<../app/(ui)/plan/PlanScreen.tsx>:1038):
+
+```tsx
+<div className="doit">
+  <b>{act.big}</b>
+  <span className="sg u">{item.destination}</span>
+</div>
+```
+
+`act.big`/`item.destination` come from the immutable `PlanItem` the original cascade run produced
+([`lib/plan/assemble.ts:24,58`](../lib/plan/assemble.ts:24)) — never from the override. Two lines
+below, [`:1043`](<../app/(ui)/plan/PlanScreen.tsx>:1043) renders
+`{override ? <div className="movedtag u">Moved · override at commit</div> : null}` — `override` is
+already the function's own parameter at this point, unused by the block above it. This is a display
+omission, not missing data.
+
+**Gap 2 — the worklist row never receives the override at all.** `PlanRow`
+([`PlanScreen.tsx:976-981`](<../app/(ui)/plan/PlanScreen.tsx>:976)) is called with only `{ item,
+current, done, onSelect, onToggle }`. Tracing the chain: `PlanView` holds the `overrides` map
+([`:653`](<../app/(ui)/plan/PlanScreen.tsx>:653)) but passes it only to `Spotlight`
+([`:824`](<../app/(ui)/plan/PlanScreen.tsx>:824)) — never to `BandSection`
+([`:792-806`](<../app/(ui)/plan/PlanScreen.tsx>:792), no `overrides` in its prop list) or down to
+`PlanRow`. The row's `SPECIALTY BINDER` chip is `act.label` from `ACTION_META`, keyed only off the
+original `item.action` — there is no path for an override to reach it.
+
+**No data-integrity risk — the commit itself is correct.** `commitHaul`'s `writeOverriddenCard` already
+writes the overridden destination, not the suggestion (confirmed elsewhere in this log). The bug is
+purely that the review screen — the one place she can check her own decision before an irreversible
+commit — shows the wrong thing.
+
+**A reusable label function already exists and the data it needs is already fetched.**
+[`lib/line/move.ts:49-66`](../lib/line/move.ts:49), `describeMove(dest: MoveDestination, names:
+MoveNameLookups): string`, is pure (its `WriteOp` import is type-only) and already produces exactly this
+kind of sentence for the Line screen's move panel. `PlanScreen` already fetches the `MoveOptions` shape
+`describeMove`'s name lookups need — it's the same data already loaded for `MoveOverlay`
+([`PlanScreen.tsx:179`](<../app/(ui)/plan/PlanScreen.tsx>:179)) — so this is wiring, not a new fetch: an
+adapter mirroring `nameLookups()` (currently server-only, in
+[`app/(ui)/line/actions.ts:31-42`](<../app/(ui)/line/actions.ts>:31)) plus passing `overrides` (or its
+computed labels) down through `BandSection` to `PlanRow`, and reading `override` in the `.doit` block
+that already has it in scope.
+
+**Suggested fix.** In the spotlight panel: when `override` is set, render `describeMove(override,
+names)` in place of `item.destination` (and give the "Moved · override at commit" badge the actual
+destination name instead of leaving it generic). On the worklist: thread `overrides` down to `PlanRow`
+and swap the chip label to the override's destination when one exists, same source function.
+
+**Priority rationale.** High: this isn't cosmetic — it's the review screen for an action she's about to
+make irreversible-feeling by clicking "Commit the haul" (see UIL-027), and right now it actively shows
+her the wrong thing for every card she's deliberately overridden. She can't verify her own decisions on
+the one screen built for verifying them. Flagging for her confirmation since severity calls are hers.
