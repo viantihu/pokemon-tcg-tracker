@@ -3414,3 +3414,368 @@ Eevee Deck and Storm Emeralda); six remain.
 is worth more than Low, but the ranking shouldn't harden until the telemetry-vs-logic question is
 settled — a telemetry gap is a small write-the-counter fix, a dead retry path is a real behaviour bug,
 and they're the same symptom today.
+
+## UIL-047 — Japanese cards are unfindable and can be confidently mis-matched, because the catalog mirror is English-only
+
+- **Reported:** 2026-09-14 (Karvi, UAT spreadsheet — three separate reports, one root cause)
+- **Status:** Open
+- **Priority:** High (Claude's read — needs Karvi's confirmation)
+- **Area:** Catalog, Sync, Lookup, Plan
+- **Env:** Testing
+
+Three of her reports are the same defect seen three ways:
+
+- "Non-american cards do not appear in the lookup or on the haul plan. For example, I own a Japanese
+  Garbodor, which has the collector number 057/086."
+- "This card is actually a Japanese Pawmi." (the app matched it as the wrong card)
+- "Floragato was not found in the sync match because it is a Japanese card, which has been causing
+  issues. Same with Purrloin."
+
+**Root cause C1 — the mirror only ever fetches English, and there is nowhere to store anything else.**
+[`.github/workflows/catalog-mirror.yml:170`](../.github/workflows/catalog-mirror.yml:170) walks
+`$TCGDEX_BASE_URL/en/sets`; no `locale` is threaded through
+([`app/api/catalog/sync/route.ts:45`](<../app/api/catalog/sync/route.ts>:45)), so
+[`lib/catalog/tcgdex.ts:118`](../lib/catalog/tcgdex.ts:118) falls to `opts.locale ?? "en"` on every
+request. `catalog_card` ([`0002_domain.sql`](../supabase/migrations/0002_domain.sql)) is keyed on
+`tcgdex_id` alone with **no locale column** — so a Japanese printing can't even be stored alongside its
+English counterpart without a PK collision. UIL-004's 23,548-row / 214-set figure is all-English by
+construction. So Japanese Garbodor `057/086` simply does not exist in the mirror, and the lookup/plan
+search ([`lib/repo/catalog-card.ts`](../lib/repo/catalog-card.ts) `search`, locale-unaware) cannot
+return a row that isn't there. That is her first report, verbatim.
+
+**Root cause C2 — the resolver knows about Japanese but the lookup key doesn't.**
+[`lib/sync/resolve.ts:32`](../lib/sync/resolve.ts:32) correctly tags a Japanese Dex row `locale: "ja"`,
+but `catalog-lookup.ts`'s `findBySetLocal` has no locale parameter and queries the English-only mirror,
+so the primary hit misses, the English `set_name` fallback returns nothing, and the row parks in
+`unresolved_entry` with `reason: "UNKNOWN_SET"`. That is exactly the path Floragato and Purrloin took —
+her third report.
+
+**Root cause C3 — a manual match will silently teach a cross-locale alias, and there is no undo.** This
+is the most dangerous of the three and the likely source of "actually a Japanese Pawmi."
+[`lib/sync/exec.ts:437-448`](../lib/sync/exec.ts:437): on manual-matching an `UNKNOWN_SET` Japanese row,
+the only card the user can pick is an English printing (there are no others), so the op writes
+`set_alias(locale='ja', dex_code=<jp code>, tcgdex_set_id=<english set id>)`. `set_alias.tcgdex_set_id`
+is plain `text` with no locale-scoped FK. Afterward, alias-drain resolves *every* subsequent Japanese
+row from that set to English printings sharing the collector number — a confident wrong match, not a
+miss. There is no `delete_set_alias` path in the app, so one bad manual match silently corrupts every
+future Japanese import from that set.
+
+**Suggested fix (data + code, both needed — fixing one alone leaves the other's symptom).** Add a
+`locale` column to `catalog_card` in a new migration and to the `(set_id, local_id)` index; thread
+`opts.locale` through `syncSet`/`syncAll` (they already accept it — call-site plumbing only) and add
+`/ja/` sets to the mirror workflow; thread a `locale` argument through `findBySetLocal`/`search` and the
+plan/backfill/lookup/coll action surfaces (each already knows the owner session, and the Dex import row
+already carries the locale via `resolve.ts`). Guard `upsert_set_alias` against a locale mismatch between
+the entry and the chosen card so C3 can't teach a cross-locale alias.
+
+**Priority rationale.** High: an entire locale of her real collection is invisible to sync and lookup —
+the app's core intake and find paths fail wholesale for it — and C3 additionally risks silent data
+corruption with no in-app recovery. She has hit it three distinct ways in one session. This is the
+largest single item in this batch.
+
+## UIL-048 — "Logging" a card she already owns into a collection creates a second physical copy row
+
+- **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
+- **Status:** Open
+- **Priority:** High (Claude's read — needs Karvi's confirmation)
+- **Area:** Collections
+- **Env:** Testing
+
+In her words: "I logged an owned card to a collection. It added 2 of that card even though I only own 1."
+
+**Root cause.** `logCardIntoCollection` ([`app/(ui)/coll/actions.ts:271-296`](<../app/(ui)/coll/actions.ts>:271))
+does an **unconditional** `copyRepo.insert` — a new shelved `copy` row — with no check for an existing
+shelved copy of that `catalog_card_id` in the binder, then idempotently unions the id into
+`target_catalog_card_ids`. So logging a card she already owns leaves **two `copy` rows** for one
+physical card. The "2" she sees is literal: `RemoveCardButton`
+([`CollHub.tsx:571-575`](<../app/(ui)/coll/CollHub.tsx>:571)) renders `Remove {count} ▸` where
+`count = card.copyIds.length`, and `copyIds` ([`actions.ts:114-116`](<../app/(ui)/coll/actions.ts>:114))
+is every shelved copy of that card in the collection's binders — now two. (`ownedCount`/`totalCount` are
+per-catalog-card, so those still read 1/1; the "2" is the copy count specifically.)
+
+**Relationship to UIL-033.** UIL-033 already flags this same function as non-atomic and as a fourth
+divergent definition of "join a collection," but frames it as a consistency/atomicity risk. The
+**duplicate-copy-on-logging-an-owned-card** symptom is a new, user-visible failure mode within UIL-033's
+blast radius that UIL-033 does not currently name. Worth fixing together — the consolidation UIL-033
+proposes (route through `apply_write_ops`'s collection-join ops) is the natural place to add the "don't
+insert a second copy if one is already shelved here" guard.
+
+**Priority rationale.** High: it silently creates phantom inventory — a copy row for a card that doesn't
+physically exist — which is exactly the class of wrong-data-about-her-real-collection the app exists to
+prevent. Same severity reasoning Karvi accepted for UIL-014/UIL-022.
+
+## UIL-049 — A duplicate that is also a specialty card routes to the specialty binder instead of bulk
+
+- **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
+- **Status:** Open
+- **Priority:** Medium (Claude's read — a routing-policy change, not a malfunction; needs Karvi's confirmation)
+- **Area:** Plan
+- **Env:** Testing
+
+In her words: "All cards, regardless of whether they are specialty or not, must be suggested as 'Bulk'
+if they are duplicates."
+
+**Current behavior, confirmed in source.** The cascade evaluates card class before duplication:
+STEP 2 specialty ([`lib/engine/cascade.ts:236-245`](../lib/engine/cascade.ts:236)) returns before
+STEP 3 duplicate ([`:246-287`](../lib/engine/cascade.ts:246)). So a specialty card that duplicates an
+already-shelved copy routes to the specialty binder, not bulk — the opposite of her rule.
+
+**Suggested fix.** Her ask is a pure block swap: move the STEP 3 duplicate block above STEP 2 specialty.
+No signature or data-model change. Interactions checked: holo-swap still fires correctly (a specialty
+holo over a shelved specialty normal still inherits the slot, displaces the normal to bulk); STEP 1
+collection-claim stays ahead of both and is unaffected (she didn't scope collections into this). One
+subtlety worth recording: `resolveDuplicate` matches on `artwork_group_id` (perceptual-hash cluster) or
+same `(set_id, local_id)`, and a full-art specialty usually has *different* art from the standard print,
+so this only fires for a second copy of the same specialty printing — which is precisely the case she
+described.
+
+**Priority rationale.** Medium: nothing is broken or mis-recorded today — the current routing is a
+defensible default, just not her stated policy. It's a deliberate behavior change she's requesting, so it
+competes with other Mediums rather than being a bug that jumps the queue.
+
+## UIL-050 — Shelved count can exceed a binder's capacity because editing a binder never rebalances what's already in it
+
+- **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
+- **Status:** Open
+- **Priority:** Medium (Claude's read — needs Karvi's confirmation)
+- **Area:** Binders, Settings
+- **Env:** Testing
+
+In her words: "Shelved is greater than capacity. This is physically impossible."
+
+**Root cause: capacity dropping below an unchanged shelved count, not a bad count.** The `binder_section`
+view ([`0002_domain.sql:286-346`](../supabase/migrations/0002_domain.sql:286)) derives capacity live from
+`pages / pockets_per_page / back_half_start_page`, while shelved count is a straight count of `copy` rows
+per `(binder_id, binder_half)` — two independent sources. `saveBinder`
+([`app/(ui)/settings/actions.ts:56-96`](<../app/(ui)/settings/actions.ts>:56)) writes new
+pages/PPP/divider with **no check that the currently shelved copies still fit**. Shrinking pages, moving
+the divider forward, or clearing `back_half_start_page` (UIL-001's "NO BACK HALF" trap — back capacity
+collapses to 0 while copies already at `binder_half='back'` still count) all produce
+`shelved > capacity`. `free_pockets` is clamped at 0, but Shelved and Capacity render raw side by side
+([`CapacityScreen.tsx:110-118`](<../app/(ui)/binders/CapacityScreen.tsx>:110)).
+
+**Suggested fix.** A missing invariant on edit, not a formula bug: either block `saveBinder` when the
+change would strand shelved copies (naming how many and where), or rebalance the affected copies at save
+time. Pairs naturally with UIL-001's existing binder-form warnings.
+
+**Priority rationale.** Medium: no data is lost and nothing is misrouted, but the binder capacity numbers
+are the core of her "time for a new binder" planning, and a visibly impossible number erodes trust in all
+of them. Not High since it takes a binder edit to trigger and nothing physically breaks.
+
+## UIL-051 — Lookup has no way to move a card
+
+- **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
+- **Status:** Open
+- **Priority:** Medium (Claude's read — needs Karvi's confirmation)
+- **Area:** Lookup
+- **Env:** Testing
+
+In her words: "Lookup provides no way to move cards."
+
+**Confirmed: the Lookup screen is structurally read-only today.**
+[`app/(ui)/look/LookupScreen.tsx`](<../app/(ui)/look/LookupScreen.tsx>) renders search, a card face, the
+card's address, and a facts grid — no button, form, or action anywhere in the file. Contrast the Line
+screen ([`LineScreen.tsx:322`](<../app/(ui)/line/LineScreen.tsx>:322)) and Plan screen
+([`PlanScreen.tsx:387`](<../app/(ui)/plan/PlanScreen.tsx>:387)), which both mount `MoveOverlay` wired to
+`moveCardAction` ([`app/(ui)/line/actions.ts:50`](<../app/(ui)/line/actions.ts>:50)).
+
+**Suggested fix — additive wiring, not a new mechanism.** `moveCardAction(copyId, destination)` is
+generic and RLS-scoped and reusable as-is; the one gap is that `LookupCopy`
+([`app/(ui)/look/actions.ts`](<../app/(ui)/look/actions.ts>)) maps the owned copy but drops its `id`.
+Thread `copyId` through, add a "Move" affordance per copy row, and mount the same `MoveOverlay`. Note
+this overlaps UIL-037's fix area (the override-display work also touches how a destination is shown) and
+UIL-023/UIL-022 (converting the move write path to atomic ops) — worth sequencing after those so Lookup
+doesn't wire up a move path that's about to be reworked underneath it.
+
+**Priority rationale.** Medium: a genuine missing capability on a daily screen, but not blocking — she
+can move a card from the Line or Plan screen today. Reuses existing machinery, so cheap once the move
+path it depends on is settled.
+
+## UIL-052 — Collections aren't sorted by most-recently-modified, and the schema has no signal to sort by
+
+- **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
+- **Status:** Open
+- **Priority:** Low (Claude's read — needs Karvi's confirmation)
+- **Area:** Collections
+- **Env:** Testing
+
+In her words: "Sort the collections on the 'Collections' page by most recently modified. Modified means
+either a card was recently added to it through shelving/re-shelving or a placeholder was added."
+
+**Confirmed: the sort signal doesn't exist yet.** `collection` has `created_at` but **no `updated_at`**
+([`0002_domain.sql:102-111`](../supabase/migrations/0002_domain.sql:102)); `collectionRepo.list`
+([`lib/repo/base.ts`](../lib/repo/base.ts)) has no `.order()`, so collections render in effectively
+insertion order ([`CollHub.tsx:369-383`](<../app/(ui)/coll/CollHub.tsx>:369)).
+
+**Suggested fix.** Her definition of "modified" maps cleanly to existing timestamps —
+`placement_decision.created_at` for a shelving/reshelving into the collection's binders, and
+`wishlist_item.created_at` for a placeholder (`line_slot` itself has no `created_at`, so the wishlist
+row's timestamp is the clean proxy). But deriving it live means a three-table join per collection on
+every load; the cheaper correct fix is to add `updated_at` to `collection` and bump it in the code paths
+that shelve into its binders or add a placeholder against them.
+
+**Priority rationale.** Low: pure ordering convenience, no data at risk, nothing broken — it's fine to
+address post go-live. Flagged Low honestly, not "Low because busy."
+
+## UIL-053 — A card can be shelved without appearing in the collection it should belong to
+
+- **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
+- **Status:** Open — **needs one clarification from Karvi before it can be scoped**
+- **Priority:** High if it's the rebind path, otherwise likely expected behavior — pending her answer
+- **Area:** Collections
+- **Env:** Testing
+
+In her words: "Card was shelved but does not reflect in collection."
+
+**Membership requires two facts, and the report is one of them failing — but which depends on how she
+shelved it.** A card counts as in a collection only if a shelved `copy` sits in one of its
+`current_binder_ids` **and** its id is on `target_catalog_card_ids`
+([`actions.ts:102-124`](<../app/(ui)/coll/actions.ts>:102)). Three candidate paths, investigated:
+
+1. **UIL-040 (open) — the most likely live bug.** Rebinding a collection to a different specialty binder
+   writes `current_binder_ids` without moving the shelved copies, so prior copies stay in the old binder
+   and fall out of membership. If she rebound the collection, this is UIL-040 manifesting, not a new
+   defect.
+2. **Expected behavior, not a bug.** A card shelved into a *general* binder via the normal Haul Plan
+   cascade is correctly not in any collection — only a `{kind:"collection"}` placement override unions
+   the tag ([`lib/plan/commit.ts:283-299`](../lib/plan/commit.ts:283)). Same for flat front-half/back-line
+   Backfill commits, which take no collection tag.
+3. No *new* orphan path was found in code beyond UIL-040; UIL-014/UIL-022/UIL-040 cover all three
+   membership write points.
+
+**What's needed:** how she shelved the card in this specific case — via a collection rebind (→ UIL-040),
+via the normal cascade into a general binder (→ expected, and the real gap is that the UI doesn't explain
+why it's not in the collection), or via a collection placement override that failed (→ genuinely new).
+Logged now so the report isn't lost; scoping waits on her answer rather than guessing.
+
+**Priority rationale.** Deliberately unrated pending clarification — it's either a High (UIL-040 orphan
+on live inventory) or a UX-copy gap (correct-by-design behavior that reads as a bug), and those are far
+apart. Recording both reads rather than picking one blind.
+
+## UIL-054 — Team Rocket's Wobbuffet (SVP full-art promo) has no image because TCGdex serves none
+
+- **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
+- **Status:** Open
+- **Priority:** Low (Claude's read — needs Karvi's confirmation)
+- **Area:** Catalog
+- **Env:** Testing
+
+In her words: "Team Rocket's Wobbuffet does not have an image. It is a full art promo card from Scarlett
+and Violet."
+
+**Confirmed: an upstream data gap, not a mirror or display bug.** The card is `svp-203` (SVP Black Star
+Promos). Its `/v2/en/cards/svp-203` payload has **no `image` field at all** (verified live; every other
+key present). `toCatalogRow` ([`lib/catalog/mirror.ts`](../lib/catalog/mirror.ts)) sets
+`image_url: card.image ?? null` verbatim, so the row stores `null` and `CardFace` correctly falls back
+to initials — the same fallback UIL-016 describes. The set is not one of UIL-004's six empty sets; `svp`
+serves 225 cards, this specific row is just imageless upstream.
+
+**Suggested fix.** Nothing in our code is wrong. Options: a re-sync may pick up an image if TCGdex adds
+one later (idempotent, cheap), or add a per-row fallback image source for known-imageless promos. Neither
+is urgent.
+
+**Priority rationale.** Low: one card's thumbnail falls back to text, the card is otherwise fully
+functional, and the cause is external data rather than a defect in the app. Fine post go-live.
+
+## UIL-055 — There is no way to browse a binder's actual cards, and the binder card's capacity stats read awkwardly
+
+- **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
+- **Status:** Open
+- **Priority:** Medium (Claude's read — needs Karvi's confirmation)
+- **Area:** Binders
+- **Env:** Testing
+
+In her words: "I should be able to see a list with icons (in a grid format) [of] all the cards in a
+binder when I click on it. Additionally, front and back halves need not be treated like separate binders
+in this view. Lastly, fix the orientation of the capacity details in each binder's box."
+
+**Three sub-asks, all confirmed against current state:**
+
+1. **No binder-browse view exists.** [`app/(ui)/binders/CapacityScreen.tsx`](<../app/(ui)/binders/CapacityScreen.tsx>)
+   is a numeric capacity review only — five stats per section, no card thumbnails, nothing clickable to
+   drill in. This is a new screen. The data exists (`copyRepo.listShelved` filtered to one binder) and
+   the `CardFace` grid primitive (`cgrid`/`ccard`, already used by CollHub's finite-set grid) drops
+   straight in — aligns with the visual-search design principle already on record.
+2. **Front/back are split in this view today** — the `binder_section` view emits `half='front'`/`'back'`
+   as separate rows and `CapacityScreen` renders each as its own card. A browse view should union them
+   and present the binder as one thing (the `binder_half` field stays for pocket classification under the
+   hood; the browse UI just shouldn't expose it as two binders).
+3. **Capacity-stat orientation:** the stats render value-above-label at 17px/8px in a cramped 5-column
+   grid ([`CapacityScreen.tsx:120-127`](<../app/(ui)/binders/CapacityScreen.tsx>:120),
+   [`globals.css:2237-2259`](../app/globals.css:2237)). Likely fix is a standard label-then-value KPI
+   orientation or a horizontal `Label: value` row.
+
+**Priority rationale.** Medium: the browse view is a real feature gap on a core surface and directly
+serves the visual-hobby principle, but nothing is broken — she can see counts today, just not the cards.
+The orientation fix is cosmetic and could ship separately as Low.
+
+## UIL-056 — Evolution lines can't be created manually, so Basics and non-viable lines strand with no recovery
+
+- **Reported:** 2026-09-14 (Karvi, UAT spreadsheet — two reports, one root cause)
+- **Status:** Open
+- **Priority:** High (Claude's read — needs Karvi's confirmation)
+- **Area:** Plan, Lines
+- **Env:** Testing
+
+Two of her reports are the same underlying gap:
+
+- "None of the cards were ever placed in a line. The Magnemite was not shelved in the back half of the
+  binder — and I cannot move it now. The Magnezone was added to a collection in a Specialty binder, so it
+  should not be in a line at all."
+- "There are lines that are missing. I tried creating one with Ponyta and Rapidash but they cannot be
+  found on the 'lines' page. A UX tip: if a basic card is being moved to the back half of the binder, the
+  user must pick which card it is entering a line with."
+
+**Root cause: a line is only ever created as a side effect of the cascade, and there is no manual path.**
+A line row is inserted only when an incoming Stage 1/2 card fires the cascade's "line-new" step
+([`cascade.ts:249-303`](../lib/engine/cascade.ts:249)) and passes viability (`>= 2` same-colour chain
+members, [`lib/engine/line.ts:114-133`](../lib/engine/line.ts:114)). A Basic never triggers line
+creation itself. So:
+
+- **Magnemite** (Basic) can't create a line, and **Magnezone** was collection-claimed (STEP 1 beats the
+  line steps), so no Stage 1/2 ever fired line-new — no `evolution_line` row exists. Magnezone going to
+  the specialty binder and *not* a line is actually correct (collection claim wins); her "should not be
+  in a line" instinct matches what the code does, so that part may be a display confusion worth checking.
+- **Ponyta/Rapidash**: only Rapidash (Stage 1) could trigger line-new, and only if viability was `>= 2`
+  at commit time (both owned, same band). If not, it took the "line-nonviable" fallthrough to the front
+  half and no line was created. `/lines` ([`lib/line/load.ts:76`](../lib/line/load.ts:76)) lists
+  `evolution_line` rows; no row, no tab.
+- **"Cannot move it now"**: the Line screen only exposes Move on cards already in a filled slot
+  ([`lib/line/view.ts:67`](../lib/line/view.ts:67)), and `placementForMove.shelf`
+  ([`lib/line/move.ts:53-60`](../lib/line/move.ts:53)) always sets `line_slot_id: null` — so a Basic in
+  the front half is invisible on `/lines` and the move path can't attach it to a line even in principle.
+
+**Her UX suggestion is diagnosing the real fix.** There is no surface anywhere to create a line manually
+(`insert_line` appears only in the cascade and one-shot backfill), and moving a Basic to the back half
+silently strands it. A "start a line / pick which line this card joins" flow is the missing capability.
+
+**Priority rationale.** High: evolution lines are a core organizing feature, cards are stranding in the
+front half with no way to place them into a line and no way to move them afterward, and she hit it on two
+separate species. Not a cosmetic gap — a reachable dead end on core functionality.
+
+## UIL-057 — The line-decision screen shows wishlist alternatives but won't let her pick one
+
+- **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
+- **Status:** Open
+- **Priority:** Medium (Claude's read — needs Karvi's confirmation)
+- **Area:** Lines
+- **Env:** Testing
+
+In her words: "I'm not able to make an alternative wishlist choice when trying to make a decision for a
+line."
+
+**Confirmed: the alternative-picking UI is missing entirely, not broken.** The line-decision card renders
+`d.wishlist.map(...)` as `wcard` elements with the first marked `on`, but **none has an `onClick`** —
+they're decorative evidence, not selectable. The `onChoose` callback accepts only a fixed
+`DecisionChoiceId` union (`"confirm-cap" | "cap-no-wishlist" | …`), none of which carries a chosen
+catalog id, and `resolveDecisionWrites` reuses the server-computed cheapest option
+(`res.chosenCatalogCardId`) regardless. So she can accept the default wishlist choice but cannot pick a
+different one.
+
+**Suggested fix.** Make the `wcard` alternatives selectable and thread the chosen catalog id through
+`onChoose` → `resolveDecisionWrites` → `wishlistUpsertFor`, rather than always using the first
+`altOptions` entry.
+
+**Priority rationale.** Medium: a genuine gap in the decision UI on a core screen, but she can still
+resolve the decision with the default rather than being fully blocked — so it's a real limitation, not a
+dead end.
