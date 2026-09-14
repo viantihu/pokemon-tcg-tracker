@@ -694,7 +694,7 @@ routine, not exotic. Nothing about it is cosmetic.
 ## UIL-010 — Card search returns nothing for a full collector number like "099/182"
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** Fixed — PR [#55](https://github.com/viantihu/pokemon-tcg-tracker/pull/55), awaiting QA review
 - **Priority:** High (Karvi's call)
 - **Area:** Lookup / Collections
 - **Env:** Testing
@@ -747,6 +747,35 @@ design. Discarding it is correct, not a shortcut.
 set checklist, and a checklist is a list of collector numbers — the number *is* the natural key for this
 workflow, not the name. Searching by name is a workaround for a card she can already name, which is not
 the case she is in. It also fails silently and totally, which reads as "the card isn't in the app."
+
+**Resolution (2026-09-13, PR [#55](https://github.com/viantihu/pokemon-tcg-tracker/pull/55)).** Fixed at
+`catalogCardRepo.search`, which is where **all five** search surfaces (plan, backfill, collections,
+lookup, sync) bottom out, so one fix covers every one.
+
+`parseCardQuery` (`lib/catalog/collector-number.ts`) pulls a printed number out of the query and
+discards the denominator, then runs the numerator through the existing tested `localIdCandidates` for
+the padding half. `local_id` is matched by **equality against the candidates**, not `ilike` — a
+substring `99` also matches `199`, `299` and `990`. The exact-number query runs separately from the
+free-text one and ranks above it, because a shared `limit` would let a dozen name matches crowd out the
+card she actually asked for. The `/` is now stripped from the free-text pattern too; leaving it in was
+what made every predicate fail.
+
+Also handles `minior 099` (searches name and number), `TG05/TG30`, and a bare `99`. A set code like
+`sv03` is deliberately NOT read as a number.
+
+The entry's constraint on the denominator is confirmed and kept: there is no set-total column, and
+counting rows per `set_id` is not a substitute, because printed totals exclude secret rares — `Shuckle
+136/132` legitimately exceeds its own denominator. Discarding it carries no information loss the catalog
+could have checked.
+
+24 new tests (14 parser, 10 on the search itself over a fake `DbClient`: ranking, exact-vs-substring,
+dedup across the two queries, digital-only exclusion, limit). Not verified in a browser — the screens
+need credentials this session lacks, so the parse and ranking logic is unit-tested but the live
+type-ahead ordering is not exercised end to end.
+
+**Left alone deliberately:** the empty-state copy ("No match in the local mirror…") belongs to UIL-011.
+Worth noting for that triage though — the string was accurate when Testing held 3 cards, but the mirror
+is now complete (23,548 cards / 214 sets), so it now advises a sync run that has already happened.
 
 ## UIL-011 — Remove internal catalog-mirror language from the UI
 
