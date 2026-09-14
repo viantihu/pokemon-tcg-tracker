@@ -36,7 +36,10 @@ current as of its last write; only the Status field itself can lag.
 ## UIL-001 — "Back half from page" gives no indication of what it means
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
+- **Status:** **Closed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to
+  `develop`, QA-reviewed, deployed, and **confirmed resolved by Karvi on Testing 2026-09-14**. The
+  binder-form layout had been proven against the real DB view but never rendered in a browser, so her
+  pass was the visual verification rather than a formality.
 - **Priority:** Low
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -59,7 +62,9 @@ step she can be walked through. Copy-only fix, safe to ship after go-live.
 ## UIL-002 — No definition of what counts as a "page"
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
+- **Status:** **Closed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to
+  `develop`, QA-reviewed, deployed, and **confirmed resolved by Karvi on Testing 2026-09-14**. Same
+  caveat as UIL-001: the live capacity total was proven against Postgres, not observed, until her pass.
 - **Priority:** Medium
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -630,11 +635,14 @@ Plan.
 ## UIL-008 — No progress indication during long operations
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#64](https://github.com/viantihu/pokemon-tcg-tracker/pull/64) MERGED to
-  `develop` (squash `88a546c`), QA-reviewed, confirmed **deployed** to Testing. Shipped **option (1)
-  only**, an indeterminate activity bar, and the PR argues *against* the determinate bar this entry
-  recommended — see the resolution note. Awaiting Karvi's confirmation, including the question of whether
-  the bar still earns its place now that UIL-020 has made the sync much faster.
+- **Status:** **Closed** — PR [#64](https://github.com/viantihu/pokemon-tcg-tracker/pull/64) MERGED to
+  `develop` (squash `88a546c`), deployed, and **confirmed resolved by Karvi on Testing 2026-09-14**.
+  **Not regressed by UIL-027, verified after #98 merged (`3e79cfe`).** All three placements survive: the
+  sync bar (`SyncScreen:177`) and the cascade bar (`PlanScreen:643`, "Routing N cards…") are untouched,
+  and the haul-commit bar was **relabelled** rather than removed — `"Writing the haul — do not close"`
+  became `"Shelving this card…"`. That is correct rather than a loss: per-card commit leaves no long
+  interruptible write, so "do not close" would have been a lie. The copy stopped describing a workflow
+  that no longer exists.
 - **Priority:** Medium (Claude's read — could argue Low)
 - **Area:** Sync, Plan
 - **Env:** Testing
@@ -668,10 +676,11 @@ three, though — nothing is broken, so Low is defensible if she would rather th
 ## UIL-009 — Clicking outside the collection popup discards everything typed
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56) MERGED to
-  `develop` 2026-09-14 (squash `0f16007`), QA-reviewed, and confirmed **deployed** to Testing on
-  `258db13` (`Vercel`/`migrate`/`smoke`/`acceptance` all green). Awaiting Karvi's confirmation — the
-  behaviour is interaction-only and was never exercised in a browser.
+- **Status:** **Closed** — PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56) MERGED to
+  `develop` (squash `0f16007`), deployed, and **confirmed resolved by Karvi on Testing 2026-09-14**.
+  Note she separately reported that fixing the backdrop is **not sufficient** for the collection-creation
+  workflow — that is UIL-038/039/040, deliberately logged as new entries rather than reopening this one,
+  since the defect described here was real and is fixed.
 - **Priority:** High (Karvi's call)
 - **Area:** Collections
 - **Env:** Testing
@@ -876,7 +885,7 @@ doing alongside UIL-010 anyway, since the two land on the same screen and the sa
 ## UIL-012 — Committing a haul fails with a foreign-key violation on `color_band`
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#57](https://github.com/viantihu/pokemon-tcg-tracker/pull/57) MERGED to
+- **Status:** **Closed** — PR [#57](https://github.com/viantihu/pokemon-tcg-tracker/pull/57) MERGED to **Confirmed live on her real data 2026-09-14:** `placement_decision` went 0 → 1 after her own haul commit on Testing, so a card was placed and written with no `copy_color_band_fkey` crash. She did not confirm it verbally; her commit exercised it, which is stronger.
   `develop` 2026-09-14 (squash `474df08`), QA-reviewed, deployed to Testing on `258db13`. Awaiting
   Karvi's confirmation: commit a haul containing a Trainer or Energy card. **The trigger was NOT the
   config tables** — see the correction at the end of this entry, which overturns the two narrowings
@@ -1681,7 +1690,7 @@ to reach the next thing she can act on.
 ## UIL-019 — Haul progress header scrolls out of view instead of staying pinned
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Fixed** — rode in on PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109), deployed. Awaiting Karvi's confirmation — she spoke only to UIL-027, so this is not claimed on her behalf. Two defects were found only by checking it in a browser, both invisible on desktop: the custom property had to be on `document.documentElement` (band heads are a sibling subtree, so it had **no effect** where it was), and `ResizeObserver` alone did not re-publish when the bar wrapped 69px → 115px, hiding band heads behind the bar at 375px.
 - **Priority:** Medium (Karvi's call)
 - **Area:** Plan
 - **Env:** Testing
@@ -2170,7 +2179,7 @@ sharing a `099` has an official count of 182.
 ## UIL-027 — "Commit the haul" is the wrong model: a card should be shelved the moment "Done" is clicked
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Closed** — PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to `develop`, deployed, and **confirmed resolved by Karvi on Testing 2026-09-14**. Done shelves the card immediately; "Commit the haul" is **removed**, not relabelled (a comment marks where it was and why). No undo — her ruling; corrections go through Move. Verified by content on `develop` rather than by PR status. **For the record:** an earlier attempt (#98) reported `MERGED` while merging into an already-squash-landed base, so it shipped nothing and was reported to her as done; she caught it from a screenshot. `baseRefName == "develop"` is now a precondition in QA's gate.
 - **Priority:** High (Claude's read — this is a core-workflow redesign, needs Karvi's confirmation)
 - **Area:** Plan
 - **Env:** Testing
@@ -2487,7 +2496,7 @@ it up" or "delete it."
 
 - **Reported:** 2026-09-14 (not from Karvi — found proactively, looking for the "fine at small scale,
   wrong at real scale" pattern rather than waiting for her to hit it)
-- **Status:** Open
+- **Status:** **Fixed** — three PRs: [#90](https://github.com/viantihu/pokemon-tcg-tracker/pull/90) added `assertReadComplete` so a capped read throws instead of returning a plausible short list, [#96](https://github.com/viantihu/pokemon-tcg-tracker/pull/96) paged the reconciler's `loadCurrentGroups` reads, and [#104](https://github.com/viantihu/pokemon-tcg-tracker/pull/104) paged `listUnplaced` rather than throwing on it. All deployed. **#90's premise is now observed rather than deduced** — through supabase-js: `data.length=1000, count=23548`.
 - **Priority:** Medium
 - **Area:** Sync, Plan
 - **Env:** Testing — **latent, not live**, confirmed by a live count (see below)
@@ -2679,7 +2688,7 @@ partial-write incident), raised by the four-site drift risk rather than by an ob
 
 - **Reported:** 2026-09-14 (not from Karvi — found proactively, looking for the next instance of the
   "fine at small scale, wrong at real scale" pattern)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#106](https://github.com/viantihu/pokemon-tcg-tracker/pull/106) MERGED and deployed. Awaiting Karvi's confirmation. A folded collection renders **nothing below its header** — tested by negation, asserting the output contains no `display: none` — and reports `aria-expanded` honestly in both states.
 - **Priority:** Medium (Senior BA's read — flagged that Karvi rated the equivalent Haul Plan issue
   High, so this may come in above Medium if she reports it first)
 - **Area:** Collections
@@ -2873,7 +2882,7 @@ verbatim) rather than a new idea to evaluate, and it's on the screen she uses mo
 ## UIL-037 — After overriding a card's placement, both the spotlight panel and the worklist row still show the original suggestion
 
 - **Reported:** 2026-09-14
-- **Status:** Open
+- **Status:** **Fixed** — rode in on PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109), deployed. Awaiting Karvi's confirmation; not claimed on her behalf. One shared `displayFor(item, override, names)` now drives **both** the worklist row and the spotlight panel, so a future divergence between them is a compile error rather than a QA finding — that divergence *was* the defect. Revert-checked: forcing `displayFor` to ignore the override fails 6 of 9 assertions.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Plan
 - **Env:** Testing
@@ -3052,7 +3061,7 @@ inconvenient. Karvi's own priority read wasn't given for this one specifically; 
 ## UIL-040 — Rebinding a collection to a different specialty binder changes the record but silently orphans the cards already shelved in the old one
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009)
-- **Status:** Open
+- **Status:** **Fixed (step 1 of 2)** — PR [#102](https://github.com/viantihu/pokemon-tcg-tracker/pull/102) MERGED and deployed: a rebind that would strand shelved copies is now **refused**, naming the cards and the old binder. Verified the guard runs *before* the write (`actions.ts:63`), with a CONTROL test proving the pre-fix shape strands every copy. **Step 2 — moving the copies so the rebind succeeds instead of refusing — is not built**, and UIL-032 must land with it.
 - **Priority:** High (Claude's read — this is a live orphan hazard, not just a missing feature; needs
   Karvi's confirmation)
 - **Area:** Collections
