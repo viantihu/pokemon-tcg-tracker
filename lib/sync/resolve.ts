@@ -53,7 +53,15 @@ export function stripPad(localId: string): string {
   return /^\d+$/.test(localId) ? String(Number(localId)) : localId;
 }
 
-/** Ordered, de-duplicated localId candidates to try against the catalog. */
+/**
+ * Ordered, de-duplicated localId candidates to try against the catalog.
+ *
+ * LOAD-BEARING BEYOND SYNC (UIL-010). This is no longer only the Dex-import resolver's padding rule:
+ * `catalogCardRepo.search` uses it too, so a collector number typed as printed ("099/182") finds a card
+ * in a set that stores `99`. `local_id` keeps TCGdex's padding verbatim and it varies by set, which is
+ * why the same three candidates are needed in both places. Changing this order or these variants moves
+ * BOTH the sync join and every card search in the app — plan, backfill, collections, lookup and sync.
+ */
 export function localIdCandidates(localId: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
