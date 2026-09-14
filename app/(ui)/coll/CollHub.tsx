@@ -309,23 +309,6 @@ function CollectionsView(props: {
   onRemove: (c: CollectionView, k: CollectionCardView) => void;
 }) {
   const { data, busy, onNew, onEdit, onMode, onDelete, onLog, onWishlist, onRemove } = props;
-  // Defaults every collection already on the page to FOLDED (UIL-034): unlike the Haul Plan, which
-  // defaults all-expanded because she works one band at a time, Collections is a browse surface — and
-  // a finite set list is 200-300+ CardFace tiles, the same "fine at three cards, wrong at real scale"
-  // shape #78 fixed for the worklist. Lazy initializer runs once, so a collection created later (via
-  // "+ New collection") is not in this Set and opens expanded, which is what you want right after
-  // creating one. Not persisted across visits — this page has no resume concept to persist into.
-  const [collapsed, setCollapsed] = useState<Set<string>>(
-    () => new Set(data.collections.map((c) => c.id)),
-  );
-  function toggleCollapse(id: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
   return (
     <div className="collwrap">
       <div className="collnew">
@@ -334,211 +317,133 @@ function CollectionsView(props: {
         </button>
       </div>
 
-      {data.collections.length > 1 && (
-        <div className="worktools">
-          <span className="hk">COLLECTIONS</span>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setCollapsed(new Set(data.collections.map((c) => c.id)))}
-            disabled={collapsed.size === data.collections.length}
-          >
-            Collapse all
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setCollapsed(new Set())}
-            disabled={collapsed.size === 0}
-          >
-            Expand all
-          </button>
-        </div>
-      )}
-
       {data.collections.length === 0 && (
         <div className="stub panel">
           <p>No collections yet. Create one — it becomes a placement target immediately.</p>
         </div>
       )}
 
-      {data.collections.map((c) => (
-        <CollectionCard
-          key={c.id}
-          collection={c}
-          busy={busy}
-          collapsed={collapsed.has(c.id)}
-          onToggleCollapse={() => toggleCollapse(c.id)}
-          onEdit={onEdit}
-          onMode={onMode}
-          onDelete={onDelete}
-          onLog={onLog}
-          onWishlist={onWishlist}
-          onRemove={onRemove}
-        />
-      ))}
-      <div className="foot">FINITE · A SET LIST YOU CHASE. OPEN · A RUNNING COUNT WITH NO END.</div>
-    </div>
-  );
-}
-
-/**
- * One collection, foldable (UIL-034 — the same mechanism as `PlanScreen`'s `BandSection` / UIL-018: a
- * folded collection renders NOTHING below its header, not CSS-hidden, so a 200-300 card finite set
- * list costs a header's worth of markup rather than a page's worth. The progress summary moves into
- * the header itself so it survives folding — per the issue log, that summary is the reason to glance
- * at the page at all even when collapsed.
- */
-export function CollectionCard(props: {
-  collection: CollectionView;
-  busy: boolean;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
-  onEdit: (c: CollectionView) => void;
-  onMode: (id: string, mode: "finite" | "open") => void;
-  onDelete: (id: string) => void;
-  onLog: (c: CollectionView) => void;
-  onWishlist: (collectionId: string, tcgdexId: string) => void;
-  onRemove: (c: CollectionView, k: CollectionCardView) => void;
-}) {
-  const {
-    collection: c,
-    busy,
-    collapsed,
-    onToggleCollapse,
-    onEdit,
-    onMode,
-    onDelete,
-    onLog,
-    onWishlist,
-    onRemove,
-  } = props;
-  const fin = c.mode === "finite";
-  const prog = finiteProgress(c.totalCount, c.ownedCount);
-  return (
-    <div className={"collcard panel" + (collapsed ? " folded" : "")}>
-      <div className="collhead">
-        <button
-          type="button"
-          className="collfold"
-          aria-expanded={!collapsed}
-          onClick={onToggleCollapse}
-          title={collapsed ? `Show ${c.name}` : `Hide ${c.name}`}
-        >
-          <span aria-hidden>{collapsed ? "▶" : "▼"}</span>
-        </button>
-        <div style={{ minWidth: 0 }}>
-          <div className="collname">{c.name}</div>
-          <div className="collmeta u">
-            {c.binderNames.join(" · ") || "No binder"} ·{" "}
-            {fin ? "Finite set list" : "Open running count"} ·{" "}
-            {fin ? `${prog.owned} / ${prog.total} owned · ${prog.pct}%` : `${c.totalCount} logged`}
-          </div>
-        </div>
-        <div className="collactions">
-          <div className="modetoggle">
-            <button
-              className={"modebtn u" + (fin ? " on" : "")}
-              onClick={() => onMode(c.id, "finite")}
-              disabled={busy}
-            >
-              Finite
-            </button>
-            <button
-              className={"modebtn u" + (fin ? "" : " on")}
-              onClick={() => onMode(c.id, "open")}
-              disabled={busy}
-            >
-              Open
-            </button>
-          </div>
-          <button className="editcollbtn u" onClick={() => onEdit(c)} disabled={busy}>
-            ✎ Edit
-          </button>
-          <button
-            className="editcollbtn u"
-            onClick={() => {
-              if (confirm(`Delete "${c.name}"?`)) onDelete(c.id);
-            }}
-            disabled={busy}
-          >
-            ✕ Delete
-          </button>
-        </div>
-      </div>
-
-      {collapsed ? null : fin ? (
-        <>
-          <div className="cbar">
-            <i style={{ width: `${prog.pct}%` }} />
-          </div>
-          <div className="cprog u">
-            <b>
-              {prog.owned} / {prog.total}
-            </b>{" "}
-            owned · {prog.pct}%
-            {prog.needed > 0 ? (
-              <span className="need"> · {prog.needed} needed</span>
-            ) : (
-              " · complete"
-            )}
-          </div>
-          <div className="cgrid">
-            {c.cards.map((k) => (
-              <div key={k.tcgdexId} className={"ccard" + (k.owned ? "" : " need")}>
-                <CardFace name={k.name} imageUrl={k.imageUrl} size="m" />
-                <div className="cn u">{k.name}</div>
-                {k.localId ? <div className="cno">{k.localId}</div> : null}
-                {k.owned ? (
-                  <>
-                    <span className="cpill have u">Owned</span>
-                    <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
-                  </>
-                ) : k.wished ? (
-                  <span className="cpill wish u">On wishlist</span>
-                ) : (
-                  <button
-                    className="wbtn u"
-                    disabled={busy}
-                    onClick={() => onWishlist(c.id, k.tcgdexId)}
-                  >
-                    + Wishlist
-                  </button>
-                )}
-              </div>
-            ))}
-            {c.cards.length === 0 && (
-              <p style={{ fontSize: 11, color: "var(--ink-2)" }}>
-                No cards in the set list yet. Edit to add the ones you are chasing.
-              </p>
-            )}
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="infbox">
-            <div className="infnum">{c.totalCount}</div>
-            <div className="inflab u">Cards and counting</div>
-            <button className="logbtn u" onClick={() => onLog(c)} disabled={busy}>
-              ＋ Log a card
-            </button>
-          </div>
-          <div className="cprog u">Open collection · no target, just a running count</div>
-          {c.cards.length > 0 && (
-            <div className="cgrid">
-              {c.cards.map((k) => (
-                <div key={k.tcgdexId} className="ccard">
-                  <CardFace name={k.name} imageUrl={k.imageUrl} size="m" />
-                  <div className="cn u">{k.name}</div>
-                  {k.localId ? <div className="cno">{k.localId}</div> : null}
-                  <span className="cpill have u">In collection</span>
-                  <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
+      {data.collections.map((c) => {
+        const fin = c.mode === "finite";
+        const prog = finiteProgress(c.totalCount, c.ownedCount);
+        return (
+          <div key={c.id} className="collcard panel">
+            <div className="collhead">
+              <div style={{ minWidth: 0 }}>
+                <div className="collname">{c.name}</div>
+                <div className="collmeta u">
+                  {c.binderNames.join(" · ") || "No binder"} ·{" "}
+                  {fin ? "Finite set list" : "Open running count"}
                 </div>
-              ))}
+              </div>
+              <div className="collactions">
+                <div className="modetoggle">
+                  <button
+                    className={"modebtn u" + (fin ? " on" : "")}
+                    onClick={() => onMode(c.id, "finite")}
+                    disabled={busy}
+                  >
+                    Finite
+                  </button>
+                  <button
+                    className={"modebtn u" + (fin ? "" : " on")}
+                    onClick={() => onMode(c.id, "open")}
+                    disabled={busy}
+                  >
+                    Open
+                  </button>
+                </div>
+                <button className="editcollbtn u" onClick={() => onEdit(c)} disabled={busy}>
+                  ✎ Edit
+                </button>
+                <button
+                  className="editcollbtn u"
+                  onClick={() => {
+                    if (confirm(`Delete "${c.name}"?`)) onDelete(c.id);
+                  }}
+                  disabled={busy}
+                >
+                  ✕ Delete
+                </button>
+              </div>
             </div>
-          )}
-        </>
-      )}
+
+            {fin ? (
+              <>
+                <div className="cbar">
+                  <i style={{ width: `${prog.pct}%` }} />
+                </div>
+                <div className="cprog u">
+                  <b>
+                    {prog.owned} / {prog.total}
+                  </b>{" "}
+                  owned · {prog.pct}%
+                  {prog.needed > 0 ? (
+                    <span className="need"> · {prog.needed} needed</span>
+                  ) : (
+                    " · complete"
+                  )}
+                </div>
+                <div className="cgrid">
+                  {c.cards.map((k) => (
+                    <div key={k.tcgdexId} className={"ccard" + (k.owned ? "" : " need")}>
+                      <CardFace name={k.name} imageUrl={k.imageUrl} size="m" />
+                      <div className="cn u">{k.name}</div>
+                      {k.localId ? <div className="cno">{k.localId}</div> : null}
+                      {k.owned ? (
+                        <>
+                          <span className="cpill have u">Owned</span>
+                          <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
+                        </>
+                      ) : k.wished ? (
+                        <span className="cpill wish u">On wishlist</span>
+                      ) : (
+                        <button
+                          className="wbtn u"
+                          disabled={busy}
+                          onClick={() => onWishlist(c.id, k.tcgdexId)}
+                        >
+                          + Wishlist
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {c.cards.length === 0 && (
+                    <p style={{ fontSize: 11, color: "var(--ink-2)" }}>
+                      No cards in the set list yet. Edit to add the ones you are chasing.
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="infbox">
+                  <div className="infnum">{c.totalCount}</div>
+                  <div className="inflab u">Cards and counting</div>
+                  <button className="logbtn u" onClick={() => onLog(c)} disabled={busy}>
+                    ＋ Log a card
+                  </button>
+                </div>
+                <div className="cprog u">Open collection · no target, just a running count</div>
+                {c.cards.length > 0 && (
+                  <div className="cgrid">
+                    {c.cards.map((k) => (
+                      <div key={k.tcgdexId} className="ccard">
+                        <CardFace name={k.name} imageUrl={k.imageUrl} size="m" />
+                        <div className="cn u">{k.name}</div>
+                        {k.localId ? <div className="cno">{k.localId}</div> : null}
+                        <span className="cpill have u">In collection</span>
+                        <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+      <div className="foot">FINITE · A SET LIST YOU CHASE. OPEN · A RUNNING COUNT WITH NO END.</div>
     </div>
   );
 }
