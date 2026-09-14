@@ -27,7 +27,7 @@ the entry records both.
 ## UIL-001 — "Back half from page" gives no indication of what it means
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** Fixed — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42), awaiting QA review
 - **Priority:** Low
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -50,7 +50,7 @@ step she can be walked through. Copy-only fix, safe to ship after go-live.
 ## UIL-002 — No definition of what counts as a "page"
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** Fixed — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42), awaiting QA review
 - **Priority:** Medium
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -69,6 +69,26 @@ derived total capacity live as she types, so a wrong pairing is visible immediat
 **Priority rationale:** higher than UIL-001 because the failure is silent and produces *wrong
 data*, not just confusion — a 2× capacity error misroutes real cards and is only discovered
 physically, at the binder. Worth fixing before the first real haul, not before go-live.
+
+**Resolution for UIL-001 + UIL-002 (2026-09-13, PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42)).** Fixed together — same form, same class of
+failure.
+
+- The binder form now shows the running total, front/back split and page ranges **live as she types**.
+  For UIL-002 that is the actual safeguard: the app only ever multiplies pages x pockets, so rather
+  than assert a convention it does not enforce, it shows the total she can check against the binder in
+  her hands — which a 2x mistake visibly doubles.
+- UIL-001's blank-divider case gets a **warning**, not helper text, because zero back-half capacity is
+  a defect rather than a copy gap. Beyond the original suggestion: the binder **list** flags it too
+  (`NO BACK HALF`), since an already-saved binder is where she would actually hit it, and a divider set
+  past the last page gets the same warning naming the out-of-range page. Specialty binders are never
+  flagged — they have no halves by design.
+- The arithmetic is `binderSplit` in `lib/surfaces/capacity.ts`, mirroring the `binder_section` view
+  including its `coalesce` and both `greatest(..., 0)` clamps. 12 cases run through **both** the helper
+  and the real view on a real Postgres and must match, so the preview cannot drift from the DB and
+  teach a wrong model of her own binders.
+
+Not verified visually — rendering Settings needs Supabase credentials, so the numbers are proven
+against Postgres but the layout is not. Worth a glance at the binder form on a narrow viewport.
 
 ## UIL-003 — Sync's added cards cannot be placed: "Place new cards" leads to an empty Haul Plan
 
@@ -359,40 +379,52 @@ expensive. Worth fixing before the first real sorting session, not necessarily b
 ## UIL-007 — Scroll bar under the card list renders outside the panel border
 
 - **Reported:** 2026-09-13
-- **Status:** Open — needs Karvi to confirm which screen
+- **Status:** Open
 - **Priority:** Low
-- **Area:** Plan (probable)
+- **Area:** Plan — **confirmed by Karvi 2026-09-13**
 - **Env:** Testing
 
 In her words: "Upon loading, the scroll bar underneath the card quantity spanned across the page
-outside of its borders."
+outside of its borders." Screen confirmed as the Haul Plan.
 
-Not reproduced yet — the affected screens are behind auth, so this needs her session or a screenshot.
-Strongest candidate is the Haul Plan draft list:
+Still not reproduced directly — `/plan` is auth-gated, so this is read from the source. The scroll
+container is the draft list, which is the only thing on the screen that can produce a bar on load:
 
 ```css
 .draftlist {
   display: flex;
   flex-direction: column;
   max-height: 260px;
-  overflow: auto;      /* both axes, so a too-wide row yields a horizontal bar */
+  overflow: auto;      /* BOTH axes — a too-wide row yields a horizontal bar */
 }
 ```
 
-`overflow: auto` scrolls on both axes, and `.draftrow` is a flex row with no `min-width: 0`, so a long
-card name cannot shrink and forces horizontal overflow. The bar then draws at the bottom of the
-scroll area, which is where "underneath" and "outside its borders" both point.
+**Correcting an earlier guess in this entry:** `.draftrow .di` *does* already set `min-width: 0`, so a
+long card name is not the cause. The likelier culprit is new in UIL-003 — the synced-card badge:
 
-"Upon loading" fits this specifically: pre-UIL-003 the draft was empty on arrival and the list never
-scrolled, so the bug had no way to show up until the page started arriving pre-populated.
+```jsx
+<span className="tag u">Waiting from sync · {d.dexVariantRaw ?? d.variant}</span>
+```
 
-Alternative candidate, if she saw it on the Sync screen instead: the unresolved-queue rows render
-`×{quantity}` ([SyncScreen.tsx:567](<../app/(ui)/sync/SyncScreen.tsx>:567)), which is the one place
-the UI literally shows a card quantity. Those rows do set `minWidth: 0` correctly, which is why the
-Plan list is the better guess.
+`.tag` is `display: inline-block` with no wrapping or max-width, and `d.dexVariantRaw` is a raw Dex
+string ("Reverse Holo", "1st Edition Holofoil"). It renders **only** for rows with an `existingCopyId`,
+which is exactly the synced cards that now seed the page. So the badge sets a min-content width that
+`.di` cannot shrink below, `.draftlist` overflows horizontally, and `overflow: auto` draws a full-width
+bar along the bottom of the list — below the bordered `.draftrow`s, which is where "underneath" and
+"outside of its borders" both land. `.draftlist` has no border of its own, so the bar reads as sitting
+outside the rows entirely.
 
-Likely fix: `overflow-y: auto` plus `overflow-x: hidden` on `.draftlist`, and `min-width: 0` on the
-flexible child of `.draftrow` so long names ellipsize instead of pushing the row wide.
+This also explains "upon loading" exactly: before UIL-003 the draft was always empty on arrival, so
+neither the list nor the badge existed until she typed something.
+
+Ambiguity left for whoever fixes it: "the card quantity" may mean the `{draft.length} cards in the
+haul` line, which sits *below* the list — in which case the bar is above it, not underneath, and the
+suspect is instead `.strip` (`overflow-x: auto`, `margin-left: 48px`) further down the page. A
+screenshot settles it in one look. The fix below covers the draft-list case either way.
+
+Likely fix: `overflow-y: auto` + `overflow-x: hidden` on `.draftlist`, and let `.tag` wrap or cap at
+`max-width: 100%` so a long Dex variant string cannot set the row's min width. If it turns out to be
+`.strip`, that one needs its `margin-left` moved to padding so the scroll area stays inside the panel.
 
 **Priority rationale:** cosmetic. Nothing is unreachable or mis-recorded, and the fix is a couple of
 CSS lines. Post go-live is fine.
