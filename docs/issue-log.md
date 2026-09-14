@@ -629,7 +629,7 @@ three, though — nothing is broken, so Low is defensible if she would rather th
 ## UIL-009 — Clicking outside the collection popup discards everything typed
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** Fixed — PR [#53](https://github.com/viantihu/pokemon-tcg-tracker/pull/53), awaiting QA review
 - **Priority:** High (Karvi's call)
 - **Area:** Collections
 - **Env:** Testing
@@ -677,7 +677,7 @@ routine, not exotic. Nothing about it is cosmetic.
 ## UIL-010 — Card search returns nothing for a full collector number like "099/182"
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** Fixed — PR [#53](https://github.com/viantihu/pokemon-tcg-tracker/pull/53), awaiting QA review
 - **Priority:** High (Karvi's call)
 - **Area:** Lookup / Collections
 - **Env:** Testing
@@ -730,6 +730,35 @@ design. Discarding it is correct, not a shortcut.
 set checklist, and a checklist is a list of collector numbers — the number *is* the natural key for this
 workflow, not the name. Searching by name is a workaround for a card she can already name, which is not
 the case she is in. It also fails silently and totally, which reads as "the card isn't in the app."
+
+**Resolution for UIL-009 + UIL-010 (2026-09-13, PR
+[#53](https://github.com/viantihu/pokemon-tcg-tracker/pull/53)).**
+
+**UIL-009** — took option (1) as recommended: the backdrop no longer dismisses the editor at all. It is
+a form, not a lightbox. Went further than the entry on the other two paths, because Close and Escape
+would otherwise destroy the same work just as silently: both now confirm, but **only once something has
+changed**, so dismissing an untouched dialog stays a single click. "Dirty" is measured against the state
+captured when the editor opened, not against emptiness — editing an existing collection starts
+populated, so a non-empty test would nag on every open. Escape had no handler at all before; it does
+now, routed through the same guard, since a modal with no keyboard exit is its own problem. The
+read-only log modal keeps backdrop-dismiss — nothing there is lost.
+
+**UIL-010** — fixed at `catalogCardRepo.search`, which is where **all five** search surfaces (plan,
+backfill, collections, lookup, sync) bottom out, so one fix covers every one. `parseCardQuery`
+(`lib/catalog/collector-number.ts`) pulls a printed number out of the query, discards the denominator,
+and runs the numerator through the existing tested `localIdCandidates` for the padding half. `local_id`
+is then matched by **equality against the candidates**, not `ilike` — a substring `99` also matches
+`199`, `299` and `990`. The exact-number query runs separately from the free-text one and ranks above
+it, because a shared `limit` would let a dozen name matches crowd out the card she actually asked for.
+The `/` is now also stripped from the free-text pattern; leaving it in was what made every predicate
+fail.
+
+Also handles `minior 099` (searches name and number), `TG05/TG30`, and a bare `99`. A set code like
+`sv03` is deliberately NOT read as a number.
+
+24 new tests. Not verified in a browser — both screens need credentials this session lacks, so the
+parse/rank logic is unit-tested but the editor's confirm dialog and the type-ahead ordering are not
+exercised end to end.
 
 ## UIL-011 — Remove internal catalog-mirror language from the UI
 
