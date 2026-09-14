@@ -96,15 +96,29 @@ export const catalogCardRepo = {
     // so an exact `local_id` hit ranks ABOVE any name match. Run as its own query rather than folded
     // into the `or` below: a shared `limit` would let a dozen name matches crowd out the exact one.
     // Equality, not `ilike` — `99` as a substring also matches `199`, `299` and `990`.
-    if (parsed.localIds.length > 0) {
+    //
+    // ONE QUERY PER CANDIDATE, IN CANDIDATE ORDER (UIL-015). The previous version put every padding
+    // variant into a single `.in("local_id", ["011", "11"])` ordered by `set_id`, which threw the
+    // candidate order away — and `set_id` ordering is alphabetical, so DIGITS SORT BEFORE LETTERS.
+    // Searching `011/217` for Wurmple (`me02.5-011`) matched the stripped form `11` in all twelve
+    // numerically-named McDonald's sets (`2011bw` … `2024sv`), which sort ahead of `me02.5`, filled
+    // the `limit`, and crowded the exact match out entirely. Invisible at 3 catalog rows, wrong at
+    // 23.5k — the same "fine at small scale" shape as the progress strip in UIL-007.
+    //
+    // The precedence restored here is the form SHE TYPED first, not "padded first":
+    // `localIdCandidates` yields the verbatim form ahead of its variants, so `011` → ["011", "11"]
+    // and `11` → ["11", "011"]. Padded-first would be right for her query and wrong for the mirror
+    // image of it. Querying one form at a time also means the `limit` cannot be consumed by the
+    // lower-precedence form before the higher one is asked for.
+    for (const localId of parsed.localIds) {
+      if (out.length >= limit) break;
       const { data, error } = await db
         .from("catalog_card")
         .select("*")
         .eq("is_digital_only", false)
-        .in("local_id", parsed.localIds)
+        .eq("local_id", localId)
         .order("set_id", { ascending: true })
-        .order("local_id", { ascending: true })
-        .limit(limit);
+        .limit(limit - out.length);
       if (error) throw error;
       take(data ?? []);
     }
