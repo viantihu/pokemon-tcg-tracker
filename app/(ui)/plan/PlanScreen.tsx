@@ -16,7 +16,7 @@
  * are there in the first paint; `reloadPending` re-reads it after a commit.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Variant } from "@/lib/engine";
 import type { PlanItem } from "@/lib/plan";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
@@ -54,6 +54,69 @@ function newId(): string {
     : `d-${Math.random().toString(36).slice(2)}`;
 }
 
+/* ------------------------- resuming a plan in progress (UIL-006) ------------------------- */
+
+const RESUME_KEY = "binderops.plan.v1";
+
+/**
+ * A run in progress, parked so navigating away does not throw it out.
+ *
+ * `stamp` is the server's stamp of everything the cascade read (lib/plan/fingerprint.ts). It is what
+ * makes resuming safe rather than merely convenient: if anything the plan depends on has moved, the
+ * stamp differs and the cache is dropped instead of showing a plan computed against stale state.
+ *
+ * Stored in sessionStorage, not localStorage: a plan is a working session at the binder, and a
+ * month-old one resurfacing would be noise. The draft rides along too, since the plan's rows are keyed
+ * by draft id and the two are only meaningful together.
+ */
+interface ResumeState {
+  stamp: string;
+  source: (typeof SOURCES)[number]["v"];
+  notes: string;
+  draft: DraftCard[];
+  plan: RunPlanResult;
+  /** Check-off progress — the part whose loss actually hurts, mid-stack at the binder. */
+  done: string[];
+  cur: number;
+  overrides: Record<string, MoveDestination>;
+}
+
+function readResume(stamp: string): ResumeState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(RESUME_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ResumeState;
+    // Any drift in the underlying state, or a shape we do not recognise, and we start clean.
+    if (!parsed || parsed.stamp !== stamp || !parsed.plan || !Array.isArray(parsed.draft)) {
+      window.sessionStorage.removeItem(RESUME_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    // Corrupt entry, quota error, or storage disabled — never break the screen over a cache.
+    return null;
+  }
+}
+
+function writeResume(state: ResumeState): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(RESUME_KEY, JSON.stringify(state));
+  } catch {
+    // Full or unavailable storage just means no resume; the plan itself is unaffected.
+  }
+}
+
+function clearResume(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(RESUME_KEY);
+  } catch {
+    /* nothing to do */
+  }
+}
+
 /** The draft as the server actions want it — drops the display payload, keeps the routing link. */
 function toPayload(draft: DraftCard[]): DraftPayloadItem[] {
   return draft.map((d) => ({
@@ -64,25 +127,62 @@ function toPayload(draft: DraftCard[]): DraftPayloadItem[] {
   }));
 }
 
-export function PlanScreen({ initialPending = [] }: { initialPending?: DraftCard[] }) {
-  const [source, setSource] = useState<(typeof SOURCES)[number]["v"]>("bulk-bin");
-  const [notes, setNotes] = useState("");
-  const [draft, setDraft] = useState<DraftCard[]>(initialPending);
-  const [plan, setPlan] = useState<RunPlanResult | null>(null);
+export function PlanScreen({
+  initialPending = [],
+  stateStamp = "",
+}: {
+  initialPending?: DraftCard[];
+  stateStamp?: string;
+}) {
+  // Read once, during the first render, so a resumed plan is there in the first paint rather than
+  // flashing an empty form and swapping. Safe in a lazy initializer: no effect, no cascading render.
+  const [resumed] = useState<ResumeState | null>(() => readResume(stateStamp));
+
+  const [source, setSource] = useState<(typeof SOURCES)[number]["v"]>(
+    resumed?.source ?? "bulk-bin",
+  );
+  const [notes, setNotes] = useState(resumed?.notes ?? "");
+  const [draft, setDraft] = useState<DraftCard[]>(resumed?.draft ?? initialPending);
+  const [plan, setPlan] = useState<RunPlanResult | null>(resumed?.plan ?? null);
+  // Whether the plan CURRENTLY on screen is the restored one. `resumed` stays non-null for the life of
+  // the component, so using it directly would keep claiming "resumed" after she re-runs.
+  const [planIsResumed, setPlanIsResumed] = useState(resumed !== null);
   const [running, setRunning] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [committed, setCommitted] = useState<CommitCounts | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [cur, setCur] = useState(0);
-  const [done, setDone] = useState<Set<string>>(new Set());
+  const [cur, setCur] = useState(resumed?.cur ?? 0);
+  const [done, setDone] = useState<Set<string>>(() => new Set(resumed?.done ?? []));
   // Placement overrides (M7): draft id → chosen destination, applied at commit (cascade skipped).
-  const [overrides, setOverrides] = useState<Record<string, MoveDestination>>({});
+  const [overrides, setOverrides] = useState<Record<string, MoveDestination>>(
+    resumed?.overrides ?? {},
+  );
   const [moveOptions, setMoveOptions] = useState<MoveOptions | null>(null);
   const [moveTarget, setMoveTarget] = useState<MoveTargetCard | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // Pending-placement queue (UIL-003). Seeded from the server render, then re-read after a commit.
   const [pendingState, setPendingState] = useState<"loading" | "ready">("ready");
   const [seededCount, setSeededCount] = useState(initialPending.length);
+
+  // Park the run whenever it changes. Writing to sessionStorage is exactly what an effect is for —
+  // syncing React state out to an external system — and it sets no state, so it cannot cascade.
+  // Nothing is parked until a plan exists: a bare draft has nothing worth resuming.
+  useEffect(() => {
+    if (!plan) {
+      clearResume();
+      return;
+    }
+    writeResume({
+      stamp: stateStamp,
+      source,
+      notes,
+      draft,
+      plan,
+      done: [...done],
+      cur,
+      overrides,
+    });
+  }, [stateStamp, source, notes, draft, plan, done, cur, overrides]);
 
   /** Re-read the queue and seed the draft from it. Only ever called from an event handler. */
   const reloadPending = useCallback(() => {
@@ -161,6 +261,7 @@ export function PlanScreen({ initialPending = [] }: { initialPending?: DraftCard
     try {
       const result = await runHaulPlan(toPayload(draft));
       setPlan(result);
+      setPlanIsResumed(false);
       setCur(0);
       setDone(new Set());
     } catch (e) {
@@ -199,6 +300,9 @@ export function PlanScreen({ initialPending = [] }: { initialPending?: DraftCard
     setError(null);
     setOverrides({});
     setMoveTarget(null);
+    setPlanIsResumed(false);
+    // The parked run is spent: it was committed, or she chose to start over.
+    clearResume();
     // Re-read the queue: what we just placed is gone from it, and anything she pulled off the draft
     // is still waiting. Runs after the draft is cleared so the seed is not skipped as "in progress".
     reloadPending();
@@ -270,6 +374,7 @@ export function PlanScreen({ initialPending = [] }: { initialPending?: DraftCard
           onReset={resetAll}
           overrides={overrides}
           onMove={openMove}
+          resumed={planIsResumed}
         />
       )}
 
@@ -486,6 +591,8 @@ function PlanView(props: {
   onReset: () => void;
   overrides: Record<string, MoveDestination>;
   onMove: (item: PlanItem) => void;
+  /** True when this plan was restored from a parked run rather than just computed (UIL-006). */
+  resumed: boolean;
 }) {
   const {
     plan,
@@ -503,6 +610,7 @@ function PlanView(props: {
     onReset,
     overrides,
     onMove,
+    resumed,
   } = props;
 
   const total = flatItems.length;
@@ -546,6 +654,12 @@ function PlanView(props: {
     <>
       <div className="haulbar panel">
         <span className="hk">HAUL PLAN</span>
+        {/* Say so rather than let her wonder whether it recomputed (UIL-006). */}
+        {resumed ? (
+          <span className="tag" title="Picked up where you left off; nothing has changed since">
+            RESUMED
+          </span>
+        ) : null}
         <span className="hv">
           {total} card{total === 1 ? "" : "s"}
         </span>

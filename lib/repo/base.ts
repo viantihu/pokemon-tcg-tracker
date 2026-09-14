@@ -86,6 +86,18 @@ export function createRepo<T extends TableName>(table: T, pk: string = "id") {
       }
     },
 
+    /**
+     * Row count only — no rows transferred (`head: true`). Used where something needs to know THAT a
+     * table changed without paying to read it (see lib/plan/fingerprint.ts).
+     */
+    async count(db: DbClient): Promise<number> {
+      const { count, error } = await loose(db)
+        .from(table)
+        .select("*", { count: "exact", head: true });
+      if (error) throw error;
+      return count ?? 0;
+    },
+
     async getByPk(db: DbClient, value: string | number): Promise<Row<T> | null> {
       const { data, error } = await loose(db).from(table).select("*").eq(pk, value).maybeSingle();
       if (error) throw error;

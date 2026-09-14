@@ -17,6 +17,7 @@ import {
   groupPlan,
   loadPendingPlacements,
   loadPlanContext,
+  loadPlanFingerprint,
   planFromDraft,
   type DraftItem,
 } from "@/lib/plan";
@@ -74,6 +75,16 @@ export async function loadPendingPlacementDraft(): Promise<DraftCard[]> {
     card: toLookupCard(p.card),
     variant: p.variant,
   }));
+}
+
+/**
+ * Stamp of everything a computed plan depends on (UIL-006). The screen caches its run against this
+ * and discards the cache when it changes, so returning to the page restores her place instead of
+ * making her re-run — without ever showing a plan computed against state that has since moved.
+ */
+export async function planStateStamp(pendingCopyIds: string[]): Promise<string> {
+  const { db } = await getOwnerContext();
+  return loadPlanFingerprint(db, pendingCopyIds);
 }
 
 /** Run the cascade over the whole draft and return the grouped plan for rendering. */
