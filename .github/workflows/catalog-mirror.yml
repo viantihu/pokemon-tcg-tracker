@@ -223,7 +223,12 @@ jobs:
             return 0
           }
 
+          # "<set_id> <cardCount.total>" per line. Written once here because both the resume
+          # check below and the upstream-shortfall report after the loop read it.
+          jq -r '.[] | "\(.id) \(.cardCount.total // 0)"' sets.json > expected-counts.txt
+
           : > remaining.txt
+          : > upstream-short.txt
           if [ "${FORCE_ALL:-false}" = "true" ]; then
             echo "force_all requested: mirroring all $total sets regardless of what is stored."
             cp set-ids.txt remaining.txt
@@ -241,7 +246,7 @@ jobs:
                 printf '  %-14s needs mirroring (have %s of %s)\n' "$set_id" "$have" "$expected"
                 echo "$set_id" >> remaining.txt
               fi
-            done < <(jq -r '.[] | "\(.id) \(.cardCount.total // 0)"' sets.json)
+            done < expected-counts.txt
             echo "Complete already: $skipped set(s). To mirror: $(wc -l < remaining.txt | tr -d ' ')."
           else
             # Do NOT quietly fall back to a presence-free full run without saying so — the
@@ -312,6 +317,13 @@ jobs:
               if [ "$code" = "200" ]; then
                 ok=$((ok + 1))
                 printf '  %-14s ok  %s\n' "$set_id" "$(printf '%s' "$body" | jq -c '.result' 2>/dev/null || echo '')"
+                # A 200 that fetched fewer cards than the brief set list advertised is TCGdex
+                # disagreeing with itself, not a mirror failure — see the note below.
+                fetched=$(printf '%s' "$body" | jq -r '.result.fetched // empty' 2>/dev/null || echo '')
+                expected=$(awk -v s="$set_id" '$1 == s { print $2 }' expected-counts.txt)
+                if [ -n "$fetched" ] && [ -n "${expected:-}" ] && [ "$fetched" -lt "$expected" ]; then
+                  printf '%s %s %s\n' "$set_id" "$fetched" "$expected" >> upstream-short.txt
+                fi
               else
                 printf '  %-14s FAIL (HTTP %s) %s\n' "$set_id" "$code" "$body"
                 echo "$set_id" >> still-failing.txt
@@ -327,6 +339,30 @@ jobs:
           # Report against what this run set out to do, not against all 218 — a resume run
           # that fixes 13 of 13 sets is 13/13, and calling it 13/218 reads like a disaster.
           echo "Mirrored $ok/$attempting of the sets this run needed; $failed still failing."
+
+          # TCGDEX DISAGREES WITH ITSELF ON SIX SETS, AND THAT IS NOT A GAP.
+          #
+          # The resume check targets `cardCount.total` from the brief set list, because that is
+          # the only card count available without fetching the set. For a handful of sets the
+          # DETAIL endpoint then returns fewer cards than the brief list advertised — run
+          # 34795733862 measured `wp` 0/7, `jumbo` 0/160, `sp` 0/10, `rc` 0/25 (all `fetched: 0`),
+          # `tk-sm-l` 18/30 and `mfb` 34/48. Promo, sample and jumbo pseudo-sets. Nothing is
+          # missing that TCGdex is willing to serve, and the row count did not move: 23548
+          # before, 23548 after.
+          #
+          # Those sets can therefore never satisfy `stored >= total`, so every future run
+          # re-requests them. Six requests is cheap and it errs in the safe direction — the check
+          # never SKIPS a set that needs mirroring — so this reports the discrepancy rather than
+          # suppressing it. Suppressing it would need an allow-list that a genuinely truncated set
+          # could later hide behind, which is the trade this workflow keeps refusing to make.
+          if [ -s upstream-short.txt ]; then
+            echo "TCGdex served fewer cards than its set list advertises for $(wc -l < upstream-short.txt | tr -d ' ') set(s):"
+            while read -r s f e; do
+              printf '  %-14s got %s of the %s claimed\n' "$s" "$f" "$e"
+            done < upstream-short.txt
+            echo "That is upstream data, not a mirror failure — these sets are as complete as TCGdex allows, and they will be re-requested on every run for that reason."
+          fi
+
           if [ "$failed" -gt 0 ]; then
             echo "Sets that never succeeded:"
             sed 's/^/  /' remaining.txt
