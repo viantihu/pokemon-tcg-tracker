@@ -774,3 +774,96 @@ still leaves the next miss confusing.
 
 **Priority rationale:** Low as a defect — nothing malfunctions and no data is at risk. Flagged as worth
 doing alongside UIL-010 anyway, since the two land on the same screen and the same moment of confusion.
+
+## UIL-012 — Committing a haul fails with a foreign-key violation on `color_band`
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** High
+- **Area:** Plan
+- **Env:** Testing
+
+Verbatim error she hit on commit:
+
+```
+insert or update on table "copy" violates foreign key constraint "copy_color_band_fkey"
+[code: 23503; details: Key is not present in table "color_band".]
+```
+
+She noted she had not checked off every item in the haul. That is not the cause — check-off is a
+physical worklist aid only; `commitHaulAction` sends the whole `input.draft` regardless of what is
+ticked. The commit is atomic (`apply_write_ops`), so **nothing was half-written** — the whole haul
+rolled back.
+
+### Root cause: `band()`'s fallback returns a display name into DB-key space
+
+Two vocabularies exist for a colour band, and they are deliberately kept apart:
+
+| | Values |
+| --- | --- |
+| DB (`color_band.band`, the FK target) | `red`, `dark_blue`, `light_blue`, `white` … |
+| Engine display names (`BAND_ORDER`) | `Red`, `Dark blue`, `Light blue`, `White` … |
+
+[`lib/plan/adapt.ts`](../lib/plan/adapt.ts) documents the contract explicitly: the engine is fed the
+DB `type_color_map` so that it "operates entirely in DB-key space," which keeps a stored
+`copy.color_band` equal to `band(card, map)`. `lib/plan/context.ts` honours it — `typeColorMap` and
+`orderedBandKeys` are both built from DB rows, and `DEFAULT_TYPE_COLOR_MAP` is referenced nowhere
+outside `bands.ts`.
+
+The fallback breaks the contract ([`lib/engine/bands.ts`](../lib/engine/bands.ts)):
+
+```ts
+export const WHITE: Band = "White";          // display name
+
+export function band(card, map: TypeColorMap): Band {
+  const resolved = map[effectiveType(card)];
+  return (resolved as Band) ?? WHITE;         // <-- leaves DB-key space on any miss
+}
+```
+
+On a hit the value is a DB key (`white`). On a **miss** it is the literal `"White"`, which is not a
+row in `color_band` — so the insert violates `copy_color_band_fkey`. The catch-all that exists to
+make unmapped cards safe is the one path that makes them fail.
+
+`bandPosition()` has the mirror-image assumption: it looks its argument up in `BAND_ORDER`, so a
+DB-key band always scores "unknown, sort last." Grouping still works because `groupPlan` is given
+`orderedBandKeys`, but the helper is wrong for every real value it will see.
+
+### What triggers a miss
+
+`effectiveType` returns `types[0]`, else `trainerType`/`"Trainer"` for Trainers, else `"Colorless"`.
+The DB map covers Fire, Fighting, Lightning, Dragon, Grass, Darkness, Water, Psychic, Fairy,
+Colorless, Metal, Trainer, Supporter, Item. Every path *should* land on one of those, which is why
+this survived 258 tests and the seed's three cards. Candidates for what actually missed, in order:
+
+1. **A `types[0]` value outside the 14 keys**, now that the catalog holds 23,548 real cards
+   rather than 3. This is the first haul run against real mirrored data.
+2. **`type_color_map` empty or short on Testing.** Filled by migration `0003_config.sql`, and
+   migrations only started reaching Testing again with #46 at 01:20Z. If the table is empty, *every*
+   card misses and no haul can ever commit.
+3. A stored `types` value that is not canonical English (casing or locale drift from a set mirrored
+   outside `/en/`).
+
+**One question separates (1) from (2) in a single glance: did the plan group her cards into several
+named colour bands, or did everything land in one band?** An empty `type_color_map` sends *every*
+card to the same fallback, so a single undifferentiated band means cause (2) and no haul can commit on
+Testing at all. Several correctly-named bands with one card failing means cause (1), and then the
+card list for that haul names the offending type.
+
+### Fix
+
+The one-line correction is to make the fallback resolve in the caller's space rather than return a
+constant: fall back to the map's own white key (or accept the white key as a parameter) so an
+unmapped type lands in the white band instead of violating the FK. Worth pairing with:
+
+- a guard in `commitHaul` that rejects a band not present in `orderedBandKeys` **before** the write,
+  so the failure names the card and the type instead of surfacing raw Postgres;
+- a startup or context-load assertion that `type_color_map` and `color_band` are non-empty, which
+  would make cause (2) visible instantly rather than as a 23503 at commit time;
+- `bandPosition` taught to accept DB keys.
+
+**Priority rationale:** High. It blocks committing a haul, which is the app's core daily loop and the
+whole point of the product, and it appeared on the first real run against the populated catalog — so
+it is squarely in the way of go-live rather than an edge case. It is loud and non-corrupting (atomic
+rollback, nothing partially saved), which is the good version of this failure, but the operation is
+unavailable until it is fixed. If cause (2) is what happened, *no* haul can commit on Testing at all.
