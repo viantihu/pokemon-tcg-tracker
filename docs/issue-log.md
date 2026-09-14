@@ -3273,3 +3273,72 @@ collector-number matches can be ranked instead of sorted alphabetically"). Recor
 the log's convention is that what she reports gets its own entry in her words — but the entry that
 needs attention is UIL-026, not this one. Worth the Senior BA weighing whether a second, concrete UAT
 hit on the same gap changes UIL-026's position in the queue; not asserting a priority change here.
+
+## UIL-045 — The Haul Plan's forecast is computed against pre-haul state, so a card that interacts with an earlier card in the same haul can be shelved somewhere other than the screen showed
+
+- **Reported:** 2026-09-14 (not from Karvi — traced in source by the Full Stack Dev; relevant tonight,
+  she is about to place 702 cards)
+- **Status:** Open
+- **Priority:** High (Senior BA's read)
+- **Area:** Plan
+- **Env:** Testing
+
+**The defect, in one line: for a card she has not overridden, what gets written is re-derived at commit
+time, not what she was shown — and the two can disagree.** `commitCardPlacement`
+([`lib/plan/commit.ts:138`](../lib/plan/commit.ts:138)) loads a fresh `loadPlanContext` on every Done
+([`:152`](../lib/plan/commit.ts:152)) and re-runs `placeCard` via `planFromDraft`
+([`:153`](../lib/plan/commit.ts:153)) — it never receives the `PlanItem` she looked at. So the row on
+screen is one computation and the write is a second, independent one.
+
+**Why the forecast drifts from the write.** `planFromDraft`
+([`lib/plan/context.ts:199-218`](../lib/plan/context.ts:199)) loops `placeCard(incoming, pc.ctx)` and
+**never mutates `pc.ctx` between cards** — verified directly, the loop body computes each row and pushes
+it, touching nothing in the context. So every forecast row is computed against **pre-haul** state, as if
+no other card in the haul existed. The per-card commit, by contrast, re-loads context fresh each Done,
+and by then the cards she already placed this sitting are real rows in the DB — so the commit sees a
+state the forecast never did. The card lands where the commit re-derives; the screen showed her where
+the pre-haul forecast landed.
+
+**Why this is worse than a wrong write, and is the exact failure this app exists to prevent.** The DB
+and the write agree with each other — the disagreement is between the DB and *her physical shelf*, because
+she places the card where the screen told her while the DB recorded somewhere else. Nothing on screen
+flags the divergence. A wrong write is loud; this is silent.
+
+**The most common trigger is not line creation — it's owning two of the same card.** The first copy
+forecasts "front half"; the second re-derives to "duplicate → bulk box," because by commit time the first
+copy exists. Two cards of one evolution line is the same shape: both forecast "start a new line," and the
+second re-derives to "fill the placeholder the first just created." The most ordinary case there is —
+a duplicate — is the one that triggers it.
+
+**Overridden cards are structurally safe, and the entry should say so to bound the blast radius.**
+`buildHaulCommitPayload` ([`lib/plan/commit.ts:213`](../lib/plan/commit.ts:213)) short-circuits an
+overridden card to `writeOverriddenCard` → `placementForMove(dest)` ([`:249-252`](../lib/plan/commit.ts:249)),
+skipping the cascade entirely. Post-UIL-037 the sentence she reads and the columns written both derive
+from the same `MoveDestination`, so for an overridden card divergence is impossible. This defect is only
+about cards she lets the cascade place.
+
+**Two attributions that must be in the entry so this isn't misfiled:**
+
+1. **Not caused by UIL-027, and does not block its per-card-commit work (#109).** The old whole-haul
+   batch commit maintained live `slotsByLine`/`passLines` mirrors across its loop, so it *already*
+   diverged from this same naive pre-haul display in exactly this way — **the gap has been live since
+   M6.** Per-card commit inherited it unchanged; what UIL-027 removed was the single end-of-haul review
+   moment, not the divergence. Fixing this is independent of UIL-027.
+2. **The obvious fix — "re-forecast the tail when a line is created" — is insufficient and should not be
+   recorded as the plan.** It misses the duplicate case, which is the common one. (This was an earlier
+   suggested fix; noting it as considered-and-rejected so no one re-proposes it.)
+
+**Recommended fix (the Full Stack Dev's, endorsed by the Senior BA): re-derive only the spotlight card,
+just-in-time, not the whole tail.** She acts on one card at a time, and the spotlight row is the only one
+whose accuracy actually puts a card in a pocket — so re-plan that single card against current state on
+each cursor move, and leave the rest of the worklist as an acknowledged estimate. The alternative
+(re-forecasting the whole tail on every Done) is not just heavier, it's prohibitively so: `loadPlanContext`
+is **9 parallel reads**, and #86 cached only one of them — the other eight, including `copyRepo.listAll`
+which pages with her collection, still run per Done. A whole-tail re-forecast is ~8–10 queries × ~685
+clicks; spotlight-only avoids that entirely.
+
+**Priority rationale (Senior BA's read): High.** It silently produces a physical placement that disagrees
+with the record, on the app's core daily action, reachable by the most ordinary case there is — owning
+two of the same card. Not blocked on anything, not caused by anything in flight. The Senior BA is telling
+Karvi directly, since she is mid-placement tonight and needs to know the screen can be wrong for
+duplicates and line-mates until this lands.
