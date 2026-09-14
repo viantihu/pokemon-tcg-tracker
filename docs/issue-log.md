@@ -2744,3 +2744,59 @@ seen this yet.
 result reading as a complete, valid one. UIL-004 (job skipped, reported success), UIL-028/UIL-031
 (unpaged/chunked reads truncate silently), UIL-029 (a test double lying in agreement with a live bug),
 and this. Five in one day is a property of the codebase, not five coincidences.
+
+## UIL-036 — Clicking a card thumbnail should enlarge it — designed in the prototype, never ported
+
+- **Reported:** 2026-09-14
+- **Status:** Open
+- **Priority:** Medium (Karvi's call)
+- **Area:** Plan
+- **Env:** Testing
+
+In her words (via the second Junior BA session): clicking a card's image thumbnail on the Haul Plan
+should enlarge it — this was part of the original prototype and never got implemented.
+
+**Confirmed: the prototype has a complete, working lightbox that was never ported.**
+[`docs/design/prototype.html`](../docs/design/prototype.html) implements this in full:
+
+- **CSS** (`:196-213`): `.face.zoomable { cursor: zoom-in }` plus a `.lightbox` overlay
+  (`position: fixed; inset: 0; ...; cursor: zoom-out`) toggled by a `.on` class.
+- **HTML** (`:687-693`): a `#lightbox` div holding `#lbcard` (the enlarged image) and `#lbcap` (name +
+  set/number caption), with a "CLICK ANYWHERE OR PRESS ESC TO CLOSE" hint.
+- **JS** (`:1017-1029, :1751-1766`): every thumbnail built by `face()` gets a `zoomable` class and a
+  `data-zoom` attribute set to `img(code, 'high')` — **only when the card has real art**, per the
+  prototype's own comment: "only a card with real art is zoomable; a block has nothing to enlarge." A
+  document-level click listener opens the lightbox on any `.zoomable` thumbnail; backdrop click or
+  Escape closes it.
+
+**None of it reached the React app.** `CardFace.tsx` renders a bare `<span class="face">` with an
+`<img>` whose only handler is `onError` (the initials fallback) — no click, no `zoomable` class, no
+cursor styling. `PlanScreen.tsx` uses `<CardFace ... />` at three sites (worklist rows and the
+spotlight card) with no wrapping click handler at any of them. A repo-wide search for
+"lightbox"/"zoom"/"enlarge" across `app/` returns nothing. This isn't scoped to Plan either — Lookup
+and Collections render the same bare `CardFace` with the same gap.
+
+**No existing pattern to reuse directly, but one useful precedent and one useful non-precedent.** No
+screen has an image viewer today. `MoveOverlay.tsx`'s `veil`/`dsheet panel` dialog shell (backdrop-click
+detection via `e.target === e.currentTarget`, an Escape listener, `role="dialog"`) is the closest
+reusable overlay skeleton — but it's a form panel, and `CollHub.tsx` explicitly notes elsewhere "this is
+a form, not a lightbox" (UIL-009's fix), meaning the team has already drawn this line once: an
+image-enlarge lightbox is a different interaction than a dismiss-with-care form dialog and shouldn't
+inherit that dialog's careful-dismiss semantics — it should close on any click, same as the prototype.
+
+**The higher-resolution image already exists; only the lightbox is missing.** `CardFace.tsx` always
+requests `${imageUrl}/low.webp`. TCGdex's base image path supports a quality suffix
+([`lib/catalog/tcgdex.ts:13`](../lib/catalog/tcgdex.ts:13): "`image` is a base path... append
+`/<quality>.<ext>`"), and the prototype's own zoom feature requests `high` for the enlarged view —
+`low`/`high` are the two quality values the app already knows about. So this isn't gated on new data;
+the thumbnail's `imageUrl` already carries everything needed to build the high-quality request.
+
+**Suggested fix.** Port the prototype's pattern rather than designing a new one: a `zoomable` variant
+on `CardFace` (gated on the card actually having art, matching the prototype's own guard) that opens a
+lightbox rendering `${imageUrl}/high.webp`, closing on backdrop click or Escape — deliberately not
+reusing `MoveOverlay`'s careful-dismiss guard, since an image viewer has nothing to lose on an accidental
+close.
+
+**Priority rationale (Karvi's call): Medium.** Not a bug — a designed feature that never shipped. Worth
+doing because it's a designed, already-scoped piece of the product (down to the CSS and JS existing
+verbatim) rather than a new idea to evaluate, and it's on the screen she uses most.
