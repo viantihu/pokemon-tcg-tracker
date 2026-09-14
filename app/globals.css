@@ -2668,3 +2668,27 @@ nav.menu .tab .n {
     justify-content: center;
   }
 }
+
+/* ---- Pinned haul progress header (UIL-019) ----------------------------------
+   "The haul progress header scrolls out of view instead of staying pinned." It had
+   no `position` at all, so it scrolled away with the page while she worked down a
+   long list — losing the N/M count and the pips that tell her how far through the
+   stack she is.
+
+   Modelled on `.bandhead`, which already does this correctly, with one addition
+   `.bandhead` does not need: TWO sticky headers on one scroll axis collide. The
+   band heads stick at `top: 0` too, so a haul bar pinned at 0 would sit on top of
+   them and hide the fold controls #78 added. `--haulbar-h` is measured from the
+   real element (PlanScreen sets it, since the bar wraps and its height is not a
+   constant) and the band heads stick BELOW it. The fallback keeps the band heads
+   correct if the measurement has not landed yet. */
+.haulbar {
+  position: sticky;
+  top: 0;
+  /* Above `.bandhead` (3) so the bar wins the overlap during the moment a band head
+     is sliding under it. */
+  z-index: 6;
+}
+.bandgroup .bandhead {
+  top: var(--haulbar-h, 0px);
+}

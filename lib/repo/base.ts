@@ -39,6 +39,30 @@ function loose(db: DbClient): SupabaseClient {
 const LIST_ALL_HARD_CAP = 200_000;
 
 /**
+ * Guards a "read everything" query against PostgREST's silent `max-rows` truncation (UIL-031).
+ *
+ * Call only on a query built with `.select(cols, { count: "exact" })` and NO `.range()`/`.limit()` —
+ * a query that means to return every matching row. `count` then carries the true total PostgREST
+ * counted server-side, independent of how many rows the cap actually let through; if that is more
+ * than we got back, the response was silently cut off, so this throws rather than let a partial
+ * result masquerade as complete. A deliberately bounded read (e.g. `catalogCardRepo.search`'s
+ * `limit`) must never pass `count: "exact"` through here — fewer rows than exist is its whole point,
+ * not a truncation.
+ *
+ * Checking `rows.length < count` rather than `rows.length === CAP` means this needs no cap constant
+ * at all: it catches truncation at whatever `max-rows` the project is actually configured to, not
+ * just the Supabase default of 1000.
+ */
+export function assertReadComplete(table: string, rows: unknown[], count: number | null): void {
+  if (count !== null && rows.length < count) {
+    throw new Error(
+      `${table}: read ${rows.length} of ${count} row(s) — the server's row cap truncated this ` +
+        `"read everything" query. Use listAll()/pageAll for a table that can grow past the cap.`,
+    );
+  }
+}
+
+/**
  * Read every row of `table`, projecting `columns`, paged past the server's `max-rows` cap.
  *
  * Ordered by the primary key so the window is stable across requests, and advanced by rows RECEIVED
@@ -83,15 +107,18 @@ export function createRepo<T extends TableName>(table: T, pk: string = "id") {
     pk,
 
     /**
-     * A SINGLE page of the table. PostgREST caps every response at the project's server-side
-     * `max-rows` (1000 on Supabase by default), so this SILENTLY TRUNCATES on any table bigger than
-     * that. Use it only where the table is known-small (config, binders); for a full-table read whose
-     * correctness depends on completeness, use `listAll`.
+     * A SINGLE page of the table, for a table known to be small (config, binders) — PostgREST caps
+     * every response at the project's server-side `max-rows` (1000 on Supabase by default), and if
+     * the table has grown past that this throws rather than silently hand back a partial list
+     * (UIL-031). For a full-table read whose correctness depends on completeness on a table that CAN
+     * grow past the cap, use `listAll` instead, which pages rather than throwing.
      */
     async list(db: DbClient): Promise<Row<T>[]> {
-      const { data, error } = await loose(db).from(table).select("*");
+      const { data, error, count } = await loose(db).from(table).select("*", { count: "exact" });
       if (error) throw error;
-      return (data ?? []) as Row<T>[];
+      const rows = (data ?? []) as Row<T>[];
+      assertReadComplete(table, rows, count);
+      return rows;
     },
 
     /**

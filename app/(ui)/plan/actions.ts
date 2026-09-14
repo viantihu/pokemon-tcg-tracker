@@ -147,6 +147,13 @@ export async function commitHaulAction(
  * `haulId` threads the sitting: pass null for the first card and hand back whatever this returns for
  * the rest, so the sitting stays one haul in the audit trail. A routed copy (UIL-003) never opens or
  * joins a haul — it was not acquired here — and returns null.
+ *
+ * `stamp` is the state stamp AFTER the write. Without it the resume cache (UIL-006) would be discarded
+ * on every single Done click: shelving changes the copy count, which is part of the stamp by design.
+ * Returning the new one lets the client roll its cache forward instead of throwing away a plan it is
+ * halfway through working. The plan's remaining rows are a FORECAST either way — `commitCardPlacement`
+ * re-derives each card's placement server-side at write time, so what gets written is never stale even
+ * when what is displayed has drifted.
  */
 export async function shelveCardAction(input: {
   source: CommitActionInput["source"];
@@ -154,8 +161,11 @@ export async function shelveCardAction(input: {
   card: DraftPayloadItem;
   override?: MoveDestination | null;
   haulId?: string | null;
+  /** Copy ids still queued, so the returned stamp matches what the screen will hold next. */
+  pendingCopyIds?: string[];
 }): Promise<
-  { ok: true; haulId: string | null; counts: CommitCounts } | { ok: false; error: string }
+  | { ok: true; haulId: string | null; counts: CommitCounts; stamp: string }
+  | { ok: false; error: string }
 > {
   try {
     const { db } = await getOwnerContext();
@@ -171,7 +181,8 @@ export async function shelveCardAction(input: {
       override: input.override ?? null,
       haulId: input.haulId ?? null,
     });
-    return { ok: true, haulId: res.haulId, counts: res.counts };
+    const stamp = await loadPlanFingerprint(db, input.pendingCopyIds ?? []);
+    return { ok: true, haulId: res.haulId, counts: res.counts, stamp };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }

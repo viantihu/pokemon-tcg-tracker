@@ -147,3 +147,32 @@ export async function count(db: PGlite, table: string): Promise<number> {
   const r = await db.query<{ n: number }>(`select count(*)::int as n from ${table}`);
   return r.rows[0].n;
 }
+
+/**
+ * ORPHANED COPIES — the invariant UIL-014 and UIL-022 both exist to protect, defined ONCE.
+ *
+ * A shelved copy sitting in a binder some collection lives in, whose catalog id is on NO collection
+ * that lives in that binder. Such a copy occupies a real pocket while being invisible in every
+ * collection and wishlist view (both keyed off `target_catalog_card_ids`) — she would only find it by
+ * flipping through the binder by hand.
+ *
+ * Lives here rather than in each test file so the two fixes cannot come to rest on two subtly
+ * different readings of "orphan". Run it as superuser (or as the owner — RLS then scopes it to her
+ * rows, which is all a test seeds anyway).
+ */
+export async function orphanedCopies(db: PGlite): Promise<string[]> {
+  const r = await db.query<{ id: string }>(`
+    select cp.id
+    from copy cp
+    where cp.role = 'shelved'
+      and cp.binder_id is not null
+      and exists (select 1 from collection c where cp.binder_id = any (c.current_binder_ids))
+      and not exists (
+        select 1 from collection c
+        where cp.binder_id = any (c.current_binder_ids)
+          and cp.catalog_card_id = any (c.target_catalog_card_ids)
+      )
+    order by cp.id
+  `);
+  return r.rows.map((row) => row.id);
+}
