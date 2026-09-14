@@ -126,11 +126,117 @@ export async function resolveAgainstCatalog(
 }
 
 /**
+ * A `CatalogPort` that answers `findBySetLocal` from memory wherever it can.
+ *
+ * WHY A PORT AND NOT A FASTER ALGORITHM. `resolveAgainstCatalog` has an INTRA-PASS DATA DEPENDENCY:
+ * on a set-code miss it resolves the set by name, learns an alias, and caches it in `sessionAliases`,
+ * so row N can change how row N+1 resolves ("one match drains the set", this file's header). Any
+ * rewrite that fires the rows concurrently, or folds them into one `in`-list, would break that — the
+ * siblings of a newly-aliased set would each take the name-resolution path instead of seeing the
+ * alias, and the answer could depend on scheduling. That is a correctness regression wearing the
+ * costume of a speedup.
+ *
+ * So the resolution algorithm is NOT touched. The rows are still walked one at a time, in order,
+ * through the same function, with the same `sessionAliases` map. The only thing that changes is where
+ * `findBySetLocal` gets its answer: keys prefetched below are served from memory, everything else
+ * falls through to a real query and is memoized. `alias-drain.test.ts` therefore holds by
+ * construction, not by re-verification.
+ *
+ * A key ABSENT from the index is never treated as "no such card" unless it was actually prefetched —
+ * `fetched` records what was asked for, so a miss in `index` only short-circuits when we know the
+ * query was run. Guessing there would silently unresolve cards.
+ */
+export function prefetchedCatalogPort(
+  inner: CatalogPort,
+  index: Map<string, { tcgdexId: string }[]>,
+  fetched: Set<string>,
+): CatalogPort {
+  const liveHits = new Map<string, { tcgdexId: string }[]>();
+  const namedSets = new Map<string, string[]>();
+  return {
+    async findBySetLocal(setId, localId) {
+      const k = `${setId}:${localId}`;
+      if (fetched.has(k)) return index.get(k) ?? [];
+      const memo = liveHits.get(k);
+      if (memo) return memo;
+      const rows = await inner.findBySetLocal(setId, localId);
+      liveHits.set(k, rows);
+      return rows;
+    },
+    async findSetIdsByName(setName) {
+      // Many rows share a set name, and a miss re-asks for every one of them.
+      const memo = namedSets.get(setName);
+      if (memo) return memo;
+      const ids = await inner.findSetIdsByName(setName);
+      namedSets.set(setName, ids);
+      return ids;
+    },
+    learnAlias: (alias) => inner.learnAlias(alias),
+  };
+}
+
+/**
+ * Prefetch every `(setId, localId)` a pass will ask for FIRST, grouped into one query per distinct
+ * set instead of one per candidate. This is the whole speedup: ~685 rows x 1-2 candidates went from
+ * ~1,000 serial round trips to roughly one per set she owns cards from.
+ *
+ * Only the primary (pre-alias) set ids can be predicted here. A retry against a set learned mid-pass
+ * is not knowable up front and falls through to a live query — correct, and rare on a mature
+ * `set_alias` table.
+ */
+export async function buildCatalogPrefetch(
+  db: DbClient,
+  wants: readonly { setId: string; candidates: readonly string[] }[],
+): Promise<{ index: Map<string, { tcgdexId: string }[]>; fetched: Set<string>; queries: number }> {
+  const bySet = new Map<string, Set<string>>();
+  for (const w of wants) {
+    if (!w.setId || w.candidates.length === 0) continue;
+    const set = bySet.get(w.setId) ?? new Set<string>();
+    for (const c of w.candidates) set.add(c);
+    bySet.set(w.setId, set);
+  }
+
+  const index = new Map<string, { tcgdexId: string }[]>();
+  const fetched = new Set<string>();
+  let queries = 0;
+
+  for (const [setId, localIds] of bySet) {
+    const rows = await catalogCardRepo.findBySetLocalMany(db, setId, [...localIds]);
+    queries += 1;
+    for (const localId of localIds) fetched.add(`${setId}:${localId}`);
+    for (const r of rows) {
+      if (!r.local_id) continue;
+      const k = `${setId}:${r.local_id}`;
+      const list = index.get(k) ?? [];
+      list.push({ tcgdexId: r.tcgdex_id });
+      index.set(k, list);
+    }
+  }
+  return { index, fetched, queries };
+}
+
+/**
  * Production entry point: bind an injected db client into a lookup closure that shares one
  * `sessionAliases` map across every row in a sync pass.
  */
 export function createCatalogLookup(db: DbClient) {
   const port = catalogPortFromDb(db);
+  const sessionAliases = new Map<string, string>();
+  return (row: Pick<DexRow, "Set">, resolved: ResolvedDexId) =>
+    resolveAgainstCatalog(port, row, resolved, sessionAliases);
+}
+
+/**
+ * As `createCatalogLookup`, but with the pass's lookups prefetched (see `buildCatalogPrefetch`).
+ * Identical closure shape, identical resolution order, identical `sessionAliases` sharing — the rows
+ * simply stop paying a round trip each.
+ */
+export async function createPrefetchedCatalogLookup(
+  db: DbClient,
+  wants: readonly { setId: string; candidates: readonly string[] }[],
+) {
+  const { index, fetched } = await buildCatalogPrefetch(db, wants);
+  const port = prefetchedCatalogPort(catalogPortFromDb(db), index, fetched);
   const sessionAliases = new Map<string, string>();
   return (row: Pick<DexRow, "Set">, resolved: ResolvedDexId) =>
     resolveAgainstCatalog(port, row, resolved, sessionAliases);
