@@ -39,6 +39,41 @@ function loose(db: DbClient): SupabaseClient {
 const LIST_ALL_HARD_CAP = 200_000;
 
 /**
+ * Read every row of `table`, projecting `columns`, paged past the server's `max-rows` cap.
+ *
+ * Ordered by the primary key so the window is stable across requests, and advanced by rows RECEIVED
+ * rather than rows requested — the server cap can be smaller than `pageSize`, which a fixed stride
+ * would skip over. Costs one extra empty-page request at the end in exchange for being correct at any
+ * cap. Shared by `listAll` and `listAllFields` so there is only one paging implementation to get right.
+ */
+async function pageAll<R>(
+  db: DbClient,
+  table: string,
+  pk: string,
+  columns: string,
+  pageSize: number,
+): Promise<R[]> {
+  const out: R[] = [];
+  for (let from = 0; ;) {
+    const { data, error } = await loose(db)
+      .from(table)
+      .select(columns)
+      .order(pk, { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as R[];
+    out.push(...page);
+    if (page.length === 0) return out;
+    from += page.length;
+    if (out.length > LIST_ALL_HARD_CAP) {
+      throw new Error(
+        `listAll(${table}) exceeded ${LIST_ALL_HARD_CAP} rows — refusing to page on.`,
+      );
+    }
+  }
+}
+
+/**
  * A single-column-primary-key CRUD repo for `table`, keyed on `pk` (default `"id"`).
  * Config tables use their natural key (`color_band.band`, `type_color_map.card_type`).
  */
@@ -60,30 +95,28 @@ export function createRepo<T extends TableName>(table: T, pk: string = "id") {
     },
 
     /**
-     * Every row, paged past the server's `max-rows` cap (see `list`). Ordered by the primary key so
-     * the window is stable across requests, and advanced by rows RECEIVED rather than rows requested
-     * — the server cap can be smaller than `pageSize`, which a fixed stride would skip over. Costs
-     * one extra empty-page request at the end in exchange for being correct at any cap.
+     * Every row, paged past the server's `max-rows` cap (see `list` and `pageAll`).
      */
     async listAll(db: DbClient, pageSize = 1000): Promise<Row<T>[]> {
-      const out: Row<T>[] = [];
-      for (let from = 0; ;) {
-        const { data, error } = await loose(db)
-          .from(table)
-          .select("*")
-          .order(pk, { ascending: true })
-          .range(from, from + pageSize - 1);
-        if (error) throw error;
-        const page = (data ?? []) as Row<T>[];
-        out.push(...page);
-        if (page.length === 0) return out;
-        from += page.length;
-        if (out.length > LIST_ALL_HARD_CAP) {
-          throw new Error(
-            `listAll(${table}) exceeded ${LIST_ALL_HARD_CAP} rows — refusing to page on.`,
-          );
-        }
-      }
+      return pageAll<Row<T>>(db, table, pk, "*", pageSize);
+    },
+
+    /**
+     * Every row, but only the named columns. Same paging discipline as `listAll` for a fraction of the
+     * bytes: for a caller that needs completeness across the whole table yet reads only a handful of
+     * fields, `select *` is pure waste. The plan state stamp is the motivating case — it has to see
+     * every copy's placement on every visit to `/plan`, and a copy row carries a dozen columns it does
+     * not look at (see lib/plan/fingerprint.ts).
+     *
+     * `fields` is checked against `Row<T>`, so a renamed column is a compile error rather than a
+     * digest that silently folds `undefined` into itself.
+     */
+    async listAllFields<K extends keyof Row<T> & string>(
+      db: DbClient,
+      fields: readonly K[],
+      pageSize = 1000,
+    ): Promise<Pick<Row<T>, K>[]> {
+      return pageAll<Pick<Row<T>, K>>(db, table, pk, fields.join(","), pageSize);
     },
 
     /**

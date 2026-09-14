@@ -20,9 +20,13 @@ function cappedDb(rowCount: number, maxRows: number) {
     tcgdex_id: `card-${String(i).padStart(5, "0")}`,
   }));
   const ranges: [number, number][] = [];
+  const selects: string[] = [];
 
   const query = {
-    select: () => query,
+    select: (cols: string) => {
+      selects.push(cols);
+      return query;
+    },
     order: () => query,
     range(from: number, to: number) {
       ranges.push([from, to]);
@@ -33,6 +37,7 @@ function cappedDb(rowCount: number, maxRows: number) {
   return {
     db: { from: () => query } as unknown as DbClient,
     ranges,
+    selects,
     ids: rows.map((r) => r.tcgdex_id),
   };
 }
@@ -74,5 +79,21 @@ describe("createRepo().listAll", () => {
   it("returns [] for an empty table", async () => {
     const { db } = cappedDb(0, 1000);
     expect(await catalogRepo.listAll(db)).toEqual([]);
+  });
+});
+
+describe("createRepo().listAllFields", () => {
+  it("pages the whole table like listAll, but projects only the named columns", async () => {
+    const { db, ids, selects } = cappedDb(2_500, 1000);
+    const out = await catalogRepo.listAllFields(db, ["tcgdex_id"]);
+    expect(out.map((r) => r.tcgdex_id)).toEqual(ids);
+    // Every page requested exactly the projection, never `select *` — that is the whole point.
+    expect(selects.every((s) => s === "tcgdex_id")).toBe(true);
+  });
+
+  it("joins multiple columns into one PostgREST projection", async () => {
+    const { db, selects } = cappedDb(10, 1000);
+    await catalogRepo.listAllFields(db, ["tcgdex_id", "name"]);
+    expect(selects[0]).toBe("tcgdex_id,name");
   });
 });
