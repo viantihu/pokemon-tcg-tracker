@@ -14,6 +14,15 @@ name: Catalog Mirror (Testing)
 # within it, and the loop lives here where there is no such ceiling. The upserts key
 # on tcgdex_id, so re-running is idempotent and a partial run is safe to resume.
 #
+# RUNS RESUME. The job first reads how many cards catalog_card already holds per set
+# and requests only the sets that are missing or short of their TCGdex card count.
+# Every failure this workflow has had is TCGdex throttling us (a 503 surfaced as our
+# 502), and the failure count grew with each full 218-set run — so recovering a
+# handful of sets by re-requesting all 218 is what was causing the next failure. See
+# the long comment on the `Mirror every set` step. `force_all: true` on a manual run
+# overrides this and re-requests everything, for when the mirror itself changed and
+# every row genuinely needs rewriting.
+#
 # Artwork hashing (`?pass=artwork`) is deliberately NOT run here. It downloads and
 # hashes every card image, it is only needed for duplicate-artwork grouping, and CSV
 # resolution keys on setCode-localId without it. Run it separately, later.
@@ -27,6 +36,11 @@ on:
   push:
     branches: [ops/run-catalog-mirror]
   workflow_dispatch:
+    inputs:
+      force_all:
+        description: "Re-request every set, even ones already fully mirrored"
+        type: boolean
+        default: false
 
 concurrency:
   group: catalog-mirror
@@ -142,21 +156,108 @@ jobs:
       - name: Mirror every set
         env:
           APP_URL: ${{ vars.APP_URL }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          FORCE_ALL: ${{ inputs.force_all }}
           # Public community catalog, no key required.
           TCGDEX_BASE_URL: https://api.tcgdex.net/v2
         run: |
           set -euo pipefail
           base="${APP_URL%/}"
 
-          # Brief set list: GET /v2/en/sets (see lib/catalog/tcgdex.ts).
+          # Brief set list: GET /v2/en/sets (see lib/catalog/tcgdex.ts). `cardCount.total`
+          # is how many cards TCGdex holds for the set, which is the target the resume
+          # check below compares against.
           curl -sS --retry 3 --retry-delay 5 "$TCGDEX_BASE_URL/en/sets" -o sets.json
           jq -r '.[].id' sets.json > set-ids.txt
           total=$(wc -l < set-ids.txt | tr -d ' ')
-          echo "Mirroring $total sets into Testing."
+
+          # RESUME, RATHER THAN RE-REQUEST ALL 218 SETS.
+          #
+          # Every failure this workflow has ever had is an upstream TCGdex 503 (surfaced as
+          # our 502) and the count grew run over run — 2, then 1, then 13 — which is
+          # throttling caused by the runs themselves. Run 34787934423 ended at 205/218 with
+          # 13 sets down, among them sv10, swsh4 and me01: current sets, not obscure ones,
+          # so a Dex export would park real cards in the unresolved queue (UIL-004).
+          #
+          # Re-running the whole mirror to recover 13 sets sends 218 requests to the API that
+          # is already throttling us, which is what produced the growth. The upserts are
+          # idempotent, so instead ask the mirror what it already holds and request only the
+          # gap. A resume run is then a handful of requests rather than 218, and the backoff
+          # below stops being load-bearing for the common case.
+          #
+          # Counts, not presence: a set that half-landed has rows but is still incomplete,
+          # and a presence check would call it done and leave the missing cards unresolvable
+          # forever. `stored < cardCount.total` catches both an absent set and a partial one.
+          #
+          # Paging advances by rows RECEIVED, not by the page size requested. PostgREST caps
+          # a response at its own `max-rows` regardless of `limit`, so advancing by the
+          # request size skips rows whenever the cap is smaller — the same bug lib/repo's
+          # `listAll` was fixed for in #39.
+          read_stored_counts() {
+            local rest="https://$PROJECT_REF.supabase.co/rest/v1/catalog_card"
+            local offset=0 page n
+            : > stored-set-ids.txt
+            while :; do
+              if [ "${KEY_IS_JWT:-0}" = "1" ]; then
+                page=$(curl -sS --retry 3 --retry-delay 5 \
+                  -H "apikey: $SERVICE_KEY" -H "Authorization: Bearer $SERVICE_KEY" \
+                  "$rest?select=set_id&order=set_id.asc&limit=1000&offset=$offset")
+              else
+                page=$(curl -sS --retry 3 --retry-delay 5 \
+                  -H "apikey: $SERVICE_KEY" \
+                  "$rest?select=set_id&order=set_id.asc&limit=1000&offset=$offset")
+              fi
+              # A PostgREST error is an object, not an array; `length` on it would be a key
+              # count and the loop would misread it as data.
+              if ! printf '%s' "$page" | jq -e 'type == "array"' > /dev/null 2>&1; then
+                echo "  could not read catalog_card: $(printf '%s' "$page" | jq -rc '.message // .' 2>/dev/null | head -c 200)"
+                return 1
+              fi
+              n=$(printf '%s' "$page" | jq 'length')
+              [ "$n" -gt 0 ] || break
+              printf '%s' "$page" | jq -r '.[].set_id // empty' >> stored-set-ids.txt
+              offset=$((offset + n))
+            done
+            # "<set_id> <count>" per line.
+            sort stored-set-ids.txt | uniq -c | awk '{ print $2, $1 }' > stored-counts.txt
+            return 0
+          }
+
+          : > remaining.txt
+          if [ "${FORCE_ALL:-false}" = "true" ]; then
+            echo "force_all requested: mirroring all $total sets regardless of what is stored."
+            cp set-ids.txt remaining.txt
+          elif read_stored_counts; then
+            stored_rows=$(wc -l < stored-set-ids.txt | tr -d ' ')
+            echo "catalog_card currently holds $stored_rows rows across $(wc -l < stored-counts.txt | tr -d ' ') sets."
+            skipped=0
+            while read -r set_id expected; do
+              [ -n "$set_id" ] || continue
+              have=$(awk -v s="$set_id" '$1 == s { print $2 }' stored-counts.txt)
+              have=${have:-0}
+              if [ "$have" -ge "$expected" ] && [ "$expected" -gt 0 ]; then
+                skipped=$((skipped + 1))
+              else
+                printf '  %-14s needs mirroring (have %s of %s)\n' "$set_id" "$have" "$expected"
+                echo "$set_id" >> remaining.txt
+              fi
+            done < <(jq -r '.[] | "\(.id) \(.cardCount.total // 0)"' sets.json)
+            echo "Complete already: $skipped set(s). To mirror: $(wc -l < remaining.txt | tr -d ' ')."
+          else
+            # Do NOT quietly fall back to a presence-free full run without saying so — the
+            # whole reason UIL-004 went unnoticed is a step that degraded silently.
+            echo "::warning::could not read the current catalog_card contents, so this run cannot resume — falling back to mirroring all $total sets. Expect TCGdex throttling."
+            cp set-ids.txt remaining.txt
+          fi
+
+          if [ ! -s remaining.txt ]; then
+            echo "Every set is already mirrored to its full TCGdex card count. Nothing to do."
+            exit 0
+          fi
 
           ok=0
-          : > remaining.txt
-          cp set-ids.txt remaining.txt
+          attempting=$(wc -l < remaining.txt | tr -d ' ')
+          echo "Mirroring $attempting of $total sets into Testing."
 
           # WHY BACKOFF AND NOT A FIXED PAUSE. Across the first three full runs every failure was an
           # upstream TCGdex 503 surfaced as our 502 — and the count GREW run over run (2, then 1, then
@@ -223,11 +324,13 @@ jobs:
           done
 
           failed=$(wc -l < remaining.txt | tr -d ' ')
-          echo "Mirrored $ok/$total sets; $failed still failing."
+          # Report against what this run set out to do, not against all 218 — a resume run
+          # that fixes 13 of 13 sets is 13/13, and calling it 13/218 reads like a disaster.
+          echo "Mirrored $ok/$attempting of the sets this run needed; $failed still failing."
           if [ "$failed" -gt 0 ]; then
             echo "Sets that never succeeded:"
             sed 's/^/  /' remaining.txt
-            echo "::error::$failed set(s) failed to mirror after 3 passes with backoff. Upserts are idempotent, so re-running is safe — but if these are TCGdex 503s, wait rather than retry immediately."
+            echo "::error::$failed set(s) failed to mirror after 3 passes with backoff. Upserts are idempotent and this workflow now resumes — re-running requests only the sets still missing, not all $total — so a retry is cheap and safe. If these are TCGdex 503s, still wait a while rather than retrying immediately."
             exit 1
           fi
 
