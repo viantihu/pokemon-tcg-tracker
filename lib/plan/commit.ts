@@ -49,6 +49,13 @@ export interface CommitInput {
    * Absent/empty ⇒ identical to the pure cascade commit.
    */
   overrides?: Record<string, MoveDestination>;
+  /**
+   * Join an existing haul instead of opening a new one (UIL-027). A per-card commit threads the id the
+   * FIRST card returned through the rest of the sitting, so the sitting remains one haul in the audit
+   * trail even though every card is now its own transaction. Absent ⇒ a haul is opened if the pass
+   * takes in any new card, exactly as before.
+   */
+  existingHaulId?: string | null;
 }
 
 export interface CommitCounts {
@@ -96,6 +103,61 @@ export async function commitHaul(db: DbClient, input: CommitInput): Promise<Comm
   });
   const { planned } = planFromDraft(pc, input.draft);
   const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, input);
+  assertPlacementBandsConfigured(payload, pc);
+  await applyWriteOps(db, payload);
+  return { haulId, counts };
+}
+
+/**
+ * Commit ONE card's placement, atomically, the moment she decides it (UIL-027).
+ *
+ * WHY THIS EXISTS, and what it changes. "Done, next card" was a pure client-side checkbox: it moved the
+ * cursor and ticked the worklist and wrote nothing. Nothing persisted until a single "Commit the haul"
+ * click wrote every card in the draft — including the hundreds she had never looked at — which is what
+ * she described as treating unshelved cards as inventory. Working 50 of 700 cards and closing the tab
+ * wrote zero rows.
+ *
+ * THE GUARANTEE THIS TRADES, stated rather than narrowed. M10 made the haul commit whole-haul atomic
+ * specifically so "a commit that fails partway leaves ZERO rows". Per card, the unit of atomicity moves
+ * from the haul to the card: a failure on card 340 of 700 leaves 1–339 genuinely shelved. That is a
+ * DIFFERENT guarantee, not a weaker one — she physically put those 339 cards in binders, and a database
+ * that disagrees with the shelf until a final button is pressed is the mismatch being reported. Each
+ * card is still individually atomic: one `apply_write_ops` call, never sequenced repo writes (the
+ * failure UIL-023 records for `applyMove`).
+ *
+ * A SIDE EFFECT THAT IS PURE GAIN. `buildHaulCommitPayload` carries a mutable slot mirror and a
+ * `passLines` map so a later card in the SAME payload sees an earlier card's new line. Committing per
+ * card makes that machinery unnecessary rather than broken: each card is planned against a context
+ * re-read from the database, which now contains the previous card's committed writes. Reality is the
+ * mirror.
+ *
+ * COST, flagged not hidden: this loads the full plan context per card, and that context pages the whole
+ * catalog mirror. See `loadPlanContext`'s own note about scoping to the haul's dexId neighbourhoods —
+ * that becomes load-bearing under this model, where it was merely flagged before.
+ */
+export async function commitCardPlacement(
+  db: DbClient,
+  input: {
+    source: HaulSource;
+    notes?: string | null;
+    /** The single card being shelved — a typed entry, or a routed existing copy (UIL-003). */
+    card: DraftItem;
+    /** Her explicit placement for this card, if she overrode the cascade (M7). */
+    override?: MoveDestination | null;
+    /** The haul this sitting already opened; null/absent opens one on the first new card. */
+    haulId?: string | null;
+  },
+): Promise<CommitResult> {
+  const draft = [input.card];
+  const pc = await loadPlanContext(db, { excludeOwnedCopyIds: existingCopyIds(draft) });
+  const { planned } = planFromDraft(pc, draft);
+  const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, {
+    source: input.source,
+    notes: input.notes ?? null,
+    draft,
+    overrides: input.override ? { [input.card.id]: input.override } : undefined,
+    existingHaulId: input.haulId ?? null,
+  });
   assertPlacementBandsConfigured(payload, pc);
   await applyWriteOps(db, payload);
   return { haulId, counts };
@@ -183,9 +245,13 @@ export function buildHaulCommitPayload(
 
   // Only a pass that actually takes in a new card is an acquisition event. A pure routing pass over
   // copies sync already created gets no haul row (see the file header).
+  // A haul row is opened once per sitting, not once per card: `existingHaulId` is how cards two
+  // onward join the one the first card opened. Only a pass that takes in a NEW card is an acquisition
+  // event at all — a pure routing pass over sync's copies still writes no haul (see the header).
   const hasNewCards = planned.some((p) => !p.existingCopyId);
-  const haulId = hasNewCards ? crypto.randomUUID() : null;
-  if (haulId) {
+  const joinedHaulId = input.existingHaulId ?? null;
+  const haulId = joinedHaulId ?? (hasNewCards ? crypto.randomUUID() : null);
+  if (haulId && !joinedHaulId) {
     ops.push({ op: "insert_haul", id: haulId, source: input.source, notes: input.notes ?? null });
   }
 
