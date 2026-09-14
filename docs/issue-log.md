@@ -1420,3 +1420,173 @@ worse than UIL-010's original failure for exactly the reason UIL-011 flagged abo
 states, but inverted: this one looks like it worked. Flagging for Karvi's confirmation, and flagging to
 the Senior BA that UIL-010's "Fixed" status may need revisiting, since this is Karvi's own confirmation
 attempt on Testing surfacing a real gap in that fix.
+
+## UIL-016 — No card images on the Haul Plan worklist or spotlight panel
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** High (Karvi's call)
+- **Area:** Plan
+- **Env:** Testing
+
+In her words: "Icons are not loading." Every row in the worklist and the "NOW HANDLING" spotlight shows
+letter-abbreviation initials (`INF`, `BLA`, `RAP`, `CLO`, `GT`…) instead of the card's artwork.
+
+**Not a loading failure — `imageUrl` is never passed in on this screen.** `CardFace`
+([`CardFace.tsx:27-42`](<../app/(ui)/_components/CardFace.tsx>:27)) is built correctly: it renders a
+live `<img>` from `imageUrl` and only falls back to initials on a missing URL or a load error. Other
+screens pass a real URL — `LookupScreen.tsx:75`, `CollHub.tsx:317/356/697` — and so does Plan's own
+**intake** draft list, before a plan is run
+([`PlanScreen.tsx:527`](<../app/(ui)/plan/PlanScreen.tsx>:527), `imageUrl={d.card.imageUrl}`).
+
+Once a plan is run, though, the worklist and spotlight are built from `PlanItem`, not the draft card, and
+both hard-code `null`:
+
+```tsx
+// PlanScreen.tsx:807 (worklist row)
+<CardFace name={item.name} imageUrl={null} size="s" />
+// PlanScreen.tsx:858 (spotlight)
+<CardFace name={item.name} imageUrl={null} size="l" />
+```
+
+This isn't a one-line oversight with the value sitting nearby unused — it was never threaded through the
+type chain. `PlanItem` ([`lib/plan/types.ts:23-38`](../lib/plan/types.ts:23)) has no `imageUrl` field;
+`toPlanItem` ([`lib/plan/assemble.ts:41-61`](../lib/plan/assemble.ts:41)) builds the row from
+`incoming.card` + the engine's result with nothing to copy an image from; `incoming.card` is a
+`CatalogCard` ([`lib/engine/types.ts:49-73`](../lib/engine/types.ts:49)) — the **engine's own** type,
+which has no `imageUrl` at all, since the engine is deliberately I/O-free placement logic and image data
+was never in its scope. So the fallback is the *only* reachable state once a plan runs, regardless of
+whether TCGdex artwork exists for the card.
+
+**Suggested fix.** Carry `imageUrl` from the catalog row into `PlanItem` alongside the other display
+fields `toPlanItem` already copies (name, etc.), so the engine's own types stay untouched and only the
+adapter layer changes — the same shape as other fixes in this log that added a field at the boundary
+rather than widening the engine's scope.
+
+**Priority rationale (Karvi's call): High.** Every row on the screen she uses to physically sort a stack
+of cards shows no image, which defeats a large part of what a "spotlight" view is for — confirming she's
+holding the right card. Not data loss, but a core-daily-screen usability gap at real haul scale (this
+haul was 702 cards).
+
+## UIL-017 — Internal field name "cardClass" leaks into the routing explanation
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** Medium (Karvi's call)
+- **Area:** Plan
+- **Env:** Testing
+
+The spotlight panel showed, verbatim: "cardClass = specialty (Illustration rare); routes to the specialty
+binder." `cardClass` is an internal field name, not something a reader should need to parse.
+
+**Root cause.** [`lib/engine/cascade.ts:235-239`](../lib/engine/cascade.ts:235):
+
+```ts
+if (incoming.card.cardClass === "specialty") {
+  return {
+    ...head,
+    step: "card-class",
+    reason: `cardClass = specialty (${incoming.card.rarity ?? "specialty"}); routes to the specialty binder.`,
+```
+
+This `reason` string is the engine's own internal trace of *why* it made a decision, and it flows to the
+screen with no copy-editing layer in between:
+[`lib/plan/assemble.ts:58`](../lib/plan/assemble.ts:58) (`reason: result.reason`) →
+[`PlanScreen.tsx:888-889`](<../app/(ui)/plan/PlanScreen.tsx>:888) (`{item.reason}`, rendered as-is).
+
+**Related but distinct from UIL-011.** UIL-011 catalogues internal "mirror/sync" jargon (a different
+table of 6 strings, none in `cascade.ts`). This is confirmed a new location and a different class of
+leak — engine field/type names, not sync terminology. The same problem exists in several other `reason`
+strings in `cascade.ts` (at least lines 197, 279, 313, 334, 380, 389) — worth fixing as one pass rather
+than one string at a time.
+
+**Suggested fix.** Keep `reason` as an internal trace field for debugging/logs, and add a display-copy
+layer (a lookup by `step`, e.g. `"card-class"` → "Specialty card — goes to your specialty binder.") the
+same way UIL-011 proposes for mirror/sync copy.
+
+**Priority rationale (Karvi's call): Medium.** Lower than UIL-011's own Low-by-default because this
+string sits mid-workflow, in the panel she reads on every single card while sorting, rather than in an
+occasional empty state — more exposure, more confusion per haul.
+
+## UIL-018 — Colour band sections have no way to collapse
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** High (Karvi's call)
+- **Area:** Plan
+- **Env:** Testing
+
+In her words: "Color rows need to be collapseable." Each band section (e.g. "RED FIRE — 43 CARDS",
+"ORANGE FIGHTING — 71 CARDS") renders every row inside it, always, with no way to hide a section she's
+already worked through.
+
+**Confirmed: no collapse mechanism exists anywhere in the tree.**
+[`PlanScreen.tsx:697-732`](<../app/(ui)/plan/PlanScreen.tsx>:697) maps every band's subgroups and every
+subgroup's rows unconditionally:
+
+```tsx
+g.subgroups.map((sub) => (
+  <div key={sub.kind}>
+    <div className="subhead u">{sub.label}</div>
+    {sub.rows.map((it) => (<PlanRow key={it.incomingId} item={it} ... />))}
+  </div>
+))
+```
+
+A search of the file for any collapse/expand affordance (`collapse`, `expand`, `<details`,
+`aria-expanded`) returns nothing; the only `toggle*` in the file is `toggleDone` (the check-off state),
+unrelated to section visibility. `BandChip.tsx` is purely presentational. So every row in every band is
+always mounted — on a 702-card haul, a single band can be 70+ rows rendered at once with no way to get
+past it except scrolling through all of it.
+
+**Suggested fix.** Give each band header (`.bandhead`) a collapsed/expanded toggle, defaulting open,
+persisted the same way check-off progress already survives navigation (UIL-006's fingerprint cache) so
+collapsing a finished band doesn't reset on the next visit.
+
+**Priority rationale (Karvi's call): High.** At real haul scale this isn't a nice-to-have — it's the
+difference between a usable worklist and a page she has to scroll through linearly for hundreds of rows
+to reach the next thing she can act on.
+
+## UIL-019 — Haul progress header scrolls out of view instead of staying pinned
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** Medium (Karvi's call)
+- **Area:** Plan
+- **Env:** Testing
+
+In her words: "The top progress header must be frozen (minimized but visible)." The strip showing overall
+haul progress (matching the "43 / 702" the spotlight panel also shows) scrolls away with the rest of the
+page once she scrolls the worklist — confirmed by the screenshot, where it's off-screen entirely while
+mid-list rows are visible.
+
+**Root cause.** [`app/globals.css:216-223`](../app/globals.css:216), the `.haulbar` rule, has no
+`position` property at all:
+
+```css
+.haulbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 13px;
+  margin-bottom: 10px;
+}
+```
+
+`.app` ([`globals.css:134-137`](../app/globals.css:134)) has no height/overflow constraint either, so the
+document body is the scroll container — there's no inner scroll region for `.haulbar` to stick within
+even if it had `position: sticky`. By contrast, `.bandhead` (the per-band "RED FIRE" header) *does* get
+`position: sticky; top: 0;` ([`globals.css:290-296`](../app/globals.css:290)), and `.spot` (the right
+detail panel) gets it on mobile only (`globals.css:1568-1574`) — but the overall haul progress bar is
+targeted by neither rule at any breakpoint. It's a plain sibling in normal flow, before `.alertbar` and
+`.planwrap` ([`PlanScreen.tsx:672-682`](<../app/(ui)/plan/PlanScreen.tsx>:672)), so it scrolls like
+ordinary content.
+
+**Suggested fix.** `position: sticky; top: 0` on `.haulbar`, matching the pattern `.bandhead` already
+uses — plus, per her "minimized but visible" phrasing, a collapsed/compact variant once scrolled (a
+`IntersectionObserver` or scroll-position class toggle) rather than the full-height bar staying pinned
+at full size.
+
+**Priority rationale (Karvi's call): Medium.** Losing sight of overall progress mid-sort is a real
+annoyance on a long haul but doesn't block anything — she can still scroll back up to check.
