@@ -13,6 +13,15 @@
  * (`select` / `eq` / `in` / `order` / `maybeSingle` / awaited-list) plus `rpc`. Anything else throws
  * loudly rather than quietly returning the wrong rows — if a repo grows a new call shape, the test
  * fails instead of lying.
+ *
+ * `select(cols, { count: "exact" })` is supported (UIL-031's `assertReadComplete` needs it), and the
+ * count it reports is real: this runs the query's actual SQL with no `LIMIT`/`OFFSET`, so `count` is
+ * just `rows.length` — genuinely accurate, not a guess. What that does NOT do is model PostgREST's
+ * `max-rows` cap: PGlite is real Postgres with no REST layer in front of it, so nothing here ever
+ * truncates a response the way a live 1000+-row table would. This shim can prove a query wired for
+ * truncation detection still returns the right rows on real Postgres/RLS; it cannot exercise the
+ * detection actually firing — see `tests/repo/truncation-detection.test.ts` for that, against a fake
+ * that models the cap explicitly instead.
  */
 import type { PGlite } from "@electric-sql/pglite";
 import type { DbClient } from "@/lib/repo";
@@ -29,15 +38,19 @@ class PgQuery {
   private cols = "*";
   private filters: Filter[] = [];
   private orderCol: string | null = null;
+  private wantCount = false;
 
   constructor(
     private readonly db: PGlite,
     private readonly table: string,
   ) {}
 
-  select(cols?: string, opts?: unknown): this {
+  select(cols?: string, opts?: { count?: "exact"; head?: boolean }): this {
     if (opts !== undefined) {
-      throw new Error("pglite-client: select() options (count/head) are not supported");
+      if (opts.count !== "exact" || opts.head) {
+        throw new Error('pglite-client: select() only supports { count: "exact" } (no head)');
+      }
+      this.wantCount = true;
     }
     if (cols && cols !== "*") {
       this.cols = cols
@@ -106,12 +119,17 @@ class PgQuery {
       | ((value: {
           data: Record<string, unknown>[];
           error: null;
+          count: number | null;
         }) => TResult1 | PromiseLike<TResult1>)
       | null,
     onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): PromiseLike<TResult1 | TResult2> {
     return this.rows()
-      .then((rows) => ({ data: rows, error: null as null }))
+      .then((rows) => ({
+        data: rows,
+        error: null as null,
+        count: this.wantCount ? rows.length : null,
+      }))
       .then(onFulfilled, onRejected);
   }
 }

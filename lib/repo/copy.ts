@@ -1,5 +1,5 @@
 /** Copy: a physical card owned. system-design §4. */
-import { createRepo, type DbClient, type Row } from "./base";
+import { assertReadComplete, createRepo, type DbClient, type Row } from "./base";
 
 export const copyRepo = {
   ...createRepo("copy"),
@@ -42,18 +42,24 @@ export const copyRepo = {
    * ones that already have a `placement_decision`; `lib/plan/pending.ts` does that.
    *
    * Oldest first, so the queue is worked in the order the cards entered the collection.
+   *
+   * A card past the server's row cap would never appear here and never get placed, with no error
+   * anywhere (UIL-031) — worse than a slow-healing queue, an invisible one — so this throws rather
+   * than return a partial queue.
    */
   async listUnplaced(db: DbClient): Promise<Row<"copy">[]> {
-    const { data, error } = await db
+    const { data, error, count } = await db
       .from("copy")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("role", "bulk")
       .is("binder_id", null)
       .is("line_slot_id", null)
       .order("created_at", { ascending: true })
       .order("id", { ascending: true });
     if (error) throw error;
-    return data ?? [];
+    const rows = data ?? [];
+    assertReadComplete("copy", rows, count);
+    return rows;
   },
 
   /** Copies in one presence group — the reconciliation unit's ordered members (sync-arch §1.5). */
