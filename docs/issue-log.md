@@ -167,6 +167,13 @@ routed-to-bulk case. No migration needed.
 **702** `placement_decision` rows against her ~685-row export, **0** unplaced copies remaining. Not
 just merged — she has placed essentially her entire import through this path.
 
+**And the "silently doubles her counts" fear is now falsified by measurement, on a real repeat import
+(2026-09-14).** Karvi ran a *second* sync of her dex export; it added **+2 copies, not +702**. The
+reconciler correctly saw the existing 702 already in the collection and added only the genuinely new
+cards. This entry's original warning — that retyping/re-importing would double her counts — was the
+reason routing (not re-inserting) was built; this is the first time that path has been proven against an
+actual repeat import rather than a test fixture.
+
 ## UIL-004 — Testing's catalog holds 3 cards, so a real Dex export resolves almost nothing
 
 - **Reported:** 2026-09-13 (found while diagnosing UIL-003)
@@ -877,13 +884,18 @@ doing alongside UIL-010 anyway, since the two land on the same screen and the sa
 
 - **Reported:** 2026-09-13
 - **Status:** **Fixed** — PR [#57](https://github.com/viantihu/pokemon-tcg-tracker/pull/57) MERGED to
-  `develop` 2026-09-14 (squash `474df08`), QA-reviewed, deployed to Testing on `258db13`. Awaiting
-  Karvi's confirmation: commit a haul containing a Trainer or Energy card. **The trigger was NOT the
-  config tables** — see the correction at the end of this entry, which overturns the two narrowings
-  above it.
+  `develop` 2026-09-14 (squash `474df08`), QA-reviewed, deployed to Testing on `258db13`. **The trigger
+  was NOT the config tables** — see the correction at the end of this entry, which overturns the two
+  narrowings above it.
 - **Priority:** High
 - **Area:** Plan
 - **Env:** Testing
+
+**Exercised on Karvi's real data 2026-09-14 (the confirmation this entry had been waiting for).** On her
+Testing environment after a real haul commit, `placement_decision` went 0 → 1 — a card was placed and
+committed with no `copy_color_band_fkey` crash. The fix isn't just merged and PGlite-verified; it has now
+run against her actual collection. (Status transition to Closed is the Senior BA's to record; recording
+the confirming measurement here as content.)
 
 Verbatim error she hit on commit:
 
@@ -2618,6 +2630,11 @@ resolved by removing the exposure rather than by the counts landing one way or t
 approach this entry recommended (`assertReadComplete`); PR [#96](https://github.com/viantihu/pokemon-tcg-tracker/pull/96)
 paged the fifth site. Both merged. Status transition is the Senior BA's to record.
 
+**The last open caveat on `assertReadComplete` is now retired — observed, not deduced (2026-09-14).**
+The detection's premise (a truncated PostgREST read reports `data.length` at the cap while `count`
+exceeds it) was measured through supabase-js on Testing: `data.length=1000, count=23548`. It had been
+carried all day as "deduced from the header spec, not yet seen through the client"; it holds as written.
+
 ## UIL-032 — The plan fingerprint doesn't cover `current_binder_ids`, so a cached plan can survive a collection being re-pointed
 
 - **Reported:** 2026-09-14 (not from Karvi — found reviewing UIL-022's fix)
@@ -3342,3 +3359,58 @@ with the record, on the app's core daily action, reachable by the most ordinary 
 two of the same card. Not blocked on anything, not caused by anything in flight. The Senior BA is telling
 Karvi directly, since she is mid-placement tonight and needs to know the screen can be wrong for
 duplicates and line-mates until this lands.
+
+## UIL-046 — Unresolved entries never record a retry attempt, so "self-heal when the catalog catches up" may never actually run
+
+- **Reported:** 2026-09-14 (not from Karvi — measured on Testing by the Senior BA/tech-lead)
+- **Status:** Open
+- **Priority:** Medium (Senior BA's read — explicitly provisional; verify the cause before treating the
+  ranking as settled)
+- **Area:** Sync
+- **Env:** Testing
+
+**Measured on Testing after Karvi's second sync (run `34901060401`):**
+
+```
+unresolved_entry WAITING:            8 → 6   (two cleared)
+retry_count on the surviving six:    min 0, max 0
+rows with last_retry_sync set:       0 of 6
+```
+
+**A second sync ran and no surviving entry records a retry attempt.** The Sync screen tells her
+unresolved rows "self-heal when the catalog catches up." If the auto-retry never runs — or runs but
+never stamps that it did — those rows only ever clear when she manually matches them. That's a
+promise-versus-behaviour gap, not data loss.
+
+**Two things that keep this honest, and both must stay in the entry:**
+
+1. **The two that cleared may have cleared by manual match, not auto-retry.** A `copy` +2 /
+   `presence_group` +1 delta fits `manualMatch` ([`lib/sync/exec.ts:423`](../lib/sync/exec.ts:423))
+   exactly — it creates copies, marks the entry RESOLVED, and learns the alias. So this is evidence the
+   auto-retry doesn't *stamp* its attempts, **not** evidence reconciliation is broken — the queue
+   demonstrably drained (8 → 6).
+2. **It may be telemetry, not logic.** A dead retry path and a retry that runs without writing its
+   counters have the identical symptom and opposite fixes. **Whoever takes this must check whether the
+   retry path reaches `UNKNOWN_SET` entries at all, and whether it writes `retry_count`/`last_retry_sync`,
+   before ranking it or proposing a fix.**
+
+**Source evidence for whoever investigates, gathered here so the cause question starts narrowed rather
+than cold.** `retry_count` IS written in the codebase, in two places — the import-parks path
+([`lib/sync/exec.ts:278`](../lib/sync/exec.ts:278), `retry_count: prior.retry_count + 1` for a CSV row
+that stays unresolved) and `manualMatch` ([`exec.ts:489`](../lib/sync/exec.ts:489)). But the **retry-only
+self-heal branch** in [`lib/sync/pipeline.ts:188-218`](../lib/sync/pipeline.ts:188) only acts on entries
+that *resolve* — it pushes them to `archiveEntryIds` and writes nothing at all for an entry that stays
+unresolved, so a retry-only sweep never increments the counter on a still-waiting row. Whether Karvi's
+second sync took the import path (which would have parked-and-incremented any still-unresolved CSV row)
+or left the six untouched because they weren't in that export at all is the open question — the counters
+being flat is consistent with "the six weren't in the second CSV" as much as with "the retry path
+doesn't stamp." That distinction is exactly what needs checking before a fix.
+
+**Do not record which of `RESOLVED`/`DISMISSED` the two cleared entries became** — the read can't
+distinguish them and nobody has asked Karvi. Two named entries did leave the queue (Battle Academy 2022
+Eevee Deck and Storm Emeralda); six remain.
+
+**Priority rationale (Senior BA's read): Medium, provisional.** A promise the UI makes that may not fire
+is worth more than Low, but the ranking shouldn't harden until the telemetry-vs-logic question is
+settled — a telemetry gap is a small write-the-counter fix, a dead retry path is a real behaviour bug,
+and they're the same symptom today.
