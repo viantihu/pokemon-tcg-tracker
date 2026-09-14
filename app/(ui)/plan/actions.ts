@@ -11,6 +11,7 @@
 
 import { availableVariants, toCardVariants } from "@/lib/plan";
 import {
+  commitCardPlacement,
   commitHaul,
   existingCopyIds,
   getOwnerContext,
@@ -22,10 +23,11 @@ import {
   type DraftItem,
 } from "@/lib/plan";
 import { loadMoveOptions, type MoveOptions } from "@/lib/line";
+import type { MoveDestination } from "@/lib/line/types";
 import { catalogCardRepo, type Row } from "@/lib/repo";
 import { errorMessage } from "@/lib/errors";
 import type { CommitCounts, DraftCard, LookupCard, RunPlanResult } from "./plan-types";
-import type { CommitActionInput } from "./plan-types";
+import type { CommitActionInput, DraftPayloadItem } from "./plan-types";
 
 /** A `catalog_card` row trimmed to what the intake UI renders. */
 function toLookupCard(r: Row<"catalog_card">): LookupCard {
@@ -128,6 +130,46 @@ export async function commitHaulAction(
       notes: input.notes ?? null,
       draft: input.draft,
       overrides: input.overrides,
+    });
+    return { ok: true, haulId: res.haulId, counts: res.counts };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * Shelve ONE card, the moment she clicks Done (UIL-027).
+ *
+ * Replaces the model where "Done" was a client-side tick and nothing persisted until a single
+ * "Commit the haul" click wrote the entire draft, decided or not. Each call is one
+ * `apply_write_ops` transaction for one card.
+ *
+ * `haulId` threads the sitting: pass null for the first card and hand back whatever this returns for
+ * the rest, so the sitting stays one haul in the audit trail. A routed copy (UIL-003) never opens or
+ * joins a haul — it was not acquired here — and returns null.
+ */
+export async function shelveCardAction(input: {
+  source: CommitActionInput["source"];
+  notes?: string | null;
+  card: DraftPayloadItem;
+  override?: MoveDestination | null;
+  haulId?: string | null;
+}): Promise<
+  { ok: true; haulId: string | null; counts: CommitCounts } | { ok: false; error: string }
+> {
+  try {
+    const { db } = await getOwnerContext();
+    const res = await commitCardPlacement(db, {
+      source: input.source,
+      notes: input.notes ?? null,
+      card: {
+        id: input.card.id,
+        tcgdexId: input.card.tcgdexId,
+        variant: input.card.variant,
+        existingCopyId: input.card.existingCopyId ?? null,
+      },
+      override: input.override ?? null,
+      haulId: input.haulId ?? null,
     });
     return { ok: true, haulId: res.haulId, counts: res.counts };
   } catch (err) {
