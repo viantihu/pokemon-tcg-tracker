@@ -1113,3 +1113,65 @@ own — normally Low. But it is the mechanism that let UIL-012 stay invisible be
 will hide the next band-related regression the same way. Argued against High because nothing is
 *currently* broken by it once UIL-012's fix lands. Flagging to Karvi for her ruling; record her read here
 once she gives it.
+
+## UIL-014 — No way to remove a card from a collection on the Collections page
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** High (Claude's read — needs Karvi's confirmation)
+- **Area:** Collections
+- **Env:** Testing
+
+In her words: "There is no way for me to remove cards from a collection from the collections page. If
+I chose to remove a card from a collection that I own, I will need to find a new location for it." That
+second sentence is the correct mental model — removal is architecturally a *move*, not a delete — and
+the app has no path to either.
+
+**Confirmed: a total gap for open collections, and a hazardous half-measure for finite ones.**
+
+`CollectionsView` ([`CollHub.tsx:314-364`](<../app/(ui)/coll/CollHub.tsx>:314)) renders a per-card action
+only for a target **not yet** owned (`+ Wishlist`); an owned card gets a static `<span
+className="cpill have u">Owned</span>` with no control at all. Open-mode cards render even less — just
+`In collection`, no button of any kind.
+
+The only removal-shaped control anywhere in the hub is the Edit modal's target-list "✕"
+([`CollHub.tsx:582`](<../app/(ui)/coll/CollHub.tsx>:582), wired to `removeTarget` at line 503), and it is
+gated to `state.mode === "finite"` — open collections get no card-list editor at all. Worse, it does not
+do what it looks like it does: `removeTarget` only edits the in-memory chase-list draft, and
+`saveCollection` ([`actions.ts:190-227`](<../app/(ui)/coll/actions.ts>:190)) persists that as
+`patch.target_catalog_card_ids` — it never touches the `copy` row. So clicking "✕" removes the card from
+the *chase list* while its physical copy stays exactly where it was, still shelved in the collection's
+binder. That copy becomes invisible in every collection and wishlist view (both are keyed off
+`target_catalog_card_ids`) while still occupying a real pocket — an orphaned, untracked copy, created by
+the one control that looks like a remove button.
+
+**Why there's no removal, architecturally.** `copy` has no `collection_id`
+([`0002_domain.sql:146-162`](../supabase/migrations/0002_domain.sql:146)); collection membership is
+inferred at read time from `collection.current_binder_ids` and `target_catalog_card_ids`
+([`actions.ts:110-112`](<../app/(ui)/coll/actions.ts>:110)) matched against shelved copies. A card is "in"
+a collection because a `copy` is shelved in one of its binders and its catalog id is on the chase list —
+there is no single field to clear. Removing it for real means rewriting the `copy`'s placement, which is
+exactly why she anticipated needing "a new location for it."
+
+**The fix already exists elsewhere and is unused here.** `lib/line/move.ts`'s `placementForMove` plus
+`lib/line/write.ts`'s `applyMove` (`applyMove`: [`write.ts:34-64`](../lib/line/write.ts:34)) already
+compute and persist exactly this rewrite — for a `{kind: "bulk"}` or `{kind: "shelf", ...}` destination,
+it updates `copy.role/binder_id/binder_half/color_band/line_slot_id` and reopens a vacated line slot. It
+is called today via `moveCardAction` ([`app/(ui)/line/actions.ts:50-63`](<../app/(ui)/line/actions.ts>:50))
+and surfaced through the generic, card-agnostic `MoveOverlay`/`MovePanel` components already wired into
+`LineScreen.tsx:322` and `PlanScreen.tsx:386`. `CollHub.tsx` and `coll/actions.ts` import neither. Suggested
+fix: give an owned card in `CollectionsView` a "Remove" action that opens the same `MoveOverlay` (default
+destination bulk, or let her pick a shelf) and calls the existing `moveCardAction`/`applyMove` path —
+wiring, not new placement logic, the same shape as UIL-003's fix reusing `lib/sync/resolve.ts`.
+
+**Ambiguity left for the implementer:** whether "remove from collection" should always default to bulk,
+or offer the same shelf/collection picker `MoveOverlay` already gives on the Line screen. Also worth
+deciding whether the finite editor's "✕" should be disabled/relabeled once a target is owned, or made to
+actually invoke the move — right now it silently orphans a copy for every owned card someone drops from
+the chase list, which should probably be treated as part of this fix rather than a separate entry.
+
+**Priority rationale.** High: this isn't a missing nice-to-have, it's a core collection-management action
+with no path at all for open collections, and the one control that looks like it does the job instead
+creates an invisible, untracked physical copy — the same class of silent-wrong-data hazard as UIL-002,
+but on live inventory rather than a one-time setup field. Flagging for Karvi's confirmation since severity
+calls are hers.
