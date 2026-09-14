@@ -130,6 +130,8 @@ function makeContext(owned: Row<"copy">[] = [], excludeOwnedIds: string[] = []):
       ]),
       bandDisplayByKey: new Map(BANDS.map((b) => [b, b])),
       collectionNameById: new Map(),
+      // Display-only (UIL-016); this suite asserts routing, not artwork.
+      imageUrlByTcgdexId: new Map(),
     },
   };
 }

@@ -25,6 +25,13 @@ export interface PlanItem {
   name: string;
   setId: string | null;
   localId: string | null;
+  /**
+   * TCGdex base image path off the catalog ROW, or null when the mirror has no artwork for the
+   * printing (UIL-016). Display-only. It lives here rather than on the engine's `CatalogCard`
+   * because the engine is I/O-free placement logic and an image is not a placement input — the same
+   * boundary `lib/line/load.ts` resolves it at. `CardFace` appends the quality + extension.
+   */
+  imageUrl: string | null;
   variant: Variant;
   /** TCGdex stage ("Basic" | "Stage1" | "Stage2" | …) or null for a Trainer/Energy. */
   stage: string | null;

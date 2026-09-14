@@ -2591,3 +2591,80 @@ nav.menu .tab .n {
     animation: none;
   }
 }
+
+/* ---- Foldable band sections (UIL-018) ---------------------------------------
+   One contiguous appended block, NOT edits merged into the `.bandhead` rule up at
+   line ~286. Two branches inserting at the same anchor is what forced the special
+   merge discipline in an earlier round; appending keeps this diff conflict-free.
+   Equal specificity, later in the sheet, so these win where they overlap.
+
+   Nothing here touches `.bandhead`'s `position: sticky` / `top` / `z-index` — that
+   rule was already correct and stays the single place sticky is expressed. Nothing
+   here gives `.haulbar` a position either: that is UIL-019, not this fix. */
+.bandhead {
+  /* The whole header is now the fold toggle, so it is a <button>, which brings UA
+     chrome the <div> never had: its own border box on all four sides, centred
+     text, and its own font. `.bandhead` above already sets border-top/bottom. */
+  width: 100%;
+  border-left: 0;
+  border-right: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.bandhead:hover {
+  background: var(--hi);
+}
+.bandhead:focus-visible {
+  /* Inset so the ring is not clipped by the sticky header's own overflow context. */
+  outline: 3px solid var(--ink);
+  outline-offset: -3px;
+}
+/* The ▼/▶ marker. Fixed width so the band name does not shift as it flips. */
+.bandhead .fold {
+  flex: 0 0 auto;
+  width: 13px;
+  font-size: 9px;
+  color: var(--ink-2);
+}
+/* A folded band is a header and nothing else — its rows are not in the tree at all
+   (see BandSection). Flat, no panel-2 lift, so it reads as a closed drawer. */
+.bandhead.folded {
+  background: var(--panel);
+}
+.bandhead.folded:hover {
+  background: var(--hi);
+}
+.worktools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 3px solid var(--ink);
+  background: var(--panel-2);
+}
+.worktools .hk {
+  font-size: 10px;
+  color: var(--ink-2);
+  letter-spacing: 0.13em;
+}
+.worktools .btn {
+  padding: 5px 9px;
+  font-size: 10px;
+  box-shadow:
+    inset 2px 2px 0 var(--hi),
+    inset -2px -2px 0 var(--lo),
+    2px 2px 0 rgba(60, 60, 59, 0.22);
+}
+@media (max-width: 720px) {
+  /* Three controls plus the label do not fit one line on a phone; let them wrap
+     rather than squeezing the labels to nothing. */
+  .worktools .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
