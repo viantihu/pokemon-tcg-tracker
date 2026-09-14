@@ -1114,6 +1114,32 @@ will hide the next band-related regression the same way. Argued against High bec
 *currently* broken by it once UIL-012's fix lands. Flagging to Karvi for her ruling; record her read here
 once she gives it.
 
+**Addendum (2026-09-13, after PR #57 merged).** Extending and correcting this entry now that the concrete
+instance has actually landed.
+
+- **The `cascade.ts:378` literal is gone, not just isolated.** PR #57 changed STEP 6 to pass `b` (the
+  map's own white key) instead of the literal, and gave `band()`'s fallback the same treatment
+  (`whiteKey(map)`, [`lib/engine/bands.ts`](../lib/engine/bands.ts)). Verified directly against
+  `origin/develop` (not a local checkout, which had gone stale by this point): zero hard-coded
+  display-form band literals remain anywhere in `lib/engine/`. A claim that `cascade.ts:378` was "the
+  only one left" was itself already stale by the time it was raised — it was zero, not one.
+- **Two distinct problems remain here, not one.** (1) The engine test suite still runs entirely on
+  `DEFAULT_TYPE_COLOR_MAP` (display-form), so it still certifies a vocabulary nothing in production uses
+  — PR #57 added key-form fixtures only to the tests it touched, not suite-wide. (2) The display/key
+  boundary has no type-level enforcement: nothing stops a future call site from typing a display-form
+  literal, and a same-shaped bug would again pass every test for the same reason. These share a cause but
+  the fixes land in different places — test fixtures vs. a branded type — so both are recorded here as
+  numbered items in one entry rather than split into two, since neither is actionable without the other's
+  context.
+- **Verified vs. inferred, so a reader knows what's load-bearing:** verified — `DEFAULT_TYPE_COLOR_MAP`
+  has no production caller (grepped `lib/` and `app/` directly); the cascade.ts fix is merged and
+  confirmed by reading `origin/develop`. Inferred — that a *future* call site would repeat the mistake;
+  that's a risk argument, not an observed defect, which is why priority stays Medium rather than climbing
+  toward the UIL-012 it grew out of.
+
+Neither (1) nor (2) blocks anything — UIL-012 itself is fixed by #57. This entry is now purely about the
+suite's ability to catch the *next* one.
+
 ## UIL-014 — No way to remove a card from a collection on the Collections page
 
 - **Reported:** 2026-09-13
@@ -1175,3 +1201,11 @@ with no path at all for open collections, and the one control that looks like it
 creates an invisible, untracked physical copy — the same class of silent-wrong-data hazard as UIL-002,
 but on live inventory rather than a one-time setup field. Flagging for Karvi's confirmation since severity
 calls are hers.
+
+**Correction (2026-09-13).** The `CollHub.tsx` line numbers above were read from a local checkout that
+had gone stale — PR #56 (UIL-009's fix) landed shortly before this entry was written, touched the same
+file, and shifted them. Current lines on `origin/develop`: `CollectionsView` 228-375, the `Owned` span
+321, `In collection` 359, `removeTarget`'s definition 537, the "✕" button 633. `actions.ts` citations
+are unaffected — #56 didn't touch that file. Substance unchanged: re-verified against current
+`origin/develop` that no removal path, `MoveOverlay` import, or `moveCardAction` call exists in either
+file.
