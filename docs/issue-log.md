@@ -3203,8 +3203,10 @@ orphan a physical card; every other drop already goes through.
 same guard.** This entry is about the **target-drop** guard — removing a card from the chase list —
 which exists and works as described above. UIL-040 is about a **different** condition in the same
 function, the **specialty-binder rebind** (the chip selector at
-[`CollHub.tsx:709-717`](<../app/(ui)/coll/CollHub.tsx>:709)), which has **no guard at all** as of this
-writing. Nothing here implies the rebind case is protected; UIL-040 remains the entry for that gap.
+[`CollHub.tsx:709-717`](<../app/(ui)/coll/CollHub.tsx>:709)), which **had no guard as of `550a803`**
+(PR #102 was open, proposing exactly that guard, at the time this note was written — check UIL-040's
+own status before assuming either way). Nothing here implies the rebind case is protected by *this*
+entry's guard; UIL-040 remains the entry for that gap.
 
 **The suggestion.** Since the collection's binder is already on screen at that row, offer the move
 inline from the owned-row state itself rather than sending her to the card to remove it from there
