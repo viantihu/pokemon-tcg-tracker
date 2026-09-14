@@ -339,7 +339,7 @@ and it needs this same token working against the strict (no `--include-all`) rai
 ## UIL-006 — Haul Plan makes her re-run the plan on every visit to the page
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** Fixed — PR [#44](https://github.com/viantihu/pokemon-tcg-tracker/pull/44), awaiting QA review
 - **Priority:** Medium (Claude's read)
 - **Area:** Plan
 - **Env:** Testing
@@ -375,6 +375,27 @@ your place halfway through physically sorting a stack is the same complaint.
 Medium: the Haul Plan is the core daily screen, and the loss lands specifically on the pass where
 she is standing at the binder working through a stack, which is when re-doing work is most
 expensive. Worth fixing before the first real sorting session, not necessarily before go-live.
+
+**Resolution (2026-09-13, PR [#44](https://github.com/viantihu/pokemon-tcg-tracker/pull/44)).** The
+run is parked in `sessionStorage` and restored on return, **with the check-off set and cursor** — the
+entry above said progress "should ride along", and that is the half that actually hurts to lose.
+`sessionStorage` not `localStorage`: a plan is a working session at the binder.
+
+What makes it safe is `planFingerprint` (`lib/plan/fingerprint.ts`), a stamp of everything the cascade
+reads. A mismatch drops the cache rather than showing a plan computed against state that has since
+moved. It covers more than her stated rule: copy count, the pending queue **and its order**, the sync
+snapshot id, line/slot counts, collection membership, the type→band map, and binder rows **in full** —
+whole rows rather than a count, because capacity edits happen in place and a count would miss them
+entirely (there is a test for precisely that).
+
+Two defects the tests caught rather than review: a `join("|")` digest made `["a|b"]` and `["a","b"]`
+identical (harmless with UUID ids, but a trap for whoever changes an id format — now JSON), and the
+`RESUMED` tag kept claiming a restored plan after she re-ran, because the resume handle stays non-null
+for the component's life.
+
+Not verified in a browser — the screen needs credentials this session lacks. Worth one manual pass:
+run a plan, tick a few cards, navigate away and back (plan + ticks present, tagged `RESUMED`), then
+apply a sync and return (cache gone).
 
 ## UIL-007 — Scroll bar under the card list renders outside the panel border
 
