@@ -2337,3 +2337,47 @@ and the fixes currently in flight are already being revert-checked as a mitigati
 open Medium with an argument for jumping ahead of it, since a fix here protects every other fix's own
 tests from the same failure mode — flagging that explicitly rather than letting it sit purely on
 priority-number ordering. Karvi has not seen this yet.
+
+## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
+
+- **Reported:** 2026-09-14 (not from Karvi — found by the Senior Dev session while fixing UIL-017)
+- **Status:** Open
+- **Priority:** Low (Senior BA's read)
+- **Area:** Plan / Engine
+- **Env:** n/a — in the repo, not a running environment
+
+**Root cause: a declared-and-read engine field that no caller ever writes.** Verified directly on
+`origin/develop`:
+
+- [`lib/engine/cascade.ts:56`](../lib/engine/cascade.ts:56) — `openBlockNeeds?: number;` declared on the
+  context.
+- [`lib/engine/cascade.ts:245`](../lib/engine/cascade.ts:245) — read: `resolveDuplicate(…,
+  ctx.openBlockNeeds ?? 0)`.
+- [`lib/engine/duplicate.ts:79`](../lib/engine/duplicate.ts:79) / [`:101`](../lib/engine/duplicate.ts:101)
+  — read again, and `offerBlockRepurpose: openBlockNeeds > 0`.
+
+A grep across `lib/` and `app/` finds **no writer** — nothing ever sets it. So it is always 0,
+`offerBlockRepurpose` is always `false`, and the "Offered as a repurposed binder block." clause on the
+duplicate/bulk path ([`cascade.ts:279`](../lib/engine/cascade.ts:279)) **has never rendered in the
+shipped app.**
+
+**Two possibilities, and this entry deliberately does not pick one — because only Karvi can.** Either
+the feature was designed and never wired (then the gap is the *wiring*, and deleting the field would
+quietly drop a real product intent), or it's a vestige (then the field, the copy, and `duplicate.ts`'s
+`openBlockNeeds` parameter should all go). Deciding requires knowing whether "repurpose an open binder
+block" is still a product idea — a product call, not an engineering one.
+
+**Why the Senior Dev was right to leave it while fixing UIL-017.** It declined to add an engine field
+just to make the unreachable copy explainable — that would be building plumbing for a message nobody
+can see. Recording the decision is the point here, more than the code.
+
+**Second instance of dead-guard code today, worth a cross-reference.** `app/(ui)/coll/actions.ts:87`'s
+`band(...) ?? "white"` fallback can never fire (noted in UIL-012's record — `band()` always returns a
+value). Two independent unreachable-defensive-code findings in one day suggests a dedicated pass for
+dead guards might eventually be worth more than either individual fix.
+
+**Priority rationale (Senior BA's read): Low.** Genuinely Low, not "Low because we're busy" — nothing
+malfunctions, no data is at risk, and no user-visible behaviour changes either way until someone decides
+which direction to resolve it. **Flagging specifically for Karvi:** the decision of whether the
+binder-block repurposing idea is live or vestigial is hers, and it determines whether the fix is "wire
+it up" or "delete it."
