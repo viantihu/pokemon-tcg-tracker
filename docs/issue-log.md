@@ -462,3 +462,152 @@ in-app operation, so its progress belongs in the run log rather than the UI.
 indistinguishable from a hung one, and the fix for that is small. Called out as the softest of the
 three, though — nothing is broken, so Low is defensible if she would rather this wait.
 
+
+## UIL-009 — Clicking outside the collection popup discards everything typed
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** High (Karvi's call)
+- **Area:** Collections
+- **Env:** Testing
+
+In her words: "If I click out of a popup while creating a collection, the collection does not save, so
+I have to start on my own."
+
+Confirmed in the source. The collection editor is wrapped in a click-to-dismiss backdrop
+([CollHub.tsx:512](<../app/(ui)/coll/CollHub.tsx>:512)):
+
+```jsx
+<div className="veil on" onClick={(e) => e.target === e.currentTarget && onClose()}>
+```
+
+and the host discards the editor outright ([CollHub.tsx:206](<../app/(ui)/coll/CollHub.tsx>:206)):
+
+```jsx
+onClose={() => setEditor(null)}
+```
+
+So a single stray click anywhere outside the panel unmounts the editor and throws away its state. No
+confirmation, no draft retained, no undo. Building a finite collection means picking cards one at a
+time, so the amount of work at risk grows the longer she stays in the dialog — the cost of the misclick
+is highest exactly when she is nearly done.
+
+The second modal on the screen has the same backdrop handler
+([CollHub.tsx:644](<../app/(ui)/coll/CollHub.tsx>:644)) but it is the read-only log viewer, so
+dismissing it loses nothing. This entry is only about the editor.
+
+Likely fix, in order of preference:
+
+1. Stop treating a backdrop click as dismiss for the editor. It is a form, not a lightbox. Keep Escape
+   and the explicit Cancel button as the ways out.
+2. If backdrop-dismiss stays, guard it: only auto-close when the form is untouched, and otherwise ask
+   before discarding.
+3. Independently, keep the editor's state alive across an accidental close (lift it out of the modal or
+   hold the last draft) so "start over" is never the only option.
+
+(1) alone resolves the report and is a one-line change. (3) is the durable version.
+
+**Priority rationale:** High, agreed. It destroys work she has already done, with no recovery and no
+warning, in the normal course of using the feature — and misclicks near the edge of a dialog are
+routine, not exotic. Nothing about it is cosmetic.
+
+## UIL-010 — Card search returns nothing for a full collector number like "099/182"
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** High (Karvi's call)
+- **Area:** Lookup / Collections
+- **Env:** Testing
+
+In her words: "In the search for cards while building a finite collection, I cannot search by the full
+collectors number e.g. The search does not recognize 099/182 as a Minior card. In fact, it does not
+return anything at all."
+
+Reproduced by reading the query. `catalogCardRepo.search`
+([catalog-card.ts](../lib/repo/catalog-card.ts)) builds one `ilike` per column from the raw string:
+
+```ts
+const q = query.replace(/[,()%*]/g, " ").trim();   // note: "/" is NOT stripped
+const like = `%${q}%`;
+.or(`name.ilike.${like},set_name.ilike.${like},local_id.ilike.${like},tcgdex_id.ilike.${like}`)
+```
+
+Typing `099/182` searches for the literal substring `099/182` in the name, set name, collector number
+and TCGdex id. No column ever contains a slash, so **every** predicate fails and the result is empty —
+which is exactly the "nothing at all" she saw, rather than a wrong-match problem.
+
+Two distinct defects behind it:
+
+1. **The printed form is never parsed.** `099/182` is `number/setTotal` — what is actually printed on
+   the card and what a set checklist lists. `local_id` holds only the numerator. Nothing splits on the
+   slash, so the denominator poisons the match.
+2. **Padding is not normalized.** The schema is explicit that `local_id` keeps TCGdex's padding
+   verbatim and that it *varies by set* — `0002_domain.sql` comments the column as "EXACT padding
+   ('027','82')". So even `099` on its own fails against a set that stores `99`, and `99` matches
+   `199`, `299`, `990` as substrings.
+
+**Most of the fix already exists and is tested.** `lib/sync/resolve.ts` solves the padding half for the
+sync engine and the Lookup search simply never calls it:
+
+```ts
+localIdCandidates("099")  // -> ["099", "99"]   (verbatim, zero-pad-3, stripped)
+```
+
+Suggested fix: parse a leading `NNN/TTT` (and bare `NNN`) out of the query, run the numerator through
+`localIdCandidates`, and match `local_id` with equality against each candidate rather than `ilike`,
+while keeping the existing free-text predicates for names. An exact-number match should also sort
+ahead of name matches.
+
+One constraint worth stating: **the `/182` cannot be used.** There is no set-total column on
+`catalog_card`, so the denominator can only be discarded, not matched. Counting rows per `set_id` is not
+a substitute — printed totals exclude secret rares, so the count and the printed total disagree by
+design. Discarding it is correct, not a shortcut.
+
+**Priority rationale:** High, agreed, and her framing is the reason. A finite collection is built from a
+set checklist, and a checklist is a list of collector numbers — the number *is* the natural key for this
+workflow, not the name. Searching by name is a workaround for a card she can already name, which is not
+the case she is in. It also fails silently and totally, which reads as "the card isn't in the app."
+
+## UIL-011 — Remove internal catalog-mirror language from the UI
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** Low
+- **Area:** Lookup, Plan, Backfill, Collections, Sync
+- **Env:** Testing
+
+In her words: "I want to remove all language about pull from catalog mirror. The end user does not need
+to know these things."
+
+The mirror is an implementation detail — that the app keeps a local copy of TCGdex rather than querying
+it live is not something the reader of an empty-state message needs to reason about. Worse, the current
+copy asks her to act on it ("needs a sync run"), which invites the wrong conclusion when a search simply
+misses.
+
+User-visible strings to rewrite:
+
+| Location | Current |
+| --- | --- |
+| [CardLookup.tsx:77](<../app/(ui)/_components/CardLookup.tsx>:77) | "Searching the mirror…" |
+| [CardLookup.tsx:81](<../app/(ui)/_components/CardLookup.tsx>:81) | "No match in the local mirror. (Full catalog needs a sync run.)" |
+| [LookupScreen.tsx:53](<../app/(ui)/look/LookupScreen.tsx>:53) | "Not in the local mirror. A full catalog needs a sync run." |
+| [BackfillScreen.tsx:340](<../app/(ui)/backfill/BackfillScreen.tsx>:340) | "Could not resolve that species from the mirror." |
+| [CollHub.tsx:429](<../app/(ui)/coll/CollHub.tsx>:429) | "CSV MIRRORS BACK INTO DEX FOR SCANNING" |
+| [SyncScreen.tsx:436](<../app/(ui)/sync/SyncScreen.tsx>:436) | "…they self-heal when the catalog catches up" |
+
+Scope note: only rendered strings. The same words appear throughout code comments and module docs, where
+"mirror" is the correct precise term for what the code does — those stay. The word "catalog" on its own
+is fine to keep where it means "the set of cards that exist"; what goes is the plumbing ("local mirror",
+"a sync run", "self-heal") and the implication that she should do something about it.
+
+Suggested replacements are a copy call rather than an engineering one, so these are starting points:
+"Searching…", "No card found." / "No match — check the number or try the card name.", and for the sync
+queue something that states the situation without the mechanism ("Not in the card list yet. These stay
+here and are added automatically once they appear.").
+
+Worth pairing with UIL-010: the empty state she hit on `099/182` is exactly the message above, so the
+old copy actively misled her about why the search failed. Fixing the search without fixing the message
+still leaves the next miss confusing.
+
+**Priority rationale:** Low as a defect — nothing malfunctions and no data is at risk. Flagged as worth
+doing alongside UIL-010 anyway, since the two land on the same screen and the same moment of confusion.
