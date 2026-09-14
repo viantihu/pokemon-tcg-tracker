@@ -74,7 +74,8 @@ function render(
       flatIndex: new Map(group.subgroups.flatMap((s) => s.rows).map((r, i) => [r.incomingId, i])),
       done: new Set<string>(),
       onSelect: () => {},
-      onToggleDone: () => {},
+      onShelve: () => {},
+      shelving: null,
       ...over,
     }),
   );
