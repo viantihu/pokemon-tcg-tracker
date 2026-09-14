@@ -1353,3 +1353,70 @@ file, and shifted them. Current lines on `origin/develop`: `CollectionsView` 228
 are unaffected — #56 didn't touch that file. Substance unchanged: re-verified against current
 `origin/develop` that no removal path, `MoveOverlay` import, or `moveCardAction` call exists in either
 file.
+
+## UIL-015 — Collector-number search returns unrelated cards while the actual match is missing
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** High (Claude's read — needs Karvi's confirmation)
+- **Area:** Lookup / Collections
+- **Env:** Testing
+
+In her words, retesting UIL-010's fix from the "New Collection" set-list search: "This number
+should've returned Wurmple from ASC, illustrated by Usgmen." Typing `011/217` instead returned five
+McDonald's Collection promo cards (Pidove, Klang, Fletchling, Zigzagoon, Meowth — sets `2011bw` through
+`2016xy`), all with `local_id: "11"`, all unrelated to the query. No Wurmple, no `me02.5` (TCGdex's
+"Ascended Heroes," printed total 217, containing `me02.5-011` — Wurmple, matching her denominator
+exactly, so this is very likely a real upstream card, not a nonsense query).
+
+**Not the same defect UIL-010 fixed — a gap in how the fix matches, not whether it matches at all.**
+UIL-010's search now correctly *finds* rows instead of returning nothing; this report is that it can
+find the *wrong* rows with no way to prefer the right one.
+
+**Root cause.** [`lib/catalog/collector-number.ts:52`](../lib/catalog/collector-number.ts:52) parses
+`011/217` and discards the denominator entirely — `{ text: "011", localIds: localIdCandidates("011"),
+numberOnly: true }`. `localIdCandidates` ([`lib/sync/resolve.ts:65-73`](../lib/sync/resolve.ts:65))
+builds `["011", "11"]` (verbatim/padded, then stripped). The search
+([`lib/repo/catalog-card.ts:99-107`](<../lib/repo/catalog-card.ts>:99)) then runs:
+
+```ts
+.in("local_id", parsed.localIds)        // ["011", "11"] — both forms, equal weight
+.order("set_id", { ascending: true })   // alphabetical, not relevance
+.order("local_id", { ascending: true })
+.limit(limit);
+```
+
+This is a strict equality match — not the `ilike` substring bug UIL-010 fixed — but `.in()` treats every
+candidate as equally valid with **no set-scoping and no precedence**. Any card anywhere in the 23,548-row
+catalog whose `local_id` is literally `"11"` is as good a hit as one whose `local_id` is `"011"`. The
+five McDonald's sets (`2011bw`…`2016xy`, 12-card promo sets that store their numbers unpadded) all have an
+11th card, all match the stripped candidate, and `set_id` sorts them ahead of `me02.5` alphabetically
+(digits before letters) — a sort accident, not relevance. If `me02.5-011` is in the mirror with its
+verbatim padded id, it should be in the same result set, just outranked and pushed past `limit` by
+McDonald's cards that shouldn't be competing at all.
+
+**Why the denominator can't be the fix.** UIL-010 already established that `217` can't be matched against
+a per-set row count — printed totals exclude secret rares, so counting rows per `set_id` disagrees with
+the real total by design. That constraint still holds here; this isn't "use the 217 you have," it's that
+the candidate list itself has no internal precedence.
+
+**Suggested fix.** `localIdCandidates` already orders its output from most- to least-specific
+(verbatim/padded forms before the stripped form) — the bug is that the query flattens that order into one
+`.in()`. Try the padded/verbatim candidates as their own exact-match query first; only fall back to the
+stripped candidate as a second query if the first returns nothing. That alone would have kept `me02.5-011`
+from ever competing with a bare `"11"`.
+
+**Ambiguity / unverified:** whether `me02.5-011` (Wurmple) actually exists in the Testing mirror. TCGdex
+confirms the card and the printed total, and UIL-004's closeout doesn't list `me02.5` among the sets
+TCGdex under-serves — so it's very likely present — but nobody in this investigation had Supabase
+credentials to check the live `catalog_card` row directly. Worth a direct check before assuming the fix
+above is sufficient on its own; if the row is genuinely missing, this is a mirror gap layered under a
+ranking bug, not a ranking bug alone.
+
+**Priority rationale.** High, same reasoning as UIL-010 itself: a finite collection is built from a set
+checklist, the collector number is the natural key for that workflow, and this feature now returns
+*confident-looking wrong cards* for a real, correctly-typed number rather than an honest empty result —
+worse than UIL-010's original failure for exactly the reason UIL-011 flagged about misleading empty
+states, but inverted: this one looks like it worked. Flagging for Karvi's confirmation, and flagging to
+the Senior BA that UIL-010's "Fixed" status may need revisiting, since this is Karvi's own confirmation
+attempt on Testing surfacing a real gap in that fix.
