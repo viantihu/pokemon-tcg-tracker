@@ -1559,13 +1559,45 @@ screen with no copy-editing layer in between:
 
 **Related but distinct from UIL-011.** UIL-011 catalogues internal "mirror/sync" jargon (a different
 table of 6 strings, none in `cascade.ts`). This is confirmed a new location and a different class of
-leak — engine field/type names, not sync terminology. The same problem exists in several other `reason`
-strings in `cascade.ts` (at least lines 197, 279, 313, 334, 380, 389) — worth fixing as one pass rather
-than one string at a time.
+leak — engine field/type names, not sync terminology.
+
+**Correction — the original line list was wrong, verified line by line against `cascade.ts` directly.**
+Lines **197** ("collection-claim") and **279** ("duplicate", bulk box) have **no leak** — neither reads
+from `b`. Line **380** ("trainer" step) is a hardcoded `"White"` string literal, not a variable read —
+also not a leak. Retracting all three from the original list.
+
+**What's actually there is a second, distinct leak: the raw DB key for a colour band reaching the
+screen, not `cardClass`-shaped at all.** Every one of these embeds `b` — the band in DB-key space
+(`dark_blue`), not the display form (`Dark blue`) the rest of the panel uses — directly into a
+user-facing sentence:
+
+- [`:295`](../lib/engine/cascade.ts:295) ("line-existing," the fill branch): `` `Fills the open
+  ${existing.slot.stage} slot of the existing ${b} line, in the back half.` ``
+- [`:313`](../lib/engine/cascade.ts:313) ("line-existing," the already-holds branch): `` `The ${b} line
+  already holds this stage...` ``
+- [`:334`](../lib/engine/cascade.ts:334) ("line-new"): `` `Creates a viable ${b}
+  ${via.chain[0]?.name ?? ""} line...` ``
+- [`:364-366`](../lib/engine/cascade.ts:364) ("line-nonviable," the fallback — easy to miss because the
+  `${b}` sits at the tail of a multi-line template literal): `` `Not viable (...); to the front half,
+  ${b} band.` ``
+- [`:389`](../lib/engine/cascade.ts:389) ("basic-no-line," twice in one string): `` `Basic with no
+  line; to the front half, ${b} band (prefer a binder with open ${b} space...` ``
+
+Five sites, all the same shape, two of them (`:295`, `:364-366`) easy to miss on a quick grep because
+the leak isn't in the same line as the `reason:` keyword. PR #77 (open) restructures the same-colour
+member *count* out of these strings into a new `sameColorMembers` field, but its diff doesn't touch
+`b` in any of the five lines above — this leak is still live regardless of what #77 lands.
+
+**This is the display half of UIL-013's two-vocabulary problem, opposite direction.** UIL-012 was a
+display name (`"White"`) reaching the database. This is a database key (`dark_blue`) reaching the
+screen. Three entries now trace to the same unenforced display/key boundary — UIL-012, UIL-013, and
+this one.
 
 **Suggested fix.** Keep `reason` as an internal trace field for debugging/logs, and add a display-copy
-layer (a lookup by `step`, e.g. `"card-class"` → "Specialty card — goes to your specialty binder.") the
-same way UIL-011 proposes for mirror/sync copy.
+layer that translates `step` + the band's own `bandDisplayByKey` lookup (already loaded at plan-context
+time) into a sentence, rather than string-interpolating `b` directly — the same shape UIL-011 proposes
+for mirror/sync copy, and the same lookup `app/(ui)/coll/actions.ts` already builds for this exact
+purpose on the Collections screen.
 
 **Priority rationale (Karvi's call): Medium.** Lower than UIL-011's own Low-by-default because this
 string sits mid-workflow, in the panel she reads on every single card while sorting, rather than in an
@@ -2237,14 +2269,41 @@ revert-checked against pre-fix source, which is the active mitigation.
   **mixed**: its "builder logic" layer uses its own `FakeDb`/`fakeClient`, but a separate layer in the
   same file already goes through real PGlite via `pglite-rpc`'s `freshRpcDb`/`applyOps` — already
   half-following the pattern this entry asks for.
-- **A third case, checked rather than assumed: `tests/plan/pending-placements.test.ts`.** Its `FakeQuery`
-  filters correctly (`eq`/`is`/`in`) but its `order()` is a literal no-op. Verified this is harmless, not
-  an oversight: [`lib/plan/pending.ts`](../lib/plan/pending.ts) never calls `.order()` on this path
-  either, so the fake's silence matches production's — there's nothing here for it to model wrong.
+- **`tests/plan/pending-placements.test.ts` — and I got this one wrong first and am correcting it in
+  place.** I earlier concluded its no-op `order()` was harmless because `lib/plan/pending.ts` never calls
+  `.order()`. That checked the wrong file: `loadPendingPlacements` calls `copyRepo.listUnplaced`, and
+  [`lib/repo/copy.ts:52-53`](../lib/repo/copy.ts:52) **does** order `.order("created_at").order("id")`,
+  documented as "oldest first, so the queue is worked in the order the cards entered the collection."
+  So the fake's no-op `order()` meant that contract was **never assertable** — and it matters concretely:
+  she works the stack top to bottom and the haul-bar pips are indexed by that order, so a silent reversal
+  in `listUnplaced` would be a real, visible-to-her defect the suite could not have caught. This belongs
+  in the dangerous bucket, not a harmless third case. (The lesson repeats today's recurring one: I
+  checked `pending.ts` because it's the file the test is named for, not `copy.ts` where the ordering
+  actually lives — a claim answering the wrong question.)
 
-**So the fix narrows to the first bucket only — move the four query-semantics doubles onto
-`tests/support/pglite-client.ts`; leave the call-recorders and the no-op-order case alone.** A
-materially smaller and better-targeted job than "audit every double."
+**#80 (open) fixes two of the dangerous set — `pending-placements` and `list-all-paging` — and the
+audit that produced it is the most useful part.** All numbers below observed by reverting and running,
+not predicted:
+
+- `tests/repo/list-all-paging.test.ts` was a **near-miss**: its `order()` was a no-op, so nothing
+  noticed if the paged read stopped ordering by primary key. Removing `.order(pk)` from `pageAll`
+  ([`lib/repo/base.ts:49`](../lib/repo/base.ts:49)) now fails **4 tests**; before, **zero**. Not
+  cosmetic: paging is only coherent over a stable window — without a stable order a paged walk can repeat
+  or skip rows between requests, which is UIL-004's "partial result reads as complete" through a
+  different door, and `listAll` is what reads the 23,548-row `catalog_card`.
+- `tests/sync/catalog-prefetch.test.ts` needed **nothing** — it implements only `eq`/`in` for a query
+  that uses only `eq`/`in`. Worth recording as the discriminator working: the risk isn't "hand-rolled,"
+  it's "hand-rolled *and* modelling an operator the assertions depend on." A double that implements
+  exactly what's called is correct scope.
+
+**So the remaining scope after #80 is `tests/catalog/card-search.test.ts` (already fixed landing
+UIL-015), `tests/catalog/mirror.test.ts`, and the mixed `tests/sync/exec-atomicity.test.ts`** — move the
+query-semantics ones onto `tests/support/pglite-client.ts`; leave the pure call-recorders alone.
+
+**#80 buys time, not immunity — the entry stays open with reduced scope, not closed.** The doubles still
+model only the operators the code under test happens to call today, so the next new operator is
+unprotected again. The durable answer remains the real-Postgres client: repo-level query behaviour tested
+through `tests/support/pglite-client.ts` cannot drift the way a hand-rolled fake silently can.
 
 **`tests/support/pglite-client.ts` is the mitigation pattern, not a suggestion — it already exists.**
 Backed by real Postgres, real migrations, real RLS, real `apply_write_ops`; deliberately narrow (only
