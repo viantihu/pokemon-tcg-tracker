@@ -1815,9 +1815,9 @@ before secrets exist). So the missing GitHub secrets block `acceptance` (and any
 data-API access) on the `main` rail — they do not, by themselves, stop the app from serving. Still a real
 gap, just a narrower one than "the app can't serve real data."
 
-**Part 2 — `main` is a pre-UI stub, not a working app missing credentials, and the gap is larger than
-previously recorded.** Verified directly: `git rev-list --count origin/main..origin/develop` is **56**,
-not the 28 first logged or the 52 estimated afterward. `main` (commit `b9c5cdc`, PR #12) contains:
+**Part 2 — `main` is a pre-UI stub, not a working app missing credentials.** Lead with what can't
+drift: `main` is pinned at commit `b9c5cdc` (PR #12) and has not moved once through any of this UAT
+cycle. It contains:
 
 - **Routes:** only `app/page.tsx` and `app/api/health/route.ts`. No `/plan`, `/sync`, `/look`, `/coll`,
   `/settings`, no `/login` — confirmed by listing `main`'s tree directly, not by guessing from a live
@@ -1825,6 +1825,14 @@ not the 28 first logged or the 52 estimated afterward. `main` (commit `b9c5cdc`,
 - **Migrations:** only `0001_init.sql` and `0002_domain.sql`. **Production's `color_band` and
   `type_color_map` are empty** — 0003 (which fills them) has never reached `main`.
 - **Workflows:** only `ci.yml` and `deploy.yml`. No `catalog-mirror.yml`, no `reset-testing.yml`.
+
+**The commit-gap number is illustrative, not a fact to restate.** It was 28 as first logged, 52 when the
+tech-lead measured it, 56 when re-verified minutes later, 58 an hour after that, 61 as of this
+correction — every increment is `develop` advancing (several of them this log's own PRs), never `main`
+moving. Re-check live rather than trust any number here: `git fetch origin && git rev-list --count
+origin/main..origin/develop`. **The gap widening for as long as UAT continues is normal, not
+deterioration** — a reader in two weeks seeing 90-odd commits should read a branch doing its job, not
+neglect.
 
 Live confirmation from the tech-lead session: `https://pokemon-tcg-tracker-sooty.vercel.app/api/health`
 returns 200 (a dependency-free check — proves only that the process booted);
@@ -1923,11 +1931,12 @@ border hugs its two buttons regardless of which `.orow` rule wins.
 **Priority rationale (Karvi's call): Low.** Purely visual — Finite/Open both still work correctly, and
 nothing is mis-recorded.
 
-## UIL-026 — Mirror the printed set total so tied collector-number matches can be ranked, not sorted alphabetically
+## UIL-026 — Mirror the printed set total AND release date, so tied collector-number matches can be ranked instead of sorted alphabetically
 
 - **Reported:** 2026-09-13 (not from Karvi — surfaced by the tech-lead session while reviewing UIL-015)
 - **Status:** Open
-- **Priority:** Medium (Senior BA's read)
+- **Priority:** Medium (Senior BA's read) — 5th in queue; UIL-022/023 are dev-assigned Highs, three
+  other Highs are ahead of it, and Karvi's rule is Lows/Mediums wait for all Highs.
 - **Area:** Catalog, Lookup / Collections
 - **Env:** n/a — the defect is in the repo, not a running environment
 
@@ -1943,20 +1952,63 @@ can't be used as a filter: there's no set-total column on `catalog_card`, and pr
 secret rares, so a real card like `Shuckle 136/132` legitimately exceeds its own denominator — counting
 rows per set would wrongly disqualify it. That reasoning holds. But TCGdex separately publishes exactly
 this number as `cardCount.official` — for `me02.5` it's confirmed **217**, the exact denominator Karvi
-typed. It simply isn't mirrored: verified directly against `0002_domain.sql`, `catalog_card` has
-`set_id`, `set_name`, `set_series` and no count column at all.
+typed (verified live against TCGdex directly). It simply isn't mirrored: verified against
+`0002_domain.sql`, `catalog_card` has `set_id`, `set_name`, `set_series` and no count column at all.
 
-**Suggested fix: a ranking signal, not a filter.** Mirror `cardCount.official` per set, then prefer a
-result whose set's official count equals the typed denominator — never exclude the others, which is what
-keeps the `Shuckle` case safe. For Karvi's query it's decisive: `me02.5` is 217 and none of the twelve
-competing McDonald's sets are (their totals are 12–25).
+**Scope grew to two columns, not one — `set_card_count_official` AND `set_release_date`, in the same
+pass.** Both are already in hand at upsert time: [`lib/catalog/mirror.ts:166`](../lib/catalog/mirror.ts:166)
+calls `tcgdex.getSet(setId, locale)`, and that same response carries `cardCount` and `releaseDate`
+alongside `serie.name`/`serie.id`, which the mirror already extracts — confirmed directly against
+`TcgdexSet` in [`lib/catalog/tcgdex.ts:73-78`](../lib/catalog/tcgdex.ts:73). Zero extra requests, no new
+API surface; both thread through `toCatalogRow`'s existing `opts` bag the same way `setSeries` does
+today. The reason to do both at once is cost, not tidiness: the expensive part isn't the columns, it's
+the `force_all` mirror re-run below, and paying that cost once for two columns beats paying it twice for
+one.
 
-**Two operational facts that have to ship with this, or it looks done and isn't:**
+**What the two columns buy together, so this doesn't read as a solved problem:** exact-padded-form
+match, then denominator match, then most-recent set — a real three-level ordering instead of an
+alphabetical accident. Only the first level exists today (UIL-015); this entry builds the other two.
 
-- It needs a migration (add the count column) plus populating it in `toCatalogRow`.
-- It needs a mirror re-run with `force_all: true` — the resume logic added for UIL-004 reads stored card
-  counts per set and would otherwise treat every one of the 218 sets as already complete and skip all of
-  them, silently leaving the new column null everywhere.
+**Three specifics that would otherwise get lost:**
+
+1. **Only the set-DETAIL response carries both fields — the card-detail's embedded `set` object has
+   `cardCount` but NOT `releaseDate`.** Verified live: `GET /cards/me02.5-011`'s embedded `set` is
+   `{cardCount, id, logo, name, symbol}` — no `releaseDate` key at all. This only works from the
+   set-detail path, which is the path the mirror already uses (`getSet`, not the per-card embed). Worth
+   recording so nobody later "simplifies" this to read from the card payload and silently drops the
+   date — the same shape of hazard as `localIdCandidates` being load-bearing for search with nothing in
+   the file saying so.
+2. **Coverage is sampled, not proven.** 25 of 218 sets checked; all 25 had a `releaseDate`, including
+   four of the six UIL-004 pseudo-sets (`miscp` 1996-01-01, `wp` 1999-09-01, `jumbo` 2000-02-01, `sp`
+   2002-08-01 — spot-checked live, exact matches). Encouraging, not proof. Both columns must be
+   **nullable, with NULLs ordered last**, rather than assuming full coverage.
+3. **The old placeholder dates are stand-ins, not real ship dates.** `1996-01-01`, `2000-02-01`,
+   `2002-08-01` are first-of-month/year placeholders — fine for *ordering*, but this column is
+   **ordering-only as a hard constraint, not a caveat to read past**: if a release date is ever surfaced
+   in the UI, it needs a real source, not this column. `1996-01-01` shown to Karvi as Base Set's actual
+   release date would be a small, quiet lie in her own app about her own hobby, and it cannot decide
+   which of two 1990s promos actually came first.
+
+**The `force_all` requirement is not "remember to pass a flag" — without it, the run reports success
+while doing nothing.** The resume check (added for UIL-004) sees 23,548 rows across 214 sets already at
+their full `cardCount.total` and reports "Every set is already mirrored… Nothing to do," exiting 0. A
+run that populates **nothing** reports **success**: both new columns stay NULL on every existing row,
+ordering silently falls back to arbitrary, and the log says it worked. Naming this explicitly because
+it's precisely the failure shape that let UIL-004 hide in the first place — a green result nobody
+interrogated is worse than a red one, and this is the same trap on the same workflow.
+
+**Migration numbering needs no coordination — it's enforced mechanically, not negotiated between
+sessions.** `scripts/check-migration-order.mjs` runs as a required `migration-order` job on every PR
+([`ci.yml:16-31`](../.github/workflows/ci.yml:16), gated on `pull_request`, checked against
+`origin/${{ github.base_ref }}`) and fails the PR if a new migration sorts behind one already merged to
+the base branch. Its own header records why: PR #13's `0003` landing after `0004` had shipped cost 18
+consecutive red Deploys. `develop` is at `0008` now; whoever merges second here simply renumbers and
+pushes.
+
+**Suggested fix: a ranking signal, not a filter.** Prefer a result whose set's official count equals the
+typed denominator, then prefer the most recent `set_release_date` among remaining ties — never exclude
+on either, which is what keeps the `Shuckle 136/132` case safe. For Karvi's query the count alone is
+already decisive: `me02.5` is 217 and none of the twelve competing McDonald's sets are (12–25).
 
 **Priority rationale (Senior BA's read): Medium.** The search already works correctly after UIL-015;
 this makes the ranking principled rather than an alphabetical accident. Not High — nothing is broken and
@@ -2052,3 +2104,53 @@ that's a call for whoever designs this, not something to guess at here.
 purpose, not a peripheral complaint, and it changes the transaction model for every future haul. Not
 something to patch quietly — flagging as a redesign that needs its own scoped implementation, likely
 larger than any single entry above it today.
+
+## UIL-028 — The batched catalog lookup is unpaged, so raising its chunk size would silently truncate results
+
+- **Reported:** 2026-09-13 (not from Karvi — found by QA reviewing #70's sync batching, corroborated
+  independently)
+- **Status:** Open
+- **Priority:** Low, held behind all open Highs and Mediums per Karvi's queue rule
+- **Area:** Sync, Catalog
+- **Env:** n/a — latent in the repo, not currently reachable
+
+**Nothing is broken today.** Stating that first so this doesn't read as a live bug.
+
+**Root cause.** [`lib/repo/catalog-card.ts:71-85`](<../lib/repo/catalog-card.ts>:71),
+`findBySetLocalMany(db, setId, localIds, chunkSize = 200)`, issues a plain
+`.select("*").eq("set_id", setId).in("local_id", chunk)` per chunk with **no `.range()` paging** —
+verified directly, confirmed absent. Each chunk is subject to PostgREST's `max-rows` cap (1000 on
+Supabase).
+
+**Why it's safe today, and only today.** A 200-`localId` chunk within one `set_id` returns roughly 200
+rows — you'd need an average of five duplicate printings per `(set_id, local_id)` to reach the cap,
+which a healthy mirror never has. But nothing in the code states that coupling: the comment at
+[`catalog-card.ts:69`](<../lib/repo/catalog-card.ts>:69) explains the chunking as being about **URL
+length** — confirmed, that's the only reason given — a different constraint from the row cap, and
+reading it would actively suggest that raising `chunkSize` for speed (2000 looks harmless) is safe. It
+isn't: it would silently truncate results.
+
+**The failure mode if that happens.** [`lib/sync/catalog-lookup.ts:203-206`](../lib/sync/catalog-lookup.ts:203)
+marks every requested `localId` as `fetched` once the query for its chunk returns — regardless of
+whether a matching row actually came back for that specific id (confirmed: `fetched.add` runs over every
+requested id, not over the rows actually returned). A key marked fetched but truncated by the cap reads
+as a **proven absence** rather than an unchecked one — real cards would quietly park in the unresolved
+queue, looking like a catalog gap rather than a bug. No error, no test failure; existing tests use small
+fixtures well under any cap.
+
+**What's correctly safe, recorded so nobody re-audits it.** `fetched.add` running *after* the awaited
+query returns (not before) means a failed query throws and propagates before anything is marked
+fetched — the dangerous direction (treating an un-run query as a proven absence) is closed. Chunking
+does correctly prevent the URL itself from blowing up.
+
+**Suggested fix.** Page the chunk query the way `lib/repo`'s `listAll` already does for UIL-004 — advance
+by rows *received*, not rows requested — so the coupling between `chunkSize` and `max-rows` stops
+mattering regardless of what either value is set to. Cheap alternative: a comment on `chunkSize` naming
+the `max-rows` constraint explicitly, though that only protects for as long as someone reads it.
+
+**Priority rationale: Low, and explicitly not for being unimportant.** Not reachable at current values,
+no data at risk today, small fix. Held Low because it needs a code change to become live — but it's the
+same class as the `list()` truncation found earlier today and the same class as UIL-004 itself: a silent
+partial result that reads as a complete one, invisible until the exact moment it isn't. Recorded as its
+own entry rather than left in a message, per the lesson UIL-020 already recorded: a finding with no
+owner and no tracking item doesn't get deprioritized, it evaporates.
