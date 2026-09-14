@@ -27,7 +27,7 @@ the entry records both.
 ## UIL-001 — "Back half from page" gives no indication of what it means
 
 - **Reported:** 2026-09-13
-- **Status:** Fixed — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42), awaiting QA review
+- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
 - **Priority:** Low
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -50,7 +50,7 @@ step she can be walked through. Copy-only fix, safe to ship after go-live.
 ## UIL-002 — No definition of what counts as a "page"
 
 - **Reported:** 2026-09-13
-- **Status:** Fixed — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42), awaiting QA review
+- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
 - **Priority:** Medium
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -530,7 +530,9 @@ expensive. Worth fixing before the first real sorting session, not necessarily b
 ## UIL-007 — Scroll bar under the card list renders outside the panel border
 
 - **Reported:** 2026-09-13
-- **Status:** Fixed — PR [#47](https://github.com/viantihu/pokemon-tcg-tracker/pull/47), awaiting QA review
+- **Status:** **Closed** — PR [#47](https://github.com/viantihu/pokemon-tcg-tracker/pull/47) MERGED to
+  `develop` (squash `0224383`), and **confirmed resolved by Karvi on Testing 2026-09-14**. The strip was
+  measured in a 375px harness during development; her pass is the confirmation in the running app.
 - **Priority:** **Medium** (raised from Low — see the reproduction below; it is not cosmetic)
 - **Area:** Plan — **confirmed by Karvi 2026-09-13**
 - **Env:** Testing
@@ -615,7 +617,11 @@ Plan.
 ## UIL-008 — No progress indication during long operations
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Fixed** — PR [#64](https://github.com/viantihu/pokemon-tcg-tracker/pull/64) MERGED to
+  `develop` (squash `88a546c`), QA-reviewed, confirmed **deployed** to Testing. Shipped **option (1)
+  only**, an indeterminate activity bar, and the PR argues *against* the determinate bar this entry
+  recommended — see the resolution note. Awaiting Karvi's confirmation, including the question of whether
+  the bar still earns its place now that UIL-020 has made the sync much faster.
 - **Priority:** Medium (Claude's read — could argue Low)
 - **Area:** Sync, Plan
 - **Env:** Testing
@@ -1294,7 +1300,11 @@ apply instead of a raw grep count.
 ## UIL-014 — No way to remove a card from a collection on the Collections page
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Fixed** — PR [#67](https://github.com/viantihu/pokemon-tcg-tracker/pull/67) MERGED to
+  `develop` (squash `c99bd080`), QA-reviewed, and confirmed **deployed** to Testing — all four conditions
+  green, and `migrate` success means **migration 0008 reached Testing**, which this fix does not work
+  without. Awaiting Karvi's confirmation; the behaviour is interaction-only and never rendered in a
+  browser during development.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Collections
 - **Env:** Testing
@@ -1364,7 +1374,9 @@ file.
 ## UIL-015 — Collector-number search returns unrelated cards while the actual match is missing
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Fixed** — PR [#73](https://github.com/viantihu/pokemon-tcg-tracker/pull/73) MERGED to
+  `develop` (squash `a88dc5c`), QA-reviewed, confirmed **deployed** to Testing. Awaiting Karvi's
+  confirmation: search `011/217`, and also a bare `11` for the symmetric case.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Lookup / Collections
 - **Env:** Testing
@@ -1645,7 +1657,11 @@ annoyance on a long haul but doesn't block anything — she can still scroll bac
 ## UIL-020 — Sync resolves Dex rows one at a time, serially, and the slowness was already known
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-008's progress bar)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#70](https://github.com/viantihu/pokemon-tcg-tracker/pull/70) MERGED to
+  `develop` (squash `585e8d9`), QA-reviewed, confirmed **deployed** to Testing. Round trips on her export
+  drop from ~1,000 to roughly one per set she owns cards from. **The improvement is arithmetic from query
+  counts, not a measured wall-clock time** — nobody here can run a real import, so her next sync is the
+  measurement. Stated that way to her too.
 - **Priority:** Medium (Senior BA's read)
 - **Area:** Sync
 - **Env:** n/a — the defect is in the repo, not a running environment
