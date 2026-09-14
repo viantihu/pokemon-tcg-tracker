@@ -46,6 +46,9 @@ const LOOKUPS: AssembleLookups = {
     ["white", "White"],
   ]),
   collectionNameById: new Map([["coll-okubo", "Illustrator: OKUBO"]]),
+  // Required by AssembleLookups since UIL-016 (#78) put card artwork on the plan rows. Empty here:
+  // these cases assert the routing EXPLANATION, so an absent image just falls back to initials.
+  imageUrlByTcgdexId: new Map(),
 };
 
 const B1: Binder = {
