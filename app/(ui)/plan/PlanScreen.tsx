@@ -235,7 +235,7 @@ export function PlanScreen({
       copyId: item.incomingId, // carries the draft id; the override is keyed by it (no copy exists yet)
       name: item.name,
       localId: item.localId,
-      imageUrl: null,
+      imageUrl: item.imageUrl ?? null,
       bandKey: item.bandKey,
       currentLabel: item.destination,
       initial:
@@ -770,7 +770,8 @@ function PlanView(props: {
   );
 }
 
-function PlanRow(props: {
+/** Exported for the render tests — the worklist row is where UIL-016 and UIL-018 both land. */
+export function PlanRow(props: {
   item: PlanItem;
   current: boolean;
   done: boolean;
@@ -804,7 +805,11 @@ function PlanRow(props: {
         className={"rail" + (meta.dither ? " dither" : "")}
         style={{ background: meta.color }}
       />
-      <CardFace name={item.name} imageUrl={null} size="s" />
+      {/* `?? null`, not just `item.imageUrl`: a plan parked in sessionStorage BEFORE UIL-016 shipped
+          has no `imageUrl` on its rows, and its stamp still matches (the stamp is DB state only), so
+          it resumes with the field `undefined`. Coercing here keeps CardFace's contract honest rather
+          than bumping the resume key and throwing away her check-off progress on deploy. */}
+      <CardFace name={item.name} imageUrl={item.imageUrl ?? null} size="s" />
       <div style={{ minWidth: 0 }}>
         <div className="nm">{item.name}</div>
         <div className="meta">
@@ -825,7 +830,8 @@ function PlanRow(props: {
   );
 }
 
-function Spotlight(props: {
+/** Exported for the render tests — the second of UIL-016's two hard-coded `imageUrl={null}` sites. */
+export function Spotlight(props: {
   item: PlanItem | undefined;
   done: boolean;
   onToggle: () => void;
@@ -855,7 +861,7 @@ function Spotlight(props: {
   return (
     <>
       <div className="hand">
-        <CardFace name={item.name} imageUrl={null} size="l" />
+        <CardFace name={item.name} imageUrl={item.imageUrl ?? null} size="l" />
         <div style={{ minWidth: 0 }}>
           <div className="nm">{item.name}</div>
           {item.localId ? (

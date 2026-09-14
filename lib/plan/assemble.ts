@@ -14,6 +14,15 @@ export interface AssembleLookups {
   binderNameById: Map<string, string>;
   bandDisplayByKey: Map<string, string>;
   collectionNameById: Map<string, string>;
+  /**
+   * `catalog_card.image_url` by `tcgdex_id` (UIL-016). Keyed in TCGdex id space, unlike the three
+   * uuid-keyed maps above.
+   *
+   * Required, not optional: a missing image is indistinguishable from an unwired one at runtime — it
+   * just renders initials — so the wiring is enforced at compile time instead. That is the whole
+   * shape of the bug this closed: `imageUrl` was never threaded through, and nothing complained.
+   */
+  imageUrlByTcgdexId: Map<string, string | null>;
 }
 
 const binderName = (id: string | null, l: AssembleLookups) =>
@@ -50,6 +59,8 @@ export function toPlanItem(
     name: incoming.card.name,
     setId: incoming.card.setId,
     localId: incoming.card.localId,
+    // Off the catalog row, not `incoming.card` — the engine's CatalogCard has no image (UIL-016).
+    imageUrl: l.imageUrlByTcgdexId.get(incoming.card.tcgdexId) ?? null,
     variant: incoming.variant,
     stage: incoming.card.stage,
     isBasic: incoming.card.stage === "Basic",
