@@ -1,7 +1,7 @@
 /**
  * Shared PGlite harness for the M10 `apply_write_ops` atomicity tests (dev-spec §4 DoD: migrations
  * apply to a fresh DB; §5 M10: commits are truly atomic). Runs REAL Postgres/plpgsql in WASM (no
- * Docker), applying the frozen 0001–0006 + the new 0007, then replicating the platform grants and
+ * Docker), applying the frozen 0001–0007 + the new 0008, then replicating the platform grants and
  * `auth.uid()` shim Supabase provides so the SECURITY INVOKER function runs under the authenticated
  * owner's RLS — exactly as production does. Never edits a migration file.
  */
@@ -21,6 +21,7 @@ const MIGRATIONS = [
   "0005_collection_mode.sql",
   "0006_commit_rpc.sql",
   "0007_backfill_ops.sql",
+  "0008_collection_removal_ops.sql",
 ];
 
 // Supabase provides auth.uid() + the anon/authenticated/service_role roles; PGlite (vanilla PG) does
@@ -41,7 +42,7 @@ function migrationSql(file: string): string {
   return readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8");
 }
 
-/** Fresh DB with 0001→0007 applied, platform grants replicated. Ends as the bootstrap superuser. */
+/** Fresh DB with 0001→0008 applied, platform grants replicated. Ends as the bootstrap superuser. */
 export async function freshRpcDb(): Promise<PGlite> {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(SUPABASE_SHIMS);
@@ -98,15 +99,29 @@ export async function seedBinders(
   }
 }
 
-/** Insert collection rows owned by OWNER (superuser), optionally pre-seeded with target ids. */
+/** Insert collection rows owned by OWNER (superuser), optionally pre-seeded with targets + binders. */
 export async function seedCollections(
   db: PGlite,
-  collections: { id: string; name?: string; targetCatalogCardIds?: string[] }[],
+  collections: {
+    id: string;
+    name?: string;
+    targetCatalogCardIds?: string[];
+    currentBinderIds?: string[];
+    mode?: "finite" | "open";
+  }[],
 ): Promise<void> {
   for (const c of collections) {
     await db.query(
-      `insert into collection (id, owner_id, name, target_catalog_card_ids) values ($1, $2, $3, $4)`,
-      [c.id, OWNER, c.name ?? c.id, c.targetCatalogCardIds ?? []],
+      `insert into collection (id, owner_id, name, target_catalog_card_ids, current_binder_ids, mode)
+         values ($1, $2, $3, $4, $5, $6)`,
+      [
+        c.id,
+        OWNER,
+        c.name ?? c.id,
+        c.targetCatalogCardIds ?? [],
+        c.currentBinderIds ?? [],
+        c.mode ?? "finite",
+      ],
     );
   }
 }
