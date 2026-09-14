@@ -2481,6 +2481,33 @@ unresolved queue — that did not materialize; only 8 rows total ever parked, ag
 catalog. Anywhere this log frames the unresolved queue as a live problem, it should stop; an overstated
 worry misleads the same way an understated bug does.
 
+**A fifth site, found by sweeping every unpaged `list()` call in `lib/`, is a different and more severe
+tier — its live status is not yet known, and this entry's "verified latent" claim does not cover it.**
+[`lib/sync/pipeline.ts:106`](../lib/sync/pipeline.ts:106),
+`loadCurrentGroups`: `` const [groups, copies] = await Promise.all([presenceGroupRepo.list(db),
+copyRepo.list(db)]); `` — its own doc comment names exactly what this feeds: "Current presence groups
+with each copy's placement snapshot (**the reconciler's `current`**)." Every other site above is a
+display list or a structurally small table; this one is the **input to a reconciliation decision**. A
+truncated read here doesn't show her a short list — it makes the sync conclude she owns fewer copies
+than she actually does, and **add copies for cards she already has**, the exact doubling UIL-003 warned
+against. And unlike `WAITING`/unplaced above, this one is plausibly already reachable: 702 placement
+decisions against a ~685-row export puts `copy` and `presence_group` plausibly in the 700–1,000 row
+band, not nowhere-near-the-cap. Counts for both tables have been requested; **if either comes back over
+1000, this site becomes its own High entry** rather than staying folded into this one's Medium.
+
+**The sweep also found no sixth surprise — the class is bounded at what's already listed, which is the
+reassuring half of the same audit.** Checked and confirmed structurally safe, not merely unexamined:
+`binderRepo`, `collectionRepo`, `binderSectionRepo` (a view over binders), `binderBlockRepo` — all
+bounded by binder/collection counts that can't approach four digits. `typeColorMapRepo` — fixed at 14
+rows by migration 0003. `setAliasRepo` — bounded by ~218 TCGdex sets. `lastSyncSnapshotRepo` — checked
+specifically because "a snapshot per sync" looks like it should accumulate; it doesn't:
+[`lib/sync/exec.ts:324-326`](../lib/sync/exec.ts:324) deletes every prior snapshot in the same
+transaction that inserts the new one (`for (const pr of prior) ops.push({ op: "delete_snapshot", id:
+pr.id })`), so the table holds exactly one row, always. And the big tables are already paged correctly
+in every other decision path — `listAll` is used repeatedly across `lib/plan/context.ts`,
+`lib/line/load.ts`, and `lib/plan/fingerprint.ts` — so this is a codebase that applied the paging
+discipline and missed one site, not one that never had it.
+
 **The fix is stronger than "add paging," and this supersedes an earlier, weaker version of this
 recommendation.** A filtered variant of `pageAll` is opt-in — and opt-in is exactly what failed four
 times today. A fifth call site can still write a bare `.select()`, pass every test at fixture scale, and
@@ -2510,10 +2537,17 @@ both = 0 — no entry has ever been archived or dropped, so `pipeline.ts`'s reco
 actually run against real data. Worth a `reason`-enum breakdown before treating that as a defect; it may
 be entirely explained by what's actually in the queue.
 
-**Priority rationale.** Medium: not High, since nothing is broken at today's queue sizes and no data is
-corrupted — the sync still adds copies correctly. Not Low: it degrades silently as she uses the app,
-defeats a behaviour the UI explicitly promises, and is the third instance of one unaddressed class.
-Not assigned — two Highs are in flight.
+**Priority rationale.** Medium for the four display/small-table sites: not High, since nothing is
+broken at today's queue sizes and no data is corrupted there. Not Low: it degrades silently as she uses
+the app, defeats a behaviour the UI explicitly promises, and is the third instance of one unaddressed
+class. **The fifth site (`pipeline.ts:106`) is deliberately left unrated here** — severity is pending
+the `copy`/`presence_group` counts, and a confirmed-live truncation there is grounds for its own High
+entry rather than a quiet upgrade of this one's rating.
+
+**In progress on the four sites originally in scope:** PR [#90](https://github.com/viantihu/pokemon-tcg-tracker/pull/90)
+(open) implements the detection approach this entry recommended (`assertReadComplete`, per its title).
+Status transition is the Senior BA's to record once it lands. The fifth site's fix, if the counts
+warrant one, is separate work.
 
 ## UIL-032 — The plan fingerprint doesn't cover `current_binder_ids`, so a cached plan can survive a collection being re-pointed
 
