@@ -470,7 +470,9 @@ Supabase dashboard before the cutover.
 ## UIL-006 — Haul Plan makes her re-run the plan on every visit to the page
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Closed** — PRs [#44](https://github.com/viantihu/pokemon-tcg-tracker/pull/44) (squash
+  `7d967d3`) and [#48](https://github.com/viantihu/pokemon-tcg-tracker/pull/48) (squash `76ec4d7`)
+  merged to `develop`, and **confirmed resolved by Karvi on Testing 2026-09-13**.
 - **Priority:** Medium (Claude's read)
 - **Area:** Plan
 - **Env:** Testing
@@ -506,6 +508,21 @@ your place halfway through physically sorting a stack is the same complaint.
 Medium: the Haul Plan is the core daily screen, and the loss lands specifically on the pass where
 she is standing at the binder working through a stack, which is when re-doing work is most
 expensive. Worth fixing before the first real sorting session, not necessarily before go-live.
+
+**Resolution (2026-09-13, PRs #44 + #48).** Her invalidation rule implemented as stated.
+
+- #44 caches the run in `sessionStorage` keyed on a state stamp (`lib/plan/fingerprint.ts`) and
+  rehydrates on mount, carrying the check-off set and cursor along so a half-finished sorting pass
+  survives navigating away. The cache **drops** on a stamp mismatch rather than rendering stale.
+- #48 fixed the stamp, which was the load-bearing half. #44 hashed plain **counts** for copies,
+  lines and slots, so the two in-place edit paths on the M7 line screen — moving a copy between
+  binder halves, and resolving a line slot — changed what the cascade routes to while leaving the
+  count identical. A returning visit then served a cached plan tagged `RESUMED` computed against
+  state that had moved, which could silently flip "duplicate → bulk" into "shelve it". The stamp now
+  carries the placement-bearing columns themselves (a multiset of copy placement tuples, plus slot
+  and line rows), with the `placement_decision` count as a backstop for any write not enumerated.
+
+**Closed by Karvi 2026-09-13** on Testing.
 
 ## UIL-007 — Scroll bar under the card list renders outside the panel border
 
