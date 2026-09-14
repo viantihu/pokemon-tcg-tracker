@@ -354,3 +354,60 @@ export function blockedTargetDropsMessage(blocked: BlockedTargetDrop[]): string 
     `to give it a new home first.`
   );
 }
+
+/**
+ * The same orphan class as `blockedTargetDrops`, triggered by a binder-id CHANGE instead of a
+ * target-list drop (UIL-040). The chase list is untouched, but any binder leaving
+ * `current_binder_ids` strands every shelved copy of a target card that was sitting there: it no
+ * longer matches the collection's (new) binder list, so it reads as un-owned while still occupying a
+ * real pocket in the old binder.
+ */
+export async function blockedBinderRebind(
+  db: DbClient,
+  col: Row<"collection">,
+  nextBinderIds: string[],
+): Promise<BlockedTargetDrop[]> {
+  const removedBinderIds = (col.current_binder_ids ?? []).filter(
+    (id) => !nextBinderIds.includes(id),
+  );
+  const targetIds = col.target_catalog_card_ids ?? [];
+  if (removedBinderIds.length === 0 || targetIds.length === 0) return [];
+
+  const shelvedByCard = new Map<string, Row<"copy">[]>();
+  for (const id of targetIds) {
+    const rows = (await copyRepo.listByCatalogCard(db, id)).filter(
+      (c) => c.role === "shelved" && c.binder_id !== null && removedBinderIds.includes(c.binder_id),
+    );
+    if (rows.length > 0) shelvedByCard.set(id, rows);
+  }
+  if (shelvedByCard.size === 0) return [];
+
+  const [cards, binders] = await Promise.all([
+    catalogCardRepo.listByIds(db, [...shelvedByCard.keys()]),
+    binderRepo.list(db),
+  ]);
+  const nameById = new Map(cards.map((c) => [c.tcgdex_id, c.name]));
+  const binderNameById = new Map(binders.map((b) => [b.id, b.name]));
+
+  return [...shelvedByCard.entries()].map(([tcgdexId, rows]) => ({
+    tcgdexId,
+    name: nameById.get(tcgdexId) ?? tcgdexId,
+    binderName: binderNameById.get(rows[0].binder_id as string) ?? "its binder",
+    copyCount: rows.length,
+  }));
+}
+
+/** The refusal shown when a binder rebind would strand owned copies left behind in the old binder. */
+export function blockedBinderRebindMessage(blocked: BlockedTargetDrop[]): string {
+  const named = blocked
+    .slice(0, 3)
+    .map((b) => `${b.name} (${b.binderName})`)
+    .join(", ");
+  const rest = blocked.length > 3 ? ` and ${blocked.length - 3} more` : "";
+  const count = blocked.reduce((n, b) => n + b.copyCount, 0);
+  return (
+    `Moving to a new binder would strand ${count} shelved card${count === 1 ? "" : "s"} in the old ` +
+    `one, including ${named}${rest}. This app can't relocate a collection's cards yet — move them out ` +
+    `individually first, or keep this collection in its current binder.`
+  );
+}
