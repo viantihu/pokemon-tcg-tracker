@@ -157,7 +157,10 @@ routed-to-bulk case. No migration needed.
 ## UIL-004 — Testing's catalog holds 3 cards, so a real Dex export resolves almost nothing
 
 - **Reported:** 2026-09-13 (found while diagnosing UIL-003)
-- **Status:** Fixed — mirror run `34787934423` populated 217/218 sets on 2026-09-13; `dp5` retry pending in PR [#39](https://github.com/viantihu/pokemon-tcg-tracker/pull/39)
+- **Status:** Investigating — **205 of 218** sets mirrored, not 217 (see the correction at the end of
+  this entry; `dp5` landed, thirteen *other* sets did not). The mirror now resumes rather than
+  re-requesting all 218 (PR [#46](https://github.com/viantihu/pokemon-tcg-tracker/pull/46)); a run is
+  needed to close the remaining thirteen.
 - **Priority:** High
 - **Area:** Catalog
 - **Env:** Testing
@@ -269,10 +272,49 @@ String(err)` appears in 24 places across the server actions, and supabase-js rej
 that runs for every DB failure in the app, and it renders `"[object Object]"`. That is not a mirror
 bug; it means every database error surfaced during UAT tells Karvi nothing. Fixed in #39.
 
+**Correcting this entry's own record (2026-09-13, PR [#46](https://github.com/viantihu/pokemon-tcg-tracker/pull/46)).**
+The "217 of 218, `dp5` pending" above is wrong, and it understated the gap. Read from the run log of
+`34787934423`, the latest completed mirror:
+
+- `dp5 ok {"setId":"dp5",...,"fetched":100,"upserted":100}` — **dp5 succeeded.** The clean-data
+  analysis above was correct that its 502 was transient; the retry was not needed.
+- the run ends `Mirrored 205/218 sets; 13 failed` — **thirteen** other sets never landed:
+  `swsh3.5 swsh4 2021swsh swsh4.5 A3 sv10 A3b sv10.5b sv10.5w A4 A4a mee me01`, every one a TCGdex
+  503 surfaced as our 502.
+
+These are not obscure sets. `sv10` (Destined Rivals), `swsh4` (Vivid Voltage) and `me01` are current
+or recent, so this is materially worse than one 2008 set: Dex rows from thirteen sets, including ones
+she is most likely to actually own, park in the unresolved queue. The "a real Dex export will now
+resolve" claim above holds for ~94% of sets, not all of them.
+
+**Why re-running was the wrong reflex.** Every failure this workflow has ever had is TCGdex throttling
+us, and the failure count *grew* run over run — 2, then 1, then 13. Recovering thirteen sets by sending
+218 requests at the API already throttling us is what produces the next run's failures. #39's backoff
+treats the symptom within a run; it does not stop each run from re-requesting everything.
+
+**Fixed in #46: the mirror resumes.** It now reads how many cards `catalog_card` already holds per set
+and requests only sets that are absent or short of their TCGdex `cardCount.total`. A recovery run is a
+handful of requests instead of 218.
+
+- **Counts, not presence.** A half-landed set has rows but is still incomplete; a presence check would
+  call it done and leave those cards permanently unresolvable — a silent version of this very bug.
+- **Paging advances by rows received**, not by the page size requested, so a PostgREST `max-rows`
+  below the page size cannot skip sets. Same failure `lib/repo`'s `listAll` was fixed for in #39.
+- A failed read **warns loudly and falls back to a full run** rather than degrading quietly, which is
+  the exact behaviour that let UIL-004 hide until UAT.
+- `force_all: true` on a manual run re-requests everything, for when the mirror logic itself changes.
+
+Verified against mocked PostgREST pages with a deliberate server cap (75) below the requested `limit`
+(1000): it read all 153 rows across 3 pages, skipped the complete sets, and requested the absent one,
+the partial one, and one with an unknown card count. Not verified against the live table, which needs
+the run itself.
+
 ## UIL-005 — Deploy's migration step is dead: the Supabase access token lost its privileges
 
 - **Reported:** 2026-09-13 (found while running the catalog mirror for UIL-004)
-- **Status:** Open — blocked on Karvi (credential)
+- **Status:** Fixed — PR [#46](https://github.com/viantihu/pokemon-tcg-tracker/pull/46) removes the
+  Management-API dependency entirely, so the revoked token is no longer a blocker. **Not caused by a
+  misconfiguration on Karvi's side** — see the correction at the end of this entry.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Deploy
 - **Env:** Testing (and Production, once it is used)
@@ -335,6 +377,72 @@ stands as a pointer for a future `Invalid JWT`, not as an active defect.
 **Production is emptier still.** The `production` environment has only `SUPABASE_DB_PASSWORD` — no
 service or anon key — and `main` is 28 commits behind `develop`. The cutover needs both keys there too,
 and it needs this same token working against the strict (no `--include-all`) rail.
+
+**Fixed (2026-09-13, PR [#46](https://github.com/viantihu/pokemon-tcg-tracker/pull/46)) — and the
+diagnosis above needs correcting: this was never Karvi's misconfiguration.**
+
+The secret's stored value was last written **2026-09-08 02:13 UTC**, and the last green Deploy ran
+**2026-09-09 04:47 UTC**. So the token worked *after* it was last set, and nothing in this repo touched
+it since. The privileges were revoked on the Supabase side, by something outside the repo. "I didn't
+configure the keys properly" is not what happened here.
+
+**The real fix is to stop depending on it.** `supabase link` is a Management API call, which is why a
+PAT's *account-level* privileges could take down this project's migrations at all. `db push --db-url`
+connects straight to Postgres and never touches that API. Confirmed by running it with no
+`SUPABASE_ACCESS_TOKEN` in the environment: it goes directly to a Postgres auth attempt instead of
+403ing. So `migrate` now uses `secrets.SUPABASE_DB_PASSWORD`, which was **already configured on both
+environments** — no new credential.
+
+That is a better outcome than restoring the token. A PAT's privileges are account-level and outside
+this repo's control, and can be narrowed again at any time; the DB password is per-project and is what
+`db push` authenticates with either way.
+
+**The pooler is required, not a preference.** `db.<ref>.supabase.co` publishes AAAA records only — no
+`A` record — and GitHub-hosted runners have no IPv6, so the direct host is unreachable from CI
+(`dial error ... connect ECONNREFUSED 2600:1f18:...`). Supavisor is dual-stack. Its host is
+region-pinned per project and **not derivable from the project ref**, so it is now
+`vars.SUPABASE_DB_POOLER_HOST` per environment. Both are set, each confirmed by probe (a wrong host
+answers `tenant/user postgres.<ref> not found`; the right one reaches real Postgres auth):
+
+| env | project | pooler |
+| --- | --- | --- |
+| testing | `cpmwdcmokbgcpmkvbtsw` | `aws-0-us-east-1.pooler.supabase.com` |
+| production | `bqqerxpdxywnpvndhxbs` | `aws-0-us-west-2.pooler.supabase.com` |
+
+Port **5432**, not 6543: 5432 is session mode, which holds the multi-statement transactions and
+advisory locks `db push` wraps each migration in. 6543 is transaction mode and would break them — the
+same distinction `scripts/promote-collection.mjs` documents.
+
+**Deploy now also asserts the schema actually moved.** `db push` exits 0 when there is nothing to do,
+which in a log is indistinguishable from having applied everything. That is the hole this entry
+describes: `migrate` reporting green while Testing sat on 0006 is what let 0007-era backfill code meet
+a 0006 `apply_write_ops`. A new step reads `supabase_migrations.schema_migrations` back over the same
+connection and fails if any local migration is absent — a **set difference, not a `max()` comparison**,
+since `--include-all` can leave a hole in the middle of the history that comparing only the newest
+version would call fully migrated.
+
+**What this changes about the blockers listed above:**
+
+- `SUPABASE_ACCESS_TOKEN` is **no longer needed for migrations** and is no longer a go-live blocker.
+  The `acceptance` job still tries it as a best-effort shortcut for deriving its two keys and tolerates
+  the 403, so nothing else has to be fixed for it.
+- Production needs no token either — it needs `vars.SUPABASE_DB_POOLER_HOST` (now set) and its existing
+  `SUPABASE_DB_PASSWORD`.
+- **`SUPABASE_ANON_KEY` on `testing` is the one thing still outstanding**, and it genuinely cannot be
+  derived: reading it is the same Management API call the PAT 403s on. It is the **publishable** key
+  (`sb_publishable_…`), it is not secret (the app ships it to every browser), and it must match Vercel's
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Until it is set, Deploy moves from red at `migrate` to red at
+  `acceptance` — which is #38 working as designed, not a regression.
+
+`reset-testing.yml` still uses `supabase link` and is **deliberately left broken**: it is destructive,
+and Testing holds the real collection until the cutover. Fixing it would only make it easier to run by
+accident.
+
+**Still worth Karvi's attention, and not something the code can answer:** *why* the account lost
+privileges. A PAT that silently stops being able to see a project can mean the project moved
+organizations, an org role was downgraded, or there is a billing/plan problem on the org. None of that
+blocks Testing any more, but the same account owns the Production project, so it is worth a look at the
+Supabase dashboard before the cutover.
 
 ## UIL-006 — Haul Plan makes her re-run the plan on every visit to the page
 
