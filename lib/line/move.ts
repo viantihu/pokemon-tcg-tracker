@@ -9,8 +9,20 @@
  *
  * Coarse location only: a move sets binder + half + band (or a collection, or bulk). It never
  * auto-joins a line and never addresses a pocket or page.
+ *
+ * This module is the ONE authority on what a destination means. That now covers two things, because
+ * collection membership is derived from two facts, not one (app/(ui)/coll/actions.ts `loadCollHub`):
+ * `placementForMove` says what the destination does to the copy's placement COLUMNS, and
+ * `collectionTargetJoinOp` says what it does to the destination collection's CHASE LIST. Landing in a
+ * collection's binder without joining its list leaves the card invisible in the very collection
+ * holding it while occupying a real pocket (UIL-022) — so the two always travel together, and they
+ * travel from here so no surface can hold a second, drifting definition of either (UIL-012's shape).
+ *
+ * Pure: no I/O. `WriteOp` is a type-only import (erased at build), so there is no runtime dependency
+ * on lib/repo and no cycle.
  */
 
+import type { WriteOp } from "@/lib/repo";
 import type { CopyPlacementPatch, MoveDestination } from "./types";
 
 /** Derive the four placement columns (+ cleared line link) for a moved copy. */
@@ -91,4 +103,106 @@ export function isMoveDestinationComplete(dest: MoveDestination): boolean {
     case "shelf":
       return Boolean(dest.binderId && dest.half && dest.band);
   }
+}
+
+/* ------------------- membership: the other half of a collection destination ------------------- */
+
+/**
+ * The chase-list write a destination implies — the SINGLE definition of "this card joins that
+ * collection", shared by every surface that can send a card into one (UIL-022).
+ *
+ * A card is "in" a collection because a shelved copy sits in one of its binders AND the catalog id is
+ * on `collection.target_catalog_card_ids`. `placementForMove` only ever produces the first fact, so a
+ * `{kind: "collection"}` destination that stops there orphans the card: physically in the collection's
+ * binder, absent from its list, therefore invisible in the collection view and every wishlist view
+ * (both keyed off that column) while occupying a real pocket.
+ *
+ * Returns null for `bulk` / `shelf` — those destinations join nothing, and a caller that pushes the
+ * null result would emit an op the RPC has no branch for, so callers must skip it.
+ *
+ * `union_collection_targets` (migration 0007) unions SERVER-SIDE in one statement, so it composes with
+ * a concurrent edit instead of clobbering it, and re-sending an id already present is a no-op.
+ */
+export function collectionTargetJoinOp(
+  dest: MoveDestination,
+  catalogCardId: string,
+): Extract<WriteOp, { op: "union_collection_targets" }> | null {
+  if (dest.kind !== "collection") return null;
+  return {
+    op: "union_collection_targets",
+    collection_id: dest.collectionId,
+    catalog_card_ids: [catalogCardId],
+  };
+}
+
+/* ------------------------------ the whole move, as one op set ------------------------------ */
+
+/** A move fully resolved against FRESH state: every id read from the DB, ready to become ops. */
+export interface MovePlan {
+  copyId: string;
+  /** The moved copy's catalog id — needed to join a destination collection's chase list. */
+  catalogCardId: string;
+  destination: MoveDestination;
+  /** The line slot this copy fills, which the move vacates. Null when it fills none. */
+  reopenSlotId: string | null;
+  /** The `complete` line to demote back to `open` because that slot is no longer filled. */
+  demoteLineId: string | null;
+  destinationLabel: string;
+}
+
+/**
+ * The complete ordered write set for one move (PURE — no I/O), applied verbatim inside ONE
+ * transaction by `apply_write_ops`.
+ *
+ * Order mirrors `buildCollectionRemovalOps`: placement, then the vacated slot, then the demoted line,
+ * then the membership list, then the audit row. Applied atomically the order only has to be FK-safe;
+ * keeping it identical across the two paths means one shape to reason about, not two.
+ *
+ * `owner_id` is deliberately absent from every op — the RPC is SECURITY INVOKER, so the column
+ * defaults to `auth.uid()` and 0002's `owner_all` RLS `with check` enforces it. It is never read from
+ * a payload.
+ */
+export function buildMoveOps(plan: MovePlan): WriteOp[] {
+  const patch = placementForMove(plan.destination);
+  const ops: WriteOp[] = [
+    {
+      op: "update_copy",
+      id: plan.copyId,
+      patch: {
+        role: patch.role,
+        binder_id: patch.binder_id,
+        binder_half: patch.binder_half,
+        color_band: patch.color_band,
+        line_slot_id: patch.line_slot_id,
+      },
+    },
+  ];
+
+  // Moving a card OFF a line reopens the slot it filled (removal symmetry, sync-arch §1.6) …
+  if (plan.reopenSlotId) {
+    ops.push({
+      op: "update_slot",
+      id: plan.reopenSlotId,
+      patch: { state: "placeholder", copy_id: null },
+    });
+  }
+  // … and a line that was complete is no longer complete.
+  if (plan.demoteLineId) {
+    ops.push({ op: "update_line", id: plan.demoteLineId, patch: { status: "open" } });
+  }
+
+  // Landing in a collection means joining ITS chase list, or the card is orphaned there (UIL-022).
+  const join = collectionTargetJoinOp(plan.destination, plan.catalogCardId);
+  if (join) ops.push(join);
+
+  ops.push({
+    op: "insert_decision",
+    haul_id: null,
+    copy_id: plan.copyId,
+    decision: "placement-move",
+    reason: moveDecisionReason(plan.destination, plan.destinationLabel),
+    resolved_by: "user",
+  });
+
+  return ops;
 }
