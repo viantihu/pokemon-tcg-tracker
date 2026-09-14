@@ -2668,3 +2668,40 @@ nav.menu .tab .n {
     justify-content: center;
   }
 }
+
+/* ---- Foldable collection cards (UIL-034) --------------------------------------
+   One contiguous appended block, same discipline as the UIL-018 block above: this
+   reuses `.worktools`/`.btn`/`.hk` as-is for the Collections page's bulk controls
+   rather than editing those rules, and adds only what a collection card's header
+   didn't already have — a dedicated fold toggle, since `.collhead` (unlike
+   `.bandhead`) holds other interactive controls and cannot become the button
+   itself. */
+.collfold {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+  font-size: 9px;
+  color: var(--ink-2);
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.collfold:hover {
+  background: var(--hi);
+}
+.collfold:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: -3px;
+}
+/* A folded card is a header and nothing else — its grid is not in the tree at all
+   (see CollectionCard). `.collhead`'s own margin-bottom exists to separate it from
+   a body that is not there when folded, so drop it rather than leaving a gap of
+   empty space above the card's bottom edge. */
+.collcard.folded .collhead {
+  margin-bottom: 0;
+}
