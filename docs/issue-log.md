@@ -2149,7 +2149,23 @@ already decisive: `me02.5` is 217 and none of the twelve competing McDonald's se
 **Priority rationale (Senior BA's read): Medium.** The search already works correctly after UIL-015;
 this makes the ranking principled rather than an alphabetical accident. Not High — nothing is broken and
 no data is at risk right now. Not Low either, because the current tie-break is genuinely arbitrary rather
-than merely imperfect, and this is the only available principled disambiguator.
+than merely imperfect, and this is the only available principled disambiguator. **Stays Medium after the
+second instance below, and worth saying explicitly so the lack of escalation doesn't read as neglect:**
+Karvi's queue rule gates Lows behind open Highs, not Mediums, so this can be assigned and worked without
+inflating its rank — and inflating it would be wrong regardless, since the search genuinely returns her
+card both times, just not first. **Assigned to the tech-lead now.**
+
+**Second reported instance — the argument for the fix is no longer hypothetical.** Karvi hit this gap
+again (logged separately as UIL-044 in her own words, since the log records what she personally
+observed even when the cause is already tracked here — this entry is where the fix belongs, not there):
+typing `099/182` returned five cards sharing `local_id` "099," with the real match — Minior, Paradox
+Rift — landing fourth of five rather than first. Confirmed live against the exact failing query:
+`GET /cards/sv04-099` returns Minior with `set.cardCount.official: 182` — **exactly** the denominator she
+typed — while none of the other four colliding sets' official counts match (193, 197, 165, 91). One gap,
+two independent reports, the second arriving after the first (UIL-015) was already fixed. **For this
+exact query, the fix's ordering is decisive, not just principled:** exact-padded-form match (already
+shipped) finds all five; denominator match would then promote Minior alone to first, since no other set
+sharing a `099` has an official count of 182.
 
 ## UIL-027 — "Commit the haul" is the wrong model: a card should be shelved the moment "Done" is clicked
 
