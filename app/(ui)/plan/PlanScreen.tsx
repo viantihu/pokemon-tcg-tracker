@@ -32,19 +32,13 @@ import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { VariantSelector } from "../_components/VariantSelector";
 import { ACTION_META, bandMeta } from "../_components/plan-meta";
 import {
-  commitHaulAction,
+  shelveCardAction,
   getMoveOptions,
   loadPendingPlacementDraft,
   lookupCatalog,
   runHaulPlan,
 } from "./actions";
-import type {
-  CommitCounts,
-  DraftCard,
-  DraftPayloadItem,
-  LookupCard,
-  RunPlanResult,
-} from "./plan-types";
+import type { DraftCard, DraftPayloadItem, LookupCard, RunPlanResult } from "./plan-types";
 
 const SOURCES: { v: "bulk-bin" | "pack-rip" | "show" | "trade"; l: string }[] = [
   { v: "bulk-bin", l: "Bulk bin" },
@@ -76,6 +70,8 @@ const RESUME_KEY = "binderops.plan.v1";
  */
 interface ResumeState {
   stamp: string;
+  /** The haul this sitting opened, so a resumed sitting keeps writing into the same one (UIL-027). */
+  haulId?: string | null;
   source: (typeof SOURCES)[number]["v"];
   notes: string;
   draft: DraftCard[];
@@ -164,10 +160,24 @@ export function PlanScreen({
   // the component, so using it directly would keep claiming "resumed" after she re-runs.
   const [planIsResumed, setPlanIsResumed] = useState(resumed !== null);
   const [running, setRunning] = useState(false);
-  const [committing, setCommitting] = useState(false);
-  const [committed, setCommitted] = useState<CommitCounts | null>(null);
+  // The id of the haul this sitting opened, threaded through every card so the sitting stays one haul
+  // in the audit trail even though each card is its own transaction (UIL-027).
+  const [haulId, setHaulId] = useState<string | null>(resumed?.haulId ?? null);
+  /**
+   * The stamp the parked run is keyed to. Shelving a card changes the copy count, which is part of the
+   * stamp by design (UIL-006), so without rolling it forward the resume cache would be thrown away on
+   * every Done click — halfway through a stack, which is exactly when losing it hurts.
+   */
+  const [liveStamp, setLiveStamp] = useState(resumed?.stamp ?? stateStamp);
+  /** The card currently being written, so only its own control shows a pending state. */
+  const [shelving, setShelving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cur, setCur] = useState(resumed?.cur ?? 0);
+  /**
+   * Cards already SHELVED — written to the database, not merely ticked (UIL-027). Every id in here is
+   * a committed `apply_write_ops` call. It still drives the pips, the counts and the cursor, but it is
+   * now a record of writes rather than a worklist aid, which is the whole of her complaint.
+   */
   const [done, setDone] = useState<Set<string>>(() => new Set(resumed?.done ?? []));
   // Folded band sections (UIL-018). Everything expanded is the default: a fresh plan should look like
   // the plan, and the screen is worked top-to-bottom so the first band she needs is already open.
@@ -192,7 +202,8 @@ export function PlanScreen({
       return;
     }
     writeResume({
-      stamp: stateStamp,
+      stamp: liveStamp,
+      haulId,
       source,
       notes,
       draft,
@@ -202,7 +213,7 @@ export function PlanScreen({
       overrides,
       collapsed: [...collapsed],
     });
-  }, [stateStamp, source, notes, draft, plan, done, cur, overrides, collapsed]);
+  }, [liveStamp, haulId, source, notes, draft, plan, done, cur, overrides, collapsed]);
 
   /** Re-read the queue and seed the draft from it. Only ever called from an event handler. */
   const reloadPending = useCallback(() => {
@@ -224,7 +235,6 @@ export function PlanScreen({
   function mutateDraft(next: DraftCard[]) {
     setDraft(next);
     setPlan(null);
-    setCommitted(null);
     setOverrides({});
   }
 
@@ -282,6 +292,8 @@ export function PlanScreen({
       const result = await runHaulPlan(toPayload(draft));
       setPlan(result);
       setPlanIsResumed(false);
+      setHaulId(null);
+      setLiveStamp(stateStamp);
       setCur(0);
       setDone(new Set());
       // A new run is new work: nothing is finished yet, so nothing should arrive folded.
@@ -293,29 +305,59 @@ export function PlanScreen({
     }
   }
 
-  async function onCommit() {
+  /**
+   * Shelve ONE card, now (UIL-027). This is what "Done" means: the placement is written before the
+   * cursor moves, so the database matches the binder she just put the card in. There is no batch step
+   * afterwards and no undo — a misplacement is corrected with Move, like any other card in her
+   * collection (her call).
+   *
+   * A card that fails stays unshelved and stays on the page, which is the correct end state: "any card
+   * that has not received a location should still appear on that haul plan page".
+   */
+  async function shelveCard(item: PlanItem): Promise<boolean> {
+    if (done.has(item.incomingId) || shelving) return false;
+    const entry = draft.find((d) => d.id === item.incomingId);
+    if (!entry) return false;
+
     setError(null);
-    setCommitting(true);
+    setShelving(item.incomingId);
     try {
-      const res = await commitHaulAction({
+      const res = await shelveCardAction({
         source,
         notes: notes.trim() || null,
-        draft: toPayload(draft),
-        overrides,
+        card: {
+          id: entry.id,
+          tcgdexId: entry.card.tcgdexId,
+          variant: entry.variant,
+          existingCopyId: entry.existingCopyId ?? null,
+        },
+        override: overrides[item.incomingId] ?? null,
+        haulId,
+        // Everything not yet shelved stays queued, so the returned stamp describes what we hold next.
+        pendingCopyIds: draft
+          .filter((d) => d.existingCopyId && !done.has(d.id) && d.id !== item.incomingId)
+          .map((d) => d.existingCopyId as string),
       });
-      if (res.ok) setCommitted(res.counts);
-      else setError(res.error);
+      if (!res.ok) {
+        setError(res.error);
+        return false;
+      }
+      // Roll the cache forward rather than letting the write invalidate it (see shelveCardAction).
+      setLiveStamp(res.stamp);
+      if (res.haulId) setHaulId(res.haulId);
+      setDone((prev) => new Set(prev).add(item.incomingId));
+      return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Commit failed.");
+      setError(e instanceof Error ? e.message : "Could not shelve that card.");
+      return false;
     } finally {
-      setCommitting(false);
+      setShelving(null);
     }
   }
 
   function resetAll() {
     setDraft([]);
     setPlan(null);
-    setCommitted(null);
     setDone(new Set());
     setCollapsed(new Set());
     setNotes("");
@@ -324,6 +366,8 @@ export function PlanScreen({
     setOverrides({});
     setMoveTarget(null);
     setPlanIsResumed(false);
+    setHaulId(null);
+    setLiveStamp(stateStamp);
     // The parked run is spent: it was committed, or she chose to start over.
     clearResume();
     // Re-read the queue: what we just placed is gone from it, and anything she pulled off the draft
@@ -341,14 +385,6 @@ export function PlanScreen({
     return m;
   }, [flatItems]);
 
-  function toggleDone(id: string) {
-    setDone((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
   /** Fold / unfold one band (UIL-018). Same shape as `toggleDone` — a set of keys, not a flag map. */
   function toggleCollapse(bandKey: string) {
     setCollapsed((prev) => {
@@ -397,12 +433,10 @@ export function PlanScreen({
           cur={cur}
           setCur={setCur}
           done={done}
-          toggleDone={toggleDone}
+          shelveCard={shelveCard}
+          shelving={shelving}
           advance={advance}
           onBack={() => setPlan(null)}
-          onCommit={onCommit}
-          committing={committing}
-          committed={committed}
           onReset={resetAll}
           overrides={overrides}
           onMove={openMove}
@@ -620,12 +654,12 @@ function PlanView(props: {
   cur: number;
   setCur: (i: number) => void;
   done: Set<string>;
-  toggleDone: (id: string) => void;
+  /** Writes ONE card now; resolves true when it was shelved (UIL-027). */
+  shelveCard: (item: PlanItem) => Promise<boolean>;
+  /** Draft id of the card mid-write, so only its own control shows a pending state. */
+  shelving: string | null;
   advance: () => void;
   onBack: () => void;
-  onCommit: () => void;
-  committing: boolean;
-  committed: CommitCounts | null;
   onReset: () => void;
   overrides: Record<string, MoveDestination>;
   onMove: (item: PlanItem) => void;
@@ -643,12 +677,10 @@ function PlanView(props: {
     cur,
     setCur,
     done,
-    toggleDone,
+    shelveCard,
+    shelving,
     advance,
     onBack,
-    onCommit,
-    committing,
-    committed,
     onReset,
     overrides,
     onMove,
@@ -685,22 +717,20 @@ function PlanView(props: {
     (a.BULK ?? 0) + (a.SWAP ?? 0)
   }`;
 
-  if (committed) {
+  // Every card in the run is shelved. There is no "commit" left to do — each card was written as she
+  // decided it — so this is a finish line, not a gate (UIL-027).
+  if (total > 0 && doneCount === total) {
     return (
       <div className="entry panel">
         <div className="alertbar ok" style={{ marginBottom: 12 }}>
           <span>✓</span>
-          <b>Haul committed.</b>
+          <b>
+            All {total} card{total === 1 ? "" : "s"} shelved.
+          </b>
         </div>
         <p style={{ fontSize: 12, lineHeight: 1.9 }}>
-          {committed.routed > 0
-            ? `Placed ${committed.routed} card${committed.routed === 1 ? "" : "s"} already in your collection`
-            : null}
-          {committed.routed > 0 && committed.copies > 0 ? " · " : null}
-          {committed.copies > 0 ? `Wrote ${committed.copies} new copies` : null}
-          {committed.routed > 0 || committed.copies > 0 ? " · " : null}
-          {committed.lines} new lines · {committed.slots} slots · {committed.wishlist} wishlist
-          items · {committed.decisions} placement decisions.
+          Each one was written as you marked it done, so there is nothing left to save. Anything you
+          skip stays on this page until it has a location.
         </p>
         <button
           type="button"
@@ -801,7 +831,8 @@ function PlanView(props: {
               flatIndex={flatIndex}
               done={done}
               onSelect={setCur}
-              onToggleDone={toggleDone}
+              onShelve={shelveCard}
+              shelving={shelving}
             />
           ))}
         </div>
@@ -815,12 +846,15 @@ function PlanView(props: {
             <Spotlight
               item={flatItems[cur]}
               done={flatItems[cur] ? done.has(flatItems[cur].incomingId) : false}
-              onToggle={() => flatItems[cur] && toggleDone(flatItems[cur].incomingId)}
-              advance={advance}
+              busy={flatItems[cur] ? shelving === flatItems[cur].incomingId : false}
+              onShelve={async () => {
+                const item = flatItems[cur];
+                // Advance only on a successful write: a card that failed still needs a location, so
+                // leaving the cursor on it is the correct behaviour rather than skipping past it.
+                if (item && (await shelveCard(item))) advance();
+              }}
               onBackCard={() => setCur(Math.max(0, cur - 1))}
               onSkip={() => setCur(Math.min(total - 1, cur + 1))}
-              onCommit={onCommit}
-              committing={committing}
               override={flatItems[cur] ? overrides[flatItems[cur].incomingId] : undefined}
               onMove={() => flatItems[cur] && onMove(flatItems[cur])}
             />
@@ -858,7 +892,9 @@ export function BandSection(props: {
   flatIndex: Map<string, number>;
   done: Set<string>;
   onSelect: (index: number) => void;
-  onToggleDone: (incomingId: string) => void;
+  /** Shelves the card now (UIL-027). No un-shelve: corrections go through Move. */
+  onShelve: (item: PlanItem) => void;
+  shelving: string | null;
 }) {
   const {
     group,
@@ -870,7 +906,8 @@ export function BandSection(props: {
     flatIndex,
     done,
     onSelect,
-    onToggleDone,
+    onShelve,
+    shelving,
   } = props;
   const meta = bandMeta(group.bandKey);
   return (
@@ -915,7 +952,8 @@ export function BandSection(props: {
                 current={flatIndex.get(it.incomingId) === cur}
                 done={done.has(it.incomingId)}
                 onSelect={() => onSelect(flatIndex.get(it.incomingId) ?? 0)}
-                onToggle={() => onToggleDone(it.incomingId)}
+                onShelve={() => onShelve(it)}
+                busy={shelving === it.incomingId}
               />
             ))}
           </div>
@@ -929,11 +967,13 @@ export function BandSection(props: {
 export function PlanRow(props: {
   item: PlanItem;
   current: boolean;
+  /** Shelved — written to the database, not merely ticked (UIL-027). */
   done: boolean;
   onSelect: () => void;
-  onToggle: () => void;
+  onShelve: () => void;
+  busy?: boolean;
 }) {
-  const { item, current, done, onSelect, onToggle } = props;
+  const { item, current, done, onSelect, onShelve, busy = false } = props;
   const act = ACTION_META[item.action];
   const meta = bandMeta(item.bandKey);
   return (
@@ -946,14 +986,17 @@ export function PlanRow(props: {
         if (e.key === "Enter") onSelect();
       }}
     >
+      {/* Shelving is a WRITE now, and there is no reverse (her ruling: correct with Move). So an
+          already-shelved row's box is disabled rather than a toggle that would silently do nothing. */}
       <button
         type="button"
         className="box"
-        aria-label={done ? "Mark not done" : "Mark done"}
+        aria-label={done ? `${item.name} is shelved` : `Shelve ${item.name}`}
         aria-pressed={done}
+        disabled={done || busy}
         onClick={(e) => {
           e.stopPropagation();
-          onToggle();
+          onShelve();
         }}
       />
       <span
@@ -988,28 +1031,18 @@ export function PlanRow(props: {
 /** Exported for the render tests — the second of UIL-016's two hard-coded `imageUrl={null}` sites. */
 export function Spotlight(props: {
   item: PlanItem | undefined;
+  /** Shelved — already written to the database (UIL-027). */
   done: boolean;
-  onToggle: () => void;
-  advance: () => void;
+  /** Mid-write, so the control reads as working rather than unresponsive. */
+  busy?: boolean;
+  /** Writes this card and advances only if the write succeeded. */
+  onShelve: () => void;
   onBackCard: () => void;
   onSkip: () => void;
-  onCommit: () => void;
-  committing: boolean;
   override: MoveDestination | undefined;
   onMove: () => void;
 }) {
-  const {
-    item,
-    done,
-    onToggle,
-    advance,
-    onBackCard,
-    onSkip,
-    onCommit,
-    committing,
-    override,
-    onMove,
-  } = props;
+  const { item, done, busy = false, onShelve, onBackCard, onSkip, override, onMove } = props;
   if (!item) return <p style={{ fontSize: 11, color: "var(--ink-2)" }}>No cards to handle.</p>;
   const act = ACTION_META[item.action];
   const meta = bandMeta(item.bandKey);
@@ -1054,21 +1087,21 @@ export function Spotlight(props: {
         <div className="doit" style={{ background: "var(--note)" }}>
           <b style={{ fontSize: 13 }}>Needs a decision</b>
           <span style={{ fontSize: 11, color: "var(--ink-2)" }}>
-            Confirm-or-override lands in Lines (M7). The proposal is recorded on commit.
+            Confirm-or-override lands in Lines (M7). The proposal is recorded when you shelve it.
           </span>
         </div>
       ) : null}
 
       <div className="spotbtns">
+        {/* One button, one meaning: this writes the placement. No Undo — shelving is a real write and
+            a misplacement is corrected with Move, like any other card (her ruling). */}
         <button
           type="button"
           className="btn btn-primary go"
-          onClick={() => {
-            onToggle();
-            advance();
-          }}
+          onClick={onShelve}
+          disabled={done || busy}
         >
-          {done ? "Undo" : "Done, next card"}
+          {done ? "Shelved ✓" : busy ? "Shelving…" : "Done, next card"}
         </button>
         <button type="button" className="btn" onClick={onBackCard}>
           ◀ Back
@@ -1078,18 +1111,12 @@ export function Spotlight(props: {
         </button>
       </div>
 
-      <button
-        type="button"
-        className="btn btn-primary"
-        style={{ width: "100%", marginTop: 12, justifyContent: "center" }}
-        onClick={onCommit}
-        disabled={committing}
-      >
-        {committing ? "Committing…" : "Commit the haul"}
-      </button>
-      {/* The commit is the one write that must not be interrupted — a single transaction over every
-          copy, line, slot and decision (UIL-008). Saying so is the point: it discourages a reload. */}
-      {committing ? <ProgressBar label="Writing the haul — do not close" /> : null}
+      {/* "Commit the haul" lived here and is GONE, not relabelled (UIL-027, her ruling). It wrote the
+          entire draft — decided or not — which is what treated unshelved cards as inventory. Each card
+          is written as she marks it done, so there is nothing left for a batch button to do. The
+          progress bar moves with it: the long write it warned about no longer exists, and one card is
+          fast enough that a bar would be noise. */}
+      {busy ? <ProgressBar label="Shelving this card…" /> : null}
     </>
   );
 }

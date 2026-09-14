@@ -90,7 +90,7 @@ describe("UIL-016 · the plan screen renders it", () => {
         current: false,
         done: false,
         onSelect: () => {},
-        onToggle: () => {},
+        onShelve: () => {},
       }),
     );
     // CardFace appends the quality + extension to the stored base path.
@@ -103,12 +103,9 @@ describe("UIL-016 · the plan screen renders it", () => {
       createElement(Spotlight, {
         item: row(ART),
         done: false,
-        onToggle: () => {},
-        advance: () => {},
+        onShelve: () => {},
         onBackCard: () => {},
         onSkip: () => {},
-        onCommit: () => {},
-        committing: false,
         override: undefined,
         onMove: () => {},
       }),
@@ -124,7 +121,7 @@ describe("UIL-016 · the plan screen renders it", () => {
         current: false,
         done: false,
         onSelect: () => {},
-        onToggle: () => {},
+        onShelve: () => {},
       }),
     );
     expect(html).not.toContain("<img");
@@ -138,7 +135,7 @@ describe("UIL-016 · the plan screen renders it", () => {
         current: false,
         done: false,
         onSelect: () => {},
-        onToggle: () => {},
+        onShelve: () => {},
       }),
     );
     expect(html).toContain('loading="lazy"');
@@ -156,7 +153,7 @@ describe("UIL-016 · the plan screen renders it", () => {
         current: false,
         done: false,
         onSelect: () => {},
-        onToggle: () => {},
+        onShelve: () => {},
       }),
     );
     expect(html).not.toContain("<img");
