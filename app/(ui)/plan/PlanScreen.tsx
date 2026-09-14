@@ -16,7 +16,7 @@
  * are there in the first paint; `reloadPending` re-reads it after a commit.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Variant } from "@/lib/engine";
 // Leaf import, NOT the "@/lib/plan" barrel: this is a client component, and the barrel re-exports
 // ./session, which pulls lib/supabase/server (and `next/headers`) into the browser bundle. The
@@ -690,6 +690,45 @@ function PlanView(props: {
     toggleCollapse,
   } = props;
 
+  /**
+   * UIL-019: the haul bar is now sticky, and the band heads stick too — at `top: 0` each, they would
+   * overlap and the bar would cover #78's fold controls. So the bar's real height is published as
+   * `--haulbar-h` and the band heads offset by it. Measured rather than assumed a constant: the bar is
+   * `flex-wrap`, so it is one row on a desktop and two or three on a phone.
+   *
+   * A ResizeObserver, not a one-off read: the height changes when the bar wraps on rotate/resize, and
+   * when the card count crosses a digit. Writes a CSS property through a ref — a DOM side effect, no
+   * setState, so it cannot cascade renders.
+   */
+  const haulbarRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = haulbarRef.current;
+    if (!el) return;
+    // On the ROOT, not on the bar: the band heads are in a sibling subtree, and a custom property
+    // only inherits downward. Setting it on `.haulbar` would publish it to nothing that needs it.
+    const root = document.documentElement;
+    const publish = () => {
+      root.style.setProperty("--haulbar-h", `${Math.round(el.getBoundingClientRect().height)}px`);
+    };
+    publish();
+    // ResizeObserver AND a viewport listener, deliberately. Verified in a browser: at 375px the bar
+    // wraps from 69px to 115px, and the observer alone did NOT re-publish — which left the band heads
+    // stuck at the old offset and HIDDEN behind the bar, on a phone, which is where this is a PWA.
+    // Rather than rely on working out why the observer missed it, also listen to the event that
+    // certainly fires.
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+    ro?.observe(el);
+    window.addEventListener("resize", publish);
+    window.addEventListener("orientationchange", publish);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", publish);
+      window.removeEventListener("orientationchange", publish);
+      // Leaving a stale height behind would offset band heads on a later visit with a shorter bar.
+      root.style.removeProperty("--haulbar-h");
+    };
+  }, []);
+
   const total = flatItems.length;
   const doneCount = flatItems.filter((it) => done.has(it.incomingId)).length;
 
@@ -746,7 +785,7 @@ function PlanView(props: {
 
   return (
     <>
-      <div className="haulbar panel">
+      <div className="haulbar panel" ref={haulbarRef}>
         <span className="hk">HAUL PLAN</span>
         {/* Say so rather than let her wonder whether it recomputed (UIL-006). */}
         {resumed ? (
