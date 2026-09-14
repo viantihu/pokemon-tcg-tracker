@@ -3219,3 +3219,41 @@ as shipped; this only adds a shortcut next to it.
 
 **Priority rationale.** Low: nothing is broken, the current behaviour was a deliberate choice, and
 the cost being addressed is one extra click, not a data risk or a blocked workflow.
+
+## UIL-044 — Collector-number search still ranks a padded exact match arbitrarily when it collides with other sets — confirmed as UIL-026's gap, not a new defect
+
+- **Reported:** 2026-09-14 (found while retesting UIL-010's fix, same search box UIL-015 was found in)
+- **Status:** Open — duplicate root cause of UIL-026, not a separate fix
+- **Priority:** See UIL-026; this is real-world evidence the gap is worth acting on, not a new priority
+  call
+- **Area:** Collections, Lookup
+- **Env:** Testing
+
+In her words: "That number should've ONLY returned the minior card, but instead, it was at the bottom
+of the list." Typing `099/182` in the "New Collection" set-list search returned five cards sharing the
+exact local id `099` across five different sets — Rabsca (Paldea Evolved), Greavard (Obsidian Flames),
+Kingler (151), **Minior (Paradox Rift)**, and Pineco (Paldean Fates) — with Minior fourth of five, not
+first and not alone.
+
+**Confirmed: this is UIL-026's exact mechanism, hit without any padding ambiguity at all.** Unlike
+UIL-015's case, `099` needs no stripped/padded disambiguation — all five results are exact matches on
+the same 3-digit local id, so [`catalog-card.ts`](<../lib/repo/catalog-card.ts>)'s single per-candidate
+query (`.eq("local_id", "099").order("set_id", { ascending: true })`) returns all five in one call, tied
+on local id, and orders them alphabetically by `set_id` alone. Verified the actual set ids account for
+the exact order she saw: `sv02` (Paldea Evolved) < `sv03` (Obsidian Flames) < `sv03.5` (151) < `sv04`
+(Paradox Rift) < `sv04.5` (Paldean Fates) — precisely Rabsca, Greavard, Kingler, Minior, Pineco. Minior
+lands fourth of five (Pineco is technically last), which is close enough to "at the bottom" that her
+description and the mechanism agree.
+
+**The denominator she typed is the decisive signal, confirmed live rather than assumed.** TCGdex reports
+`sv04` (Paradox Rift) as `cardCount.official: 182` — **exactly** the denominator she typed — while the
+other four sets are 193, 197, 165, and 91. None of the others match; only Minior's set does. This is
+UIL-026's proposed fix (rank by the typed denominator matching a set's official count) demonstrated on
+a real, concrete case rather than the synthetic `me02.5` example that entry was written from.
+
+**Not logging this as a new defect or a new fix.** The root cause, the mechanism, and the suggested fix
+are already fully described in UIL-026 ("Mirror the printed set total AND release date, so tied
+collector-number matches can be ranked instead of sorted alphabetically"). Recording this here because
+the log's convention is that what she reports gets its own entry in her words — but the entry that
+needs attention is UIL-026, not this one. Worth the Senior BA weighing whether a second, concrete UAT
+hit on the same gap changes UIL-026's position in the queue; not asserting a priority change here.
