@@ -24,13 +24,16 @@ import type { Variant } from "@/lib/engine";
 import { progressPips } from "@/lib/plan/progress";
 import type { PlanBandGroup, PlanItem } from "@/lib/plan";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
+// Leaf import of the pure move module (its only dependency is ./types; the `WriteOp` it names is a
+// type-only import), so bringing `describeMove` into the browser bundle drags in no server code.
+import { describeMove, moveNameLookups, type MoveNameLookups } from "@/lib/line/move";
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
 import { CardLookup } from "../_components/CardLookup";
 import { ProgressBar } from "../_components/ProgressBar";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { VariantSelector } from "../_components/VariantSelector";
-import { ACTION_META, bandMeta } from "../_components/plan-meta";
+import { ACTION_META, bandMeta, moveMeta } from "../_components/plan-meta";
 import {
   shelveCardAction,
   getMoveOptions,
@@ -215,6 +218,27 @@ export function PlanScreen({
     });
   }, [liveStamp, haulId, source, notes, draft, plan, done, cur, overrides, collapsed]);
 
+  // The override DESTINATION TEXT (e.g. "Binder 1 · Back · Green") needs the move options' name maps,
+  // which `openMove` loads lazily. But a RESUMED plan (UIL-006) can carry overrides she set last
+  // sitting with the panel never opened this one, so the options are absent exactly when there is
+  // something to label (UIL-037). Load them once when overrides exist and we have not already. The
+  // short chip label degrades gracefully without them (`moveMeta` reads only the destination kind), so
+  // a failed load shows the right KIND of destination while missing only its proper name.
+  useEffect(() => {
+    if (moveOptions || Object.keys(overrides).length === 0) return;
+    let live = true;
+    getMoveOptions()
+      .then((opts) => {
+        if (live) setMoveOptions(opts);
+      })
+      .catch(() => {
+        /* Chip still resolves from the destination alone; the sentence falls back to the suggestion. */
+      });
+    return () => {
+      live = false;
+    };
+  }, [overrides, moveOptions]);
+
   /** Re-read the queue and seed the draft from it. Only ever called from an event handler. */
   const reloadPending = useCallback(() => {
     setPendingState("loading");
@@ -385,6 +409,12 @@ export function PlanScreen({
     return m;
   }, [flatItems]);
 
+  // Name maps for override destination sentences (UIL-037), null until the move options have loaded.
+  const overrideNames = useMemo<MoveNameLookups | null>(
+    () => (moveOptions ? moveNameLookups(moveOptions) : null),
+    [moveOptions],
+  );
+
   /** Fold / unfold one band (UIL-018). Same shape as `toggleDone` — a set of keys, not a flag map. */
   function toggleCollapse(bandKey: string) {
     setCollapsed((prev) => {
@@ -439,6 +469,7 @@ export function PlanScreen({
           onBack={() => setPlan(null)}
           onReset={resetAll}
           overrides={overrides}
+          overrideNames={overrideNames}
           onMove={openMove}
           resumed={planIsResumed}
           collapsed={collapsed}
@@ -647,6 +678,41 @@ function IntakePanel(props: {
 
 /* ---------------------------------- plan ---------------------------------- */
 
+/**
+ * What to SHOW for a card: the destination she overrode to, or — absent an override — the cascade's
+ * own suggestion (UIL-037). One function so the spotlight panel and the worklist row cannot disagree
+ * with each other about where a card is going, which is the whole of the reported bug.
+ *
+ * The short `label`/`color` come from `moveMeta`, which reads only the destination KIND, so the chip
+ * is right even before the name maps have loaded. The long `destination` sentence needs those maps
+ * (`describeMove`); until they arrive it falls back to the suggestion text rather than showing a
+ * half-resolved label with raw ids in it.
+ */
+function displayFor(
+  item: PlanItem,
+  override: MoveDestination | undefined,
+  names: MoveNameLookups | null,
+): { big: string; label: string; color: string; dark?: boolean; destination: string } {
+  if (override) {
+    const m = moveMeta(override);
+    return {
+      big: m.big,
+      label: m.label,
+      color: m.color,
+      dark: m.dark,
+      destination: names ? describeMove(override, names) : item.destination,
+    };
+  }
+  const act = ACTION_META[item.action];
+  return {
+    big: act.big,
+    label: act.label,
+    color: act.color,
+    dark: act.dark,
+    destination: item.destination,
+  };
+}
+
 function PlanView(props: {
   plan: RunPlanResult;
   flatItems: PlanItem[];
@@ -662,6 +728,8 @@ function PlanView(props: {
   onBack: () => void;
   onReset: () => void;
   overrides: Record<string, MoveDestination>;
+  /** Name maps for override destination sentences (UIL-037); null until options load. */
+  overrideNames: MoveNameLookups | null;
   onMove: (item: PlanItem) => void;
   /** True when this plan was restored from a parked run rather than just computed (UIL-006). */
   resumed: boolean;
@@ -683,6 +751,7 @@ function PlanView(props: {
     onBack,
     onReset,
     overrides,
+    overrideNames,
     onMove,
     resumed,
     collapsed,
@@ -872,6 +941,8 @@ function PlanView(props: {
               onSelect={setCur}
               onShelve={shelveCard}
               shelving={shelving}
+              overrides={overrides}
+              overrideNames={overrideNames}
             />
           ))}
         </div>
@@ -895,6 +966,7 @@ function PlanView(props: {
               onBackCard={() => setCur(Math.max(0, cur - 1))}
               onSkip={() => setCur(Math.min(total - 1, cur + 1))}
               override={flatItems[cur] ? overrides[flatItems[cur].incomingId] : undefined}
+              overrideNames={overrideNames}
               onMove={() => flatItems[cur] && onMove(flatItems[cur])}
             />
           </div>
@@ -934,6 +1006,11 @@ export function BandSection(props: {
   /** Shelves the card now (UIL-027). No un-shelve: corrections go through Move. */
   onShelve: (item: PlanItem) => void;
   shelving: string | null;
+  /** Placement overrides she has set (UIL-037), so a row shows where she moved a card, not the
+   *  suggestion. Threaded here because `PlanView` holds the map and the row is two levels down. */
+  overrides: Record<string, MoveDestination>;
+  /** Name maps for the override destination text; null until options load (UIL-037). */
+  overrideNames: MoveNameLookups | null;
 }) {
   const {
     group,
@@ -947,6 +1024,8 @@ export function BandSection(props: {
     onSelect,
     onShelve,
     shelving,
+    overrides,
+    overrideNames,
   } = props;
   const meta = bandMeta(group.bandKey);
   return (
@@ -993,6 +1072,8 @@ export function BandSection(props: {
                 onSelect={() => onSelect(flatIndex.get(it.incomingId) ?? 0)}
                 onShelve={() => onShelve(it)}
                 busy={shelving === it.incomingId}
+                override={overrides[it.incomingId]}
+                overrideNames={overrideNames}
               />
             ))}
           </div>
@@ -1011,9 +1092,15 @@ export function PlanRow(props: {
   onSelect: () => void;
   onShelve: () => void;
   busy?: boolean;
+  /** The destination she overrode this card to, if any (UIL-037). */
+  override?: MoveDestination | undefined;
+  /** Name maps for the override sentence; null until options load (UIL-037). */
+  overrideNames?: MoveNameLookups | null;
 }) {
-  const { item, current, done, onSelect, onShelve, busy = false } = props;
-  const act = ACTION_META[item.action];
+  const { item, current, done, onSelect, onShelve, busy = false, override, overrideNames } = props;
+  // Show where she MOVED the card, not where the cascade proposed — same source as the spotlight, so
+  // the two cannot disagree (UIL-037).
+  const disp = displayFor(item, override ?? undefined, overrideNames ?? null);
   const meta = bandMeta(item.bandKey);
   return (
     <div
@@ -1051,16 +1138,18 @@ export function PlanRow(props: {
         <div className="nm">{item.name}</div>
         <div className="meta">
           {item.localId ? <span className="no">{item.localId}</span> : null}
-          <span className="u">{item.destination}</span>
+          <span className="u">{disp.destination}</span>
         </div>
       </div>
       <div className="actwrap">
         <span
           className="act u"
-          style={{ background: act.color, color: act.dark ? "var(--panel)" : "var(--ink)" }}
+          style={{ background: disp.color, color: disp.dark ? "var(--panel)" : "var(--ink)" }}
         >
-          {act.label}
+          {disp.label}
         </span>
+        {/* She overrode this one: mark it so she can pick out her own decisions at a glance (UIL-037). */}
+        {override ? <span className="moved u">Moved</span> : null}
         {item.needsDecision ? <span className="needs u">Decide</span> : null}
       </div>
     </div>
@@ -1079,11 +1168,25 @@ export function Spotlight(props: {
   onBackCard: () => void;
   onSkip: () => void;
   override: MoveDestination | undefined;
+  /** Name maps for the override sentence; null until options load (UIL-037). */
+  overrideNames?: MoveNameLookups | null;
   onMove: () => void;
 }) {
-  const { item, done, busy = false, onShelve, onBackCard, onSkip, override, onMove } = props;
+  const {
+    item,
+    done,
+    busy = false,
+    onShelve,
+    onBackCard,
+    onSkip,
+    override,
+    overrideNames,
+    onMove,
+  } = props;
   if (!item) return <p style={{ fontSize: 11, color: "var(--ink-2)" }}>No cards to handle.</p>;
-  const act = ACTION_META[item.action];
+  // Show where she MOVED the card, not where the cascade proposed — the whole point of the review
+  // panel is verifying her own decision before she clicks Done (UIL-037).
+  const disp = displayFor(item, override, overrideNames ?? null);
   const meta = bandMeta(item.bandKey);
   return (
     <>
@@ -1108,11 +1211,13 @@ export function Spotlight(props: {
       </div>
 
       <div className="doit">
-        <b>{act.big}</b>
-        <span className="sg u">{item.destination}</span>
+        <b>{disp.big}</b>
+        <span className="sg u">{disp.destination}</span>
       </div>
 
-      {override ? <div className="movedtag u">Moved · override at commit</div> : null}
+      {/* "Moved" as its own label because Done is now the commit (UIL-027) — there is no separate
+          commit step for the override to be "at". The `.movedtag u` styling is preserved. */}
+      {override ? <div className="movedtag u">Moved · {disp.destination}</div> : null}
 
       <button type="button" className="movebtn wide u" style={{ width: "100%" }} onClick={onMove}>
         ↔ Change position

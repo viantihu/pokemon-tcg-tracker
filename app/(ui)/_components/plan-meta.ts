@@ -6,6 +6,7 @@
  * module is pure data, safe to import from client components.
  */
 
+import type { MoveDestination } from "@/lib/line/types";
 import type { PlanActionKind } from "@/lib/plan";
 
 export interface BandMeta {
@@ -86,3 +87,35 @@ export const ACTION_META: Record<PlanActionKind, ActionMeta> = {
   FRONT: { label: "PLACE IN FRONT HALF", big: "Place in the front half", color: "#ADEBB3" },
   BULK: { label: "SEND TO BULK BOX", big: "Into the bulk box", color: "#A89D85" },
 };
+
+/**
+ * The same vocabulary for a destination SHE chose, not one the cascade proposed (UIL-037).
+ *
+ * Why this is not just `ACTION_META` reused: there is no action for "back half, no line". A manual
+ * move to the back half deliberately does NOT join an evolution line — `placementForMove` clears
+ * `line_slot_id` — so labelling it FILL, NEWLINE or PULL would name work she is not doing. It gets its
+ * own entry, in the back half's own palette (`NEWLINE`'s violet, since that is the back-half colour
+ * the worklist already reads as "back").
+ *
+ * Deliberately short strings. The full destination sentence (`describeMove`) goes in the row's meta
+ * line and the spotlight block; the chip is a fixed-width pill in a flex row, and long content in one
+ * is exactly what blew the page to ~4,800px in UIL-007.
+ */
+export const MOVE_META: Record<"bulk" | "collection" | "front" | "back", ActionMeta> = {
+  bulk: ACTION_META.BULK,
+  collection: ACTION_META.SPEC,
+  front: ACTION_META.FRONT,
+  back: { label: "PLACE IN BACK HALF", big: "Place in the back half", color: "#EDDFF7" },
+};
+
+/** Chip + headline for an override destination. Total over `MoveDestination`. */
+export function moveMeta(dest: MoveDestination): ActionMeta {
+  switch (dest.kind) {
+    case "bulk":
+      return MOVE_META.bulk;
+    case "collection":
+      return MOVE_META.collection;
+    case "shelf":
+      return dest.half === "front" ? MOVE_META.front : MOVE_META.back;
+  }
+}

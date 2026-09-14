@@ -436,6 +436,17 @@ nav.menu .tab .n {
   font-size: 10px;
   box-shadow: 2px 2px 0 rgba(60, 60, 59, 0.25);
 }
+/* Sits beside `.act` in `.actwrap` to mark a card she overrode (UIL-037), so a scroll picks out her
+   own decisions from a wall of cascade-proposed ones without opening the spotlight for each. */
+.moved {
+  display: inline-block;
+  padding: 4px 7px;
+  border: 3px solid var(--ink);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 10px;
+  box-shadow: 2px 2px 0 rgba(60, 60, 59, 0.25);
+}
 
 /* ---------- card face ---------- */
 .face {

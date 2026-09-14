@@ -14,10 +14,10 @@ import {
   applyDecision,
   applyMove,
   loadLineScreen,
+  moveNameLookups,
   type DecisionChoiceId,
   type LineScreenData,
   type MoveDestination,
-  type MoveNameLookups,
 } from "@/lib/line";
 import { getOwnerContext } from "@/lib/plan/session";
 import { errorMessage } from "@/lib/errors";
@@ -26,21 +26,6 @@ import { errorMessage } from "@/lib/errors";
 export async function loadLine(): Promise<LineScreenData> {
   const { db } = await getOwnerContext();
   return loadLineScreen(db);
-}
-
-function nameLookups(data: LineScreenData): MoveNameLookups {
-  const binderName = (id: string | null) =>
-    (id && data.moveOptions.binders.find((b) => b.id === id)?.name) || "Binder";
-  const collectionName = (id: string) => {
-    for (const list of Object.values(data.moveOptions.collectionsByBinder)) {
-      const hit = list.find((c) => c.id === id);
-      if (hit) return hit.name;
-    }
-    return null;
-  };
-  const bandDisplay = (key: string) =>
-    data.moveOptions.bands.find((b) => b.key === key)?.display ?? key;
-  return { binderName, collectionName, bandDisplay };
 }
 
 export type MoveActionResult =
@@ -60,7 +45,7 @@ export async function moveCardAction(
   try {
     const { db } = await getOwnerContext();
     const before = await loadLineScreen(db);
-    const res = await applyMove(db, { copyId, destination }, nameLookups(before));
+    const res = await applyMove(db, { copyId, destination }, moveNameLookups(before.moveOptions));
     const data = await loadLineScreen(db);
     return { ok: true, label: res.destinationLabel, data };
   } catch (err) {

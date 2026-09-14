@@ -76,6 +76,8 @@ function render(
       onSelect: () => {},
       onShelve: () => {},
       shelving: null,
+      overrides: {},
+      overrideNames: null,
       ...over,
     }),
   );
