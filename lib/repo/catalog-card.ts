@@ -2,6 +2,32 @@
 import { parseCardQuery } from "@/lib/catalog/collector-number";
 import { createRepo, type DbClient, type Insert, type Row } from "./base";
 
+/**
+ * Upper bound on how many exact `local_id` matches one candidate can produce — a number exists in at
+ * most one card per set (~218 sets), so this only exists to keep an unbounded read from a bad filter
+ * from becoming a full-table scan. Well above the real ceiling; not a display limit.
+ */
+const EXACT_MATCH_FETCH_CAP = 500;
+
+/**
+ * Float the exact matches whose set's official card count equals the typed denominator to the front,
+ * STABLY — the input's order (recency, then set_id) is preserved within each partition. Denominator is
+ * a ranking signal only (UIL-026): a non-matching row still appears, just after the matches. A missing
+ * `setTotal`, or a row with a NULL `set_card_count_official`, simply gets no boost.
+ */
+function rankExactMatches(
+  rows: Row<"catalog_card">[],
+  setTotal: number | undefined,
+): Row<"catalog_card">[] {
+  if (setTotal === undefined) return rows;
+  const matches: Row<"catalog_card">[] = [];
+  const rest: Row<"catalog_card">[] = [];
+  for (const r of rows) {
+    (r.set_card_count_official === setTotal ? matches : rest).push(r);
+  }
+  return matches.length === 0 ? rows : [...matches, ...rest];
+}
+
 export const catalogCardRepo = {
   ...createRepo("catalog_card", "tcgdex_id"),
 
@@ -138,6 +164,18 @@ export const catalogCardRepo = {
     // and `11` → ["11", "011"]. Padded-first would be right for her query and wrong for the mirror
     // image of it. Querying one form at a time also means the `limit` cannot be consumed by the
     // lower-precedence form before the higher one is asked for.
+    //
+    // WITHIN one candidate, when the same number exists in several sets (UIL-026): the old
+    // `.order("set_id")` was alphabetical, so `099/182` for Minior (`sv04-099`) buried the match
+    // under five other 099s because `sv04` sorts late. Now ordered by RECENCY at the DB
+    // (`set_release_date desc nulls last`, then `set_id` for a stable tie-break), and then the exact
+    // matches whose set's official count equals the typed denominator are floated to the front in JS
+    // (`rankExactMatches`). Denominator is a rank, never a filter — a `Shuckle 136/132` legitimately
+    // exceeds its own total, so a non-matching row still appears, just lower.
+    //
+    // Fetch the WHOLE match set for the candidate (bounded by set count, capped defensively) BEFORE
+    // ranking, not `limit - out.length` rows: a denominator match that sorts late by recency must not
+    // be dropped by the row cap before it can be floated to the front.
     for (const localId of parsed.localIds) {
       if (out.length >= limit) break;
       const { data, error } = await db
@@ -145,10 +183,11 @@ export const catalogCardRepo = {
         .select("*")
         .eq("is_digital_only", false)
         .eq("local_id", localId)
+        .order("set_release_date", { ascending: false, nullsFirst: false })
         .order("set_id", { ascending: true })
-        .limit(limit - out.length);
+        .limit(EXACT_MATCH_FETCH_CAP);
       if (error) throw error;
-      take(data ?? []);
+      take(rankExactMatches(data ?? [], parsed.setTotal));
     }
 
     if (out.length < limit && q.length > 0) {

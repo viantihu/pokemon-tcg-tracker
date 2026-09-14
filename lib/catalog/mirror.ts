@@ -74,10 +74,20 @@ export function extractPrices(pricing: TcgdexCardFull["pricing"]): {
  * Map one full TCGdex card to a `catalog_card` insert row. ids/localId stored verbatim;
  * `evolveFrom` "None" → null (basics); series comes from the set resource (the card's embedded
  * `set` has no `serie`). Does NOT set artwork fields — that is `regroupArtwork`'s job.
+ *
+ * `setCardCountOfficial` and `setReleaseDate` (UIL-026) come from `opts`, not from `card.set`: the
+ * card's embedded `set` object carries `cardCount` but NOT `releaseDate`, so both are read once off the
+ * set resource in `syncSet` and threaded through here — the same reason `setSeries` is. Do not
+ * "simplify" either to `card.set`, or the date silently becomes NULL on every row.
  */
 export function toCatalogRow(
   card: TcgdexCardFull,
-  opts: { isDigitalOnly: boolean; setSeries?: string | null },
+  opts: {
+    isDigitalOnly: boolean;
+    setSeries?: string | null;
+    setCardCountOfficial?: number | null;
+    setReleaseDate?: string | null;
+  },
 ): CatalogInsert {
   const { priceLow, priceMarket } = extractPrices(card.pricing);
   const evolveFrom = card.evolveFrom && card.evolveFrom !== "None" ? card.evolveFrom : null;
@@ -101,6 +111,8 @@ export function toCatalogRow(
     image_url: card.image ?? null,
     price_low: priceLow,
     price_market: priceMarket,
+    set_card_count_official: opts.setCardCountOfficial ?? null,
+    set_release_date: opts.setReleaseDate ?? null,
   };
 }
 
@@ -166,12 +178,20 @@ export async function syncSet(
   const set = await tcgdex.getSet(setId, opts.locale);
   const isDigitalOnly = set.serie?.id === TCG_POCKET_SERIE_ID;
   const setSeries = set.serie?.name ?? null;
+  // Read once off the set resource (UIL-026): the per-card embedded `set` has cardCount but no
+  // releaseDate, so both are threaded through toCatalogRow rather than read from the card.
+  const setCardCountOfficial = set.cardCount?.official ?? null;
+  const setReleaseDate = set.releaseDate ?? null;
   const briefs = set.cards ?? [];
 
   const fulls = await mapLimit(briefs, opts.concurrency ?? 8, (b) =>
     tcgdex.getCard(b.id, opts.locale),
   );
-  const rows = dedupeById(fulls.map((c) => toCatalogRow(c, { isDigitalOnly, setSeries })));
+  const rows = dedupeById(
+    fulls.map((c) =>
+      toCatalogRow(c, { isDigitalOnly, setSeries, setCardCountOfficial, setReleaseDate }),
+    ),
+  );
 
   let upserted = 0;
   for (const batch of chunk(rows, opts.batchSize ?? 500)) {

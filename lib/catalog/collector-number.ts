@@ -10,10 +10,13 @@
  *   2. Padding was never normalized. `local_id` keeps TCGdex's padding verbatim and it VARIES BY SET
  *      (0002_domain.sql: "EXACT padding ('027','82')"), so even a bare `099` misses a set storing `99`.
  *
- * WHY THE DENOMINATOR IS DISCARDED, not matched. There is no set-total column on `catalog_card`, and
- * counting rows per `set_id` is not a substitute: printed totals exclude secret rares, so a card like
- * `Shuckle 136/132` legitimately exceeds its own denominator. Discarding it is correct rather than a
- * shortcut — it carries no information the catalog can check.
+ * THE DENOMINATOR RANKS, IT DOES NOT FILTER (UIL-026). It was discarded entirely until `catalog_card`
+ * gained `set_card_count_official` (migration 0009). It still must never FILTER: printed totals exclude
+ * secret rares, so a card like `Shuckle 136/132` legitimately exceeds its own denominator, and counting
+ * rows per `set_id` is not a substitute either. But as a RANKING signal it is safe and decisive — an
+ * exact `local_id` match whose set's official count equals the typed denominator is almost certainly
+ * the card, so it sorts first while the others still appear below it. `setTotal` carries it out for the
+ * search to use; a set that happens to lack the count just doesn't get the boost.
  *
  * Pure. Imports `localIdCandidates` from the sync resolver rather than reimplementing it, because that
  * padding logic is already the verified answer to the same question (sync-architecture §1.3) and a
@@ -32,6 +35,14 @@ export interface ParsedCardQuery {
   localIds: string[];
   /** True when the query was ONLY a collector number, so there is no useful free text left. */
   numberOnly: boolean;
+  /**
+   * The printed denominator (`182` in `099/182`), when it was a plain number. Used ONLY to RANK exact
+   * `local_id` matches — a set whose official card count equals this sorts first (UIL-026) — never to
+   * filter, because printed totals exclude secret rares, so `Shuckle 136/132` legitimately exceeds its
+   * own denominator. Absent for a bare number, an already-lettered denominator (`TG05/TG30`), or a
+   * non-numeric one.
+   */
+  setTotal?: number;
 }
 
 /**
@@ -48,8 +59,15 @@ export function parseCardQuery(raw: string): ParsedCardQuery {
 
   const printed = PRINTED.exec(q);
   if (printed) {
-    // The denominator is deliberately dropped — see the header.
-    return { text: printed[1], localIds: localIdCandidates(printed[1]), numberOnly: true };
+    // Denominator kept for RANKING only (see header) — and only when it is a plain number. A lettered
+    // denominator like `TG30` is not a set's official count, so it stays absent.
+    const denom = /^[0-9]+$/.test(printed[2]) ? Number(printed[2]) : undefined;
+    return {
+      text: printed[1],
+      localIds: localIdCandidates(printed[1]),
+      numberOnly: true,
+      setTotal: denom,
+    };
   }
 
   const bare = BARE_NUMBER.exec(q);
@@ -57,16 +75,20 @@ export function parseCardQuery(raw: string): ParsedCardQuery {
     return { text: q, localIds: localIdCandidates(bare[1]), numberOnly: true };
   }
 
-  // A number embedded in a longer query ("minior 099", "sv03 099/182"): search both halves.
-  const embedded = /(?:^|\s)([0-9]{1,4})\s*(?:\/\s*[0-9a-z]{1,5})?(?=\s|$)/i.exec(q);
+  // A number embedded in a longer query ("minior 099", "sv03 099/182"): search both halves. The
+  // denominator group is captured (not just skipped) so "minior 099/182" gets the same ranking boost
+  // as the bare printed form.
+  const embedded = /(?:^|\s)([0-9]{1,4})\s*(?:\/\s*([0-9a-z]{1,5}))?(?=\s|$)/i.exec(q);
   if (embedded) {
     const rest = (q.slice(0, embedded.index) + " " + q.slice(embedded.index + embedded[0].length))
       .replace(/\s+/g, " ")
       .trim();
+    const denom = embedded[2] && /^[0-9]+$/.test(embedded[2]) ? Number(embedded[2]) : undefined;
     return {
       text: rest === "" ? embedded[1] : rest,
       localIds: localIdCandidates(embedded[1]),
       numberOnly: rest === "",
+      setTotal: denom,
     };
   }
 
