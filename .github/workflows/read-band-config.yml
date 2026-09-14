@@ -203,3 +203,27 @@ jobs:
           fi
           echo "VERDICT: $waiting WAITING entries, under the 1000-row cap — the unpaged listWaiting is LATENT, not live. Reconciliation is currently reaching every entry."
           echo "Headroom before it bites: $((1000 - waiting)) more WAITING entries."
+
+          # ---- Second unpaged call site: copyRepo.listUnplaced (lib/repo/copy.ts:46-57), which feeds
+          # the Haul Plan's pending-placement queue (UIL-003's fix). Same 1000-row cap.
+          #
+          # COUNT THE PRE-FILTER SET, which is what the cap applies to. `loadPendingPlacements`
+          # subtracts copies that already hold a `placement_decision` AFTER the query returns
+          # (lib/plan/pending.ts:50-57), so truncation happens first, on the larger set. Counting only
+          # the "actually pending" remainder would understate the risk.
+          unplaced=$(count_of "copy?select=id&role=eq.bulk&binder_id=is.null&line_slot_id=is.null")
+          decisions=$(count_of "placement_decision?select=id")
+          echo
+          echo "copy WHERE role=bulk AND binder_id IS NULL AND line_slot_id IS NULL: $unplaced"
+          echo "placement_decision rows (total):                                     $decisions"
+
+          if [ "$unplaced" = "unknown" ]; then
+            echo "::warning::could not read a count for unplaced copies — that half is undetermined."
+            exit 0
+          fi
+          if [ "$unplaced" -ge 1000 ]; then
+            echo "::error::LIVE — $unplaced rows match listUnplaced, at or past the 1000-row cap, so copies past row 1000 never reach the Haul Plan and can never be placed. Silent. Re-rank and page it."
+            exit 1
+          fi
+          echo "VERDICT: $unplaced unplaced-shaped copies, under the cap — listUnplaced is LATENT too."
+          echo "Headroom: $((1000 - unplaced)) more."
