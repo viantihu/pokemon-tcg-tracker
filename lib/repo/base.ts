@@ -98,6 +98,40 @@ async function pageAll<R>(
 }
 
 /**
+ * Drives a FILTERED, custom-ordered read past the server's `max-rows` cap (UIL-031). Unlike
+ * `pageAll` — which pages a whole table ordered by its primary key — the caller builds each page
+ * itself: `page(from, to)` must apply the SAME filters and the SAME order on every call, ending in
+ * `.range(from, to)`. That lets a bespoke finder like `copyRepo.listUnplaced` (filtered on role and
+ * placement, ordered oldest-first) page instead of throwing on truncation, without `pageAll` having
+ * to know its filters.
+ *
+ * The order the caller applies MUST be a TOTAL order (no ties) — `.range()` only tiles correctly
+ * over rows in a fixed sequence, so an order that can tie (a timestamp, say) needs a unique
+ * tiebreaker appended, the way `listUnplaced` orders `created_at` then `id`. An order with ties can
+ * skip or duplicate rows across a page boundary.
+ */
+export async function pageFiltered<R>(
+  table: string,
+  page: (from: number, to: number) => PromiseLike<{ data: unknown; error: unknown }>,
+  pageSize = 1000,
+): Promise<R[]> {
+  const out: R[] = [];
+  for (let from = 0; ;) {
+    const { data, error } = await page(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as R[];
+    out.push(...rows);
+    if (rows.length === 0) return out;
+    from += rows.length;
+    if (out.length > LIST_ALL_HARD_CAP) {
+      throw new Error(
+        `pageFiltered(${table}) exceeded ${LIST_ALL_HARD_CAP} rows — refusing to page on.`,
+      );
+    }
+  }
+}
+
+/**
  * A single-column-primary-key CRUD repo for `table`, keyed on `pk` (default `"id"`).
  * Config tables use their natural key (`color_band.band`, `type_color_map.card_type`).
  */

@@ -1,5 +1,5 @@
 /** Copy: a physical card owned. system-design §4. */
-import { assertReadComplete, createRepo, type DbClient, type Row } from "./base";
+import { createRepo, pageFiltered, type DbClient, type Row } from "./base";
 
 export const copyRepo = {
   ...createRepo("copy"),
@@ -41,25 +41,28 @@ export const copyRepo = {
    * catches copies the cascade legitimately ROUTED to bulk, so the caller must still subtract the
    * ones that already have a `placement_decision`; `lib/plan/pending.ts` does that.
    *
-   * Oldest first, so the queue is worked in the order the cards entered the collection.
+   * Oldest first, so the queue is worked in the order the cards entered the collection —
+   * `created_at` ties broken by `id` for a stable, gapless order across a page boundary.
    *
-   * A card past the server's row cap would never appear here and never get placed, with no error
-   * anywhere (UIL-031) — worse than a slow-healing queue, an invisible one — so this throws rather
-   * than return a partial queue.
+   * Paged rather than guarded-and-thrown (UIL-031): this repo used to detect truncation here and
+   * throw, on the reasoning that a card past the cap silently never appearing is worse than an
+   * error. Right against silent truncation, but wrong against the option it didn't weigh — paging
+   * gives a COMPLETE queue, which beats both. It also avoids a deadlock a throw would create: this
+   * IS the Haul Plan's queue, so throwing here means `/plan` cannot load, and placing the queue's
+   * own cards down below the cap is the only in-app way out of a queue that's over it.
    */
   async listUnplaced(db: DbClient): Promise<Row<"copy">[]> {
-    const { data, error, count } = await db
-      .from("copy")
-      .select("*", { count: "exact" })
-      .eq("role", "bulk")
-      .is("binder_id", null)
-      .is("line_slot_id", null)
-      .order("created_at", { ascending: true })
-      .order("id", { ascending: true });
-    if (error) throw error;
-    const rows = data ?? [];
-    assertReadComplete("copy", rows, count);
-    return rows;
+    return pageFiltered<Row<"copy">>("copy", (from, to) =>
+      db
+        .from("copy")
+        .select("*")
+        .eq("role", "bulk")
+        .is("binder_id", null)
+        .is("line_slot_id", null)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
   },
 
   /** Copies in one presence group — the reconciliation unit's ordered members (sync-arch §1.5). */

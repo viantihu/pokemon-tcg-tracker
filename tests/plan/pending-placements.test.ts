@@ -67,6 +67,10 @@ class FakeQuery {
   then<T>(resolve: (v: { data: unknown; error: null }) => T) {
     return Promise.resolve({ data: this.filtered(), error: null }).then(resolve);
   }
+  /** `listUnplaced` now pages (UIL-031) — a single `.range()` covers this fixture's small row sets. */
+  range(from: number, to: number) {
+    return Promise.resolve({ data: this.filtered().slice(from, to + 1), error: null });
+  }
 }
 
 function fakeDb(store: Record<string, Record<string, unknown>[]>): DbClient {
