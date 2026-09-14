@@ -1,4 +1,5 @@
 /** CatalogCard: a TCGdex printing mirrored into the DB (read-only to the app). system-design §4. */
+import { parseCardQuery } from "@/lib/catalog/collector-number";
 import { createRepo, type DbClient, type Insert, type Row } from "./base";
 
 export const catalogCardRepo = {
@@ -74,21 +75,56 @@ export const catalogCardRepo = {
    * queries TCGdex live.
    */
   async search(db: DbClient, query: string, limit = 12): Promise<Row<"catalog_card">[]> {
-    // Strip PostgREST `or()` control characters so user input can't break out of the filter.
-    const q = query.replace(/[,()%*]/g, " ").trim();
-    if (q.length === 0) return [];
-    const like = `%${q}%`;
-    const { data, error } = await db
-      .from("catalog_card")
-      .select("*")
-      .eq("is_digital_only", false)
-      .or(
-        `name.ilike.${like},set_name.ilike.${like},local_id.ilike.${like},tcgdex_id.ilike.${like}`,
-      )
-      .order("name", { ascending: true })
-      .limit(limit);
-    if (error) throw error;
-    return data ?? [];
+    const parsed = parseCardQuery(query);
+    // Strip PostgREST `or()` control characters so user input can't break out of the filter. The
+    // slash goes too: it never appears in any column, so leaving it in was what made a printed
+    // collector number match nothing at all (UIL-010).
+    const q = parsed.text.replace(/[,()%*/]/g, " ").trim();
+    if (q.length === 0 && parsed.localIds.length === 0) return [];
+
+    const out: Row<"catalog_card">[] = [];
+    const seen = new Set<string>();
+    const take = (rows: Row<"catalog_card">[]) => {
+      for (const r of rows) {
+        if (seen.has(r.tcgdex_id)) continue;
+        seen.add(r.tcgdex_id);
+        out.push(r);
+      }
+    };
+
+    // A printed collector number is the natural key when building a collection from a set checklist,
+    // so an exact `local_id` hit ranks ABOVE any name match. Run as its own query rather than folded
+    // into the `or` below: a shared `limit` would let a dozen name matches crowd out the exact one.
+    // Equality, not `ilike` — `99` as a substring also matches `199`, `299` and `990`.
+    if (parsed.localIds.length > 0) {
+      const { data, error } = await db
+        .from("catalog_card")
+        .select("*")
+        .eq("is_digital_only", false)
+        .in("local_id", parsed.localIds)
+        .order("set_id", { ascending: true })
+        .order("local_id", { ascending: true })
+        .limit(limit);
+      if (error) throw error;
+      take(data ?? []);
+    }
+
+    if (out.length < limit && q.length > 0) {
+      const like = `%${q}%`;
+      const { data, error } = await db
+        .from("catalog_card")
+        .select("*")
+        .eq("is_digital_only", false)
+        .or(
+          `name.ilike.${like},set_name.ilike.${like},local_id.ilike.${like},tcgdex_id.ilike.${like}`,
+        )
+        .order("name", { ascending: true })
+        .limit(limit);
+      if (error) throw error;
+      take(data ?? []);
+    }
+
+    return out.slice(0, limit);
   },
 
   /**
