@@ -1443,6 +1443,28 @@ but it's the strongest evidence available without DB access.
 — there's no release-date column to sort by instead. So after this fix, a tie between two *padded exact
 matches* in different sets is still broken arbitrarily. See UIL-026.
 
+**Scale is why this stayed invisible until 23,548 rows, the same shape as UIL-007.** `.order("set_id")`
+being alphabetical, and digits sorting before letters, was true on day one — it just had nothing to bite
+on with the 3-row seed catalog. At real scale, twelve numerically-named sets happened to sort ahead of a
+real card's set and fill the limit first. Fine at small scale, wrong at production scale, same lesson
+UIL-007's progress strip already recorded.
+
+**The fix (PR [#73](https://github.com/viantihu/pokemon-tcg-tracker/pull/73), squash `a88dc5c`) is
+independently reproduced, not just claimed.** Ran the revert check myself in an isolated worktree:
+pre-fix `search()` against the current, corrected test double fails 5 of 15 tests, including both
+original UIL-010 assertions by name ("ranks the exact number match first, ahead of name matches",
+"finds both cards for a name plus a number, number first"); 10 pass. Third independent confirmation of
+the same result, from a third starting point. Status transition is the Senior BA's to record.
+
+**The `sync` safety claim in the resolution below needs the right discriminator, and it isn't "is the
+file in the diff."** `catalog-card.ts` serves both Lookup's `search()` (this fix) and sync's
+`findBySetLocal`/`findBySetLocalMany` (reached through `lib/sync/catalog-lookup.ts`, itself called from
+`lib/sync/resolve.ts`). PR #73's diff touches only `search()` — confirmed directly against the PR's
+patch, one hunk, starting well after `findBySetLocalMany`'s definition — and `lib/sync/resolve.ts` isn't
+in the diff at all. That's the correct way to state sync is unaffected: at the *function* level, not by
+checking whether a particular file appears in the changed-files list, since the same file serves both
+call paths and "the file changed" would have proved nothing either way.
+
 ## UIL-016 — No card images on the Haul Plan worklist or spotlight panel
 
 - **Reported:** 2026-09-13
@@ -2186,19 +2208,27 @@ what the author expected once Postgres runs them... UIL-012 shipped through a fu
 that way." Not High: no user-facing defect exists right now, and every fix currently in flight is being
 revert-checked against pre-fix source, which is the active mitigation.
 
-**Scope of the exposure, verified directly.** Each of these hand-rolls its own query-builder fake rather
-than using the PGlite-backed harness:
+**The risk is not uniform across the six files — triaged by class, which narrows the fix.**
 
-- `tests/catalog/card-search.test.ts`, `tests/catalog/mirror.test.ts`,
-  `tests/plan/pending-placements.test.ts`, `tests/sync/catalog-prefetch.test.ts` — each defines its own
-  `function fakeDb(...)`.
-- `tests/repo/list-all-paging.test.ts` — an inline fake table object
-  (`db: { from: () => query } as unknown as DbClient`), same exposure, no named function.
-- `tests/sync/exec-atomicity.test.ts` — **mixed, not purely unverified**: it runs one layer
-  ("builder logic") against its own `FakeDb`/`fakeClient`, but a separate layer in the same file already
-  goes through real PGlite via `pglite-rpc`'s `freshRpcDb`/`applyOps`. Worth being precise about this one
-  rather than counting it the same as the other five — it's a partial exception, already following the
-  pattern for half its assertions.
+- **Dangerous: doubles modelling PostgREST query semantics** — ordering, `limit`, `in`, filter
+  composition. These can disagree with the server about *which rows come back*, which is exactly how
+  this bug hid. `tests/catalog/card-search.test.ts`, `tests/catalog/mirror.test.ts`,
+  `tests/sync/catalog-prefetch.test.ts`, `tests/repo/list-all-paging.test.ts` (the last as an inline fake
+  table object, `db: { from: () => query } as unknown as DbClient`, same exposure with no named
+  function).
+- **Harmless: call-recorders that only assert an emitted op set.** They cannot produce this failure mode
+  at all — there's no query result to get wrong. `tests/sync/exec-atomicity.test.ts` is additionally
+  **mixed**: its "builder logic" layer uses its own `FakeDb`/`fakeClient`, but a separate layer in the
+  same file already goes through real PGlite via `pglite-rpc`'s `freshRpcDb`/`applyOps` — already
+  half-following the pattern this entry asks for.
+- **A third case, checked rather than assumed: `tests/plan/pending-placements.test.ts`.** Its `FakeQuery`
+  filters correctly (`eq`/`is`/`in`) but its `order()` is a literal no-op. Verified this is harmless, not
+  an oversight: [`lib/plan/pending.ts`](../lib/plan/pending.ts) never calls `.order()` on this path
+  either, so the fake's silence matches production's — there's nothing here for it to model wrong.
+
+**So the fix narrows to the first bucket only — move the four query-semantics doubles onto
+`tests/support/pglite-client.ts`; leave the call-recorders and the no-op-order case alone.** A
+materially smaller and better-targeted job than "audit every double."
 
 **`tests/support/pglite-client.ts` is the mitigation pattern, not a suggestion — it already exists.**
 Backed by real Postgres, real migrations, real RLS, real `apply_write_ops`; deliberately narrow (only
@@ -2208,18 +2238,24 @@ fidelity issue UIL-013 already described for engine-test fixtures, generalized: 
 double is production code with no tests of its own.** Nothing checks that ours models PostgREST
 correctly, and this entry is the second and third time in one day that gap produced a real miss.
 
-**Suggested fix.** Move these onto `tests/support/pglite-client.ts` where practical. Where a real DB is
-genuinely too heavy for a given test, add a conformance test that runs the same queries through both the
-fake and PGlite and asserts identical results — the durable version, since it makes the double's
-fidelity a tested property instead of an assumption, rather than trusting whoever writes the next fake to
-get `.order()` composition and PostgREST's actual comparison semantics right by hand.
+**Suggested fix.** Move the four query-semantics doubles above onto `tests/support/pglite-client.ts`.
+Where a real DB is genuinely too heavy for a given test, add a conformance test that runs the same
+queries through both the fake and PGlite and asserts identical results instead — the durable version,
+since it makes the double's fidelity a tested property instead of an assumption.
 
-**How this was found, worth recording as a review-bar addition, not just a fix.** The revert check
-(run a test against pre-fix source, confirm it fails) was adopted to prove a test catches its own bug. It
-turns out to do more: it audits the test double itself. A test that *passes* pre-fix isn't merely weak —
-it's evidence the harness is lying. The dev session found this only because the headline test passed
-pre-fix, made no sense, and got chased down instead of accepted as green. Worth keeping the revert check
-as standard practice specifically because of this second effect, not only the first.
+**How this was found, and the sharper rule it implies.** The revert check (run a test against pre-fix
+source, confirm it fails) was adopted to prove a test catches its own bug. It turns out to do more: it
+audits the test double itself. The precise logic — a test that passes pre-fix is *positive* evidence the
+harness is wrong, because a correct harness, a live bug, and a correct assertion cannot all hold at
+once. So the rule isn't "revert-check migrations" — it's **run the revert check on every fix, and treat
+an unexpected pass as a harness bug until proven otherwise.** The dev session found this only because the
+headline test passed pre-fix, made no sense, and got chased down instead of accepted as green.
+
+**Independently reproduced twice more, from two different starting points.** One session reverted
+`search()` to its pre-fix form while keeping the current, corrected fake and got 5 failures naming both
+original UIL-010 tests explicitly. A second, isolated run (this session, in a throwaway worktree, node
+untouched) reproduced the identical result: 5 of 15 fail, 10 pass, same two named tests among the
+failures. Three sessions, three different entry points, same number.
 
 **Priority rationale (Senior BA's read): Medium.** Not High — nothing user-facing is broken right now,
 and the fixes currently in flight are already being revert-checked as a mitigation. Genuinely the one
