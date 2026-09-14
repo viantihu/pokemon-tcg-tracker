@@ -14,6 +14,7 @@ export * from "./adapt";
 export * from "./context";
 export * from "./commit";
 export * from "./pending";
+export * from "./catalog-cache";
 export * from "./fingerprint";
 export * from "./progress";
 export { getOwnerContext, SEEDED_OWNER_ID, type OwnerContext } from "./session";

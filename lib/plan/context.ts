@@ -22,7 +22,6 @@ import {
 import {
   binderRepo,
   binderSectionRepo,
-  catalogCardRepo,
   collectionRepo,
   colorBandRepo,
   copyRepo,
@@ -32,6 +31,7 @@ import {
   type DbClient,
   type Row,
 } from "@/lib/repo";
+import { loadCatalogCached } from "./catalog-cache";
 import { toBinder, toCatalogCard, toCollection, toEvolutionLine, toOwnedCopy } from "./adapt";
 import { toPlanItem, type AssembleLookups } from "./assemble";
 import type { PlanItem, PlannedCard } from "./types";
@@ -92,7 +92,12 @@ export async function loadPlanContext(
     // `listAll`, not `list`: these tables scale with the collection and the mirror (~23.5k catalog
     // rows), and a single `select *` is silently capped at the server's `max-rows` (1000). A
     // truncated catalog would quietly break chain-building, viability and alternate ranking.
-    catalogCardRepo.listAll(db),
+    //
+    // The catalog specifically comes from a process-local cache (UIL-027). Per-card commits call this
+    // function once per "Done" click, and re-paging 23.5k rows each time is the cost that made the
+    // per-card model unshippable. Same rows either way, so placement is unaffected — see
+    // lib/plan/catalog-cache.ts for why this is cached rather than scoped.
+    loadCatalogCached(db),
     copyRepo.listAll(db),
     binderRepo.list(db),
     evolutionLineRepo.listAll(db),
