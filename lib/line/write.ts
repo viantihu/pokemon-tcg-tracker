@@ -1,18 +1,35 @@
 /**
  * Apply a move or a decision resolution (dev-spec §5 M7 acceptance; §4 audit trail).
  *
- * The write side of the line screen. A move rewrites a copy's placement columns and records a
- * `PlacementDecision` (`resolved_by: 'user'`); moving a card off a line reopens its vacated slot
- * (removal symmetry, sync-arch §1.6) and demotes a `complete` line to `open`. A decision resolution
- * re-derives the decision from FRESH state (never trusts a client write payload), turns the chosen
- * option into repo writes via the pure resolver, applies them in dependency order, and records the
- * audit row. Every branch writes exactly one `PlacementDecision`.
+ * The write side of the line screen. A move rewrites a copy's placement columns, joins the
+ * destination collection's chase list when there is one, and records a `PlacementDecision`
+ * (`resolved_by: 'user'`); moving a card off a line reopens its vacated slot (removal symmetry,
+ * sync-arch §1.6) and demotes a `complete` line to `open`. A decision resolution re-derives the
+ * decision from FRESH state (never trusts a client write payload), turns the chosen option into repo
+ * writes via the pure resolver, applies them in dependency order, and records the audit row. Every
+ * branch writes exactly one `PlacementDecision`.
  *
- * No cross-statement transaction (supabase-js; migrations frozen) — writes are ordered and small.
+ * ATOMICITY. `applyMove` is now ONE transaction: it reads fresh state, hands the whole ordered write
+ * set to the `apply_write_ops` RPC, and is all-or-nothing (UIL-023). It used to issue four separate
+ * awaited statements with no transaction and no compensating rollback — the fourth write path M10
+ * never converted. Every op it needs already existed (`update_copy`, `update_slot`,
+ * `update_line` from 0008, `union_collection_targets` from 0007, `insert_decision`), so the
+ * conversion required NO migration. Fixing UIL-022 by bolting a fifth un-transacted write onto that
+ * sequence would have created the exact half-apply this path exists to prevent: a copy physically in
+ * a collection whose chase list never got updated.
+ *
+ * `applyDecision` is NOT converted and is still a sequence of un-transacted writes. It needs an op
+ * `apply_write_ops` does not have — `wishlist_item` can only be INSERTED through the RPC (0006), never
+ * patched, and a decision resolution updates open wishlist rows (`resolved_at`, and a re-choose that
+ * refreshes an existing row). Converting it therefore means a new migration and a wider blast radius
+ * than UIL-022/UIL-023 name; it is called out in the PR rather than smuggled in here.
+ *
  * SERVER ONLY.
  */
 
 import {
+  applyWriteOps,
+  collectionRepo,
   copyRepo,
   evolutionLineRepo,
   lineSlotRepo,
@@ -22,60 +39,96 @@ import {
 } from "@/lib/repo";
 import { resolveDecisionWrites } from "./decisions";
 import { buildScreenModel } from "./load";
-import { describeMove, moveDecisionReason, placementForMove, type MoveNameLookups } from "./move";
-import type { DecisionChoiceId, MoveRequest } from "./types";
+import { buildMoveOps, describeMove, type MoveNameLookups } from "./move";
+import type { DecisionChoiceId, MoveDestination, MoveRequest } from "./types";
 
 export interface MoveResult {
   copyId: string;
   destinationLabel: string;
 }
 
-/** Move an owned/shelved copy to a new home; rewrite placement + write the user audit row. */
+/**
+ * Move an owned/shelved copy to a new home, ATOMICALLY: placement + vacated slot + demoted line +
+ * destination-collection membership + the audit row, all in one transaction.
+ *
+ * Everything the write set depends on is re-derived from FRESH state here — which slot the copy fills
+ * and whether that slot's line is `complete`. The client sends only a copy id and a destination; a
+ * stale slot or line id from the browser is never trusted (the rule `applyDecision` and
+ * `applyCollectionRemoval` both follow).
+ *
+ * `ownerId` is no longer a parameter: the RPC is SECURITY INVOKER, so `owner_id` defaults to
+ * `auth.uid()` and RLS enforces it. It is never carried in a payload.
+ */
 export async function applyMove(
   db: DbClient,
-  ownerId: string,
   req: MoveRequest,
   names: MoveNameLookups,
 ): Promise<MoveResult> {
   const copy = await copyRepo.getByPk(db, req.copyId);
   if (!copy) throw new Error("That card is no longer in the collection.");
 
-  const patch = placementForMove(req.destination);
-  const priorSlotId = copy.line_slot_id;
-
-  await copyRepo.update(db, req.copyId, {
-    role: patch.role,
-    binder_id: patch.binder_id,
-    binder_half: patch.binder_half,
-    color_band: patch.color_band,
-    line_slot_id: patch.line_slot_id,
-  });
+  await assertCollectionDestinationLives(db, req.destination);
 
   // Moving a card OUT of a line reopens the slot it filled and demotes a completed line.
-  if (priorSlotId) {
+  let reopenSlotId: string | null = null;
+  let demoteLineId: string | null = null;
+  if (copy.line_slot_id) {
     // By primary key: a full-table `list` is capped at the server's max-rows, so scanning for the
     // slot could silently miss it once the collection outgrows one page.
-    const slot = await lineSlotRepo.getByPk(db, priorSlotId);
+    const slot = await lineSlotRepo.getByPk(db, copy.line_slot_id);
     if (slot && slot.copy_id === req.copyId) {
-      await lineSlotRepo.update(db, slot.id, { state: "placeholder", copy_id: null });
+      reopenSlotId = slot.id;
       const line = await evolutionLineRepo.getByPk(db, slot.line_id);
-      if (line && line.status === "complete") {
-        await evolutionLineRepo.update(db, line.id, { status: "open" });
-      }
+      if (line && line.status === "complete") demoteLineId = line.id;
     }
   }
 
   const destinationLabel = describeMove(req.destination, names);
-  await placementDecisionRepo.insert(db, {
-    owner_id: ownerId,
-    haul_id: null,
-    copy_id: req.copyId,
-    decision: "placement-move",
-    reason: moveDecisionReason(req.destination, destinationLabel),
-    resolved_by: "user",
+  await applyWriteOps(db, {
+    ops: buildMoveOps({
+      copyId: req.copyId,
+      catalogCardId: copy.catalog_card_id,
+      destination: req.destination,
+      reopenSlotId,
+      demoteLineId,
+      destinationLabel,
+    }),
   });
 
   return { copyId: req.copyId, destinationLabel };
+}
+
+/**
+ * Refuse a collection destination that would orphan the card even WITH the membership write.
+ *
+ * `union_collection_targets` matches by id and silently writes nothing when no row matches — that is
+ * deliberate and correct for the backfill tagger, but here a no-op union is indistinguishable from the
+ * bug UIL-022 describes: the copy lands in the binder, the list never gains it. Two stale-client cases
+ * reach it, both from a tab left open across a Collections edit:
+ *
+ *   1. the collection was DELETED → the union matches nothing, and the card sits in an ex-collection's
+ *      binder on no list at all;
+ *   2. the collection has since MOVED to a different binder → the union lands, but membership is
+ *      derived from `current_binder_ids` (app/(ui)/coll/actions.ts `loadCollHub`), so the card reads as
+ *      an un-owned target she is still chasing while she is in fact holding it.
+ *
+ * Both are refused here rather than in the client, for the same reason `blockedTargetDrops` is a
+ * server-side refusal: a stale page or a second tab walks straight past a hidden control.
+ */
+async function assertCollectionDestinationLives(
+  db: DbClient,
+  destination: MoveDestination,
+): Promise<void> {
+  if (destination.kind !== "collection") return;
+  const col = await collectionRepo.getByPk(db, destination.collectionId);
+  if (!col) {
+    throw new Error("That collection no longer exists — reload the screen and pick a home again.");
+  }
+  if (!(col.current_binder_ids ?? []).includes(destination.binderId)) {
+    throw new Error(
+      `${col.name} does not live in that binder any more — reload the screen and pick a home again.`,
+    );
+  }
 }
 
 /**

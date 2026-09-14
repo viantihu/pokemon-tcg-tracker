@@ -16,12 +16,15 @@
  *     what the Edit modal's "✕" did before this fix: it persisted only the chase list.
  *
  * So the whole removal goes through `apply_write_ops` as ONE transaction (migration 0008 added the
- * `subtract_collection_targets` and `update_line` ops it needed). It deliberately does NOT reuse
- * `lib/line/write.ts`'s `applyMove`, which predates M10 and still issues four separate statements
- * with no transaction — see the PR notes; that path is worth converting on its own.
+ * `subtract_collection_targets` and `update_line` ops it needed). It stays a SEPARATE entry point from
+ * `lib/line/write.ts`'s `applyMove` because a removal is not a move: it requires the card to be on the
+ * source collection's list, subtracts it, refuses self-destinations, and re-homes EVERY copy in the
+ * binder. (`applyMove` is atomic too as of UIL-023 — that caveat used to live here and is gone.)
  *
- * The placement arithmetic itself is NOT reinvented: `placementForMove` (lib/line/move.ts) is the one
- * authority on what a destination does to a copy's columns, and it is called here unchanged.
+ * Neither the placement arithmetic nor the membership write is reinvented: `lib/line/move.ts` is the
+ * one authority on what a destination means, and both halves are called from there unchanged —
+ * `placementForMove` for the copy's columns, `collectionTargetJoinOp` for the destination collection's
+ * chase list.
  *
  * Pure op-building is separated from I/O so the ordered write set is testable without a database.
  */
@@ -38,7 +41,12 @@ import {
   type Row,
   type WriteOp,
 } from "@/lib/repo";
-import { describeMove, placementForMove, type MoveNameLookups } from "@/lib/line/move";
+import {
+  collectionTargetJoinOp,
+  describeMove,
+  placementForMove,
+  type MoveNameLookups,
+} from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
 
 /* ------------------------------- pure planning ------------------------------ */
@@ -134,13 +142,11 @@ export function buildCollectionRemovalOps(plan: CollectionRemovalPlan): WriteOp[
 
   // Landing in another collection means joining ITS chase list — otherwise the copy is shelved in
   // that collection's binder while being on no list at all, which is the orphan we are removing.
-  if (plan.destinationCollectionId && plan.destinationCollectionId !== plan.collectionId) {
-    ops.push({
-      op: "union_collection_targets",
-      collection_id: plan.destinationCollectionId,
-      catalog_card_ids: [plan.tcgdexId],
-    });
-  }
+  // The op itself comes from `collectionTargetJoinOp` (lib/line/move.ts), the ONE definition of what
+  // joining a collection means, shared with the Line-screen move and the Plan-commit override
+  // (UIL-022). Only the "not the collection we are removing FROM" guard is local to this path.
+  const join = collectionTargetJoinOp(plan.destination, plan.tcgdexId);
+  if (join && join.collection_id !== plan.collectionId) ops.push(join);
 
   const reason = removalDecisionReason({
     collectionName: plan.collectionName,
