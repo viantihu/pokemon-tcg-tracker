@@ -153,6 +153,13 @@ export async function loadPlanContext(
   const bandDisplayByKey = new Map<string, string>(bandRows.map((b) => [b.band, b.display_name]));
   const binderNameById = new Map<string, string>(binderRows.map((b) => [b.id, b.name]));
   const collectionNameById = new Map<string, string>(collectionRows.map((c) => [c.id, c.name]));
+  // Artwork for the plan rows (UIL-016). Free: `catalogCardRepo.listAll` is `select *`, so
+  // `image_url` is already in `catalogRows` — it is `toCatalogCard` that drops it, because the
+  // engine's CatalogCard has no image field. Resolved from the row, the same way lib/line/load.ts
+  // does, so the engine's types stay untouched and no second query is added.
+  const imageUrlByTcgdexId = new Map<string, string | null>(
+    catalogRows.map((r) => [r.tcgdex_id, r.image_url]),
+  );
 
   const ctx: EngineContext = {
     typeColorMap,
@@ -170,7 +177,7 @@ export async function loadPlanContext(
     copyRowById,
     slotRowsByLine: slotsByLine,
     orderedBandKeys,
-    lookups: { binderNameById, bandDisplayByKey, collectionNameById },
+    lookups: { binderNameById, bandDisplayByKey, collectionNameById, imageUrlByTcgdexId },
   };
 }
 

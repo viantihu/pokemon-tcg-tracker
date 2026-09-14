@@ -35,8 +35,17 @@ export function CardFace({
   return (
     <span className={`face ${size}`}>
       {src && !errored ? (
+        // Deferred, not eager (UIL-016): the haul-plan worklist mounts one face per card, and at
+        // Karvi's 702-card scale an eager fetch is 702 requests on first paint for maybe 12 rows she
+        // can actually see. `loading="lazy"` leaves the browser to fetch what scrolls into view.
         // eslint-disable-next-line @next/next/no-img-element -- fallback needs onError; not a hot path
-        <img src={src} alt={name} onError={() => setErrored(true)} />
+        <img
+          src={src}
+          alt={name}
+          loading="lazy"
+          decoding="async"
+          onError={() => setErrored(true)}
+        />
       ) : (
         <span className="fallback u">{initials(name)}</span>
       )}
