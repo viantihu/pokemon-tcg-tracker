@@ -58,6 +58,8 @@ export type Database = {
           image_url: string | null;
           price_low: number | null;
           price_market: number | null;
+          set_card_count_official: number | null;
+          set_release_date: string | null;
         };
         Insert: {
           tcgdex_id: string;
@@ -82,6 +84,8 @@ export type Database = {
           image_url?: string | null;
           price_low?: number | null;
           price_market?: number | null;
+          set_card_count_official?: number | null;
+          set_release_date?: string | null;
         };
         Update: {
           tcgdex_id?: string;
@@ -106,6 +110,8 @@ export type Database = {
           image_url?: string | null;
           price_low?: number | null;
           price_market?: number | null;
+          set_card_count_official?: number | null;
+          set_release_date?: string | null;
         };
         Relationships: [];
       };
