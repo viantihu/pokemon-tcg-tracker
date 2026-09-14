@@ -487,8 +487,8 @@ expensive. Worth fixing before the first real sorting session, not necessarily b
 ## UIL-007 — Scroll bar under the card list renders outside the panel border
 
 - **Reported:** 2026-09-13
-- **Status:** Open
-- **Priority:** Low
+- **Status:** Fixed — PR [#47](https://github.com/viantihu/pokemon-tcg-tracker/pull/47), awaiting QA review
+- **Priority:** **Medium** (raised from Low — see the reproduction below; it is not cosmetic)
 - **Area:** Plan — **confirmed by Karvi 2026-09-13**
 - **Env:** Testing
 
@@ -536,6 +536,38 @@ Likely fix: `overflow-y: auto` + `overflow-x: hidden` on `.draftlist`, and let `
 
 **Priority rationale:** cosmetic. Nothing is unreachable or mis-recorded, and the fix is a couple of
 CSS lines. Post go-live is fine.
+
+**Reproduced, and both earlier hypotheses were wrong (2026-09-13, PR
+[#45](https://github.com/viantihu/pokemon-tcg-tracker/pull/47)).** Rather than keep reading the source,
+I rebuilt the screen standalone — the real `globals.css`, the real markup, the real
+`width=device-width` viewport — and measured it in a browser.
+
+- **Not the draft list, and not the badge.** At a true 375px viewport the seeded rows produce **zero**
+  horizontal overflow. `.tag` computes to `white-space: normal`, so the "Waiting from sync · Trick or
+  Trade 2023" badge *wraps* instead of setting a min-content width. The entry's corrected guess was as
+  wrong as the one it corrected.
+- **It is the haul bar's progress strip.** `.xp` renders one pip per card and `.xp i` carries a 2px
+  border per side that flex cannot shrink, plus a 3px gap — a hard ~7px floor per card. Measured at 685
+  cards on a 375px viewport: the strip is **4792px**, the haul bar overflows its own panel (4805 vs
+  341), and **the page scrolls sideways by 4,447px**. Each pip measured exactly 4px, confirming the
+  mechanism. That is why "spanned across the page outside of its borders" is literal, and the strip
+  sits directly under the `685 cards` count, which matches "underneath the card quantity".
+- **Same root cause as the other entries:** only reachable because UIL-003 made the plan arrive
+  pre-populated. A typed haul is a handful of pips.
+
+**Priority raised to Medium.** "Cosmetic, a couple of CSS lines" was wrong — the core daily screen
+scrolls ~4,800px sideways on a phone, and this is a PWA she installs. Nothing is mis-recorded, so not
+High.
+
+Fix: `progressPips` (`lib/plan/progress.ts`) caps the strip at 40 pips — exact and per-card below the
+cap so a normal haul is untouched, proportional buckets above it, with the precise figures already
+shown as `N / total` beside the strip. Plus CSS guards so no future count can repeat it:
+`min-width: 0` and `overflow: hidden` on `.xp`, `overflow-x: hidden` on `.draftlist` (the entry's
+suggestion — right fix, wrong cause), and `max-width: 100%` on `.tag`. Re-measured after: strip 243px,
+page overflow **gone**.
+
+The `.strip` alternative above is not implicated — it belongs to the line-detail screen, not the Haul
+Plan.
 
 ## UIL-008 — No progress indication during long operations
 

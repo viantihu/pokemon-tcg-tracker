@@ -18,6 +18,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Variant } from "@/lib/engine";
+// Leaf import, NOT the "@/lib/plan" barrel: this is a client component, and the barrel re-exports
+// ./session, which pulls lib/supabase/server (and `next/headers`) into the browser bundle. The
+// `import type` below is fine because types are erased; a VALUE import is not.
+import { progressPips } from "@/lib/plan/progress";
 import type { PlanItem } from "@/lib/plan";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
 import { BandChip } from "../_components/BandChip";
@@ -663,9 +667,11 @@ function PlanView(props: {
         <span className="hv">
           {total} card{total === 1 ? "" : "s"}
         </span>
+        {/* Bounded pip count (UIL-007): one per card blew the page ~4,800px wide at 685 cards,
+            because each pip's 2px borders cannot shrink. Exact below the cap, bucketed above. */}
         <div className="xp" aria-hidden>
-          {flatItems.map((it) => (
-            <i key={it.incomingId} className={done.has(it.incomingId) ? "f" : ""} />
+          {progressPips(flatItems.map((it) => done.has(it.incomingId))).map((filled, i) => (
+            <i key={i} className={filled ? "f" : ""} />
           ))}
         </div>
         <span className="hv">
