@@ -1428,6 +1428,21 @@ states, but inverted: this one looks like it worked. Flagging for Karvi's confir
 the Senior BA that UIL-010's "Fixed" status may need revisiting, since this is Karvi's own confirmation
 attempt on Testing surfacing a real gap in that fix.
 
+**The mechanism is now certain, not probable, and her card is confirmed in the mirror.** Verified
+directly against TCGdex: the twelve McDonald's Collection set ids are numeric-prefixed (`2011bw` through
+`2024sv`); digits sort before letters, so all twelve precede `me02.5` under
+`.order("set_id", { ascending: true })` ([`catalog-card.ts:104-107`](<../lib/repo/catalog-card.ts>:104));
+each holds 12–25 cards so each has an `011`/`11`; `.limit()` fills from `2011bw` up and never reaches
+her set. Exactly the five unrelated results she saw. Also confirmed: TCGdex reports
+`me02.5` as `cardCount: {official: 217, total: 295}` and the set-detail endpoint serves exactly 295 —
+not a truncated set from UIL-004's six-pseudo-set family. That's a per-set count proxy, not a per-row
+assertion about `me02.5-011` specifically (still not independently checked against the live mirror row),
+but it's the strongest evidence available without DB access.
+
+**What the fix above still leaves arbitrary.** `set_id` alphabetical ordering was never a design choice
+— there's no release-date column to sort by instead. So after this fix, a tie between two *padded exact
+matches* in different sets is still broken arbitrarily. See UIL-026.
+
 ## UIL-016 — No card images on the Haul Plan worklist or spotlight panel
 
 - **Reported:** 2026-09-13
@@ -1718,10 +1733,27 @@ target list — invisible in the very collection holding it, while occupying a r
 the Line screen's move panel and the Plan screen's placement override, both of which she uses on every
 sorting pass.
 
-**Suggested fix.** The pattern for fixing this now exists: migration 0008 (UIL-014's fix) added
-`subtract_collection_targets` and `update_line` because 0007 had no inverse op. A `{kind: "collection"}`
-move needs the equivalent forward op — union the target list — applied atomically alongside the
-placement write, the same way UIL-014's fix converted its own write path.
+**Independently corroborated — genuinely independent this time.** QA reached the same conclusion reading
+`lib/line/write.ts`/`lib/line/move.ts` on PR #67's branch while reviewing it, before seeing this entry;
+different starting point, same finding. `applyMove` ([`lib/line/write.ts`](../lib/line/write.ts))
+contains no reference at all to `union_collection_targets` or `target_catalog_card_ids` — not a wrong
+call, an absent one. And #67's own test proves the removal flow gets this right for the equivalent case:
+[`tests/coll/remove-from-collection.test.ts:291`](../tests/coll/remove-from-collection.test.ts:291),
+"into ANOTHER collection sharing the same binder: it joins that chase list, so it stays tracked" — so the
+move panel's omission is the odd one out, not an open design question.
+
+**Suggested fix, refined after reading `lib/coll/remove.ts` directly.** Its own header explains exactly
+why it doesn't call `applyMove`: [`lib/coll/remove.ts:18-20`](../lib/coll/remove.ts:18) — "It deliberately
+does NOT reuse `lib/line/write.ts`'s `applyMove`, which predates M10 and still issues four separate
+statements with no transaction... that path is worth converting on its own" (that path is UIL-023). It
+*does* reuse `placementForMove` (`lib/line/move.ts`) unchanged for the placement arithmetic, and builds
+its own op list for `apply_write_ops` rather than calling `applyMove`. So the fix here isn't "call
+`remove.ts`'s function from the move panel" — the request shapes differ. It's: **convert `applyMove` to
+build ops for `apply_write_ops` the same way `remove.ts` does** (UIL-023's fix), reusing
+`placementForMove` for arithmetic exactly as `remove.ts` already does, and add the
+`union_collection_targets` op for a `{kind: "collection"}` destination the same way `remove.ts` does for
+its cross-collection case. Fixing UIL-023 is very likely the same piece of work that fixes this entry,
+not two separate efforts — worth sequencing together rather than assigning separately.
 
 **Priority rationale (Senior BA's read): High.** Same reasoning Karvi accepted for UIL-014 — it silently
 produces wrong data about live inventory, no error, no indication, on two screens used every sorting
@@ -1890,3 +1922,43 @@ border hugs its two buttons regardless of which `.orow` rule wins.
 
 **Priority rationale (Karvi's call): Low.** Purely visual — Finite/Open both still work correctly, and
 nothing is mis-recorded.
+
+## UIL-026 — Mirror the printed set total so tied collector-number matches can be ranked, not sorted alphabetically
+
+- **Reported:** 2026-09-13 (not from Karvi — surfaced by the tech-lead session while reviewing UIL-015)
+- **Status:** Open
+- **Priority:** Medium (Senior BA's read)
+- **Area:** Catalog, Lookup / Collections
+- **Env:** n/a — the defect is in the repo, not a running environment
+
+**Context.** UIL-015's fix (query padded candidates before the stripped fallback) resolves Karvi's
+"011/217" case, but the denominator she typed is still discarded once it's parsed — and after the fix,
+`set_id` alphabetical ordering is the only thing left to break a tie between two sets that both have a
+padded exact match on the same local id. That ordering was never a design choice; there's no
+release-date column to sort by instead.
+
+**The premise for discarding the denominator is sound, but beatable.**
+[`lib/catalog/collector-number.ts`](../lib/catalog/collector-number.ts) documents why the typed total
+can't be used as a filter: there's no set-total column on `catalog_card`, and printed totals exclude
+secret rares, so a real card like `Shuckle 136/132` legitimately exceeds its own denominator — counting
+rows per set would wrongly disqualify it. That reasoning holds. But TCGdex separately publishes exactly
+this number as `cardCount.official` — for `me02.5` it's confirmed **217**, the exact denominator Karvi
+typed. It simply isn't mirrored: verified directly against `0002_domain.sql`, `catalog_card` has
+`set_id`, `set_name`, `set_series` and no count column at all.
+
+**Suggested fix: a ranking signal, not a filter.** Mirror `cardCount.official` per set, then prefer a
+result whose set's official count equals the typed denominator — never exclude the others, which is what
+keeps the `Shuckle` case safe. For Karvi's query it's decisive: `me02.5` is 217 and none of the twelve
+competing McDonald's sets are (their totals are 12–25).
+
+**Two operational facts that have to ship with this, or it looks done and isn't:**
+
+- It needs a migration (add the count column) plus populating it in `toCatalogRow`.
+- It needs a mirror re-run with `force_all: true` — the resume logic added for UIL-004 reads stored card
+  counts per set and would otherwise treat every one of the 218 sets as already complete and skip all of
+  them, silently leaving the new column null everywhere.
+
+**Priority rationale (Senior BA's read): Medium.** The search already works correctly after UIL-015;
+this makes the ranking principled rather than an alphabetical accident. Not High — nothing is broken and
+no data is at risk right now. Not Low either, because the current tie-break is genuinely arbitrary rather
+than merely imperfect, and this is the only available principled disambiguator.
