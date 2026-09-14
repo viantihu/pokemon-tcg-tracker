@@ -9,6 +9,7 @@
  */
 
 import {
+  assertBandConfig,
   band,
   placeCard,
   type CascadeResult,
@@ -144,6 +145,11 @@ export async function loadPlanContext(
   for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
 
   const orderedBandKeys = bandRows.map((b) => b.band);
+  // Fail fast on broken band config (empty table, or a type mapped to a band color_band lacks) so it
+  // surfaces here, on the first plan run, rather than as a copy_color_band_fkey 23503 at commit time
+  // after a whole haul has been built (UIL-012).
+  assertBandConfig(typeColorMap, orderedBandKeys);
+
   const bandDisplayByKey = new Map<string, string>(bandRows.map((b) => [b.band, b.display_name]));
   const binderNameById = new Map<string, string>(binderRows.map((b) => [b.id, b.name]));
   const collectionNameById = new Map<string, string>(collectionRows.map((c) => [c.id, c.name]));

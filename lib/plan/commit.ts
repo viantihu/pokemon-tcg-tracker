@@ -27,7 +27,7 @@
  * the RLS `with check (owner_id = auth.uid())` policy enforces it.
  */
 
-import type { Role } from "@/lib/engine";
+import { effectiveType, type Role } from "@/lib/engine";
 import { applyWriteOps, type DbClient, type WriteOp, type WritePayload } from "@/lib/repo";
 // Leaf import (lib/line/move depends only on lib/line/types → lib/engine; no cycle back to lib/plan).
 import { placementForMove } from "@/lib/line/move";
@@ -96,8 +96,52 @@ export async function commitHaul(db: DbClient, input: CommitInput): Promise<Comm
   });
   const { planned } = planFromDraft(pc, input.draft);
   const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, input);
+  assertPlacementBandsConfigured(payload, pc);
   await applyWriteOps(db, payload);
   return { haulId, counts };
+}
+
+/**
+ * Guard the write set before it reaches the DB: every colour band it stores must be a configured
+ * band (a `color_band` key in `orderedBandKeys`). A band that is not — a display name leaking into
+ * DB-key space, or a type mapped to a band `color_band` does not have (UIL-012) — would otherwise
+ * fail `copy_color_band_fkey` mid-commit as an opaque 23503 naming neither the card nor the type.
+ * This converts that into an actionable message, for THIS and every future cause. Pure (no I/O);
+ * the atomic RPC still guarantees nothing is half-written if it somehow slips past.
+ */
+export function assertPlacementBandsConfigured(payload: WritePayload, pc: PlanContext): void {
+  const known = new Set(pc.orderedBandKeys);
+  const describe = (catalogCardId: string | null | undefined): string => {
+    if (!catalogCardId) return "a copy";
+    const card = pc.catalogById.get(catalogCardId);
+    return card ? `${card.name} (${card.tcgdexId}, type ${effectiveType(card)})` : catalogCardId;
+  };
+  for (const op of payload.ops) {
+    let bandKey: string | null | undefined;
+    let subject: string;
+    if (op.op === "insert_copy") {
+      bandKey = op.color_band;
+      subject = describe(op.catalog_card_id);
+    } else if (op.op === "update_copy") {
+      bandKey = op.patch.color_band;
+      subject = describe(pc.copyRowById.get(op.id)?.catalog_card_id);
+    } else if (op.op === "insert_line") {
+      bandKey = op.color_band;
+      subject = `the evolution line for dex #${op.root_dex_id}`;
+    } else {
+      continue;
+    }
+    // null clears a placement (bulk / specialty) and is always valid; undefined means the patch does
+    // not touch the band. Only a present, non-null band that is not configured is a fault.
+    if (bandKey != null && !known.has(bandKey)) {
+      throw new Error(
+        `Cannot commit: ${subject} resolved to colour band "${bandKey}", which is not one of the ` +
+          `configured bands [${pc.orderedBandKeys.join(", ")}]. Check type_color_map and color_band ` +
+          `in Settings — a display name such as "White" where the key "white" is expected is the ` +
+          `usual cause.`,
+      );
+    }
+  }
 }
 
 /**

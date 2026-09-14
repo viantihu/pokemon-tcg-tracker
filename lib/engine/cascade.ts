@@ -369,13 +369,16 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
     };
   }
 
-  // STEP 6 — TRAINER / SUPPORTER / ITEM (and any non-Pokémon) → front half, White.
+  // STEP 6 — TRAINER / SUPPORTER / ITEM (and any non-Pokémon) → front half, White band.
+  // `b` is the map's OWN white key (Trainer/Supporter/Item/Colorless all map to White), so this
+  // stays in the caller's band space instead of minting the literal "White" (UIL-012 — the literal
+  // is not a color_band key and violated copy_color_band_fkey at commit).
   if (incoming.card.category === "Trainer" || incoming.card.category === "Energy") {
     return {
       ...head,
       step: "trainer",
       reason: `${incoming.card.category === "Energy" ? "Energy" : "Trainer / Supporter / Item"}; to the front half, White band.`,
-      target: { kind: "front-half", binderId: frontHalfBinderId(ctx, "White"), band: "White" },
+      target: { kind: "front-half", binderId: frontHalfBinderId(ctx, b), band: b },
     };
   }
 
