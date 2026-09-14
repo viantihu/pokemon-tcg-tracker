@@ -3071,6 +3071,11 @@ review; this one is a live, user-requested feature. If it's implemented literall
 letting the edit form's existing write path stand in as "the fix" — it ships the orphan hazard as a
 feature.
 
+**Distinct from UIL-043's guard, which lives in the same function and could otherwise be mistaken for
+covering this.** UIL-043 describes `saveCollection`'s existing target-drop refusal — a different
+condition, already built, already shipped. This entry's rebind path has no guard of its own; the two
+should not be read as the same protection.
+
 **Suggested fix.** A binder change must relocate the collection's shelved copies as part of the same
 atomic write that updates `current_binder_ids` — reusing the placement-rewrite machinery UIL-014's fix
 (`lib/coll/remove.ts` → `apply_write_ops`) already established, not the current bare
@@ -3193,6 +3198,13 @@ remove on the card` in place of the "✕" for an owned target, and
 as the backstop, not the primary path: "Dropping an un-owned target — a gap she has stopped
 chasing — strands nothing and is still allowed." The guard only refuses the one case that would
 orphan a physical card; every other drop already goes through.
+
+**Disambiguation from UIL-040, since both describe `saveCollection` and could otherwise read as the
+same guard.** This entry is about the **target-drop** guard — removing a card from the chase list —
+which exists and works as described above. UIL-040 is about a **different** condition in the same
+function, the **specialty-binder rebind** (the chip selector at
+[`CollHub.tsx:709-717`](<../app/(ui)/coll/CollHub.tsx>:709)), which has **no guard at all** as of this
+writing. Nothing here implies the rebind case is protected; UIL-040 remains the entry for that gap.
 
 **The suggestion.** Since the collection's binder is already on screen at that row, offer the move
 inline from the owned-row state itself rather than sending her to the card to remove it from there
