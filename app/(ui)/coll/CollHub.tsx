@@ -490,6 +490,40 @@ function CollectionEditor(props: {
   const { state, binders, busy, onChange, onClose, onSubmit } = props;
   const isNew = !state.id;
 
+  /**
+   * UIL-009: a stray click outside the panel used to unmount this editor and throw away everything
+   * typed — no confirmation, no draft kept, no undo. Building a finite collection means picking cards
+   * one at a time, so the work at risk grows the longer she stays, and the misclick costs most when
+   * she is nearly done.
+   *
+   * The backdrop no longer dismisses at all: this is a form, not a lightbox. Close and Escape stay,
+   * but both ask first once anything has been entered. Captured on mount, which is when the editor
+   * opens, so "dirty" means changed since it was opened rather than merely non-empty (editing an
+   * existing collection starts populated).
+   */
+  const [initial] = useState(() => JSON.stringify(state));
+  const dirty = JSON.stringify(state) !== initial;
+
+  const requestClose = useCallback(() => {
+    if (
+      dirty &&
+      !window.confirm("Discard this collection? Everything entered here will be lost.")
+    ) {
+      return;
+    }
+    onClose();
+  }, [dirty, onClose]);
+
+  // Escape is the only keyboard way out of a modal; it routes through the same guard. No setState in
+  // the effect body — the listener is registered, and only fires later.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") requestClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [requestClose]);
+
   function addTarget(card: LookupCard) {
     if (state.targets.some((t) => t.tcgdexId === card.tcgdexId)) return;
     onChange({
@@ -508,12 +542,13 @@ function CollectionEditor(props: {
     state.name.trim().length > 0 &&
     (state.binderId !== "__new" || state.newBinderName.trim().length > 0);
 
+  // No backdrop onClick: dismissing a part-built collection by misclick is UIL-009.
   return (
-    <div className="veil on" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="veil on">
       <div className="dsheet panel" role="dialog" aria-modal="true">
         <div className="cap">
           <span className="t u">{isNew ? "New collection" : "Edit collection"}</span>
-          <button className="btn u" onClick={onClose} style={{ background: "var(--panel-2)" }}>
+          <button className="btn u" onClick={requestClose} style={{ background: "var(--panel-2)" }}>
             Close
           </button>
         </div>
