@@ -1254,11 +1254,18 @@ the whole suite's vocabulary," and it's the rule that would actually have caught
 - **The test for whether any fix actually worked:** after it lands, is there exactly **one** definition
   of "the white key" that both the engine and backfill consult? Today there are two.
 
-**Priority: Low — joint read, QA withdrew its Medium counter-argument rather than never having raised
-it.** The hole that let UIL-012 through is closed — #57 added the missing Trainer/Energy commit case, so
-nothing is currently unprotected. QA's original counter-argument (the cheap fix eliminates a class of
-mistake, not just an instance, which is worth doing regardless of cost) still stands as a reason to do the
-fix, just not as a reason to rank the entry above Low. Karvi has not ruled.
+**Priority: Low.** QA agreed Low on the ranking; its class-of-mistake argument (the cheap fix eliminates
+a class of mistake, not just an instance) stands as a reason to do the fix, not as a reason to rank it
+higher — an earlier version of this entry attributed a Medium position to QA that it never actually
+held, and this replaces it. The hole that let UIL-012 through is closed (#57 added the missing
+Trainer/Energy commit case), so nothing is currently unprotected. Karvi has not ruled.
+
+**Enforceable rule, restated more precisely:** a display-form string counts against the rule only
+inside the file's own `TypeColorMap`/`color_band` fixture, not inside a display-lookup map
+(`bandDisplayByKey`/`bandDisplay`). And `tests/engine/bands.test.ts` isn't merely an exception to that
+rule — `expect(whiteKey(DEFAULT_TYPE_COLOR_MAP)).toBe("White")` is precisely where both vocabularies
+belong, since that file's job is proving `whiteKey` returns the caller's own space regardless of which
+one it's handed.
 
 **Addendum (2026-09-13) — checked the "clean 3-vs-8 split" claim itself, since QA flagged it as a crude
 grep rather than a finding.** A wider grep for display-form band strings across the test suite also hits
@@ -1468,6 +1475,13 @@ of cards shows no image, which defeats a large part of what a "spotlight" view i
 holding the right card. Not data loss, but a core-daily-screen usability gap at real haul scale (this
 haul was 702 cards).
 
+**Design principle from Karvi, worth generalizing beyond this screen:** "Any search for cards
+(collections, inventory, etc.) should focus on the image thumbnail more than anything. Pokemon card
+collecting is a visual hobby, so the visual matters a lot." Lookup and Collections already pass a real
+`imageUrl` into `CardFace` today, so they aren't broken by this gap — but the principle is a reason to
+treat the thumbnail as the primary identifying element in any future search/result UI on this app, not
+just to patch the one screen where it's currently missing.
+
 ## UIL-017 — Internal field name "cardClass" leaks into the routing explanation
 
 - **Reported:** 2026-09-13
@@ -1590,3 +1604,289 @@ at full size.
 
 **Priority rationale (Karvi's call): Medium.** Losing sight of overall progress mid-sort is a real
 annoyance on a long haul but doesn't block anything — she can still scroll back up to check.
+
+## UIL-020 — Sync resolves Dex rows one at a time, serially, and the slowness was already known
+
+- **Reported:** 2026-09-13 (not from Karvi — found while building UIL-008's progress bar)
+- **Status:** Open
+- **Priority:** Medium (Senior BA's read)
+- **Area:** Sync
+- **Env:** n/a — the defect is in the repo, not a running environment
+
+**Root cause.** [`lib/sync/pipeline.ts:161`](../lib/sync/pipeline.ts:161), inside `for (const r of
+dexRows)`:
+
+```ts
+const resolved = resolveDexId(r, aliasMap);
+const hit = await lookup(r, resolved);   // awaited once per row
+```
+
+Serial by construction — the loop cannot start row N+1's lookup until row N returns. The same pattern
+repeats at [`:179`](../lib/sync/pipeline.ts:179) for the retry-only path. At ~685 rows in the export that
+surfaced UIL-006 through UIL-013, and 30–50ms per lookup, that's 20–35 seconds, scaling linearly with
+collection size.
+
+**Why this belongs next to UIL-008, not inside it.** UIL-008 asked for a progress bar because the
+operation feels hung. This is *why* it takes long enough to feel hung, and it reframes UIL-008's
+determinate-vs-indeterminate question: make it fast first, then ask whether a percentage is still wanted
+— a four-second sync probably needs neither.
+
+**This is not a new finding — it was flagged and dropped once already.** It was raised when M4 merged,
+labelled non-blocking, and merged with no owner and no tracking entry. The lesson worth recording: a
+finding filed as non-blocking with no owner and no entry doesn't get deprioritized, it evaporates — it
+resurfaced only because someone built a UI feature over the top of it and noticed the wait. Contrast with
+the plan-cache staleness gap (UIL-006 → fixed via #48) and the backfill atomicity gap (fixed via #36),
+both of which got an owner and a tracking item at the time and landed as fixes. This is what the other
+path looks like: three weeks and a UI feature later.
+
+**The obvious fix (batch the lookups) is wrong as stated, and would trade a slow bug for a silent
+correctness regression.** [`lib/sync/catalog-lookup.ts:12`](../lib/sync/catalog-lookup.ts:12) documents
+that a set-name match learned on one row must "drain the remaining rows of that set within the SAME
+pass, not only the next one" — the mechanism at
+[`:76-78`](../lib/sync/catalog-lookup.ts:76): a set-code miss resolves the set by name, a unique match
+learns and persists an alias (also cached in `sessionAliases`), then retries. **Row N's lookup can teach
+an alias that changes how row N+1 resolves.** The loop is not incidentally serial; it has a real
+intra-pass data dependency. A naive `Promise.all` or single `in`-list rewrite would break this: fired
+concurrently, rows in an unknown set wouldn't see the alias the first row learned, and would resolve
+differently depending on scheduling — a correctness regression that would present as a speedup.
+
+**Suggested fix.** Batch while preserving drain semantics — e.g. resolve rows grouped by set, batching
+within a set only after that set's alias (if any) is already known, or batching everything with known
+aliases in one pass and handling alias-learning rows separately. `tests/sync/alias-drain.test.ts` is the
+existing guard; any equivalence test for a rewrite must use an export containing an unknown set code that
+gets name-resolved mid-pass — an export whose sets are all already aliased would pass while proving
+nothing.
+
+**Priority rationale (Senior BA's read): Medium.** Nothing is broken and the sync produces correct
+results — she can wait 30 seconds. But it's on the primary path cards enter the system by, the cost grows
+with her collection, it is the root of a complaint she actually made, and the fix is more delicate than it
+first looks — a reason to do it deliberately with tests, not a reason to defer it.
+
+## UIL-021 — A wall-clock test assertion will fail unrelated PRs at random
+
+- **Reported:** 2026-09-13 (not from Karvi — found while building UIL-008)
+- **Status:** Open
+- **Priority:** Low, with a counter-argument recorded
+- **Area:** Catalog (test infrastructure)
+- **Env:** n/a — the defect is in the repo, not a running environment
+
+**Root cause.** [`tests/catalog/artwork.test.ts:303`](../tests/catalog/artwork.test.ts:303):
+
+```ts
+// Banding must avoid the ~276M-pair all-vs-all scan; comfortably under a generous CI bound.
+expect(elapsedMs).toBeLessThan(10000);
+```
+
+It measured 9101ms on PR #64's first CI run and passed at 91% of its own "generous" budget. #64 touched
+two screens and a stylesheet, no clustering code; a re-run with no changes went green. It's a timing
+budget on a shared runner, so it will keep tripping at random for PRs that have nothing to do with it.
+
+**Suggested fix, two honest options.** Raise the bound substantially, or assert the asymptotic property
+instead — a comparison test directly above this one already pins LSH banding against the naive
+all-pairs scan (`clusterArtwork` vs `clusterArtworkNaive`), which arguably makes the timing assertion
+redundant. This is the perf guard added in PR #25 and shouldn't be weakened unilaterally by whoever
+happens to be passing through when it trips.
+
+**Priority rationale: Low, with a counter-argument worth recording.** By the log's own rule, priority is
+impact on go-live, and this has none — nothing user-facing, no data at risk. The counter-argument: a gate
+that reds at random teaches everyone to re-run rather than investigate, and "a check that fails for
+reasons nobody looks at" is the exact shape that let UIL-004 hide for weeks. The gate depends on this
+suite meaning something. Still lands on Low; both readings flagged for Karvi.
+
+## UIL-022 — Moving a card into a collection from the Line or Plan screen orphans it
+
+- **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
+- **Status:** Open
+- **Priority:** High (Senior BA's read)
+- **Area:** Line, Plan, Collections
+- **Env:** Testing
+
+Same orphan class as UIL-014, reachable from a different surface, and live today (not gated behind
+UIL-014's fix).
+
+**Root cause.** Collection membership is derived from two facts together: a copy is shelved in one of the
+collection's binders, **and** its catalog id is on that collection's `target_catalog_card_ids`
+([`app/(ui)/coll/actions.ts:110-112`](<../app/(ui)/coll/actions.ts>:110), same mechanism UIL-014
+describes). [`lib/line/move.ts`](../lib/line/move.ts) handles a `{kind: "collection"}` destination
+(cases at lines 28, 53, 89) and moves the copy's placement into the binder — but nothing in that path
+unions the card into the destination collection's target list. Verified: `union_collection_targets`
+(added by migration 0007) has exactly **one** production caller,
+[`lib/backfill/commit.ts:143`](../lib/backfill/commit.ts:143). The Line/Plan move path is not a caller.
+
+**Effect.** The card sits physically in the destination collection's binder while absent from its own
+target list — invisible in the very collection holding it, while occupying a real pocket. Reached from
+the Line screen's move panel and the Plan screen's placement override, both of which she uses on every
+sorting pass.
+
+**Suggested fix.** The pattern for fixing this now exists: migration 0008 (UIL-014's fix) added
+`subtract_collection_targets` and `update_line` because 0007 had no inverse op. A `{kind: "collection"}`
+move needs the equivalent forward op — union the target list — applied atomically alongside the
+placement write, the same way UIL-014's fix converted its own write path.
+
+**Priority rationale (Senior BA's read): High.** Same reasoning Karvi accepted for UIL-014 — it silently
+produces wrong data about live inventory, no error, no indication, on two screens used every sorting
+pass. Not a missing feature; an action that appears to succeed and leaves the collection wrong.
+
+## UIL-023 — `applyMove` is a fourth write path and it is not atomic
+
+- **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
+- **Status:** Open
+- **Priority:** Medium (Senior BA's read)
+- **Area:** Line
+- **Env:** Testing
+
+**Root cause.** [`lib/line/write.ts:11-12`](../lib/line/write.ts:11), in its own header comment:
+
+> "No cross-statement transaction (supabase-js; migrations frozen) — writes are ordered and small."
+
+`applyMove` issues separate awaited writes — `copyRepo.update`, then `lineSlotRepo.update`, then
+`evolutionLineRepo.update`, plus a `PlacementDecision` insert. It predates M10 (which made haul, sync,
+and backfill commits atomic via `apply_write_ops`) and was never converted. A failure between statements
+can leave a copy moved with its vacated slot still marked filled, or a `complete` line that should have
+demoted to `open`. There is no compensating-rollback code anywhere in this app — PRs #30 and #36 removed
+the last of it — so nothing catches a partial write here.
+
+**Correcting a loose claim this entry itself has propagated.** M10's outcome is sometimes summarised as
+"all write paths are atomic." That's true of haul, sync, and backfill commits, and false as a general
+claim — `applyMove` is the fourth path and isn't one of them. Worth being precise about which three,
+since the loose version nearly caused UIL-014's fix to wire collection removal *through* `applyMove`,
+which would have added a fifth un-transacted write on top of an existing one.
+
+**Suggested fix.** The pattern now exists (migration 0008, UIL-014) for converting an M7-era write path
+to an atomic RPC. Same conversion for `applyMove`.
+
+**Priority rationale (Senior BA's read): Medium, not High.** The write window is small and ordered, so
+likely partial states are recoverable rather than corrupting, and no report of it happening exists. But
+it's a known un-transacted multi-row write on live inventory, the app's stated invariant is atomic
+writes, and the cost of fixing it has dropped now that the conversion pattern exists. Low is defensible;
+Medium because this is the one place the stated invariant doesn't hold.
+
+## UIL-024 — Production readiness: missing keys are mechanical, the access-token privilege loss is not, and `main` is further behind than recorded
+
+- **Reported:** 2026-09-13 (not from Karvi — surfaced resolving UIL-005; firsthand account from the
+  tech-lead session)
+- **Status:** Open
+- **Priority:** High for the cutover, not for today's UAT (both sessions' read)
+- **Area:** Deploy
+- **Env:** Production
+
+Not a UAT report — flagging now so it doesn't get lost once Testing itself is green.
+
+**Part 1 — missing keys, mechanical, narrower in scope than first thought.** The GitHub `production`
+environment holds only `SUPABASE_DB_PASSWORD`; its pooler host is wired
+(`vars.SUPABASE_DB_POOLER_HOST`, `aws-0-us-west-2.pooler.supabase.com`, project `bqqerxpdxywnpvndhxbs`),
+so `migrate` alone would work on `main` today. **Correction to how this was first framed: the running
+app does not read these from GitHub at all.** GitHub environment secrets are consumed by workflows only;
+the deployed app reads `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` from **Vercel's**
+environment at request time ([`lib/env.ts`](../lib/env.ts), parsed lazily so `next build` stays green
+before secrets exist). So the missing GitHub secrets block `acceptance` (and any future workflow needing
+data-API access) on the `main` rail — they do not, by themselves, stop the app from serving. Still a real
+gap, just a narrower one than "the app can't serve real data."
+
+**Part 2 — `main` is a pre-UI stub, not a working app missing credentials, and the gap is larger than
+previously recorded.** Verified directly: `git rev-list --count origin/main..origin/develop` is **56**,
+not the 28 first logged or the 52 estimated afterward. `main` (commit `b9c5cdc`, PR #12) contains:
+
+- **Routes:** only `app/page.tsx` and `app/api/health/route.ts`. No `/plan`, `/sync`, `/look`, `/coll`,
+  `/settings`, no `/login` — confirmed by listing `main`'s tree directly, not by guessing from a live
+  request.
+- **Migrations:** only `0001_init.sql` and `0002_domain.sql`. **Production's `color_band` and
+  `type_color_map` are empty** — 0003 (which fills them) has never reached `main`.
+- **Workflows:** only `ci.yml` and `deploy.yml`. No `catalog-mirror.yml`, no `reset-testing.yml`.
+
+Live confirmation from the tech-lead session: `https://pokemon-tcg-tracker-sooty.vercel.app/api/health`
+returns 200 (a dependency-free check — proves only that the process booted);
+`https://pokemon-tcg-tracker-sooty.vercel.app/login` returns 404, which the route listing above makes a
+certainty rather than a surprise — there is no login page on `main` to return anything else.
+
+**Two consequences worth naming before cutover, not after:**
+
+1. Once develop's code lands on `main` without a full 0001–0008 migration run first, **every** placement
+   would fail `copy_color_band_fkey` — not just Trainers as in UIL-012 — because the band config tables
+   are empty, not misconfigured. The cutover fix is that 0003–0008 apply as part of the promotion; naming
+   it here so nobody re-diagnoses a second UIL-012 from scratch under time pressure.
+2. `smoke`'s assertion that `/login` returns 200 will correctly pass once `main` holds develop's code —
+   but would fail today, for an unrelated reason, if anyone pushes a trivial commit to `main` before the
+   cutover.
+
+**Part 3 — the access-token privilege loss: cause is unknown by decision, not by lack of means.**
+`SUPABASE_ACCESS_TOKEN` lost Management API privileges — confirmed account-level, not project-level (the
+same wall blocked reads on both `cpmwdcmokbgcpmkvbtsw` and `bqqerxpdxywnpvndhxbs`). Corrected window: the
+secret was last **written** 2026-09-08 02:13 UTC, but the last **green Deploy** was 2026-09-09 04:47 UTC
+— so the token worked *after* it was last set, and the actual window with no repo-side change is
+2026-09-09 04:47 → 2026-09-13. That rules out "Karvi misconfigured it," which she was told twice and
+which was never true.
+
+**401 vs. 403 rules out expiry, deletion, and rotation.** An expired, deleted, or revoked PAT returns
+401; this token returns 403 ("does not have the necessary privileges") — Supabase authenticates the
+token and refuses the *authorization*, a different failure mode entirely.
+
+**The diagnostic that exists and was declined.** Three account-scoped read-only GETs separate the
+remaining live hypotheses: `GET /v1/profile` (which account the token actually belongs to — the
+decisive one), `GET /v1/organizations`, `GET /v1/projects`. A wrong/duplicate account (the leading
+candidate — the only hypothesis explaining a privilege change with no repo-side cause: sign up by email,
+later sign in with Google, end up with two accounts, PAT minted on the second) shows as a profile email
+she doesn't log into. Removed-from-org or a moved project shows as the org/project lists omitting the
+two project refs. A role downgrade shows as both lists including them while per-project calls still 403.
+**The Supabase dashboard cannot substitute for this** — it shows the account she is logged into, never
+which account the token belongs to; she could check a correct-looking Owner role indefinitely and learn
+nothing if it's the duplicate-account case.
+
+Karvi was offered the probe, a dashboard check, rotation, or deferral, and **chose to rotate the token
+without diagnosing.** Record the cause as unknown by decision. Mitigation that makes the rotation
+diagnostic by accident: mint the new PAT while logged into the account whose dashboard actually lists
+`cpmwdcmokbgcpmkvbtsw` — if the new token works, it was the wrong account or a role change; if it still
+403s, the account itself lost access and the probe becomes worth running.
+
+**Why this doesn't block anything today.** After PR #46, nothing that runs uses this token unconditionally
+except [`reset-testing.yml`](../.github/workflows/reset-testing.yml), which must never run (Testing holds
+the only copy of the real collection until cutover). `deploy.yml`'s `migrate` doesn't use it at all;
+`acceptance` and `catalog-mirror` reach for it only as a best-effort fallback when a key is missing, and
+both `testing` keys are now set. A bad rotation can't break anything currently running — and, symmetrically,
+nothing will confirm a good one.
+
+**One thing this replaces:** an earlier framing called this "discovered by accident." That's wrong — the
+catalog mirror needed a key the same account-level wall was blocking, so UIL-004's credential path and
+UIL-005's migration path were one job with one external cause, not two unrelated accidents. Two symptoms
+in unrelated subsystems tracing to a single external change is the shape that makes a cause worth finding
+rather than routing around.
+
+**Suggested fix.** Set `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` on the `production` GitHub
+environment (unblocks `acceptance` on `main`); ensure the full migration history (0001–0008) applies to
+`main`/production as part of cutover, not assumed from `develop`'s state; and treat the access-token
+mystery as closed-by-decision unless the rotated token also 403s, at which point the `/v1/profile` probe
+above is the next step.
+
+**Priority rationale.** High for the cutover, not for today's UAT — nothing here affects Karvi's testing
+on Testing. Between the two halves, Part 2 (production's actual state) outranks Part 3 (the privilege
+mystery): it's fully known with a concrete fix, while Part 3 remains a genuine unknown accepted by
+decision. Both sessions flagged this; Karvi has been told at a high level and has not ruled on priority.
+
+## UIL-025 — Finite/Open mode toggle renders with a large dead area inside its own border
+
+- **Reported:** 2026-09-13
+- **Status:** Open
+- **Priority:** Low (Karvi's call)
+- **Area:** Collections
+- **Env:** Testing
+
+In her words: "The finite/open options do not look right." The bordered toggle box around Finite/Open
+extends far wider than the two buttons inside it, leaving a large blank rectangle inside the same
+border to the right of "Open."
+
+**Root cause: two conflicting `.orow` rules.** [`app/globals.css:1421-1423`](../app/globals.css:1421)
+defines `.orow` as a plain block; a second rule at
+[`app/globals.css:2425-2430`](../app/globals.css:2425) redefines the same class as
+`display: flex; flex-direction: column`. In a column flex container, the cross axis is horizontal, and
+flexbox's default `align-items: stretch` stretches every child to the container's full width unless the
+child opts out. `.modetoggle` ([`app/globals.css:1949-1953`](../app/globals.css:1949),
+`display: flex; border: 3px solid var(--ink); flex: 0 0 auto`) has no `align-self`, and `flex: 0 0 auto`
+only governs the main axis — it does nothing to stop the cross-axis stretch. So `.modetoggle` (the
+border owner) stretches to fill `.orow`'s full width, while `.modebtn` (the buttons inside it) keep
+their intrinsic content width, leaving the gap between "Open" and the border's right edge.
+
+**Suggested fix.** Add `align-self: flex-start` to `.modetoggle` (or `width: fit-content`), so the
+border hugs its two buttons regardless of which `.orow` rule wins.
+
+**Priority rationale (Karvi's call): Low.** Purely visual — Finite/Open both still work correctly, and
+nothing is mis-recorded.
