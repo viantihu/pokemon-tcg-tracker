@@ -57,12 +57,35 @@ describe("isMoveDestinationComplete", () => {
   it("bulk is always complete", () => {
     expect(isMoveDestinationComplete({ kind: "bulk" })).toBe(true);
   });
-  it("a shelf move needs a band", () => {
+  it("a front-half shelf move needs a band, and nothing else — no line concept applies", () => {
     expect(
-      isMoveDestinationComplete({ kind: "shelf", binderId: "b1", half: "back", band: "" }),
+      isMoveDestinationComplete({ kind: "shelf", binderId: "b1", half: "front", band: "" }),
     ).toBe(false);
     expect(
+      isMoveDestinationComplete({ kind: "shelf", binderId: "b1", half: "front", band: "red" }),
+    ).toBe(true);
+  });
+  it("a back-half shelf move ALSO needs a line choice (UIL-056) — a band alone is not enough", () => {
+    expect(
       isMoveDestinationComplete({ kind: "shelf", binderId: "b1", half: "back", band: "red" }),
+    ).toBe(false);
+    expect(
+      isMoveDestinationComplete({
+        kind: "shelf",
+        binderId: "b1",
+        half: "back",
+        band: "red",
+        lineJoin: { mode: "new" },
+      }),
+    ).toBe(true);
+    expect(
+      isMoveDestinationComplete({
+        kind: "shelf",
+        binderId: "b1",
+        half: "back",
+        band: "red",
+        lineJoin: { mode: "existing", lineId: "l1", slotId: "s1" },
+      }),
     ).toBe(true);
   });
   it("a collection move needs a collection", () => {

@@ -27,19 +27,31 @@
  * SERVER ONLY.
  */
 
+import { toCatalogCard } from "@/lib/plan/adapt";
+import type { IncomingCard, TypeColorMap, Variant } from "@/lib/engine";
 import {
   applyWriteOps,
+  catalogCardRepo,
   collectionRepo,
   copyRepo,
   evolutionLineRepo,
   lineSlotRepo,
   placementDecisionRepo,
+  typeColorMapRepo,
   wishlistItemRepo,
   type DbClient,
+  type WriteOp,
 } from "@/lib/repo";
 import { resolveDecisionWrites } from "./decisions";
 import { buildScreenModel } from "./load";
-import { buildMoveOps, describeMove, type MoveNameLookups } from "./move";
+import {
+  buildExistingLineJoinOps,
+  buildMoveOps,
+  buildNewLineJoinOps,
+  describeMove,
+  lineJoinOf,
+  type MoveNameLookups,
+} from "./move";
 import type { DecisionChoiceId, MoveDestination, MoveRequest } from "./types";
 
 export interface MoveResult {
@@ -83,6 +95,62 @@ export async function applyMove(
     }
   }
 
+  // Moving a card INTO the back half resolves a line target (UIL-056) — re-derived fresh here, same
+  // as reopenSlotId/demoteLineId above, never trusted from the client.
+  const join = lineJoinOf(req.destination);
+  let lineJoinOps: WriteOp[] | undefined;
+  let resolvedLineSlotId: string | null | undefined;
+  if (join && req.destination.kind === "shelf") {
+    if (join.mode === "existing") {
+      const slot = await lineSlotRepo.getByPk(db, join.slotId);
+      if (!slot || slot.line_id !== join.lineId) {
+        throw new Error("That line slot no longer exists — reload the screen and pick again.");
+      }
+      if (slot.state === "filled") {
+        throw new Error("That slot has already been filled — reload the screen and pick again.");
+      }
+      const siblings = await lineSlotRepo.listByLine(db, join.lineId);
+      const slotIsLastOpen = siblings.every((s) => s.id === slot.id || s.state === "filled");
+      const built = buildExistingLineJoinOps({
+        copyId: req.copyId,
+        lineId: join.lineId,
+        slotId: slot.id,
+        slotIsLastOpen,
+      });
+      lineJoinOps = built.ops;
+      resolvedLineSlotId = built.slotId;
+    } else {
+      const card = await catalogCardRepo.getByPk(db, copy.catalog_card_id);
+      if (!card) throw new Error("That card's catalog entry is missing — reload and try again.");
+      const cc = toCatalogCard(card);
+      const [existing, catalogRows, typeMapRows] = await Promise.all([
+        evolutionLineRepo.findByRootAndBand(db, cc.dexId[0] ?? -1, req.destination.band),
+        catalogCardRepo.listAll(db),
+        typeColorMapRepo.list(db),
+      ]);
+      if (existing) {
+        throw new Error(
+          "A line for this species and band already exists — reload the screen and join it instead.",
+        );
+      }
+      const typeColorMap: TypeColorMap = {};
+      for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
+      const incoming: IncomingCard = {
+        id: req.copyId,
+        card: cc,
+        variant: (copy.variant as Variant) ?? "normal",
+      };
+      const built = buildNewLineJoinOps({
+        incoming,
+        catalog: catalogRows.map(toCatalogCard),
+        typeColorMap,
+        binderId: req.destination.binderId,
+      });
+      lineJoinOps = built.ops;
+      resolvedLineSlotId = built.slotId;
+    }
+  }
+
   const destinationLabel = describeMove(req.destination, names);
   await applyWriteOps(db, {
     ops: buildMoveOps({
@@ -92,6 +160,8 @@ export async function applyMove(
       reopenSlotId,
       demoteLineId,
       destinationLabel,
+      lineJoinOps,
+      resolvedLineSlotId,
     }),
   });
 

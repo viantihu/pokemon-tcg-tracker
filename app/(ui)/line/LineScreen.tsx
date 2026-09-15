@@ -18,6 +18,7 @@ import type {
   LineView,
   MoveDestination,
   SlotView,
+  UnlinedCard,
 } from "@/lib/line/types";
 import { CardFace } from "../_components/CardFace";
 import { DecisionCard } from "../_components/DecisionCard";
@@ -129,6 +130,23 @@ export function LineScreen() {
     });
   }
 
+  /**
+   * A shelved card with no line yet (UIL-056) — the strand her UAT report named. Offered the line
+   * picker; a card already filling a slot is not (`openMove` above) — it already has a line, and
+   * moving one INTO a different line is a rarer case left for a follow-up.
+   */
+  function openMoveForUnlined(card: UnlinedCard) {
+    setMove({
+      copyId: card.copyId,
+      name: card.card.name,
+      localId: card.card.localId,
+      imageUrl: card.card.imageUrl,
+      bandKey: card.card.bandKey,
+      currentLabel: card.currentLabel,
+      lineJoinCandidatesByBand: card.joinCandidatesByBand,
+    });
+  }
+
   async function onMoveConfirm(dest: MoveDestination) {
     if (!move) return;
     setBusy(true);
@@ -155,13 +173,25 @@ export function LineScreen() {
 
   if (!curLine) {
     return (
-      <div className="stub panel">
-        <h1 className="u">No lines yet</h1>
-        <p>
-          Evolution lines appear here once a haul creates one (a Stage 1 or Stage 2 that forms a
-          viable line). Run a haul on the Plan screen to start one.
-        </p>
-      </div>
+      <>
+        <div className="stub panel">
+          <h1 className="u">No lines yet</h1>
+          <p>
+            Evolution lines appear here once a haul creates one (a Stage 1 or Stage 2 that forms a
+            viable line), or once you start one yourself from a shelved card below.
+          </p>
+        </div>
+        <UnlinedCardsPanel cards={data.unlinedCards} onMove={openMoveForUnlined} />
+        {move ? (
+          <MoveOverlay
+            card={move}
+            options={data.moveOptions}
+            allowLineJoin={Boolean(move.lineJoinCandidatesByBand)}
+            onConfirm={onMoveConfirm}
+            onClose={() => setMove(null)}
+          />
+        ) : null}
+      </>
     );
   }
 
@@ -298,6 +328,8 @@ export function LineScreen() {
         ))}
       </div>
 
+      <UnlinedCardsPanel cards={data.unlinedCards} onMove={openMoveForUnlined} />
+
       <div className="foot">BINDER → HALF → BAND · ONE HORIZONTAL LINE, NO PAGE, NO POCKET</div>
 
       {activeDecision ? (
@@ -322,6 +354,7 @@ export function LineScreen() {
         <MoveOverlay
           card={move}
           options={data.moveOptions}
+          allowLineJoin={Boolean(move.lineJoinCandidatesByBand)}
           onConfirm={onMoveConfirm}
           onClose={() => setMove(null)}
         />
@@ -333,6 +366,51 @@ export function LineScreen() {
         </div>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Shelved cards with no line yet (UIL-056) — the way OFF the front half her UAT report was missing.
+ * Nothing to show is the common case (most shelved cards are already lined or have no line
+ * concept), so this collapses to nothing rather than an empty panel.
+ */
+function UnlinedCardsPanel({
+  cards,
+  onMove,
+}: {
+  cards: UnlinedCard[];
+  onMove: (card: UnlinedCard) => void;
+}) {
+  if (cards.length === 0) return null;
+  return (
+    <div className="lineinfo" style={{ marginTop: 16 }}>
+      <div className="box panel" style={{ gridColumn: "1 / -1" }}>
+        <div className="k u">NOT IN A LINE YET</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
+          {cards.map((c) => (
+            <div key={c.copyId} className="hand" style={{ minWidth: 160 }}>
+              <CardFace name={c.card.name} imageUrl={c.card.imageUrl} size="m" />
+              <div style={{ minWidth: 0 }}>
+                <div className="nm" style={{ fontSize: 13 }}>
+                  {c.card.name}
+                </div>
+                <div className="u" style={{ fontSize: 10, color: "var(--ink-2)", marginTop: 4 }}>
+                  {c.currentLabel}
+                </div>
+                <button
+                  type="button"
+                  className="movebtn u"
+                  style={{ marginTop: 6 }}
+                  onClick={() => onMove(c)}
+                >
+                  ↔ Move
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -7,7 +7,7 @@
  */
 
 import { useEffect } from "react";
-import type { MoveDestination, MoveOptions } from "@/lib/line/types";
+import type { LineJoinCandidate, MoveDestination, MoveOptions } from "@/lib/line/types";
 import { CardFace } from "./CardFace";
 import { MovePanel } from "./MovePanel";
 
@@ -19,16 +19,21 @@ export interface MoveTargetCard {
   bandKey: string;
   currentLabel: string;
   initial?: MoveDestination;
+  /** Line screen only (UIL-056): existing lines this card could join, by band, plus "start new". */
+  lineJoinCandidatesByBand?: Record<string, LineJoinCandidate[]>;
 }
 
 export function MoveOverlay({
   card,
   options,
+  allowLineJoin = false,
   onConfirm,
   onClose,
 }: {
   card: MoveTargetCard;
   options: MoveOptions;
+  /** UIL-056: only the Line screen turns this on — see MovePanel's docstring. */
+  allowLineJoin?: boolean;
   onConfirm: (dest: MoveDestination) => void;
   onClose: () => void;
 }) {
@@ -88,7 +93,13 @@ export function MoveOverlay({
               </div>
             </div>
           </div>
-          <MovePanel options={options} initial={card.initial} onConfirm={onConfirm} />
+          <MovePanel
+            options={options}
+            initial={card.initial}
+            allowLineJoin={allowLineJoin}
+            lineJoinCandidatesByBand={card.lineJoinCandidatesByBand}
+            onConfirm={onConfirm}
+          />
           <div className="hint">Pick a new home. No rule applies here — it is your call.</div>
         </div>
       </div>

@@ -199,9 +199,26 @@ export interface DecisionWrites {
 
 /* ---------------------------------- move ----------------------------------- */
 
+/**
+ * The back half IS the lines area (UIL-056): a shelf destination whose half is `"back"` must resolve
+ * to a line, or the card strands there exactly as `line_slot_id: null` always used to leave it. Join
+ * an existing line's open slot, or start a new one. Deliberately allowed even when the engine's own
+ * viability rule (>= 2 same-colour chain members) is not met — Karvi's own UX tip was "the user must
+ * pick which card it is entering a line with," not "only when the engine would have made one itself";
+ * gating manual creation on viability would strand her at a decision she cannot satisfy from a single
+ * card. Absent entirely for a `"front"` half — no line concept applies there.
+ */
+export type LineJoinChoice = { mode: "existing"; lineId: string; slotId: string } | { mode: "new" };
+
 /** Where a moved card lands (binder + half + band, into a collection, or the bulk box). */
 export type MoveDestination =
-  | { kind: "shelf"; binderId: string; half: "front" | "back"; band: string }
+  | {
+      kind: "shelf";
+      binderId: string;
+      half: "front" | "back";
+      band: string;
+      lineJoin?: LineJoinChoice;
+    }
   | { kind: "collection"; binderId: string; collectionId: string }
   | { kind: "bulk" };
 
@@ -218,9 +235,35 @@ export interface MoveOptions {
   bands: { key: string; display: string }[];
 }
 
+/**
+ * An existing line this specific card could join — one open (placeholder/block) slot whose species
+ * matches the card's own dexId, keyed by the line's band so the picker can filter as she changes the
+ * band chip. Computed server-side (UIL-056) from lines already loaded for the screen; absent when no
+ * line anywhere has a fitting open slot, in which case only "start a new line" is offered.
+ */
+export interface LineJoinCandidate {
+  lineId: string;
+  slotId: string;
+  bandKey: string;
+  speciesLabel: string;
+  stage: string;
+}
+
 /** The client-facing line-screen payload (loaded server-side, rendered client-side). */
 export interface LineScreenData {
   lines: LineView[];
   decisions: DecisionCard[];
   moveOptions: MoveOptions;
+  /** Shelved copies with no line slot, offered a way in (UIL-056) — see `unlinedCards`. */
+  unlinedCards: UnlinedCard[];
+}
+
+/** A shelved, line-less card shown so it has a way OFF the front half and INTO a line (UIL-056). */
+export interface UnlinedCard {
+  copyId: string;
+  card: CardIdentity;
+  currentLabel: string;
+  /** This card's own dexId — fixed, used to match candidate lines' open slots. */
+  dexId: number;
+  joinCandidatesByBand: Record<string, LineJoinCandidate[]>;
 }

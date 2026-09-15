@@ -10,10 +10,21 @@
  * `onConfirm` with the chosen `MoveDestination`. Reused by the line strip, the plan spotlight, and
  * (later) lookup — anywhere a card shows. Presentational + local state only; the write is a server
  * action the host passes down.
+ *
+ * `allowLineJoin` (UIL-056, opt-in, default off): the back half IS the lines area, so a back-half
+ * destination resolves to a line — an existing one's open slot, or a new one. Off by default so the
+ * plan spotlight and Collections' existing usage are untouched; only the Line screen turns it on,
+ * where `lineJoinCandidatesByBand` (computed server-side from lines already loaded) says which
+ * existing lines this specific card could join, per band.
  */
 
 import { useState } from "react";
-import type { MoveDestination, MoveOptions } from "@/lib/line/types";
+import type {
+  LineJoinCandidate,
+  LineJoinChoice,
+  MoveDestination,
+  MoveOptions,
+} from "@/lib/line/types";
 import { isMoveDestinationComplete } from "@/lib/line/move";
 import { bandMeta } from "./plan-meta";
 
@@ -23,11 +34,15 @@ export function MovePanel({
   options,
   initial,
   confirmLabel = "Place it here ▶",
+  allowLineJoin = false,
+  lineJoinCandidatesByBand,
   onConfirm,
 }: {
   options: MoveOptions;
   initial?: MoveDestination;
   confirmLabel?: string;
+  allowLineJoin?: boolean;
+  lineJoinCandidatesByBand?: Record<string, LineJoinCandidate[]>;
   onConfirm: (dest: MoveDestination) => void;
 }) {
   const firstGeneral = options.binders.find((b) => b.type === "general");
@@ -43,17 +58,27 @@ export function MovePanel({
   const [collectionId, setCollectionId] = useState<string | null>(
     initial?.kind === "collection" ? initial.collectionId : null,
   );
+  const [lineJoin, setLineJoin] = useState<LineJoinChoice | undefined>(
+    initial?.kind === "shelf" ? initial.lineJoin : undefined,
+  );
 
   const isBulk = binderId === BULK;
   const binder = options.binders.find((b) => b.id === binderId);
   const isSpecialty = binder?.type === "specialty";
   const collections = binder ? (options.collectionsByBinder[binder.id] ?? []) : [];
+  const candidates = allowLineJoin && band ? (lineJoinCandidatesByBand?.[band] ?? []) : [];
 
   const destination: MoveDestination = isBulk
     ? { kind: "bulk" }
     : isSpecialty
       ? { kind: "collection", binderId: binder!.id, collectionId: collectionId ?? "" }
-      : { kind: "shelf", binderId: binder?.id ?? "", half, band: band ?? "" };
+      : {
+          kind: "shelf",
+          binderId: binder?.id ?? "",
+          half,
+          band: band ?? "",
+          ...(half === "back" && allowLineJoin ? { lineJoin } : {}),
+        };
 
   const canConfirm = isMoveDestinationComplete(destination);
 
@@ -64,7 +89,15 @@ export function MovePanel({
       return `${binder?.name ?? "BINDER"} · ${c ? c.name.toUpperCase() : "PICK A COLLECTION"}`;
     }
     const bandLabel = band ? bandMeta(band).display.toUpperCase() : "PICK A BAND";
-    return `${binder?.name ?? "BINDER"} · ${half.toUpperCase()} HALF · ${bandLabel}`;
+    const joinLabel =
+      half === "back" && allowLineJoin
+        ? lineJoin?.mode === "new"
+          ? " · NEW LINE"
+          : lineJoin?.mode === "existing"
+            ? ` · ${candidates.find((c) => c.slotId === lineJoin.slotId)?.speciesLabel ?? "LINE"}`
+            : " · PICK A LINE"
+        : "";
+    return `${binder?.name ?? "BINDER"} · ${half.toUpperCase()} HALF · ${bandLabel}${joinLabel}`;
   }
 
   return (
@@ -150,7 +183,10 @@ export function MovePanel({
                     type="button"
                     className={"ochip" + (half === h ? " on" : "")}
                     aria-pressed={half === h}
-                    onClick={() => setHalf(h)}
+                    onClick={() => {
+                      setHalf(h);
+                      setLineJoin(undefined);
+                    }}
                   >
                     {h.toUpperCase()} HALF
                   </button>
@@ -168,7 +204,10 @@ export function MovePanel({
                       type="button"
                       className={"ochip" + (band === b.key ? " on" : "")}
                       aria-pressed={band === b.key}
-                      onClick={() => setBand(b.key)}
+                      onClick={() => {
+                        setBand(b.key);
+                        setLineJoin(undefined);
+                      }}
                     >
                       <span
                         className={"sw" + (m.dither ? " dither" : "")}
@@ -181,6 +220,40 @@ export function MovePanel({
                 })}
               </div>
             </div>
+            {half === "back" && allowLineJoin && band ? (
+              <div className="orow">
+                <div className="ol">JOIN A LINE</div>
+                <div className="ochips">
+                  {candidates.map((c) => {
+                    const on =
+                      lineJoin?.mode === "existing" &&
+                      lineJoin.lineId === c.lineId &&
+                      lineJoin.slotId === c.slotId;
+                    return (
+                      <button
+                        key={c.slotId}
+                        type="button"
+                        className={"ochip" + (on ? " on" : "")}
+                        aria-pressed={on}
+                        onClick={() =>
+                          setLineJoin({ mode: "existing", lineId: c.lineId, slotId: c.slotId })
+                        }
+                      >
+                        {c.speciesLabel} · {c.stage.toUpperCase()} SLOT
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    className={"ochip" + (lineJoin?.mode === "new" ? " on" : "")}
+                    aria-pressed={lineJoin?.mode === "new"}
+                    onClick={() => setLineJoin({ mode: "new" })}
+                  >
+                    + Start a new line
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </>
         )}
 
