@@ -39,6 +39,7 @@ import {
   getMoveOptions,
   loadPendingPlacementDraft,
   lookupCatalog,
+  refreshSpotlightAction,
   runHaulPlan,
 } from "./actions";
 import type { DraftCard, DraftPayloadItem, LookupCard, RunPlanResult } from "./plan-types";
@@ -174,6 +175,22 @@ export function PlanScreen({
   const [liveStamp, setLiveStamp] = useState(resumed?.stamp ?? stateStamp);
   /** The card currently being written, so only its own control shows a pending state. */
   const [shelving, setShelving] = useState<string | null>(null);
+  /**
+   * The spotlight card, RE-DERIVED against current state (UIL-045).
+   *
+   * The worklist's rows all come from one cascade run that never advanced between cards, so any card
+   * interacting with an earlier card in the same haul shows a stale pocket. The write re-derives, so it
+   * silently disagrees — and she reads the screen to decide which physical pocket to use, which makes a
+   * stale row a wrong shelf that nothing ever contradicts.
+   *
+   * Only the spotlight card is refreshed: it is the one whose accuracy moves a physical card. Keyed by
+   * draft id so a stale in-flight response cannot overwrite a newer card's answer.
+   */
+  const [fresh, setFresh] = useState<{
+    id: string;
+    item: PlanItem | null;
+    digest: string | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cur, setCur] = useState(resumed?.cur ?? 0);
   /**
@@ -361,8 +378,18 @@ export function PlanScreen({
         pendingCopyIds: draft
           .filter((d) => d.existingCopyId && !done.has(d.id) && d.id !== item.incomingId)
           .map((d) => d.existingCopyId as string),
+        // Only when we hold a fresh derivation FOR THIS CARD (UIL-045). Sending the stale forecast's
+        // digest would conflict on every interacting card; sending none keeps the old behaviour.
+        expectedDigest: fresh?.id === item.incomingId ? fresh.digest : null,
       });
       if (!res.ok) {
+        // The placement moved under her. Nothing was written; show the new one and let her look
+        // again rather than reporting a failure for something that is working correctly.
+        if (res.changed) {
+          setFresh({ id: item.incomingId, item: res.fresh, digest: res.freshDigest });
+          setError(res.error);
+          return false;
+        }
         setError(res.error);
         return false;
       }
@@ -415,6 +442,60 @@ export function PlanScreen({
     [moveOptions],
   );
 
+  /**
+   * Re-derive the spotlight card whenever the cursor lands on one (UIL-045).
+   *
+   * Skipped entirely until something has been shelved this sitting: before the first Done, nothing has
+   * moved, so the forecast IS current and a round trip would buy nothing. Skipped for an overridden card
+   * too — her destination is written verbatim, so it cannot drift.
+   *
+   * Syncing to an external system (the server's view of placement) is what an effect is for. The
+   * response is keyed by draft id and discarded if the cursor has moved on, so an out-of-order reply
+   * cannot show one card's pocket on another card.
+   */
+  const spotlightId = flatItems[cur]?.incomingId ?? null;
+  useEffect(() => {
+    // No setState on this path, deliberately: a stale entry is IGNORED at the point of use (it is
+    // keyed by draft id and every reader checks the key), so clearing it here would be a cascading
+    // render for no observable difference.
+    if (!spotlightId || done.size === 0 || overrides[spotlightId]) return;
+    const entry = draft.find((d) => d.id === spotlightId);
+    if (!entry) return;
+    let live = true;
+    refreshSpotlightAction({
+      card: {
+        id: entry.id,
+        tcgdexId: entry.card.tcgdexId,
+        variant: entry.variant,
+        existingCopyId: entry.existingCopyId ?? null,
+      },
+      pendingCopyIds: draft
+        .filter((d) => d.existingCopyId && !done.has(d.id))
+        .map((d) => d.existingCopyId as string),
+    })
+      .then((res) => {
+        if (!live) return;
+        // An entry is recorded even when the call FAILED (`item: null`), because "we have an answer
+        // for this card" is what the in-flight indicator is derived from — without it a failure would
+        // leave "Checking…" on screen forever. A failed refresh keeps showing the forecast, which is
+        // still the best available answer and is labelled as an estimate.
+        setFresh({
+          id: spotlightId,
+          item: res.ok ? res.item : null,
+          digest: res.ok ? res.digest : null,
+        });
+      })
+      .catch(() => {
+        if (live) setFresh({ id: spotlightId, item: null, digest: null });
+      });
+    return () => {
+      live = false;
+    };
+    // `done` in full rather than `done.size`: its identity changes on every shelve, and re-deriving
+    // then is exactly right — a card was just written, which is the event that can move this card's
+    // pocket. The guard above still skips the whole thing before the first Done.
+  }, [spotlightId, done, draft, overrides]);
+
   /** Fold / unfold one band (UIL-018). Same shape as `toggleDone` — a set of keys, not a flag map. */
   function toggleCollapse(bandKey: string) {
     setCollapsed((prev) => {
@@ -465,6 +546,7 @@ export function PlanScreen({
           done={done}
           shelveCard={shelveCard}
           shelving={shelving}
+          fresh={fresh}
           advance={advance}
           onBack={() => setPlan(null)}
           onReset={resetAll}
@@ -724,6 +806,8 @@ function PlanView(props: {
   shelveCard: (item: PlanItem) => Promise<boolean>;
   /** Draft id of the card mid-write, so only its own control shows a pending state. */
   shelving: string | null;
+  /** The spotlight card re-derived against current state, keyed by draft id (UIL-045). */
+  fresh: { id: string; item: PlanItem | null; digest: string | null } | null;
   advance: () => void;
   onBack: () => void;
   onReset: () => void;
@@ -747,6 +831,7 @@ function PlanView(props: {
     done,
     shelveCard,
     shelving,
+    fresh,
     advance,
     onBack,
     onReset,
@@ -926,6 +1011,16 @@ function PlanView(props: {
             >
               Expand all
             </button>
+            {/* Say what the list is, once, rather than hedging 685 rows (UIL-045). Only shown once
+                something has been shelved, because until then nothing has moved and the forecast is
+                exactly current — a standing "these may be wrong" would be false and would train her
+                to ignore it. */}
+            {done.size > 0 ? (
+              <span className="estimate">
+                Positions below are from the original run. The card in the spotlight is re-checked
+                against your shelves as you reach it.
+              </span>
+            ) : null}
           </div>
           {plan.groups.map((g) => (
             <BandSection
@@ -968,6 +1063,19 @@ function PlanView(props: {
               override={flatItems[cur] ? overrides[flatItems[cur].incomingId] : undefined}
               overrideNames={overrideNames}
               onMove={() => flatItems[cur] && onMove(flatItems[cur])}
+              // Only when the reply belongs to the card actually in the spotlight (UIL-045).
+              freshItem={
+                flatItems[cur] && fresh?.id === flatItems[cur].incomingId ? fresh.item : null
+              }
+              /* Derived, not stored (UIL-045): a re-derivation is outstanding exactly when one is
+                 expected for this card and we do not hold its answer yet. Keeping this out of state
+                 is also what keeps the effect free of a synchronous setState. */
+              refreshing={
+                !!flatItems[cur] &&
+                doneCount > 0 &&
+                !overrides[flatItems[cur].incomingId] &&
+                fresh?.id !== flatItems[cur].incomingId
+              }
             />
           </div>
         </aside>
@@ -1171,9 +1279,16 @@ export function Spotlight(props: {
   /** Name maps for the override sentence; null until options load (UIL-037). */
   overrideNames?: MoveNameLookups | null;
   onMove: () => void;
+  /**
+   * This card re-derived against current state (UIL-045), when it differs from the forecast row.
+   * Undefined means "the forecast is current" — before the first Done, nothing has moved.
+   */
+  freshItem?: PlanItem | null;
+  /** A re-derivation is in flight, so the destination shown may be about to change. */
+  refreshing?: boolean;
 }) {
   const {
-    item,
+    item: forecast,
     done,
     busy = false,
     onShelve,
@@ -1182,8 +1297,21 @@ export function Spotlight(props: {
     override,
     overrideNames,
     onMove,
+    freshItem,
+    refreshing = false,
   } = props;
-  if (!item) return <p style={{ fontSize: 11, color: "var(--ink-2)" }}>No cards to handle.</p>;
+  if (!forecast) return <p style={{ fontSize: 11, color: "var(--ink-2)" }}>No cards to handle.</p>;
+  /**
+   * The re-derived row wins when we have one (UIL-045). The forecast was computed against pre-haul
+   * state, so for a card interacting with one she has already shelved it names a pocket the write will
+   * not use — and she reads this panel to decide which pocket to physically use.
+   */
+  const item = freshItem ?? forecast;
+  // Only worth telling her when the pocket actually moved; a reworded reason is not news.
+  const movedFrom =
+    freshItem && !override && freshItem.destination !== forecast.destination
+      ? forecast.destination
+      : null;
   // Show where she MOVED the card, not where the cascade proposed — the whole point of the review
   // panel is verifying her own decision before she clicks Done (UIL-037).
   const disp = displayFor(item, override, overrideNames ?? null);
@@ -1218,6 +1346,26 @@ export function Spotlight(props: {
       {/* "Moved" as its own label because Done is now the commit (UIL-027) — there is no separate
           commit step for the override to be "at". The `.movedtag u` styling is preserved. */}
       {override ? <div className="movedtag u">Moved · {disp.destination}</div> : null}
+
+      {/* An earlier card in this haul changed where this one goes (UIL-045). Saying so is the whole
+          point: a silent correction would leave her trusting the worklist row she read a moment ago,
+          and the row is what decides which pocket she physically uses. Names the cause, because
+          "it changed" without a reason reads like a bug rather than the cascade working. */}
+      {movedFrom ? (
+        <div className="changedtag u" role="status">
+          <b>Changed by this haul</b>
+          <span>
+            was {movedFrom} — now {item.destination}
+          </span>
+          <span className="wy">{item.reason}</span>
+        </div>
+      ) : null}
+
+      {/* Only while a re-derivation is actually in flight, and only ever additive: the panel keeps
+          showing the forecast rather than blanking, because a stale-but-labelled answer beats none. */}
+      {refreshing ? (
+        <div className="checkingtag u">Checking this card against your shelves…</div>
+      ) : null}
 
       <button type="button" className="movebtn wide u" style={{ width: "100%" }} onClick={onMove}>
         ↔ Change position
