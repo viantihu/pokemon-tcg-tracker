@@ -144,6 +144,21 @@ export function isMoveDestinationComplete(dest: MoveDestination): boolean {
   }
 }
 
+/**
+ * The half a FRESH move panel opens on (no `initial` destination) — a regression `isMoveDestinationComplete`
+ * itself surfaced (UIL-056): without the line picker (`allowLineJoin` false — the Plan spotlight,
+ * Collections), defaulting to "back" opened the panel on a destination that check can never confirm,
+ * with Confirm just sitting disabled and nothing explaining why. Only a caller that HAS the picker
+ * (the Line screen) should default toward the back half — that is the entire point of that flow.
+ */
+export function defaultMoveHalf(
+  initial: MoveDestination | undefined,
+  allowLineJoin: boolean,
+): "front" | "back" {
+  if (initial?.kind === "shelf") return initial.half;
+  return allowLineJoin ? "back" : "front";
+}
+
 /* ------------------- membership: the other half of a collection destination ------------------- */
 
 /**

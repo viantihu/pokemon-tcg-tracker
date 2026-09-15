@@ -26,7 +26,7 @@ import type {
   MoveDestination,
   MoveOptions,
 } from "@/lib/line/types";
-import { isMoveDestinationComplete } from "@/lib/line/move";
+import { defaultMoveHalf, isMoveDestinationComplete } from "@/lib/line/move";
 import { bandMeta } from "./plan-meta";
 
 const BULK = "__bulk__";
@@ -56,9 +56,7 @@ export function MovePanel({
     if (initial && "binderId" in initial) return initial.binderId;
     return firstGeneral?.id ?? options.binders[0]?.id ?? BULK;
   });
-  const [half, setHalf] = useState<"front" | "back">(
-    initial?.kind === "shelf" ? initial.half : "back",
-  );
+  const [half, setHalf] = useState<"front" | "back">(() => defaultMoveHalf(initial, allowLineJoin));
   const [band, setBand] = useState<string | null>(initial?.kind === "shelf" ? initial.band : null);
   const [collectionId, setCollectionId] = useState<string | null>(
     initial?.kind === "collection" ? initial.collectionId : null,
@@ -226,6 +224,16 @@ export function MovePanel({
                 })}
               </div>
             </div>
+            {half === "back" && !allowLineJoin ? (
+              <div className="orow">
+                <div className="ol" />
+                <div className="ochips">
+                  <span className="oskip">
+                    Back-half moves choose a line. Do this from the Lines page.
+                  </span>
+                </div>
+              </div>
+            ) : null}
             {half === "back" && allowLineJoin && band ? (
               <div className="orow">
                 <div className="ol">JOIN A LINE</div>
