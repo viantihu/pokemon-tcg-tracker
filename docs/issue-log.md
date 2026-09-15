@@ -3441,10 +3441,39 @@ doesn't stamp." That distinction is exactly what needs checking before a fix.
 distinguish them and nobody has asked Karvi. Two named entries did leave the queue (Battle Academy 2022
 Eevee Deck and Storm Emeralda); six remain.
 
-**Priority rationale (Senior BA's read): Medium, provisional.** A promise the UI makes that may not fire
-is worth more than Low, but the ranking shouldn't harden until the telemetry-vs-logic question is
-settled — a telemetry gap is a small write-the-counter fix, a dead retry path is a real behaviour bug,
-and they're the same symptom today.
+**Settled: telemetry, by design, not a dead retry path — both the "self-heal" mechanism and the "why the
+counters are flat" question checked directly against source.**
+
+- **The retry-only sweep never touches a still-unresolved row, on either outcome.**
+  [`retryUnresolvedNow`](<../app/(ui)/sync/actions.ts>:90) runs the pipeline with `bytes=null`, and if
+  nothing promotes it returns `{ applied: false }` **without calling `executeApply` at all** — no write
+  happens, so nothing could be stamped. Even when something *does* promote,
+  [`pipeline.ts:188-218`](../lib/sync/pipeline.ts:188)'s retry-only branch only ever pushes entries that
+  now resolve into `archiveEntryIds`; there is no `else` arm for a still-unresolved entry, so `parks`
+  stays empty on this path and a surviving WAITING row is never in the write set to begin with.
+- **The import-reparks path can stamp the counter, but a repeated identical export never reaches it.**
+  [`exec.ts` step 5](../lib/sync/exec.ts:278) does write `retry_count + 1`/`last_retry_sync` for a CSV
+  row that comes back still unresolved — but only if `applySync` actually runs.
+  [`SyncScreen.tsx:80-85`](<../app/(ui)/sync/SyncScreen.tsx>:80) returns on `preview.kind === "noop"`
+  ("Already in sync — nothing to apply") without calling `applySync`, and
+  [`pipeline.ts:242-253`](../lib/sync/pipeline.ts:242) explicitly classifies an identical re-park (same
+  quantity, same reason) as **not meaningful**, which is what makes the preview a noop. So a repeat
+  export of the same still-unresolved rows never reaches the write step that would stamp them — exactly
+  what she measured.
+
+**Both self-heal promises are actually kept; only the "last checked" stamp is missing.** A resolving
+entry is archived on import and promoted on retry either way. What's missing is a write recording that a
+check happened when nothing changed — so the queue view
+([`toEntryView`](<../app/(ui)/sync/actions.ts>), which maps `last_retry_sync`) shows "never retried" for
+rows that have, in fact, been checked repeatedly and correctly found still unresolved.
+
+**Falsifier run before concluding this:** read the noop branch specifically for any `applySync` call —
+there is none.
+
+**Priority rationale.** No behaviour defect — self-healing works exactly as promised for any entry that
+actually resolves; this is a missing stamp on a checked-and-still-unresolved outcome, not a dead retry
+path or lost data. The Senior BA is putting a revised Low to Karvi now that the cause is settled;
+recording that as proposed rather than final since priority is her call.
 
 ## UIL-047 — Japanese cards are unfindable and can be confidently mis-matched, because the catalog mirror is English-only
 
