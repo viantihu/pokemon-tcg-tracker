@@ -33,12 +33,24 @@ function quoteIdent(name: string): string {
   return `"${name}"`;
 }
 
-/** A thenable query builder that compiles to one SELECT. Mirrors the repo layer's usage only. */
+type Row = Record<string, unknown>;
+
+/**
+ * A thenable query builder that compiles to one SELECT, INSERT, or UPDATE. Mirrors the repo layer's
+ * usage only — `createRepo`'s five shapes (`insert(values).select().single()`,
+ * `insertMany` the same without `.single()`, `update(patch).eq(pk, v).select().single()`, plus the
+ * pre-existing read chains). Extended for UIL-048's `applyCollectionLog`, the first module under test
+ * here that writes through direct repo calls rather than `apply_write_ops` — narrow on purpose, same
+ * as the read surface above: an unsupported shape throws rather than silently doing nothing.
+ */
 class PgQuery {
   private cols = "*";
   private filters: Filter[] = [];
   private orderCol: string | null = null;
   private wantCount = false;
+  private mode: "select" | "insert" | "update" = "select";
+  private writeValues: Row | Row[] | null = null;
+  private wantSingle = false;
 
   constructor(
     private readonly db: PGlite,
@@ -61,6 +73,23 @@ class PgQuery {
     return this;
   }
 
+  insert(values: Row | Row[]): this {
+    this.mode = "insert";
+    this.writeValues = values;
+    return this;
+  }
+
+  update(patch: Row): this {
+    this.mode = "update";
+    this.writeValues = patch;
+    return this;
+  }
+
+  single(): this {
+    this.wantSingle = true;
+    return this;
+  }
+
   eq(col: string, value: unknown): this {
     this.filters.push({ kind: "eq", col, value });
     return this;
@@ -76,8 +105,7 @@ class PgQuery {
     return this;
   }
 
-  private compile(): [string, unknown[]] {
-    const params: unknown[] = [];
+  private whereClause(params: unknown[]): string {
     const where: string[] = [];
     for (const f of this.filters) {
       if (f.kind === "eq") {
@@ -96,20 +124,55 @@ class PgQuery {
         where.push(`${quoteIdent(f.col)} in (${slots.join(", ")})`);
       }
     }
+    return where.length > 0 ? ` where ${where.join(" and ")}` : "";
+  }
+
+  private compile(): [string, unknown[]] {
+    const params: unknown[] = [];
     const sql =
       `select ${this.cols} from ${quoteIdent(this.table)}` +
-      (where.length > 0 ? ` where ${where.join(" and ")}` : "") +
+      this.whereClause(params) +
       (this.orderCol ? ` order by ${quoteIdent(this.orderCol)} asc` : "");
     return [sql, params];
   }
 
-  private async rows(): Promise<Record<string, unknown>[]> {
+  private async rows(): Promise<Row[]> {
     const [sql, params] = this.compile();
-    const res = await this.db.query<Record<string, unknown>>(sql, params);
+    const res = await this.db.query<Row>(sql, params);
     return res.rows;
   }
 
-  async maybeSingle(): Promise<{ data: Record<string, unknown> | null; error: null }> {
+  private async runInsert(): Promise<Row[]> {
+    const rows = Array.isArray(this.writeValues) ? this.writeValues : [this.writeValues!];
+    if (rows.length === 0) return [];
+    const cols = Object.keys(rows[0]);
+    const params: unknown[] = [];
+    const valueRows = rows.map(
+      (row) => `(${cols.map((c) => (params.push(row[c]), `$${params.length}`)).join(", ")})`,
+    );
+    const sql =
+      `insert into ${quoteIdent(this.table)} (${cols.map(quoteIdent).join(", ")})` +
+      ` values ${valueRows.join(", ")} returning *`;
+    const res = await this.db.query<Row>(sql, params);
+    return res.rows;
+  }
+
+  private async runUpdate(): Promise<Row[]> {
+    const params: unknown[] = [];
+    const patch = this.writeValues as Row;
+    const setCols = Object.keys(patch);
+    const setClause = setCols
+      .map((c) => (params.push(patch[c]), `${quoteIdent(c)} = $${params.length}`))
+      .join(", ");
+    const sql =
+      `update ${quoteIdent(this.table)} set ${setClause}` +
+      this.whereClause(params) +
+      ` returning *`;
+    const res = await this.db.query<Row>(sql, params);
+    return res.rows;
+  }
+
+  async maybeSingle(): Promise<{ data: Row | null; error: null }> {
     const rows = await this.rows();
     return { data: rows[0] ?? null, error: null };
   }
@@ -117,16 +180,22 @@ class PgQuery {
   then<TResult1, TResult2 = never>(
     onFulfilled?:
       | ((value: {
-          data: Record<string, unknown>[];
+          data: Row[] | Row | null;
           error: null;
           count: number | null;
         }) => TResult1 | PromiseLike<TResult1>)
       | null,
     onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): PromiseLike<TResult1 | TResult2> {
-    return this.rows()
+    const run =
+      this.mode === "insert"
+        ? this.runInsert()
+        : this.mode === "update"
+          ? this.runUpdate()
+          : this.rows();
+    return run
       .then((rows) => ({
-        data: rows,
+        data: this.wantSingle ? (rows[0] ?? null) : rows,
         error: null as null,
         count: this.wantCount ? rows.length : null,
       }))
