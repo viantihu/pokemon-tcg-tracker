@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
+import type { CatalogCard } from "@/lib/engine";
 import type { WritePayload } from "@/lib/repo";
 
 export const OWNER = "00000000-0000-0000-0000-000000000001";
@@ -74,6 +75,53 @@ export async function applyOps(db: PGlite, payload: WritePayload): Promise<void>
 }
 
 /** Insert minimal catalog_card rows (superuser) so copy/slot/wishlist FKs resolve. */
+/**
+ * Seed catalog rows from real engine fixtures, WITH the columns placement actually reads.
+ *
+ * `seedCatalogCards` below writes `tcgdex_id` and `name` only, which is right for tests that assert on
+ * writes and only need the foreign key to resolve. It is actively misleading for anything that runs the
+ * cascade: with `set_id`, `local_id` and `artwork_group_id` all null, `isDuplicateCard` can never match,
+ * so NO card is a duplicate of any other and every card routes as if it were the first of its kind.
+ * A duplicate-detection test against that seed passes while proving nothing — the same class of trap as
+ * a test double that agrees with the code.
+ *
+ * So: use this whenever the cascade's decision is what is under test, and `seedCatalogCards` when only
+ * the FK matters. Takes the engine's own `CatalogCard` fixtures, so the row shape cannot drift from the
+ * shape `toCatalogCard` expects to read back.
+ */
+export async function seedCatalogCardsFull(db: PGlite, cards: CatalogCard[]): Promise<void> {
+  for (const c of cards) {
+    await db.query(
+      `insert into catalog_card
+         (tcgdex_id, name, dex_id, set_id, set_name, local_id, rarity, types, stage, evolve_from,
+          variants, artwork_group_id, card_class, is_digital_only, image_url)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       on conflict (tcgdex_id) do update set
+         dex_id = excluded.dex_id, set_id = excluded.set_id, local_id = excluded.local_id,
+         types = excluded.types, stage = excluded.stage, evolve_from = excluded.evolve_from,
+         variants = excluded.variants, artwork_group_id = excluded.artwork_group_id,
+         card_class = excluded.card_class`,
+      [
+        c.tcgdexId,
+        c.name,
+        c.dexId ?? [],
+        c.setId,
+        c.setName,
+        c.localId,
+        c.rarity,
+        c.types ?? [],
+        c.stage,
+        c.evolveFrom,
+        JSON.stringify(c.variants ?? {}),
+        c.artworkGroupId,
+        c.cardClass ?? "standard",
+        c.isDigitalOnly ?? false,
+        null,
+      ],
+    );
+  }
+}
+
 export async function seedCatalogCards(db: PGlite, ids: string[]): Promise<void> {
   const unique = [...new Set(ids)].filter(Boolean);
   for (const id of unique) {
