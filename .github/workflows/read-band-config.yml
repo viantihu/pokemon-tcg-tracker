@@ -302,6 +302,66 @@ jobs:
             echo "::warning::set_release_date present on only $with_date of $copies_total rows — the sampled-coverage caveat was real. NULLs order last, so this degrades rather than breaks."
           fi
 
+          # ---- UIL-046: did a sync APPLY actually run? An apply writes the undo point;
+          # `executeUndo` consumes it (exec.ts:352-357 reads it, `delete_snapshot` at the end). So this
+          # is the ONE discriminator between "an apply ran and the re-park key missed" (a real defect)
+          # and "no apply has run, so retry_count 0 is correct" (not a bug). Every other path — the
+          # retry action with nothing to promote, an identical re-import classified `noop` — writes
+          # nothing for a still-waiting row BY DESIGN.
+          echo
+          echo "--- UIL-046: has a sync apply run since the last undo? ---"
+          snapshots=$(count_of "last_sync_snapshot?select=id")
+          echo "last_sync_snapshot rows: $snapshots"
+          if [ "$snapshots" = "unknown" ]; then
+            echo "::warning::could not read last_sync_snapshot — UIL-046 undetermined."
+          elif [ "$snapshots" -eq 0 ]; then
+            echo "VERDICT: no apply has run since the last undo, so retry_count 0 on the six waiting rows is CORRECT. UIL-046 is Not-a-bug — and nobody should be told she re-ran a sync or ignored a stop."
+          else
+            echo "::warning::an apply HAS run ($snapshots undo point(s)), so those six SHOULD have been re-parked and bumped. That makes UIL-046 a real defect: next question is why the \`\${dex_id} \${dex_variant_raw}\` key missed."
+          fi
+
+          # ---- UIL-048 blast radius: how many (catalog_card_id, binder_id) pairs hold MORE THAN ONE
+          # shelved copy — i.e. phantom duplicates to clean up once the guard lands.
+          #
+          # PostgREST has no GROUP BY, so the grouping is done here. Pages by rows RECEIVED, not by the
+          # page size requested, so a server max-rows below the page size cannot skip rows. Prints ONLY
+          # the aggregate — the pairs themselves are card identity and are never echoed.
+          echo
+          echo "--- UIL-048: (catalog_card_id, binder_id) pairs with >1 shelved copy ---"
+          offset=0
+          : > shelved.txt
+          while :; do
+            case "$SERVICE_KEY" in
+              eyJ*) page=$(curl -sS --retry 3 -H "apikey: $SERVICE_KEY" -H "Authorization: Bearer $SERVICE_KEY" \
+                      "$rest/copy?select=catalog_card_id,binder_id&role=eq.shelved&binder_id=not.is.null&order=id.asc&limit=1000&offset=$offset") ;;
+              *)    page=$(curl -sS --retry 3 -H "apikey: $SERVICE_KEY" \
+                      "$rest/copy?select=catalog_card_id,binder_id&role=eq.shelved&binder_id=not.is.null&order=id.asc&limit=1000&offset=$offset") ;;
+            esac
+            if ! printf '%s' "$page" | jq -e 'type == "array"' > /dev/null 2>&1; then
+              echo "::warning::could not read shelved copies — UIL-048 blast radius undetermined."
+              break
+            fi
+            n=$(printf '%s' "$page" | jq 'length')
+            [ "$n" -gt 0 ] || break
+            printf '%s' "$page" | jq -r '.[] | "\(.catalog_card_id)|\(.binder_id)"' >> shelved.txt
+            offset=$((offset + n))
+          done
+          if [ -s shelved.txt ] || [ "$offset" -gt 0 ]; then
+            total_shelved=$(wc -l < shelved.txt | tr -d ' ')
+            dup_pairs=$(sort shelved.txt | uniq -c | awk '$1 > 1' | wc -l | tr -d ' ')
+            dup_rows=$(sort shelved.txt | uniq -c | awk '$1 > 1 { s += $1 } END { print s + 0 }')
+            echo "shelved copies scanned:            $total_shelved"
+            echo "pairs holding >1 shelved copy:     $dup_pairs"
+            echo "shelved copies in those pairs:     $dup_rows"
+            if [ "$dup_pairs" -eq 0 ]; then
+              echo "VERDICT: no phantom duplicates — nothing to clean up when the guard lands."
+            else
+              echo "VERDICT: $dup_pairs pair(s) to clean up, covering $dup_rows shelved copies ($((dup_rows - dup_pairs)) surplus)."
+            fi
+          else
+            echo "no shelved copies with a binder — nothing to group."
+          fi
+
           # ---- THE RECONCILER'S OWN INPUTS. lib/sync/pipeline.ts:106 loads the reconciler's `current`
           # with `presenceGroupRepo.list(db)` and `copyRepo.list(db)` — and `list()` is the UNPAGED
           # variant by design (lib/repo/base.ts:89-91 says outright: "correctness depends on
