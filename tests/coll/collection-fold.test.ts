@@ -42,6 +42,7 @@ function collection(owned: number, gap: number): CollectionView {
     id: "col-1",
     name: "Matsuno",
     mode: "finite",
+    incomplete: false,
     binderIds: ["b1"],
     binderNames: ["Specialty A"],
     cards,
@@ -119,12 +120,27 @@ describe("UIL-034 · a folded collection does not render its cards", () => {
   });
 });
 
+describe("UIL-038 · an incomplete draft is marked, not left to look broken", () => {
+  it("shows a Draft badge when the collection is missing a name or a binder", () => {
+    const html = render({ ...collection(0, 0), name: "", incomplete: true }, false);
+    expect(html).toContain("Untitled collection");
+    expect(html).toContain('class="cpill draft u"');
+    expect(html).toContain("Draft");
+  });
+
+  it("shows no badge for a normally-named, homed collection", () => {
+    const html = render(collection(1, 1), false);
+    expect(html).not.toContain("cpill draft");
+  });
+});
+
 describe("UIL-034 · open collections fold the same way", () => {
   function openCollection(n: number): CollectionView {
     return {
       id: "col-2",
       name: "Kagemaru",
       mode: "open",
+      incomplete: false,
       binderIds: ["b2"],
       binderNames: ["Specialty B"],
       cards: Array.from({ length: n }, (_, i) => card(i + 1, true)),
