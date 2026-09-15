@@ -1695,11 +1695,10 @@ to reach the next thing she can act on.
 ## UIL-019 — Haul progress header scrolls out of view instead of staying pinned
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to
-  `develop` 2026-09-14 (squash `e911c8c`), QA-reviewed, confirmed **deployed** to Testing (all four
-  conditions green on `7cb1a36`). The haul bar and the band heads are now `position: sticky`. Awaiting
-  Karvi's confirmation — she confirmed UIL-027 from the same PR but has not spoken to this one, so it is
-  not claimed on her behalf.
+- **Status:** **Closed** — PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to
+  `develop` 2026-09-14 (squash `e911c8c`), QA-reviewed, deployed to Testing, and **confirmed by Karvi on
+  Testing 2026-09-14**: "the progress bar now sticks as intended." The pin works; the overlap it causes
+  on desktop is tracked separately as UIL-058 (her rule: every report gets its own number), not a reopen.
 - **Priority:** Medium (Karvi's call)
 - **Area:** Plan
 - **Env:** Testing
@@ -2749,10 +2748,11 @@ partial-write incident), raised by the four-site drift risk rather than by an ob
 
 - **Reported:** 2026-09-14 (not from Karvi — found proactively, looking for the next instance of the
   "fine at small scale, wrong at real scale" pattern)
-- **Status:** **Fixed** — PR [#106](https://github.com/viantihu/pokemon-tcg-tracker/pull/106) MERGED to
-  `develop` 2026-09-14 (squash `c6e83b8`), QA-reviewed, confirmed **deployed** to Testing (all four
-  conditions green on `7cb1a36`). Collections now default to folded, with collapse-all / expand-all
-  controls; a newly created collection opens expanded. Awaiting Karvi's confirmation.
+- **Status:** **Closed** — PR [#106](https://github.com/viantihu/pokemon-tcg-tracker/pull/106) MERGED to
+  `develop` 2026-09-14 (squash `c6e83b8`), QA-reviewed, deployed to Testing, and **confirmed working by
+  Karvi on Testing 2026-09-14** while retesting it — her follow-on ask that the fold state persist across
+  visits is its own entry, UIL-059 (Low, her priority call pending). Collections default to folded with
+  collapse-all / expand-all controls; a newly created collection opens expanded.
 - **Priority:** Medium (Senior BA's read — flagged that Karvi rated the equivalent Haul Plan issue
   High, so this may come in above Medium if she reports it first)
 - **Area:** Collections
@@ -3573,7 +3573,14 @@ largest single item in this batch.
 ## UIL-048 — "Logging" a card she already owns into a collection creates a second physical copy row
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#119](https://github.com/viantihu/pokemon-tcg-tracker/pull/119) MERGED to
+  `develop` 2026-09-15 (squash `637668b`), QA-gated on the merged tree, confirmed **deployed** to Testing
+  (Vercel / migrate / smoke / acceptance all green on `637668b` and on the `a59bc4e` tip). Logging a card
+  she already owns is now: already in this collection's binder → no-op (tag only, no insert); owned but
+  shelved elsewhere or in bulk → refused, naming where it is and pointing at Move; not owned → one copy
+  inserted as before. Guard verified by mutation (guard removed → `expected 2 to be 1` on the copy row
+  count). Testing showed **0** existing duplicate pairs, so nothing needed cleaning up. Awaiting Karvi's
+  confirmation: log an already-shelved card again and see no second copy and no "Remove 2".
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Collections
 - **Env:** Testing
