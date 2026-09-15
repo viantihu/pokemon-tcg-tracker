@@ -2088,7 +2088,13 @@ nothing is mis-recorded.
 ## UIL-026 — Mirror the printed set total AND release date, so tied collector-number matches can be ranked instead of sorted alphabetically
 
 - **Reported:** 2026-09-13 (not from Karvi — surfaced by the tech-lead session while reviewing UIL-015)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#110](https://github.com/viantihu/pokemon-tcg-tracker/pull/110) MERGED to
+  `develop` 2026-09-14 (squash `f3248d9`, migration `0009` adds `set_card_count` + `set_release_date`
+  and the search ranks by denominator match then recency), deployed to Testing, and the data verified
+  **populated by count, not by a green run**: after the forced mirror run (`34909186338`, 218/218 sets)
+  both new columns are non-NULL on **23,548 / 23,548** rows and `sv04-099` carries `182`. **Closes only on
+  Karvi's own search: `099/182` must return Minior first, ahead of the numerically-named McDonald's sets.**
+  A search that merely finds the card somewhere is not the fix — it did that before.
 - **Priority:** Medium (Senior BA's read) — 5th in queue; UIL-022/023 are dev-assigned Highs, three
   other Highs are ahead of it, and Karvi's rule is Lows/Mediums wait for all Highs.
 - **Area:** Catalog, Lookup / Collections
@@ -3287,7 +3293,9 @@ the cost being addressed is one extra click, not a data risk or a blocked workfl
 ## UIL-044 — Collector-number search still ranks a padded exact match arbitrarily when it collides with other sets — confirmed as UIL-026's gap, not a new defect
 
 - **Reported:** 2026-09-14 (found while retesting UIL-010's fix, same search box UIL-015 was found in)
-- **Status:** Open — duplicate root cause of UIL-026, not a separate fix
+- **Status:** **Fixed** — same fix as UIL-026 (PR [#110](https://github.com/viantihu/pokemon-tcg-tracker/pull/110),
+  squash `f3248d9`, deployed, ranking columns verified populated 23,548 / 23,548). Closes together with
+  UIL-026 on Karvi's `099/182` search returning Minior first — this entry IS that acceptance test.
 - **Priority:** See UIL-026; this is real-world evidence the gap is worth acting on, not a new priority
   call
 - **Area:** Collections, Lookup
