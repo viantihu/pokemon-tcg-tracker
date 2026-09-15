@@ -19,7 +19,6 @@ import {
   copyRepo,
   evolutionLineRepo,
   lineSlotRepo,
-  placementDecisionRepo,
   typeColorMapRepo,
   wishlistItemRepo,
   type Row,
@@ -28,6 +27,7 @@ import { band } from "@/lib/engine";
 import { getOwnerContext, toCatalogCard } from "@/lib/plan";
 import { errorMessage } from "@/lib/errors";
 import {
+  applyCollectionLog,
   applyCollectionRemoval,
   blockedBinderRebind,
   blockedBinderRebindMessage,
@@ -280,8 +280,9 @@ export async function deleteCollection(id: string): Promise<SaveResult> {
 }
 
 /**
- * Log a card into a collection — a PLACEMENT, not a tally. Writes a real Copy shelved in the
- * collection's (specialty) binder, records membership on the collection, and writes the audit row.
+ * Log a card into a collection — a PLACEMENT, not a tally. Thin `getOwnerContext()` wrapper; the
+ * testable core (and the UIL-048 guard against creating a second physical copy for a card already
+ * owned) lives in `applyCollectionLog`.
  */
 export async function logCardIntoCollection(
   collectionId: string,
@@ -289,37 +290,8 @@ export async function logCardIntoCollection(
 ): Promise<SaveResult> {
   try {
     const { db, ownerId } = await getOwnerContext();
-    const col = await collectionRepo.getByPk(db, collectionId);
-    if (!col) return { ok: false, error: "Collection not found." };
-    const binderId = (col.current_binder_ids ?? [])[0];
-    if (!binderId) return { ok: false, error: "This collection has no binder yet." };
-
-    const copy = await copyRepo.insert(db, {
-      owner_id: ownerId,
-      catalog_card_id: tcgdexId,
-      variant: "normal",
-      role: "shelved",
-      binder_id: binderId,
-      binder_half: null, // specialty binder is a single section
-      color_band: null,
-      acquired_at: new Date().toISOString(),
-    });
-
-    const targets = col.target_catalog_card_ids ?? [];
-    if (!targets.includes(tcgdexId)) {
-      await collectionRepo.update(db, collectionId, {
-        target_catalog_card_ids: [...targets, tcgdexId],
-      });
-    }
-
-    await placementDecisionRepo.insert(db, {
-      owner_id: ownerId,
-      copy_id: copy.id,
-      decision: "collection-log",
-      reason: `Logged into ${col.name}`,
-      resolved_by: "user",
-    });
-    return { ok: true };
+    const res = await applyCollectionLog(db, ownerId, collectionId, tcgdexId);
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }
