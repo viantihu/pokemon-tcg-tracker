@@ -2787,9 +2787,13 @@ nav.menu .tab .n {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* No `.wy` inside `.changedtag` any more — the reason lives in the panel's own `.wy` below, in
+   sentence case. Kept as a guard: `.changedtag` carries `.u`, so anything nested that is prose rather
+   than a label must opt out of the uppercase or it arrives as three lines of shouting on a phone. */
 .changedtag .wy {
   color: var(--ink-2);
   font-size: 10px;
+  text-transform: none;
 }
 
 /* In-flight re-derivation. Additive only: the panel keeps showing the forecast

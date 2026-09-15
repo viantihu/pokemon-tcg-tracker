@@ -1354,10 +1354,12 @@ export function Spotlight(props: {
       {movedFrom ? (
         <div className="changedtag u" role="status">
           <b>Changed by this haul</b>
-          <span>
-            was {movedFrom} — now {item.destination}
-          </span>
-          <span className="wy">{item.reason}</span>
+          {/* The old destination only. The NEW one is the `.doit` block immediately above and the
+              cascade's reason is the `.wy` immediately below, both already showing the re-derived
+              values — repeating either here printed the same sentence twice on one panel (caught at
+              375px, where it cost three extra lines of ALL CAPS). What is missing without this line is
+              only ever the thing she can no longer see: what the row used to say. */}
+          <span>was {movedFrom}</span>
         </div>
       ) : null}
 
