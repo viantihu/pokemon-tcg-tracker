@@ -4061,3 +4061,65 @@ schema change and a new matching heuristic, not an extension of Half 1's plumbin
 to is currently a dead end beyond Dismiss), but `Match Manually`/`Dismiss` already exist as a working,
 if less smooth, path — nothing is blocked, and the more valuable half of the fix (Half 1) is
 comparatively cheap while the complete feature (both halves) is not.
+
+## UIL-061 — Creating a new line can silently relocate other already-owned cards, with no confirmation and no audit trail, and there is no way to choose the line yourself
+
+- **Reported:** 2026-09-14
+- **Status:** Open
+- **Priority:** High (Claude's read — needs Karvi's confirmation)
+- **Area:** Plan, Lines
+- **Env:** Testing
+
+In her words: "When I 'create a new line' in the haul plan, it automatically take the cards from that
+haul into that line without confirming. You cannot infer that a card will go somewhere and just put it
+there. In a haul, the user must validate each and every single line. Additionally, there must be an
+option to add to the back of the binder and either start a new line or add to an existing. If add to
+existing is selected, the user must choose a compatible line from a list."
+
+**Confirmed, and worse than described: it isn't only that the pull is unconfirmed — it's untracked.**
+
+**Mechanism.** `generateSlots` ([`lib/engine/line.ts`](../lib/engine/line.ts)) fills every stage of a
+new line from `ctx.owned` — every copy in her whole collection, not scoped to the haul
+([`lib/plan/context.ts:104-107`](../lib/plan/context.ts:104), `copyRepo.listAll(db)`), matching by
+species and colour band (`ownedAt`, [`line.ts:116`](../lib/engine/line.ts:116)). If a matching chain
+member is already shelved in a general binder's front half, it's flagged to be **pulled** into the new
+line's back-half slot. `writeNewLine` ([`lib/plan/commit.ts:556-566`](../lib/plan/commit.ts:556)) writes
+that pulled copy's placement change into the **same** op set as the card she clicked Done on — one
+transaction, one "Done" click, and an unbounded number of already-shelved cards can move as a side
+effect.
+
+**No audit row for the pulled cards — this is the sharper problem.** `buildHaulCommitPayload`'s loop
+writes exactly one `insert_decision` per incoming draft card. The pulled copies get no
+`placement_decision` row at all. So not only is there no confirmation before the move — there is no
+record afterward that it happened. If she later asks "why is this Charmander in the back half, I didn't
+put it there," nothing in the app can answer that.
+
+**No choice between "start a new line" and "add to an existing line" exists anywhere.**
+`existingLineSlot` ([`cascade.ts:168`](../lib/engine/cascade.ts:168)) checks for exactly one candidate
+line; if found, "line-existing" fires, otherwise "line-new" — the engine decides unilaterally, considers
+only the first match, and there is no concept of multiple "compatible lines" to select among. The
+generic "↔ Change position" button opens a free-form destination picker (`MoveOverlay`) — any
+binder/half/band/bulk/specialty — not a line-specific chooser, and it's identical for every card type,
+not a targeted "pick which line" flow.
+
+**"Done" discloses only the incoming card, never the pull.** The spotlight text for a new line
+([`lib/plan/assemble.ts:91-95`](../lib/plan/assemble.ts:91)) — `"Starts a new {band} line for
+{name} ({N} same-colour cards so far) — goes to the back half"` — names a count, never the specific
+already-shelved cards about to be relocated. She confirms one card's destination and the write silently
+does more than that sentence describes.
+
+**Suggested fix, in order of how directly each maps to her ask:**
+
+1. Surface the pull explicitly before commit — name which other card(s) are about to move and require
+   confirming that too, not just the incoming card. This is the "validate each and every line" half of
+   her request.
+2. Write a `placement_decision` for a pulled copy the same way the incoming card gets one, so a move
+   like this is traceable after the fact regardless of whether #1 ships first.
+3. When a card could go to the back half, offer an explicit choice — start a new line, or add to an
+   existing one from a list of compatible lines — rather than the cascade deciding silently. This is a
+   real UI addition, not a wiring job: no "list compatible lines" concept exists anywhere today.
+
+**Priority rationale.** High: this is the silent-wrong-data class the log has repeatedly treated as High
+(UIL-014, UIL-022, UIL-040, UIL-048) — a normal action relocates inventory she didn't ask to move, with
+zero confirmation and, unlike those other entries, zero audit trail to even discover it happened.
+Flagging for her confirmation since severity calls are hers.
