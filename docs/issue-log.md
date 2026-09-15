@@ -3859,3 +3859,52 @@ different one.
 **Priority rationale.** Medium: a genuine gap in the decision UI on a core screen, but she can still
 resolve the decision with the default rather than being fully blocked — so it's a real limitation, not a
 dead end.
+
+## UIL-058 — The pinned progress bar (UIL-019's fix) now overlaps the spotlight panel on desktop
+
+- **Reported:** 2026-09-14 (Karvi, retesting UIL-019's fix, PR #109)
+- **Status:** Open
+- **Priority:** Medium (Claude's read — needs Karvi's confirmation)
+- **Area:** Plan
+- **Env:** Testing
+
+In her words (via the second Junior BA): the progress bar now sticks as intended, but it covers the
+top of the suggestion/spotlight box. The pin itself works — this is a new, distinct problem, not
+UIL-019's original bug recurring.
+
+**Root cause: two sticky elements sharing one scroll container, only one of which was taught about the
+other's height.** `.haulbar` ([`globals.css:2733-2739`](../app/globals.css:2733), UIL-019's fix) is
+`position: sticky; top: 0; z-index: 6`, and `PlanScreen.tsx` publishes its real rendered height as
+`--haulbar-h` onto `document.documentElement` via a `ResizeObserver`
+([`PlanScreen.tsx:772-799`](<../app/(ui)/plan/PlanScreen.tsx>:772)) specifically so other sticky elements
+can offset around it. But that variable has exactly **one** consumer today —
+[`.bandgroup .bandhead`](../app/globals.css:2740) (`top: var(--haulbar-h, 0px)`), the worklist column's
+fold headers. `.spot` (the "NOW HANDLING" panel, [`globals.css:498-503`](../app/globals.css:498)) is
+separately `position: sticky; top: 14px` — a **hardcoded** value, no `z-index` at all (defaults to
+`auto`), and no reference to `--haulbar-h`. Both are siblings inside the same scroll container
+(confirmed: `PlanScreen.tsx`'s own comment states "the document body is the scroll container on this
+screen"), so on scroll `.haulbar` pins at `top: 0` and extends well past 14px (its real height, from
+padding and wrapped flex content), while `.spot` pins at `top: 14px` — landing inside the vertical space
+`.haulbar` occupies. `.haulbar`'s explicit `z-index: 6` beats `.spot`'s default `auto`, so `.haulbar`
+paints over it.
+
+**Confirmed specific to the desktop two-column layout.** At `≤1080px`
+([`globals.css:1553-1555`](../app/globals.css:1553)) `.spot` becomes `position: static` — the bug can't
+occur there. At `≤720px` ([`globals.css:1578-1585`](../app/globals.css:1578)) `.spot` gets its own
+sticky context and is reordered first — a different stacking arrangement, not this bug. The overlap she
+saw is specific to `>1080px`, the same layout UIL-019's own original bug was invisible at (that one was
+mobile-only; this one is desktop-only — mirror images of the same class of "only checked one breakpoint"
+gap).
+
+**Suggested fix.** Give `.spot` `top: var(--haulbar-h, 14px)`, the same pattern already used for
+`.bandhead` — the missing piece is the offset, not the z-index. `.haulbar`'s `z-index: 6` doesn't need
+to change once `.spot` no longer sits inside its footprint.
+
+**Note for whoever tracks UIL-019's status:** the original defect (the bar not staying pinned) is fixed
+— this is a new, distinct symptom introduced by that fix touching only `.haulbar`/`.bandhead` and never
+`.spot`. Whether that means UIL-019 stays Closed with this as its own entry, or gets reopened, is a
+status call; logging this as its own entry either way so the report isn't lost in the meantime.
+
+**Priority rationale.** Medium: nothing is broken functionally — she can still read the spotlight card's
+information, just with the top of it visually covered — but it's a real regression-shaped issue on the
+core daily screen, on desktop, right after a fix that was supposed to make that screen better.
