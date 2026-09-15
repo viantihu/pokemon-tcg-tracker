@@ -883,10 +883,12 @@ doing alongside UIL-010 anyway, since the two land on the same screen and the sa
 ## UIL-012 — Committing a haul fails with a foreign-key violation on `color_band`
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#57](https://github.com/viantihu/pokemon-tcg-tracker/pull/57) MERGED to
-  `develop` 2026-09-14 (squash `474df08`), QA-reviewed, deployed to Testing on `258db13`. **The trigger
-  was NOT the config tables** — see the correction at the end of this entry, which overturns the two
-  narrowings above it.
+- **Status:** **Closed** — PR [#57](https://github.com/viantihu/pokemon-tcg-tracker/pull/57) MERGED to
+  `develop` 2026-09-14 (squash `474df08`), QA-reviewed, deployed to Testing on `258db13`, and **exercised
+  on Karvi's real data 2026-09-14**: `placement_decision` went 0 → 1 after her own haul commit with no
+  `color_band` FK crash. Closed on that measurement rather than a verbal confirmation (weaker evidence,
+  recorded as such — see the confirmation paragraph below). **The trigger was NOT the config tables** —
+  see the correction at the end of this entry, which overturns the two narrowings above it.
 - **Priority:** High
 - **Area:** Plan
 - **Env:** Testing
@@ -1693,7 +1695,11 @@ to reach the next thing she can act on.
 ## UIL-019 — Haul progress header scrolls out of view instead of staying pinned
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Fixed** — PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to
+  `develop` 2026-09-14 (squash `e911c8c`), QA-reviewed, confirmed **deployed** to Testing (all four
+  conditions green on `7cb1a36`). The haul bar and the band heads are now `position: sticky`. Awaiting
+  Karvi's confirmation — she confirmed UIL-027 from the same PR but has not spoken to this one, so it is
+  not claimed on her behalf.
 - **Priority:** Medium (Karvi's call)
 - **Area:** Plan
 - **Env:** Testing
@@ -2182,7 +2188,12 @@ sharing a `099` has an official count of 182.
 ## UIL-027 — "Commit the haul" is the wrong model: a card should be shelved the moment "Done" is clicked
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Closed** — server half PR [#83](https://github.com/viantihu/pokemon-tcg-tracker/pull/83)
+  and client half PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to `develop`
+  2026-09-14 (#109 squash `e911c8c`), deployed to Testing, and **confirmed resolved by Karvi on Testing
+  2026-09-14**: Done shelves the card immediately and the "Commit the haul" button is gone. Verified by
+  content on `origin/develop` (`shelveCardAction` wired in `PlanScreen.tsx`; no Commit button rendered),
+  not by PR state — an earlier stacked PR (#98) reported MERGED while shipping nothing.
 - **Priority:** High (Claude's read — this is a core-workflow redesign, needs Karvi's confirmation)
 - **Area:** Plan
 - **Env:** Testing
@@ -2499,7 +2510,14 @@ it up" or "delete it."
 
 - **Reported:** 2026-09-14 (not from Karvi — found proactively, looking for the "fine at small scale,
   wrong at real scale" pattern rather than waiting for her to hit it)
-- **Status:** Open
+- **Status:** **Fixed** — PRs [#90](https://github.com/viantihu/pokemon-tcg-tracker/pull/90) (squash
+  `dd9c88d`, truncation made impossible to ignore), [#96](https://github.com/viantihu/pokemon-tcg-tracker/pull/96)
+  (squash `ca9b982`, the reconciler's current-state read paged) and
+  [#104](https://github.com/viantihu/pokemon-tcg-tracker/pull/104) (squash `77812f4`, `listUnplaced` paged
+  instead of throwing) MERGED to `develop` 2026-09-14, QA-reviewed, confirmed **deployed** to Testing (all
+  four conditions green on `7cb1a36`). #90's premise — PostgREST silently caps the response — is now
+  *observed* through supabase-js on her real data, not deduced. No user-visible test step: this was latent
+  at her scale, so Fixed stands until a real-data read past the cap confirms it.
 - **Priority:** Medium
 - **Area:** Sync, Plan
 - **Env:** Testing — **latent, not live**, confirmed by a live count (see below)
@@ -2696,7 +2714,10 @@ partial-write incident), raised by the four-site drift risk rather than by an ob
 
 - **Reported:** 2026-09-14 (not from Karvi — found proactively, looking for the next instance of the
   "fine at small scale, wrong at real scale" pattern)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#106](https://github.com/viantihu/pokemon-tcg-tracker/pull/106) MERGED to
+  `develop` 2026-09-14 (squash `c6e83b8`), QA-reviewed, confirmed **deployed** to Testing (all four
+  conditions green on `7cb1a36`). Collections now default to folded, with collapse-all / expand-all
+  controls; a newly created collection opens expanded. Awaiting Karvi's confirmation.
 - **Priority:** Medium (Senior BA's read — flagged that Karvi rated the equivalent Haul Plan issue
   High, so this may come in above Medium if she reports it first)
 - **Area:** Collections
@@ -2890,7 +2911,11 @@ verbatim) rather than a new idea to evaluate, and it's on the screen she uses mo
 ## UIL-037 — After overriding a card's placement, both the spotlight panel and the worklist row still show the original suggestion
 
 - **Reported:** 2026-09-14
-- **Status:** Open
+- **Status:** **Fixed** — PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to
+  `develop` 2026-09-14 (squash `e911c8c`), QA-reviewed, confirmed **deployed** to Testing (all four
+  conditions green on `7cb1a36`). The spotlight panel and the worklist row now name the override
+  destination instead of the original suggestion. Awaiting Karvi's confirmation — she confirmed UIL-027
+  from the same PR but has not spoken to this one, so it is not claimed on her behalf.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Plan
 - **Env:** Testing
@@ -3069,7 +3094,13 @@ inconvenient. Karvi's own priority read wasn't given for this one specifically; 
 ## UIL-040 — Rebinding a collection to a different specialty binder changes the record but silently orphans the cards already shelved in the old one
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009)
-- **Status:** Open
+- **Status:** **Fixed (step 1 of 2)** — PR [#102](https://github.com/viantihu/pokemon-tcg-tracker/pull/102)
+  MERGED to `develop` 2026-09-14 (squash `9497c6c`), QA-reviewed, confirmed **deployed** to Testing (all
+  four conditions green on `7cb1a36`). **Step 1** closes the hazard: a rebind that would strand shelved
+  copies is now *refused*, with a message naming what would be orphaned. **Step 2** — moving the copies
+  into the new binder so the rebind can succeed — is not built, and must land together with UIL-032 (the
+  plan fingerprint has to cover `current_binder_ids`, or a cached plan survives the re-point). Step 2
+  stays with the UX Dev alongside the Collections rework (UIL-038/039).
 - **Priority:** High (Claude's read — this is a live orphan hazard, not just a missing feature; needs
   Karvi's confirmation)
 - **Area:** Collections
