@@ -3891,6 +3891,12 @@ silently strands it. A "start a line / pick which line this card joins" flow is 
 front half with no way to place them into a line and no way to move them afterward, and she hit it on two
 separate species. Not a cosmetic gap — a reachable dead end on core functionality.
 
+**Cross-reference UIL-061.** #120's own "Deliberately left out" section names two gaps this fix doesn't
+close: Plan-spotlight/Collections override support for the line-join it adds, and pulling other owned
+copies of the same family into a newly-started line as a side effect. UIL-061 is the second of those,
+found independently from Karvi's own report rather than from this list — the two should be read together
+so a future session doesn't log the same gap a third time.
+
 ## UIL-057 — The line-decision screen shows wishlist alternatives but won't let her pick one
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
@@ -4107,6 +4113,11 @@ not a targeted "pick which line" flow.
 {name} ({N} same-colour cards so far) — goes to the back half"` — names a count, never the specific
 already-shelved cards about to be relocated. She confirms one card's destination and the write silently
 does more than that sentence describes.
+
+**Cross-reference UIL-056.** #120 (UIL-056's fix) explicitly lists "pulling other owned copies of the
+same family into a newly-started line" among what it deliberately leaves out — this entry is that exact
+gap, confirmed independently from Karvi's own report. Its fix should land alongside #120's line-join
+work (same `MovePanel` line picker, same author), not as a separate effort.
 
 **Suggested fix, in order of how directly each maps to her ask:**
 
