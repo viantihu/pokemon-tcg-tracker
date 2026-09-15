@@ -267,6 +267,41 @@ jobs:
             echo "VERDICT: every retry_count is 0, so these rows have NEVER been re-examined by a sync — the archive/drop path really may be unexercised. Worth deliberately exercising."
           fi
 
+              # ---- UIL-026: did migration 0009's two columns actually POPULATE? A green catalog-mirror run
+          # proves nothing here — without `force_all: true` the resume check skips every set and exits 0
+          # having written nothing, which is UIL-004's exact failure shape. So count the NON-NULLs and
+          # spot-check the row the acceptance test turns on.
+          echo
+          echo "--- UIL-026 set metadata: did 0009's columns actually populate? ---"
+          copies_total=$(count_of "catalog_card?select=tcgdex_id")
+          with_count=$(count_of "catalog_card?select=tcgdex_id&set_card_count_official=not.is.null")
+          with_date=$(count_of "catalog_card?select=tcgdex_id&set_release_date=not.is.null")
+          echo "catalog_card rows:                     $copies_total"
+          echo "  set_card_count_official NOT NULL:    $with_count"
+          echo "  set_release_date        NOT NULL:    $with_date"
+
+          # The acceptance row: Minior, Paradox Rift. Its set's official count must read 182 — the
+          # denominator she types in `099/182` — or the ranking has nothing to match on. `get()` lives
+          # in the first step's shell, so this step does its own request.
+          minior_url="$rest/catalog_card?tcgdex_id=eq.sv04-099&select=tcgdex_id,name,local_id,set_card_count_official,set_release_date"
+          case "$SERVICE_KEY" in
+            eyJ*) minior=$(curl -sS --retry 3 -H "apikey: $SERVICE_KEY" \
+                    -H "Authorization: Bearer $SERVICE_KEY" "$minior_url") ;;
+            *)    minior=$(curl -sS --retry 3 -H "apikey: $SERVICE_KEY" "$minior_url") ;;
+          esac
+          echo "acceptance row: $(printf '%s' "$minior" | jq -c '.[0] // "NOT FOUND"' 2>/dev/null || echo '(unreadable)')"
+
+          if [ "$with_count" = "unknown" ] || [ "$with_count" -eq 0 ]; then
+            echo "::error::set_card_count_official is NULL on every row — the mirror ran without force_all, so 0009's columns were never populated. A green mirror run does NOT mean this shipped."
+          elif [ "$with_count" -lt "$copies_total" ]; then
+            echo "::warning::$with_count of $copies_total rows have a card count — partial. The $((copies_total - with_count)) without one are sets TCGdex omits the field for; they order last by design, but worth knowing which."
+          else
+            echo "VERDICT: set_card_count_official populated on all $with_count rows."
+          fi
+          if [ "$with_date" != "unknown" ] && [ "$with_date" -lt "$copies_total" ]; then
+            echo "::warning::set_release_date present on only $with_date of $copies_total rows — the sampled-coverage caveat was real. NULLs order last, so this degrades rather than breaks."
+          fi
+
           # ---- THE RECONCILER'S OWN INPUTS. lib/sync/pipeline.ts:106 loads the reconciler's `current`
           # with `presenceGroupRepo.list(db)` and `copyRepo.list(db)` — and `list()` is the UNPAGED
           # variant by design (lib/repo/base.ts:89-91 says outright: "correctness depends on
