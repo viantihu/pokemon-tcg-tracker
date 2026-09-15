@@ -45,6 +45,7 @@ import {
 import { buildLineView, type SlotInput } from "./view";
 import type {
   CardIdentity,
+  ExistingLineBlock,
   LineJoinCandidate,
   LineScreenData,
   LineView,
@@ -229,6 +230,13 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
   // line-less shelved card is offered (UIL-056). Built alongside each line's own chain rebuild below
   // so the species walk happens once per line rather than once per candidate card.
   const openSlotsByDexId = new Map<number, LineJoinCandidate[]>();
+  // Every line, by (its chain root, its band) — independent of whether ITS slot for any particular
+  // dexId is open. Lets `existingLineByBand` explain "a line exists here but your stage is filled"
+  // (UIL-056 note 3) rather than a card just seeing an empty candidate list with no reason given.
+  const lineByRootBand = new Map<
+    string,
+    { speciesLabel: string; filledCount: number; totalCount: number }
+  >();
 
   for (const line of lineRows) {
     const bandKey = line.color_band;
@@ -244,6 +252,13 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
 
     const rootName = chain[0]?.name;
     const lineSpeciesLabel = rootName ? `${rootName.toUpperCase()} LINE` : "EVOLUTION LINE";
+    const filledCount = slots.filter((s) => s.state === "filled").length;
+    const totalCount = slots.length;
+    lineByRootBand.set(`${line.root_dex_id}:${bandKey}`, {
+      speciesLabel: lineSpeciesLabel,
+      filledCount,
+      totalCount,
+    });
     for (const s of slots) {
       if (s.state === "filled") continue;
       const dexId = chain[s.stage_index]?.dexId;
@@ -255,6 +270,8 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
         bandKey: line.color_band,
         speciesLabel: lineSpeciesLabel,
         stage: s.stage,
+        filledCount,
+        totalCount,
       });
       openSlotsByDexId.set(dexId, list);
     }
@@ -407,6 +424,19 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
     for (const cand of openSlotsByDexId.get(dexId) ?? []) {
       (joinCandidatesByBand[cand.bandKey] ??= []).push(cand);
     }
+
+    // THIS card's own chain root (may differ from its own dexId, e.g. a Stage1 whose Basic exists in
+    // the catalog) — the same key `applyMove`'s "does a line already exist" check uses, so a band
+    // that would REFUSE a new line explains why here rather than showing an empty candidate list.
+    const cardChain = buildChain({ id: "u", card: cc, variant: "normal" } as IncomingCard, catalog);
+    const cardRootDexId = cardChain[0]?.dexId ?? dexId;
+    const existingLineByBand: Record<string, ExistingLineBlock> = {};
+    for (const b of bandRows) {
+      if ((joinCandidatesByBand[b.band]?.length ?? 0) > 0) continue; // already has an open slot
+      const existing = lineByRootBand.get(`${cardRootDexId}:${b.band}`);
+      if (existing) existingLineByBand[b.band] = existing;
+    }
+
     unlinedCards.push({
       copyId: c.id,
       card: identity(cc, bandKey),
@@ -415,6 +445,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
         : "Unshelved",
       dexId,
       joinCandidatesByBand,
+      existingLineByBand,
     });
   }
 

@@ -276,6 +276,98 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     expect(await q(`select 1 from evolution_line`)).toHaveLength(1); // no second line inserted
     expect((await copyRow(CARD)).line_slot_id).toBeNull(); // nothing moved
   });
+
+  it("REFUSES using the CHAIN'S root, not the moved card's own dexId — a Stage1 is not its own root", async () => {
+    // The existing line is rooted at Emberling (9101); the card being moved is a SECOND Emberdrake
+    // (9102) — a different dexId from the root. Checking against the card's OWN dexId (the bug this
+    // regresses) would never find this line, silently letting a second, colliding (9101, red) line
+    // through with no DB constraint to catch it.
+    const THIRD = "c0000000-0000-0000-0000-0000000000e3";
+    await seedCard({
+      id: "emberling",
+      name: "Emberling",
+      dexId: EMBERLING_DEX,
+      stage: "Basic",
+      evolveFrom: null,
+    });
+    await seedCard({
+      id: "emberdrake",
+      name: "Emberdrake",
+      dexId: EMBERDRAKE_DEX,
+      stage: "Stage1",
+      evolveFrom: "Emberling",
+    });
+    await seedShelvedFront(OTHER, "emberling");
+    await seedShelvedFront(THIRD, "emberdrake");
+    await seedShelvedFront(CARD, "emberdrake"); // the SECOND Emberdrake being moved
+    await db.exec(`
+      insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+        values ('${LINE}', '${OWNER}', ${EMBERLING_DEX}, 'red', '${GEN}', 'back', 'complete');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+        values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OTHER}');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+        values ('${SLOT_NEXT}', '${OWNER}', '${LINE}', 1, 'Stage1', 'filled', '${THIRD}');
+      update copy set line_slot_id = '${SLOT_ROOT}', binder_half = 'back' where id = '${OTHER}';
+      update copy set line_slot_id = '${SLOT_NEXT}', binder_half = 'back' where id = '${THIRD}';
+    `);
+    await asOwner(db);
+
+    await expect(
+      applyMove(
+        pgliteClient(db),
+        {
+          copyId: CARD,
+          destination: {
+            kind: "shelf",
+            binderId: GEN,
+            half: "back",
+            band: "red",
+            lineJoin: { mode: "new" },
+          },
+        },
+        names,
+      ),
+    ).rejects.toThrow(/already exists/i);
+
+    await asSuperuser(db);
+    expect(await q(`select 1 from evolution_line`)).toHaveLength(1); // no colliding second line
+    expect((await copyRow(CARD)).line_slot_id).toBeNull();
+  });
+
+  it("creates the line in HER chosen band, not the card's own natural type-band", async () => {
+    // Onlymon is Fire (natural band "red"), but she picks "green" — coarse location is her call
+    // (system-design §12); the line, and every slot's band-matching, must follow that choice.
+    await seedCard({
+      id: "onlymon",
+      name: "Onlymon",
+      dexId: ONLYMON_DEX,
+      stage: "Basic",
+      evolveFrom: null,
+    });
+    await seedShelvedFront(CARD, "onlymon");
+    await asOwner(db);
+
+    await applyMove(
+      pgliteClient(db),
+      {
+        copyId: CARD,
+        destination: {
+          kind: "shelf",
+          binderId: GEN,
+          half: "back",
+          band: "green",
+          lineJoin: { mode: "new" },
+        },
+      },
+      names,
+    );
+
+    await asSuperuser(db);
+    expect(
+      (await q<{ color_band: string }>(`select color_band from evolution_line`))[0].color_band,
+    ).toBe("green");
+    expect((await copyRow(CARD)).color_band).toBe("green");
+  });
 });
 
 /* ==================== joining an existing line's open slot ==================== */

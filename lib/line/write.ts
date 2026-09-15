@@ -123,16 +123,10 @@ export async function applyMove(
       const card = await catalogCardRepo.getByPk(db, copy.catalog_card_id);
       if (!card) throw new Error("That card's catalog entry is missing — reload and try again.");
       const cc = toCatalogCard(card);
-      const [existing, catalogRows, typeMapRows] = await Promise.all([
-        evolutionLineRepo.findByRootAndBand(db, cc.dexId[0] ?? -1, req.destination.band),
+      const [catalogRows, typeMapRows] = await Promise.all([
         catalogCardRepo.listAll(db),
         typeColorMapRepo.list(db),
       ]);
-      if (existing) {
-        throw new Error(
-          "A line for this species and band already exists — reload the screen and join it instead.",
-        );
-      }
       const typeColorMap: TypeColorMap = {};
       for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
       const incoming: IncomingCard = {
@@ -145,7 +139,22 @@ export async function applyMove(
         catalog: catalogRows.map(toCatalogCard),
         typeColorMap,
         binderId: req.destination.binderId,
+        destinationBand: req.destination.band,
       });
+      // Checked against the line's ACTUAL root (built.rootDexId) rather than the moved card's own
+      // dexId — those differ whenever the card is not itself the chain's root (e.g. starting a line
+      // from a Stage1 whose Basic exists in the catalog as a placeholder). Discarding `built.ops` on
+      // a throw is safe: they are pure data, no I/O has happened yet.
+      const existing = await evolutionLineRepo.findByRootAndBand(
+        db,
+        built.rootDexId,
+        req.destination.band,
+      );
+      if (existing) {
+        throw new Error(
+          "A line for this species and band already exists — reload the screen and join it instead.",
+        );
+      }
       lineJoinOps = built.ops;
       resolvedLineSlotId = built.slotId;
     }

@@ -20,6 +20,7 @@
 
 import { useState } from "react";
 import type {
+  ExistingLineBlock,
   LineJoinCandidate,
   LineJoinChoice,
   MoveDestination,
@@ -36,6 +37,7 @@ export function MovePanel({
   confirmLabel = "Place it here ▶",
   allowLineJoin = false,
   lineJoinCandidatesByBand,
+  existingLineByBand,
   onConfirm,
 }: {
   options: MoveOptions;
@@ -43,6 +45,9 @@ export function MovePanel({
   confirmLabel?: string;
   allowLineJoin?: boolean;
   lineJoinCandidatesByBand?: Record<string, LineJoinCandidate[]>;
+  /** A line already exists for this band but has no open slot for this card (UIL-056 note 3) —
+   *  explains an otherwise-empty candidate list rather than leaving it looking broken. */
+  existingLineByBand?: Record<string, ExistingLineBlock>;
   onConfirm: (dest: MoveDestination) => void;
 }) {
   const firstGeneral = options.binders.find((b) => b.type === "general");
@@ -67,6 +72,7 @@ export function MovePanel({
   const isSpecialty = binder?.type === "specialty";
   const collections = binder ? (options.collectionsByBinder[binder.id] ?? []) : [];
   const candidates = allowLineJoin && band ? (lineJoinCandidatesByBand?.[band] ?? []) : [];
+  const blockingLine = allowLineJoin && band ? existingLineByBand?.[band] : undefined;
 
   const destination: MoveDestination = isBulk
     ? { kind: "bulk" }
@@ -239,7 +245,8 @@ export function MovePanel({
                           setLineJoin({ mode: "existing", lineId: c.lineId, slotId: c.slotId })
                         }
                       >
-                        {c.speciesLabel} · {c.stage.toUpperCase()} SLOT
+                        {c.speciesLabel} · {c.filledCount}/{c.totalCount} FILLED ·{" "}
+                        {c.stage.toUpperCase()} SLOT
                       </button>
                     );
                   })}
@@ -252,6 +259,14 @@ export function MovePanel({
                     + Start a new line
                   </button>
                 </div>
+                {candidates.length === 0 && blockingLine ? (
+                  <div className="oskip" style={{ marginTop: 6 }}>
+                    {blockingLine.speciesLabel} already exists here ({blockingLine.filledCount}/
+                    {blockingLine.totalCount} filled), but this card&apos;s own stage is already
+                    filled by another copy — lines are tracked once, so this one starts its own line
+                    instead.
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </>

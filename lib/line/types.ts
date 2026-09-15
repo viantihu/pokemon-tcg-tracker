@@ -240,6 +240,11 @@ export interface MoveOptions {
  * matches the card's own dexId, keyed by the line's band so the picker can filter as she changes the
  * band chip. Computed server-side (UIL-056) from lines already loaded for the screen; absent when no
  * line anywhere has a fitting open slot, in which case only "start a new line" is offered.
+ *
+ * `filledCount`/`totalCount` exist so two candidates with the same `speciesLabel` (same root species,
+ * genuinely possible if the same (root, band) pair were ever duplicated) don't read as identical —
+ * without them she would be picking blind between two otherwise-indistinguishable rows (UIL-001's
+ * "no indication what it means" shape).
  */
 export interface LineJoinCandidate {
   lineId: string;
@@ -247,6 +252,21 @@ export interface LineJoinCandidate {
   bandKey: string;
   speciesLabel: string;
   stage: string;
+  filledCount: number;
+  totalCount: number;
+}
+
+/**
+ * A line already exists for this card's species (chain root) in this band, but not as an open join
+ * candidate — its matching slot is already filled (a duplicate copy of a stage already owned). The
+ * cascade's own rule for this shape is "lines tracked once" (an extra copy of a filled stage does
+ * NOT get a second line); this is that same rule surfacing on the manual path, so "start a new line"
+ * is offered anyway (her call), but explained rather than left to read as an empty, broken list.
+ */
+export interface ExistingLineBlock {
+  speciesLabel: string;
+  filledCount: number;
+  totalCount: number;
 }
 
 /** The client-facing line-screen payload (loaded server-side, rendered client-side). */
@@ -266,4 +286,7 @@ export interface UnlinedCard {
   /** This card's own dexId — fixed, used to match candidate lines' open slots. */
   dexId: number;
   joinCandidatesByBand: Record<string, LineJoinCandidate[]>;
+  /** Set for a band with no open candidate BECAUSE a line for this family already exists there
+   *  (see `ExistingLineBlock`) — absent, not just empty, when no line exists there at all. */
+  existingLineByBand: Record<string, ExistingLineBlock>;
 }

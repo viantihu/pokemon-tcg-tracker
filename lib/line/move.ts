@@ -28,6 +28,7 @@
 import {
   generateSlots,
   testViability,
+  type Band,
   type CatalogCard,
   type IncomingCard,
   type TypeColorMap,
@@ -181,6 +182,13 @@ export interface NewLineContext {
   catalog: CatalogCard[];
   typeColorMap: TypeColorMap;
   binderId: string | null;
+  /**
+   * The band SHE picked in the panel, not the card's own natural band. Coarse location is a
+   * feature (system-design §12) — a move destination's band is her call, never re-derived — so the
+   * line this creates, and every same-colour/placeholder lookup that builds its slots, must use this
+   * band or the line would silently land in a different band than the copy it was created for.
+   */
+  destinationBand: string;
 }
 
 /**
@@ -196,15 +204,20 @@ export interface NewLineContext {
 export function buildNewLineJoinOps(ctx: NewLineContext): {
   ops: WriteOp[];
   slotId: string | null;
+  /** The line's actual root — NOT necessarily `incoming`'s own dexId when it isn't the chain's
+   *  root (e.g. starting a line from a Stage1 whose Basic exists in the catalog as a placeholder).
+   *  The caller's "does a line already exist" check must key on this, not the card's own dexId. */
+  rootDexId: number;
 } {
-  const viability = testViability(ctx.incoming, [], ctx.catalog, ctx.typeColorMap);
-  const gen = generateSlots(
-    ctx.incoming,
-    { ...viability, viable: true },
-    [],
-    ctx.catalog,
-    ctx.typeColorMap,
-  );
+  const chainViability = testViability(ctx.incoming, [], ctx.catalog, ctx.typeColorMap);
+  // Chain-walking is species-only (no band involved); same-colour/placeholder matching is not — so
+  // `band` is overridden to HER destination band here, before any of that matching runs, rather than
+  // trusting `testViability`'s own band guess from the card's type.
+  // `Band` is a nominal display-space union; production actually carries DB-key strings through it
+  // (the same trust the rest of this codebase already gives `band()`'s own return value) — never
+  // validated against the ten literals here, same as elsewhere.
+  const viability = { ...chainViability, band: ctx.destinationBand as Band, viable: true };
+  const gen = generateSlots(ctx.incoming, viability, [], ctx.catalog, ctx.typeColorMap);
   const lineId = crypto.randomUUID();
   const rootDexId = viability.chain[0]?.dexId ?? ctx.incoming.card.dexId[0];
   const ops: WriteOp[] = [
@@ -212,7 +225,7 @@ export function buildNewLineJoinOps(ctx: NewLineContext): {
       op: "insert_line",
       id: lineId,
       root_dex_id: rootDexId,
-      color_band: viability.band,
+      color_band: ctx.destinationBand,
       binder_id: ctx.binderId,
       half: "back",
       status: gen.status,
@@ -235,7 +248,7 @@ export function buildNewLineJoinOps(ctx: NewLineContext): {
       note: slot.note ?? null,
     });
   }
-  return { ops, slotId: ownSlotId };
+  return { ops, slotId: ownSlotId, rootDexId };
 }
 
 /**

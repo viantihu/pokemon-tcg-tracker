@@ -144,6 +144,7 @@ export function LineScreen() {
       bandKey: card.card.bandKey,
       currentLabel: card.currentLabel,
       lineJoinCandidatesByBand: card.joinCandidatesByBand,
+      existingLineByBand: card.existingLineByBand,
     });
   }
 
