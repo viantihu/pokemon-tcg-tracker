@@ -2468,6 +2468,35 @@ the author, pre-review, by applying this entry's own rule ("an unexpected pass i
 proven otherwise") to the harness being written for the fix. Second time today the rule has caught a
 lying double; the first time before anyone else needed to.
 
+**A third and fourth instance, found building #121 (UIL-045) and confirmed against `origin/develop`
+`7e377fa` with #121 open — this is `tests/support/pglite-client.ts` itself, the mitigation pattern this
+entry recommends everyone move onto, having exactly the fidelity gap the entry describes.**
+
+1. **`order()` silently ignored a descending request.** `order(col: string): this` took no options
+   parameter at all, and `compile()` always emitted `order by ... asc` — a caller passing
+   `{ ascending: false }` (as several real repo methods do) would get ascending results with no error.
+   Confirmed on `7e377fa`; #121's fix (`order(col, opts?: { ascending?: boolean })`, honouring it) says
+   why in its own comment: "silently sorting ascending for a `{ ascending: false }` caller is the shape
+   of double that certifies wrong behaviour."
+2. **`count` reported the page size as the total, once `.range()` existed to page at all.** The fake had
+   no `.range()` on `7e377fa`; #121 adds it (needed for `pageAll`/`listAll`, UIL-031) and, in the same
+   change, fixes `count: this.wantCount ? rows.length : null` to run a separate unranged `count(*)`
+   query instead — `rows.length` under a range is the page size, and reporting that as the total is
+   exactly how `assertReadComplete` (UIL-031) would be fooled into certifying a truncated read as
+   complete. Both faults were introduced and fixed within the same PR, before either reached a test that
+   would have relied on them silently.
+
+**A related seed-fidelity gap, same investigation, not a `DbClient` fault but the same shape.**
+[`seedCatalogCards`](../tests/support/pglite-rpc.ts:77) inserts only `tcgdex_id` and `name` — `set_id`,
+`local_id`, and `artwork_group_id` all stay null. `isDuplicateCard`
+([`lib/engine/duplicate.ts:19-26`](../lib/engine/duplicate.ts:19)) requires both fields of either match
+condition to be truthy (`a.artworkGroupId && b.artworkGroupId`, or `a.setId && a.localId`) — so **no two
+cards seeded this way can ever be detected as duplicates**, regardless of what the test intends. Any
+cascade duplicate-detection assertion built on this seed alone passes while proving nothing, the same
+failure shape this entry is about, one layer over in test *data* rather than a test *double*. Open
+follow-up rather than its own UIL: audit what else in the suite leans on the id-only seed for a property
+it can't actually exercise.
+
 ## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
 
 - **Reported:** 2026-09-14 (not from Karvi — found by the Senior Dev session while fixing UIL-017)
