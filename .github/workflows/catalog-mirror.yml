@@ -27,10 +27,25 @@ name: Catalog Mirror (Testing)
 # hashes every card image, it is only needed for duplicate-artwork grouping, and CSV
 # resolution keys on setCode-localId without it. Run it separately, later.
 #
-# Trigger: push to the ops/run-catalog-mirror branch (a workflow_dispatch button
-# only appears once the file is on the default branch, and `main` deliberately lags
-# `develop` until the production cutover). workflow_dispatch is declared too so the
-# button starts working for free after that promotion.
+# HOW TO RUN IT. Prefer the API, which works TODAY and takes inputs:
+#
+#   gh workflow run catalog-mirror.yml --ref develop -f force_all=true
+#
+# Verified 2026-09-14 (run 34909186338): 218/218 sets, zero failures. An earlier note here claimed
+# dispatch could not reach this workflow because the file is not on the default branch — that is
+# true only of the **UI button**, which GitHub renders only for workflows on the default branch, and
+# `main` deliberately lags `develop` until the production cutover. The `workflow_dispatch` **API**
+# has no such restriction, so `gh workflow run --ref <branch>` reaches it regardless. The button
+# appears for free after the cutover.
+#
+# Pushing to `ops/run-catalog-mirror` also triggers it and is retained, but prefer dispatch: a push
+# carries NO inputs, so `force_all` is unset and the run resumes instead of re-mirroring — and a
+# push to that branch also consumes a Vercel build, which dispatch does not.
+#
+# `force_all=true` is REQUIRED after a migration adds a column to `catalog_card`. Without it the
+# resume check sees every set already at its full card count, prints "Every set is already
+# mirrored… Nothing to do" and exits 0 — a green run that populates nothing, which is exactly how
+# UIL-004 stayed hidden. Verify a column landed by counting non-NULLs, never by the run being green.
 
 on:
   push:
