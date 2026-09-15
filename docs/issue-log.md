@@ -3937,3 +3937,37 @@ status call; logging this as its own entry either way so the report isn't lost i
 **Priority rationale.** Medium: nothing is broken functionally — she can still read the spotlight card's
 information, just with the top of it visually covered — but it's a real regression-shaped issue on the
 core daily screen, on desktop, right after a fix that was supposed to make that screen better.
+
+## UIL-059 — Collections always reopen fully folded, even right after she expanded one
+
+- **Reported:** 2026-09-14 (Karvi, retesting UIL-034's fix, PR #106)
+- **Status:** Open
+- **Priority:** Low (Claude's read — needs Karvi's confirmation)
+- **Area:** Collections
+- **Env:** Testing
+
+In her words: "If the user left the collections page expanded, it must stay expanded. It shouldn't
+default to collapsed."
+
+**Confirmed: this is documented, deliberate behavior, not a bug in UIL-034's fix — it's a gap the fix
+itself named and left for later.** `CollHub.tsx`'s own comment
+([`:314-317`](<../app/(ui)/coll/CollHub.tsx>:314)) states it plainly: "Not persisted across visits —
+this page has no resume concept to persist into." Every collection defaults to folded on mount
+(`() => new Set(data.collections.map((c) => c.id))`), unconditionally, on every visit — expanding one
+and navigating away and back re-collapses it.
+
+**Why the Haul Plan's equivalent (UIL-018) doesn't have this problem, and why Collections can't just
+copy it wholesale.** `PlanScreen.tsx`'s `collapsed` set rides inside the sessionStorage-backed resume
+payload UIL-006 built (`resumed?.collapsed`, [`:187`](<../app/(ui)/plan/PlanScreen.tsx>:187), saved
+alongside the draft/plan/cursor at [`:217`](<../app/(ui)/plan/PlanScreen.tsx>:217)) — it persists because
+it's one field in a mechanism that already existed for a different reason (resuming an in-progress
+haul). Collections has no such mechanism at all; there's nothing existing to piggyback on.
+
+**Suggested fix.** A small, Collections-specific persistence — a single sessionStorage key storing the
+set of collapsed collection ids, read on mount and written on toggle. Doesn't need UIL-006's full
+resume-and-invalidate machinery (there's no computed plan to go stale here, just a UI preference), so
+this is simpler than what Plan has, not a port of it.
+
+**Priority rationale.** Low: nothing is broken and no data is at risk — the all-folded default is a
+reasonable choice for a 200-300-card browse surface, just not sticky the way she wants. A UI-state
+convenience, not a defect.
