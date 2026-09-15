@@ -880,6 +880,14 @@ still leaves the next miss confusing.
 **Priority rationale:** Low as a defect — nothing malfunctions and no data is at risk. Flagged as worth
 doing alongside UIL-010 anyway, since the two land on the same screen and the same moment of confusion.
 
+**Broadened (2026-09-14, Karvi, low priority per her own framing).** Her fuller direction: "any time
+there is mention of the 'catalog' or 'mirroring' I want to replace it with more 'vintage' language like
+database or entry." This goes further than the original scope above, which kept "catalog" where it means
+"the set of cards that exist" — she now wants the word itself gone in favor of period-appropriate
+terms ("database," "entry"), not just the sync-mechanism implications. Recording as a direction for
+whoever does the copy pass rather than rewriting the string table above: the destination vocabulary
+changed, the "don't expose the plumbing" principle didn't.
+
 ## UIL-012 — Committing a haul fails with a foreign-key violation on `color_band`
 
 - **Reported:** 2026-09-13
@@ -3978,3 +3986,64 @@ this is simpler than what Plan has, not a port of it.
 **Priority rationale.** Low: nothing is broken and no data is at risk — the all-folded default is a
 reasonable choice for a 200-300-card browse surface, just not sticky the way she wants. A UI-state
 convenience, not a defect.
+
+## UIL-060 — Let her create a stand-in catalog record for a card the external database doesn't have yet, and swap it for the real one once it arrives
+
+- **Reported:** 2026-09-14 (Karvi, retesting Sync)
+- **Status:** Open
+- **Priority:** Medium (Claude's read — a real gap with a working manual fallback already in place;
+  needs Karvi's confirmation)
+- **Area:** Sync, Catalog
+- **Env:** Testing
+
+In her words: "I realized when this happens, it is most likely happening because the catalog being
+pulled externally does not have a record. In this situation, I want to introduce the ability to create
+a record for that card in the catalog... When the external database receives a record upon sync, I want
+the user generated card to be replaced by the matching one from the external."
+
+**Her diagnosis is right, and the screenshot's own examples confirm it.** Two of the six
+"waiting on catalog" rows — Floragato (Starter Set ex Deck Sprigatito & Meowscarada ex) and Purrloin
+(Starter Set ex Deck Zorua & Zoroark ex) — are Japan's "MEGA Starter Set ex" decks, released
+2026-07-31 (~6 weeks old). Checked live against TCGdex's `ja` set list: no matching set exists there
+yet, though TCGdex does carry other, older JP starter decks — a coverage/timing lag on a recent release,
+not a categorical gap. Likely the same underlying cause as UIL-047 (the mirror's English-only scope),
+made visible here as a second, distinct symptom: a card TCGdex simply hasn't caught up to yet, regardless
+of locale.
+
+**Two genuinely separate halves, and the second is substantially larger than the first.**
+
+**Half 1 — create a stand-in record.** Confirmed there is no write path to `catalog_card` outside the
+mirror today: `catalogCardRepo` exposes `upsert`/`upsertMany` (used only by
+[`lib/catalog/mirror.ts`](../lib/catalog/mirror.ts)) and read-only finders;
+`manualMatch` ([`lib/sync/exec.ts:423-430`](../lib/sync/exec.ts:423)) only looks up an **existing** row
+and throws if there isn't one. A generic `insert` exists on the base repo but is never called for this
+table. Buildable: a form that writes a minimal `catalog_card` row from what the Dex export already
+carries (name, set name, collector number), keyed on some non-TCGdex id scheme (`tcgdex_id` is
+documented as "stored EXACTLY as TCGdex returns," so a stand-in needs its own distinguishable id shape).
+
+**Half 2 — detect the real record and swap it in.** This is the expensive part, on two counts:
+
+1. **No provenance flag exists.** `catalog_card` has no `source`/`is_user_generated` column — every row
+   is currently assumed TCGdex-sourced. Needs a new column (migration) just to know which rows are
+   stand-ins.
+2. **Seven reference sites would need atomic repointing on a swap**, none of them `ON UPDATE CASCADE`:
+   `presence_group.catalog_card_id`, `copy.catalog_card_id`, `line_slot.target_catalog_card_id`,
+   `wishlist_item.chosen_catalog_card_id`, `unresolved_entry.manual_match_id` (all real FKs, verified in
+   [`0002_domain.sql`](../supabase/migrations/0002_domain.sql)), plus two **unconstrained** array
+   columns that also carry the id with no FK at all — `collection.target_catalog_card_ids` and
+   `wishlist_item.alternate_catalog_card_ids`. A swap has to update every one of these in one
+   transaction or a card can end up owned under one id and wishlisted under another.
+3. **No existing signal to hook the detection into.** The mirror workflow only reports aggregate
+   fetched/upserted counts per set, not per-card "this id is new." Matching a stand-in to its eventual
+   real record would need to be built from scratch — plausibly a name/set/collector-number heuristic,
+   since the stand-in has no real `tcgdex_id` to match against directly.
+
+**Suggested scope, not a full design:** ship Half 1 alone first — a stand-in record with a `source`
+column lets her place the card immediately, which is most of the value — and treat Half 2 (automatic
+detection-and-swap) as its own follow-on, since it's a genuinely different-sized piece of work with a
+schema change and a new matching heuristic, not an extension of Half 1's plumbing.
+
+**Priority rationale.** Medium: a real, recurring friction point (any card the mirror hasn't caught up
+to is currently a dead end beyond Dismiss), but `Match Manually`/`Dismiss` already exist as a working,
+if less smooth, path — nothing is blocked, and the more valuable half of the fix (Half 1) is
+comparatively cheap while the complete feature (both halves) is not.
