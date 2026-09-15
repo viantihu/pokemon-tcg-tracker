@@ -3620,37 +3620,49 @@ address post go-live. Flagged Low honestly, not "Low because busy."
 ## UIL-053 — A card can be shelved without appearing in the collection it should belong to
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open — **needs one clarification from Karvi before it can be scoped**
-- **Priority:** High if it's the rebind path, otherwise likely expected behavior — pending her answer
+- **Status:** Open — **still needs clarification; her first answer ruled out two candidates but not
+  the third the way it looked like it would**
+- **Priority:** Unrated — the mechanism is still unidentified
 - **Area:** Collections
 - **Env:** Testing
 
 In her words: "Card was shelved but does not reflect in collection."
 
-**Membership requires two facts, and the report is one of them failing — but which depends on how she
-shelved it.** A card counts as in a collection only if a shelved `copy` sits in one of its
-`current_binder_ids` **and** its id is on `target_catalog_card_ids`
-([`actions.ts:102-124`](<../app/(ui)/coll/actions.ts>:102)). Three candidate paths, investigated:
+**Membership requires two facts:** a shelved `copy` in one of the collection's `current_binder_ids`
+**and** its id on `target_catalog_card_ids` ([`actions.ts:102-124`](<../app/(ui)/coll/actions.ts>:102)).
 
-1. **UIL-040 (open) — the most likely live bug.** Rebinding a collection to a different specialty binder
-   writes `current_binder_ids` without moving the shelved copies, so prior copies stay in the old binder
-   and fall out of membership. If she rebound the collection, this is UIL-040 manifesting, not a new
-   defect.
-2. **Expected behavior, not a bug.** A card shelved into a *general* binder via the normal Haul Plan
-   cascade is correctly not in any collection — only a `{kind:"collection"}` placement override unions
-   the tag ([`lib/plan/commit.ts:283-299`](../lib/plan/commit.ts:283)). Same for flat front-half/back-line
-   Backfill commits, which take no collection tag.
-3. No *new* orphan path was found in code beyond UIL-040; UIL-014/UIL-022/UIL-040 cover all three
-   membership write points.
+**First round of candidates, and her answer to which one applied.** She clarified she shelved the card
+**directly into the collection**, not via rebinding an existing one — which rules out candidate 1
+(UIL-040's rebind orphan) and candidate 2 (a general-binder shelve with no collection tag, where
+non-membership would be correct-by-design). That pointed at candidate 3: a
+`{kind:"collection"}` placement-override write that moves the copy but fails to union the target id.
 
-**What's needed:** how she shelved the card in this specific case — via a collection rebind (→ UIL-040),
-via the normal cascade into a general binder (→ expected, and the real gap is that the UI doesn't explain
-why it's not in the collection), or via a collection placement override that failed (→ genuinely new).
-Logged now so the report isn't lost; scoping waits on her answer rather than guessing.
+**Candidate 3 checked directly against source and refuted — this is not a new bug.**
+`writeOverriddenCard` ([`lib/plan/commit.ts:385-412`](../lib/plan/commit.ts:385)) calls
+`placementForMove(dest)` for the copy's placement **and separately** calls
+`collectionTargetJoinOp(dest, p.tcgdexId)` ([`:409-410`](../lib/plan/commit.ts:409)), pushing a
+`union_collection_targets` op whenever the destination is a collection. This is exactly the fix UIL-022
+shipped (PR #82) — its own commit message states "TWO SITES, not one... the Plan screen's placement
+override does NOT [union]... Both were missing the membership write; both are fixed," and
+[`tests/line/move-into-collection.test.ts:170`](../tests/line/move-into-collection.test.ts:170) pins a
+control case reproducing this exact pre-fix orphan before asserting the union happens. On current
+`origin/develop`, a Plan-screen collection override does union correctly.
 
-**Priority rationale.** Deliberately unrated pending clarification — it's either a High (UIL-040 orphan
-on live inventory) or a UX-copy gap (correct-by-design behavior that reads as a bug), and those are far
-apart. Recording both reads rather than picking one blind.
+**So the report's mechanism is still open, not closed.** Ruling out three specific hypotheses doesn't
+mean the symptom is imaginary — she saw it happen. Other paths that shelve "directly into a collection"
+exist and haven't all been checked against this specific symptom: the Collections screen's own "Log a
+card" flow (`logCardIntoCollection`, already flagged in UIL-048 for a different symptom — duplicate
+copies — but its own JS-computed union step hasn't been checked for a staleness or ordering bug), and
+Backfill's specialty commit path.
+
+**What's actually needed now: the exact screen and button, not just "directly into the collection."**
+"Directly into the collection" describes at least three different UI flows (Plan-screen override, Line
+screen move-into-collection, Collections' "Log a card"), and only one of the three has been ruled out by
+code. Recommend asking her which specific action she took, rather than continuing to guess from a
+description that fits more than one flow.
+
+**Priority rationale.** Still unrated — a real mechanism hasn't been identified yet, and rating a guess
+would be worse than rating nothing.
 
 ## UIL-054 — Team Rocket's Wobbuffet (SVP full-art promo) has no image because TCGdex serves none
 
