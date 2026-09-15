@@ -17,4 +17,5 @@ export * from "./pending";
 export * from "./catalog-cache";
 export * from "./fingerprint";
 export * from "./progress";
+export * from "./spotlight";
 export { getOwnerContext, SEEDED_OWNER_ID, type OwnerContext } from "./session";

@@ -34,7 +34,34 @@ import { collectionTargetJoinOp, placementForMove } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
 import { copyPlacementFromTarget } from "./placement";
 import { loadPlanContext, planFromDraft, type DraftItem, type PlanContext } from "./context";
-import type { PlannedCard } from "./types";
+import { derivePlacementFrom, placementDigest } from "./spotlight";
+import type { PlanItem, PlannedCard } from "./types";
+
+/**
+ * Thrown when the placement re-derived at Done time differs from the one the screen was showing
+ * (UIL-045). Carries the FRESH row so the caller can show her what changed rather than just failing.
+ *
+ * A distinct error type rather than a message, because the UI has to treat it differently from a real
+ * failure: nothing is wrong, nothing was written, and the correct response is "look again", not
+ * "retry".
+ */
+export class PlacementChangedError extends Error {
+  readonly fresh: PlanItem | null;
+  readonly expectedDigest: string;
+  readonly actualDigest: string;
+  constructor(fresh: PlanItem | null, expectedDigest: string, actualDigest: string) {
+    super(
+      fresh
+        ? `This card's placement changed while you were working: it now goes to ${fresh.destination}. ` +
+            `Nothing was written — check the new position and press Done again.`
+        : "This card's placement changed while you were working. Nothing was written.",
+    );
+    this.name = "PlacementChangedError";
+    this.fresh = fresh;
+    this.expectedDigest = expectedDigest;
+    this.actualDigest = actualDigest;
+  }
+}
 
 export type HaulSource = "bulk-bin" | "pack-rip" | "show" | "trade";
 
@@ -146,11 +173,38 @@ export async function commitCardPlacement(
     override?: MoveDestination | null;
     /** The haul this sitting already opened; null/absent opens one on the first new card. */
     haulId?: string | null;
+    /**
+     * The `placementDigest` of what the screen was SHOWING when she clicked Done (UIL-045).
+     *
+     * The write re-derives from current state, so without this it can silently land somewhere other
+     * than the pocket she read off the screen and physically used — DB right, shelf wrong, nothing
+     * ever contradicting anything. When supplied and the fresh derivation disagrees, this refuses
+     * instead of writing, and hands back the new placement for the screen to show.
+     *
+     * Optional, and absent means "do not check": the whole-haul path and the tests that predate this
+     * have no digest to offer, and a cascade-placed card is still written correctly without one.
+     * Ignored for an override, which cannot drift — `writeOverriddenCard` writes her destination
+     * verbatim, so display and write already share one source.
+     */
+    expectedDigest?: string | null;
   },
 ): Promise<CommitResult> {
   const draft = [input.card];
   const pc = await loadPlanContext(db, { excludeOwnedCopyIds: existingCopyIds(draft) });
   const { planned } = planFromDraft(pc, draft);
+
+  // Compare BEFORE building the payload, so a conflict costs nothing and writes nothing.
+  if (input.expectedDigest && !input.override && planned[0]) {
+    const actual = placementDigest(planned[0].result);
+    if (actual !== input.expectedDigest) {
+      throw new PlacementChangedError(
+        derivePlacementFrom(pc, input.card)?.item ?? null,
+        input.expectedDigest,
+        actual,
+      );
+    }
+  }
+
   const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, {
     source: input.source,
     notes: input.notes ?? null,
