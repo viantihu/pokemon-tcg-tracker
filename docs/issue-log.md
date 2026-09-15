@@ -3578,6 +3578,20 @@ the app's core intake and find paths fail wholesale for it — and C3 additional
 corruption with no in-app recovery. She has hit it three distinct ways in one session. This is the
 largest single item in this batch.
 
+**Real-data observation, tensed to run [`34920768200`](https://github.com/viantihu/pokemon-tcg-tracker/actions/runs/34920768200)
+on 2026-09-15 — C3 possibly one step short of firing, on her own data.** After a Testing refresh and
+re-import, that run measured `unresolved_entry`: 8 total, 7 WAITING, by reason **UNKNOWN_SET 6 /
+UNKNOWN_CARD 1** (confirmed directly from the run's own log output). Before the refresh, all 8 were
+UNKNOWN_SET. The tech-lead's hypothesis, offered rather than asserted: `set_alias` wasn't part of
+whatever the refresh reset, so the aliases her two earlier manual matches taught survived it. If a
+surviving alias maps a Japanese Dex set code onto an English `tcgdex_id` set, that set now resolves at
+the set level — the row stops being UNKNOWN_SET — while the specific card still misses at the card
+level, landing as UNKNOWN_CARD instead of a confident wrong match. If this holds, it's C3 partially
+observed on real data: one level of resolution succeeded on a bad alias, one level didn't, which is why
+this presents as a miss rather than the mis-match C3 warns about, not evidence C3 is wrong. It also means
+the fix decision above has to cover an already-learned bad alias, not just prevent new ones — there is
+no `delete_set_alias` path to unlearn one (confirmed: no such op anywhere in the codebase).
+
 ## UIL-048 — "Logging" a card she already owns into a collection creates a second physical copy row
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
