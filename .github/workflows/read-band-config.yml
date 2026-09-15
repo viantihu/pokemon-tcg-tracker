@@ -302,6 +302,64 @@ jobs:
             echo "::warning::set_release_date present on only $with_date of $copies_total rows — the sampled-coverage caveat was real. NULLs order last, so this degrades rather than breaks."
           fi
 
+          # ---- UIL-047: does a learned set alias survive and apply on a re-import?
+          #
+          # THE JOIN KEY IS NOT dex_set_name. `set_alias` is keyed `(locale, dex_code)` where
+          # `dex_code` is `parseDexId(entry.dex_id).rawCode` — the SET CODE before the dash, with a
+          # `jpn_` prefix stripped (resolve.ts:36-44, exec.ts:441-446). So `me25-011` → `me25`, and the
+          # alias maps `en:me25` → `me02.5`. Comparing against the human `dex_set_name` ("Ascended
+          # Heroes") would never match and would read as "alias absent" when it is present.
+          #
+          # Prints set CODES and set-level alias rows only — no card names, numbers or quantities.
+          echo
+          echo "--- UIL-047: learned aliases vs still-WAITING set codes ---"
+          # `get()` lives in the first step's shell; this step needs its own.
+          fetch_rows() {
+            case "$SERVICE_KEY" in
+              eyJ*) curl -sS --retry 3 --retry-delay 5 -H "apikey: $SERVICE_KEY" \
+                      -H "Authorization: Bearer $SERVICE_KEY" "$rest/$1" ;;
+              *)    curl -sS --retry 3 --retry-delay 5 -H "apikey: $SERVICE_KEY" "$rest/$1" ;;
+            esac
+          }
+          aliases=$(fetch_rows "set_alias?select=locale,dex_code,tcgdex_set_id,source,created_at&order=created_at.asc")
+          if printf '%s' "$aliases" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            echo "set_alias rows: $(printf '%s' "$aliases" | jq 'length')"
+            printf '%s' "$aliases" | jq -r '.[] | "  \(.locale):\(.dex_code) -> \(.tcgdex_set_id)  [\(.source)] \(.created_at)"'
+          else
+            echo "::warning::could not read set_alias — UIL-047 undetermined."
+            aliases='[]'
+          fi
+
+          waiting_rows=$(fetch_rows "unresolved_entry?select=locale,dex_id,reason&status=eq.WAITING")
+          if printf '%s' "$waiting_rows" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            # rawCode = text before the first dash, `jpn_` stripped. Locale normalises the way
+            # exec.ts does: "ja" or "Japanese" -> ja, everything else -> en.
+            echo "waiting entries by (locale:setCode, reason), and whether an alias exists:"
+            printf '%s' "$waiting_rows" | jq -r --argjson al "$aliases" '
+              ($al | map("\(.locale):\(.dex_code)")) as $keys
+              | .[]
+              | ((.locale // "") | if . == "ja" or . == "Japanese" then "ja" else "en" end) as $loc
+              | ((.dex_id // "") | sub("^jpn_"; "") | split("-")[0]) as $code
+              | "  \($loc):\($code)\t\(.reason)\t" + (if ($keys | index("\($loc):\($code)")) then "ALIASED" else "no alias" end)
+            ' | sort | uniq -c | sed 's/^/  /'
+            aliased=$(printf '%s' "$waiting_rows" | jq --argjson al "$aliases" '
+              ($al | map("\(.locale):\(.dex_code)")) as $keys
+              | [ .[]
+                  | ((.locale // "") | if . == "ja" or . == "Japanese" then "ja" else "en" end) as $loc
+                  | ((.dex_id // "") | sub("^jpn_"; "") | split("-")[0]) as $code
+                  | select($keys | index("\($loc):\($code)")) ] | length')
+            total_waiting=$(printf '%s' "$waiting_rows" | jq 'length')
+            echo "waiting AND aliased:     $aliased"
+            echo "waiting AND not aliased: $((total_waiting - aliased))"
+            if [ "$aliased" -gt 0 ]; then
+              echo "::warning::$aliased WAITING entr(ies) DO have a matching set_alias, so the alias exists but did not resolve the row at import. Expected path: pipeline.ts:166 resolveDexId(r, aliasMap) -> catalog-lookup; a resolved set that misses the card should report UNKNOWN_CARD, not UNKNOWN_SET. Check the reason column above."
+            else
+              echo "VERDICT: no WAITING entry has a matching alias — nothing contradicts 'one match drains the set'. These are simply set codes nobody has taught yet."
+            fi
+          else
+            echo "::warning::could not read the waiting entries — cross-check undetermined."
+          fi
+
           # ---- UIL-046: did a sync APPLY actually run? An apply writes the undo point;
           # `executeUndo` consumes it (exec.ts:352-357 reads it, `delete_snapshot` at the end). So this
           # is the ONE discriminator between "an apply ran and the re-park key missed" (a real defect)
