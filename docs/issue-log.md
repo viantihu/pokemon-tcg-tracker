@@ -4147,3 +4147,36 @@ work (same `MovePanel` line picker, same author), not as a separate effort.
 (UIL-014, UIL-022, UIL-040, UIL-048) — a normal action relocates inventory she didn't ask to move, with
 zero confirmation and, unlike those other entries, zero audit trail to even discover it happened.
 Flagging for her confirmation since severity calls are hers.
+
+**Correction 2026-09-15 (verified against `6776da3`): the blast radius is wider than "shelved,
+general-binder, front-half copies."** `ownedAt` ([`lib/engine/line.ts:116`](../lib/engine/line.ts:116))
+matches a candidate on species and colour band only —
+`o.card.dexId.includes(node.dexId) && band(o.card, map) === b` — with no filter on `role` or on
+whether the copy is already sitting in a line. `ctx.owned` itself is the full unfiltered collection
+([`lib/plan/context.ts:104`](../lib/plan/context.ts:104) → `cascade.ts:321-323` pass it straight into
+`testViability`/`generateSlots`). So the pull candidate can be a `bulk`-role copy, a `block`-role copy,
+a copy shelved in a *specialty* binder (specialty placements carry `binder_half: null`, not `"front"`,
+per [`commit.ts:196`](../lib/plan/commit.ts:196)), or a copy currently filling **another line's own
+slot** — not only a general-binder front-half shelved copy.
+
+`generateSlots` tags a `pullFrom` ([`line.ts:293`](../lib/engine/line.ts:293)) only when
+`binderHalf === "front" && role === "shelved"` — true for the general-binder case this entry
+describes, false for all four cases above. That tag turns out to be cosmetic either way: `writeNewLine`
+([`lib/plan/commit.ts:557-568`](../lib/plan/commit.ts:557)) fires its relocation on the bare truthiness
+of the slot's `copyId` and never reads `pullFrom` — the field has no reference anywhere in `commit.ts`.
+Every one of the four wider-blast-radius cases gets relocated exactly like the front-half-shelved case
+the entry already flags.
+
+**New consequence specific to the "another line's own slot" case:** the `update_copy` op
+(`commit.ts:558-568`) overwrites the copy's `line_slot_id` to point at the new line's slot, but nothing
+in `writeNewLine` patches the *old* slot it vacated. That old slot's row is left `state: "filled"`,
+`copy_id` still pointing at a copy that has since moved — an orphaned slot, invisible in the UI. A
+count of any such orphans already on Testing is being pulled separately; a nonzero count gets its own
+entry rather than folding into this one.
+
+**Approved fix direction, layered onto the "Suggested fix" list above:** confirmation at the write
+layer via a `PlannedCard.confirmedPulls` set that defaults to moving nothing; one `placement_decision`
+per confirmed pull (closes suggestion #2 regardless of source); and a confirmed pull sourced from
+another line's slot must release that slot (an `update_slot` back to open) in the same apply, so the
+orphan case above can't recur once this ships. Historical orphan repair stays out of this entry's
+scope.
