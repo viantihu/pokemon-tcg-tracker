@@ -3371,7 +3371,18 @@ hit on the same gap changes UIL-026's position in the queue; not asserting a pri
 
 - **Reported:** 2026-09-14 (not from Karvi — traced in source by the Full Stack Dev; relevant tonight,
   she is about to place 702 cards)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#121](https://github.com/viantihu/pokemon-tcg-tracker/pull/121) MERGED to
+  `develop` 2026-09-15 (squash `72fd94d`), QA-gated on the merged tree with mutations verified, confirmed
+  **deployed** to Testing (Vercel / migrate / smoke / acceptance all green on tip `378b570`). Shipped as
+  briefed — re-derive **only the spotlight card**, just-in-time — plus the stronger guarantee the design
+  review reached: the write stays server-authoritative (carrying a client placement would silently drop
+  line creation, slot fills and holo swaps), the client returns a **digest of what it displayed**, and on
+  a mismatch the server throws `PlacementChangedError` having written **nothing**. So: what she saw is
+  what was written, or she is told it changed — never silently one then the other. The spotlight now
+  reads "was … — now …" with the cascade's reason when the re-derivation differs, and Done is disabled
+  ("Checking…") while the re-check is in flight. Overridden cards were already safe and are unchanged.
+  Test debt carried into UIL-061: the digest's fill/new-line/swap components are not yet pinned by tests
+  (only the target pocket is). Awaiting Karvi's confirmation on a second copy of an already-shelved card.
 - **Priority:** High (Senior BA's read)
 - **Area:** Plan
 - **Env:** Testing
@@ -3935,7 +3946,15 @@ dead end.
 ## UIL-058 — The pinned progress bar (UIL-019's fix) now overlaps the spotlight panel on desktop
 
 - **Reported:** 2026-09-14 (Karvi, retesting UIL-019's fix, PR #109)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#134](https://github.com/viantihu/pokemon-tcg-tracker/pull/134) MERGED to
+  `develop` 2026-09-15 (squash `6776da3`), QA-gated, confirmed **deployed** to Testing (all four
+  conditions green). One rule: `.spot` now offsets by the haul bar's published height
+  (`top: calc(var(--haulbar-h, 0px) + 14px)`, `z-index: 4`, between `.bandhead` and `.haulbar`).
+  Verified by browser measurement at 1440 / 1000 / 375 px with a revert check — 52 px of the spotlight
+  cap hidden before, 0 after; inert in the two narrower layouts. No unit test is possible for a computed
+  offset. Related product question open with Karvi, deliberately not changed here: at ≤720 px the
+  spotlight stacks **above** the pinned bar, so the progress counter is hidden on a phone. Awaiting her
+  confirmation on desktop: scroll until the bar pins, the "NOW HANDLING" cap sits fully below it.
 - **Priority:** Medium (Claude's read — needs Karvi's confirmation)
 - **Area:** Plan
 - **Env:** Testing
