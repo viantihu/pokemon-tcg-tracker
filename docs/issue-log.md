@@ -748,9 +748,9 @@ nothing; Close and Escape should ask), then confirm an untouched dialog still cl
 ## UIL-010 — Card search returns nothing for a full collector number like "099/182"
 
 - **Reported:** 2026-09-13
-- **Status:** **Closed** — PR [#55](https://github.com/viantihu/pokemon-tcg-tracker/pull/55) MERGED to
-  `develop` 2026-09-14 (squash `15a79de`), QA-reviewed, deployed to Testing, and **confirmed resolved by
-  Karvi on Testing 2026-09-15**: a full collector number is found. Note PR [#58](https://github.com/viantihu/pokemon-tcg-tracker/pull/58) (squash
+- **Status:** **Fixed** — PR [#55](https://github.com/viantihu/pokemon-tcg-tracker/pull/55) MERGED to
+  `develop` 2026-09-14 (squash `15a79de`), QA-reviewed, and confirmed **deployed** to Testing. Awaiting
+  Karvi's confirmation. Note PR [#58](https://github.com/viantihu/pokemon-tcg-tracker/pull/58) (squash
   `d40536c`) follows it with a comment-only change recording that `localIdCandidates` in
   `lib/sync/resolve.ts` is now load-bearing for **search** as well as sync — a change to its padding
   rules moves two subsystems, and nothing in the file said so.
@@ -1335,10 +1335,11 @@ apply instead of a raw grep count.
 ## UIL-014 — No way to remove a card from a collection on the Collections page
 
 - **Reported:** 2026-09-13
-- **Status:** **Closed** — PR [#67](https://github.com/viantihu/pokemon-tcg-tracker/pull/67) MERGED to
-  `develop` (squash `c99bd080`), QA-reviewed, deployed to Testing (all four conditions green, migration
-  0008 reached Testing), and **confirmed resolved by Karvi on Testing 2026-09-15** — the first time this
-  interaction-only behaviour was exercised in a browser.
+- **Status:** **Fixed** — PR [#67](https://github.com/viantihu/pokemon-tcg-tracker/pull/67) MERGED to
+  `develop` (squash `c99bd080`), QA-reviewed, and confirmed **deployed** to Testing — all four conditions
+  green, and `migrate` success means **migration 0008 reached Testing**, which this fix does not work
+  without. Awaiting Karvi's confirmation; the behaviour is interaction-only and never rendered in a
+  browser during development.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Collections
 - **Env:** Testing
@@ -1408,9 +1409,9 @@ file.
 ## UIL-015 — Collector-number search returns unrelated cards while the actual match is missing
 
 - **Reported:** 2026-09-13
-- **Status:** **Closed** — PR [#73](https://github.com/viantihu/pokemon-tcg-tracker/pull/73) MERGED to
-  `develop` (squash `a88dc5c`), QA-reviewed, deployed to Testing, and **confirmed resolved by Karvi on
-  Testing 2026-09-15**: the collector-number search returns the actual match, correctly matched.
+- **Status:** **Fixed** — PR [#73](https://github.com/viantihu/pokemon-tcg-tracker/pull/73) MERGED to
+  `develop` (squash `a88dc5c`), QA-reviewed, confirmed **deployed** to Testing. Awaiting Karvi's
+  confirmation: search `011/217`, and also a bare `11` for the symmetric case.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Lookup / Collections
 - **Env:** Testing
@@ -1749,11 +1750,11 @@ annoyance on a long haul but doesn't block anything — she can still scroll bac
 ## UIL-020 — Sync resolves Dex rows one at a time, serially, and the slowness was already known
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-008's progress bar)
-- **Status:** **Closed** — PR [#70](https://github.com/viantihu/pokemon-tcg-tracker/pull/70) MERGED to
-  `develop` (squash `585e8d9`), QA-reviewed, deployed to Testing, and **confirmed resolved by Karvi on
-  Testing 2026-09-15** after real re-imports of her ~705-copy export. The improvement had only been
-  arithmetic from query counts (~1,000 round trips → roughly one per owned set); her syncs are the
-  wall-clock measurement, and she calls it resolved.
+- **Status:** **Fixed** — PR [#70](https://github.com/viantihu/pokemon-tcg-tracker/pull/70) MERGED to
+  `develop` (squash `585e8d9`), QA-reviewed, confirmed **deployed** to Testing. Round trips on her export
+  drop from ~1,000 to roughly one per set she owns cards from. **The improvement is arithmetic from query
+  counts, not a measured wall-clock time** — nobody here can run a real import, so her next sync is the
+  measurement. Stated that way to her too.
 - **Priority:** Medium (Senior BA's read)
 - **Area:** Sync
 - **Env:** n/a — the defect is in the repo, not a running environment
@@ -2094,13 +2095,13 @@ nothing is mis-recorded.
 ## UIL-026 — Mirror the printed set total AND release date, so tied collector-number matches can be ranked instead of sorted alphabetically
 
 - **Reported:** 2026-09-13 (not from Karvi — surfaced by the tech-lead session while reviewing UIL-015)
-- **Status:** **Closed** — PR [#110](https://github.com/viantihu/pokemon-tcg-tracker/pull/110) MERGED to
+- **Status:** **Fixed** — PR [#110](https://github.com/viantihu/pokemon-tcg-tracker/pull/110) MERGED to
   `develop` 2026-09-14 (squash `f3248d9`, migration `0009` adds `set_card_count` + `set_release_date`
-  and the search ranks by denominator match then recency), deployed to Testing, the data verified
-  **populated by count, not by a green run** (both new columns non-NULL on **23,548 / 23,548** rows,
-  `sv04-099` carries `182`, re-verified intact after the 2026-09-15 Testing data refreshes), and
-  **confirmed resolved by Karvi on Testing 2026-09-15**: the collector-number search now ranks the real
-  match first. The acceptance test was her own `099/182` search, not the deploy.
+  and the search ranks by denominator match then recency), deployed to Testing, and the data verified
+  **populated by count, not by a green run**: after the forced mirror run (`34909186338`, 218/218 sets)
+  both new columns are non-NULL on **23,548 / 23,548** rows and `sv04-099` carries `182`. **Closes only on
+  Karvi's own search: `099/182` must return Minior first, ahead of the numerically-named McDonald's sets.**
+  A search that merely finds the card somewhere is not the fix — it did that before.
 - **Priority:** Medium (Senior BA's read) — 5th in queue; UIL-022/023 are dev-assigned Highs, three
   other Highs are ahead of it, and Karvi's rule is Lows/Mediums wait for all Highs.
 - **Area:** Catalog, Lookup / Collections
@@ -3329,9 +3330,9 @@ the cost being addressed is one extra click, not a data risk or a blocked workfl
 ## UIL-044 — Collector-number search still ranks a padded exact match arbitrarily when it collides with other sets — confirmed as UIL-026's gap, not a new defect
 
 - **Reported:** 2026-09-14 (found while retesting UIL-010's fix, same search box UIL-015 was found in)
-- **Status:** **Closed** — same fix as UIL-026 (PR [#110](https://github.com/viantihu/pokemon-tcg-tracker/pull/110),
-  squash `f3248d9`, deployed, ranking columns verified populated 23,548 / 23,548), and **confirmed
-  resolved by Karvi on Testing 2026-09-15** together with UIL-026 — this entry was that acceptance test.
+- **Status:** **Fixed** — same fix as UIL-026 (PR [#110](https://github.com/viantihu/pokemon-tcg-tracker/pull/110),
+  squash `f3248d9`, deployed, ranking columns verified populated 23,548 / 23,548). Closes together with
+  UIL-026 on Karvi's `099/182` search returning Minior first — this entry IS that acceptance test.
 - **Priority:** See UIL-026; this is real-world evidence the gap is worth acting on, not a new priority
   call
 - **Area:** Collections, Lookup
@@ -3577,31 +3578,39 @@ the app's core intake and find paths fail wholesale for it — and C3 additional
 corruption with no in-app recovery. She has hit it three distinct ways in one session. This is the
 largest single item in this batch.
 
-**Real-data observation, tensed to run [`34920768200`](https://github.com/viantihu/pokemon-tcg-tracker/actions/runs/34920768200)
-on 2026-09-15 — C3 possibly one step short of firing, on her own data.** After a Testing refresh and
-re-import, that run measured `unresolved_entry`: 8 total, 7 WAITING, by reason **UNKNOWN_SET 6 /
-UNKNOWN_CARD 1** (confirmed directly from the run's own log output). Before the refresh, all 8 were
-UNKNOWN_SET. The tech-lead's hypothesis, offered rather than asserted: `set_alias` wasn't part of
-whatever the refresh reset, so the aliases her two earlier manual matches taught survived it. If a
-surviving alias maps a Japanese Dex set code onto an English `tcgdex_id` set, that set now resolves at
-the set level — the row stops being UNKNOWN_SET — while the specific card still misses at the card
-level, landing as UNKNOWN_CARD instead of a confident wrong match. If this holds, it's C3 partially
-observed on real data: one level of resolution succeeded on a bad alias, one level didn't, which is why
-this presents as a miss rather than the mis-match C3 warns about, not evidence C3 is wrong. It also means
-the fix decision above has to cover an already-learned bad alias, not just prevent new ones — there is
-no `delete_set_alias` path to unlearn one (confirmed: no such op anywhere in the codebase).
+**Real-data observation, confirmed (not hypothesized) against run
+[`34977540936`](https://github.com/viantihu/pokemon-tcg-tracker/actions/runs/34977540936) on
+2026-09-15 — supersedes the earlier hedged version of this note.** `set_alias` holds **21 rows** and
+survived every Testing refresh; two are hers, both manual, both cross-locale:
+`ja:m6 → swshp` (2026-09-14T21:18:56Z) and `en:ba22e → swshp` (2026-09-14T21:19:28Z). Of the 8 WAITING
+entries, the per-row breakdown (read directly from the run's log) confirms the mechanism exactly: the
+**2 aliased** codes (`ja:m6`, `en:ba22e`) are **UNKNOWN_CARD**; the **6 un-aliased** codes
+(`en:swsh45sv`, `ja:mc`, `ja:mem`, `ja:mez`, `ja:s12a`, `ja:sv9`) are **UNKNOWN_SET**. So "one match
+drains the set" does hold — an alias resolves every row in its set at import — and C3's mechanism is
+now observed, not hypothetical: `ja:m6 → swshp` is a permanent cross-locale alias, taught because
+TCGdex carries no Battle Academy set to point at instead. It fails safe here only because `swshp` (the
+English SWSH promo set it was aliased to) doesn't carry that specific card number either — a lucky miss,
+not a designed one; a different card number could have matched confidently and wrongly, which is
+exactly what C3 warns about.
+
+**The two UNKNOWN_CARD rows are UIL-060's exact case, not a separate mechanism — cross-reference both
+ways.** Once resolved to a set (correctly or not), a card TCGdex simply doesn't carry lands as
+UNKNOWN_CARD — the same "external database has no record for this card" gap UIL-060 proposes a
+stand-in-record fix for. The six UNKNOWN_SET rows remain this entry's own C1/C2 (no set to resolve to at
+all); the fix decision here still has to cover the already-learned bad alias, not just prevent new ones
+— there is no `delete_set_alias` path to unlearn one (confirmed: no such op anywhere in the codebase).
 
 ## UIL-048 — "Logging" a card she already owns into a collection creates a second physical copy row
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** **Closed** — PR [#119](https://github.com/viantihu/pokemon-tcg-tracker/pull/119) MERGED to
+- **Status:** **Fixed** — PR [#119](https://github.com/viantihu/pokemon-tcg-tracker/pull/119) MERGED to
   `develop` 2026-09-15 (squash `637668b`), QA-gated on the merged tree, confirmed **deployed** to Testing
   (Vercel / migrate / smoke / acceptance all green on `637668b` and on the `a59bc4e` tip). Logging a card
   she already owns is now: already in this collection's binder → no-op (tag only, no insert); owned but
   shelved elsewhere or in bulk → refused, naming where it is and pointing at Move; not owned → one copy
   inserted as before. Guard verified by mutation (guard removed → `expected 2 to be 1` on the copy row
-  count). Testing showed **0** existing duplicate pairs, so nothing needed cleaning up. **Confirmed
-  resolved by Karvi on Testing 2026-09-15.**
+  count). Testing showed **0** existing duplicate pairs, so nothing needed cleaning up. Awaiting Karvi's
+  confirmation: log an already-shelved card again and see no second copy and no "Remove 2".
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Collections
 - **Env:** Testing
@@ -4066,6 +4075,11 @@ schema change and a new matching heuristic, not an extension of Half 1's plumbin
 to is currently a dead end beyond Dismiss), but `Match Manually`/`Dismiss` already exist as a working,
 if less smooth, path — nothing is blocked, and the more valuable half of the fix (Half 1) is
 comparatively cheap while the complete feature (both halves) is not.
+
+**Cross-reference UIL-047.** Confirmed live on Testing (run `34977540936`): two of UIL-047's WAITING
+entries resolve to a real set (via a learned alias) but still miss at the card level — TCGdex simply
+doesn't carry that card. That's this entry's exact case, not a separate mechanism; a fix here would also
+give those two rows a path forward.
 
 ## UIL-061 — Creating a new line can silently relocate other already-owned cards, with no confirmation and no audit trail, and there is no way to choose the line yourself
 
