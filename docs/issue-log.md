@@ -4180,3 +4180,66 @@ per confirmed pull (closes suggestion #2 regardless of source); and a confirmed 
 another line's slot must release that slot (an `update_slot` back to open) in the same apply, so the
 orphan case above can't recur once this ships. Historical orphan repair stays out of this entry's
 scope.
+
+## UIL-062 — Existing evolution-line slots on Testing are marked filled while the copy they point to has already moved elsewhere
+
+- **Reported:** 2026-09-15 (not from Karvi — measured on Testing by the tech lead via the
+  `ops/read-band-config` diagnostic branch, relayed by the Senior BA)
+- **Status:** Open
+- **Priority:** High (Senior BA's read — the record disagreeing with the physical shelf is the app's
+  core failure class; Karvi to confirm)
+- **Area:** Lines, Plan
+- **Env:** Testing
+
+**Measured on Testing, 2026-09-15 ~03:50, against all rows created since the last Testing clear (so
+this is live-path drift, not leftover residue):**
+
+```
+evolution_line:              9
+line_slot:                   24  (filled 18 · placeholder 5 · block 1)
+copies currently claiming a slot (copy.line_slot_id set): 13
+filled slots whose copy has moved away (slot.copy_id set,
+  but that copy's line_slot_id no longer points back at it): 5
+filled slots with null copy_id:                             0
+copies pointing at a slot that isn't holding them:          0
+```
+
+Five filled slots are stale. Two sub-shapes aren't separated yet — copy left the slot for no line at
+all (`line_slot_id` now `NULL`) versus copy moved to a different line's slot — the tech lead is running
+that split next.
+
+**What she'd see:** on the Lines page, a slot looks occupied — card art, "filled" — while the actual
+card is shelved somewhere else or built into a different line. The record and the shelf disagree, and
+nothing on screen says so.
+
+**One confirmed cause, one path checked and cleared, one path still open.**
+
+1. **Confirmed cause: UIL-061's new-line pull.** `writeNewLine`
+   ([`lib/plan/commit.ts:557-568`](../lib/plan/commit.ts:557)) overwrites a pulled copy's
+   `line_slot_id` to point at the new line's slot without ever patching the slot it vacated — see
+   UIL-061's 2026-09-15 correction for the full mechanism. This alone explains any stale slot whose
+   copy moved because a new line was started that happened to claim it.
+2. **Checked and cleared: `buildMoveOps`'s own release logic is symmetric.** The "move a card off a
+   line" write path ([`lib/line/move.ts:190-213`](../lib/line/move.ts:190)) does reopen the slot it
+   vacates — `if (plan.reopenSlotId)` pushes an `update_slot` back to `placeholder`/`copy_id: null` in
+   the same op set, exactly matching its own doc comment ("removal symmetry, sync-arch §1.6"). This is
+   not the second leak.
+3. **Still open: how `reopenSlotId` itself gets resolved before a move is built.** Both call sites that
+   populate a `MovePlan`/collection-removal plan derive `reopenSlotId` from a slot lookup done ahead of
+   the actual write ([`lib/line/write.ts:73-92`](../lib/line/write.ts:73),
+   [`lib/coll/remove.ts:250-262`](../lib/coll/remove.ts:250)) — if that lookup runs against state that's
+   already stale by the time the op set applies, the move would clear the copy's own `line_slot_id`
+   correctly but skip reopening a slot it no longer believes it's leaving. Unverified; FSD-2 is checking
+   this against #120.
+
+**Repair rule (verbatim from the tech lead, to record exactly as given):** `copy.line_slot_id` is the
+side the write path treats as authoritative, so reconciliation must clear the stale slot to
+`placeholder`/`copy_id: null` — never re-attach the copy to the slot it no longer occupies.
+
+**Scope split with UIL-061:** UIL-061 covers *preventing new orphans* (its confirmed-pull design
+closes the exact gap in #1 above). This entry, UIL-062, covers *repairing the ones already on Testing*
+plus resolving whether #3 is a real second leak. Cross-reference both ways.
+
+**Priority rationale.** High, per the Senior BA: this is the same silent-disagreement-with-reality
+class the log has repeatedly treated as High, on the screen whose whole job is showing her what she
+physically owns and where. Flagging for Karvi's confirmation since severity calls are hers.
