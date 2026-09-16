@@ -497,7 +497,18 @@ nav.menu .tab .n {
 /* ---------- spotlight ---------- */
 .spot {
   position: sticky;
-  top: 14px;
+  /* UIL-058: offset by the pinned haul bar, not a bare 14px.
+     `.haulbar` became sticky at `top: 0` for UIL-019 and publishes its measured height as
+     `--haulbar-h`. Only `.bandhead` was taught to consume it, so on desktop (>1080px, where this
+     rule applies at all — see the 1080px query) `.spot` still pinned at 14px, i.e. UNDERNEATH the
+     bar, hiding its own "NOW HANDLING" cap and the top of the card. The fallback `0px` keeps this
+     identical to the old behaviour before the measurement lands, or on any screen where the bar is
+     not sticky. */
+  top: calc(var(--haulbar-h, 0px) + 14px);
+  /* Explicit rather than `auto`. The bar SHOULD paint over the panel while the panel slides under
+     it, which auto stacking happened to give — but relying on that means any later rule with a
+     z-index silently reverses it. Above `.bandhead` (3), below `.haulbar` (6). */
+  z-index: 4;
   padding: 0;
   overflow: hidden;
 }
