@@ -469,9 +469,6 @@ export function PlanScreen({
         variant: entry.variant,
         existingCopyId: entry.existingCopyId ?? null,
       },
-      pendingCopyIds: draft
-        .filter((d) => d.existingCopyId && !done.has(d.id))
-        .map((d) => d.existingCopyId as string),
     })
       .then((res) => {
         if (!live) return;
@@ -1388,14 +1385,20 @@ export function Spotlight(props: {
 
       <div className="spotbtns">
         {/* One button, one meaning: this writes the placement. No Undo — shelving is a real write and
-            a misplacement is corrected with Move, like any other card (her ruling). */}
+            a misplacement is corrected with Move, like any other card (her ruling).
+
+            Also disabled while the re-check is in flight (UIL-045). In that window the panel is still
+            showing the FORECAST, and the forecast carries no digest — so a Done clicked here would go
+            unguarded and could write a pocket other than the one she just read off the screen and put
+            the card into. Sub-second, but it is the whole wrong-shelf hazard in miniature, so the
+            correct answer is to not accept the click rather than to accept it unguarded. */}
         <button
           type="button"
           className="btn btn-primary go"
           onClick={onShelve}
-          disabled={done || busy}
+          disabled={done || busy || refreshing}
         >
-          {done ? "Shelved ✓" : busy ? "Shelving…" : "Done, next card"}
+          {done ? "Shelved ✓" : busy ? "Shelving…" : refreshing ? "Checking…" : "Done, next card"}
         </button>
         <button type="button" className="btn" onClick={onBackCard}>
           ◀ Back

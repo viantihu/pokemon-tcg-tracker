@@ -224,8 +224,6 @@ export async function shelveCardAction(input: {
  */
 export async function refreshSpotlightAction(input: {
   card: DraftPayloadItem;
-  /** Copy ids this sitting is routing, withheld from `owned` exactly as the commit withholds them. */
-  pendingCopyIds?: string[];
 }): Promise<
   { ok: true; item: PlanItem | null; digest: string | null } | { ok: false; error: string }
 > {
@@ -237,6 +235,11 @@ export async function refreshSpotlightAction(input: {
       variant: input.card.variant,
       existingCopyId: input.card.existingCopyId ?? null,
     };
+    // EXACTLY the set `commitCardPlacement` withholds — this one card's own existing copy, and
+    // nothing else. It deliberately does NOT withhold the rest of the sitting's pending copies: an
+    // unshelved pending copy is not yet placed, so the cascade already treats it as absent, and
+    // withholding a DIFFERENT set here than the write uses would make the digest disagree with the
+    // write on every card and turn the guard into permanent false conflicts.
     const res = await deriveSpotlightPlacement(db, card, {
       excludeOwnedCopyIds: existingCopyIds([card]),
     });

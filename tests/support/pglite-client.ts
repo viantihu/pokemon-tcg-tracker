@@ -165,11 +165,20 @@ class PgQuery {
     return res.rows;
   }
 
-  /** The real row count for these filters, ignoring any range — see the note in `then`. */
+  /**
+   * The real row count for these filters, ignoring any range — see the note in `then`.
+   *
+   * The ORDER BY has to come off as well as the range. `select count(*) … order by tcgdex_id` is
+   * invalid SQL ("must appear in the GROUP BY clause or be used in an aggregate function"), so leaving
+   * it on made this throw for exactly the readers that matter: a paged read always orders by its
+   * primary key. Ordering is meaningless for a scalar count anyway.
+   */
   private async total(): Promise<number> {
     const saved = this.limitOffset;
     const savedCols = this.cols;
+    const savedOrder = this.orderCol;
     this.limitOffset = null;
+    this.orderCol = null;
     this.cols = "count(*)::int as n";
     try {
       const [sql, params] = this.compile();
@@ -178,6 +187,7 @@ class PgQuery {
     } finally {
       this.limitOffset = saved;
       this.cols = savedCols;
+      this.orderCol = savedOrder;
     }
   }
 
