@@ -353,6 +353,50 @@ jobs:
             else
               echo "::warning::line_slot drift present (A=$orphan_a B=$orphan_b C=$dangling_copy) — a repair item is warranted. C is the inverse of B and would indicate the overwrite happened without the old slot being cleared."
             fi
+
+            # SPLIT THE B CASES — this decides WHICH write path leaks. The earlier `slotcopies` query
+            # filtered `line_slot_id=not.is.null`, so a copy whose slot pointer is now NULL is
+            # indistinguishable from one that moved to a different slot. Re-fetch the drifted copies
+            # with NO null filter:
+            #   all NULL              -> a move-out / unshelve path that never clears the slot
+            #   any pointing elsewhere -> line-new's auto-pull overwriting without clearing (UIL-061)
+            # Prints role and whether a binder is set — structural, no card identity, no copy ids.
+            if [ "$orphan_b" -gt 0 ]; then
+              drifted=$(jq -rn --argjson s "$slots" --argjson c "$slotcopies" '
+                ($c | map({key: .id, value: .line_slot_id}) | from_entries) as $back
+                | [ $s[] | select(.state == "filled" and .copy_id != null)
+                    | select(($back[.copy_id] // null) != .id) | .copy_id ] | join(",")')
+              detail=$(fetch_rows_early "copy?select=id,line_slot_id,role,binder_id&id=in.($drifted)")
+              if printf '%s' "$detail" | jq -e 'type == "array"' > /dev/null 2>&1; then
+                echo "  the $orphan_b drifted copies, by shape:"
+                # Classify FIRST, then group on the classification. Grouping on `line_slot_id == null`
+                # alone merges "points at another existing slot" with "points at a slot that no longer
+                # exists" and then labels both from the group's first row — a silent mislabel.
+                printf '%s' "$detail" | jq -r --argjson s "$slots" '
+                  ($s | map(.id)) as $slotids
+                  | map(. as $r | {
+                      where: (if $r.line_slot_id == null then "NULL"
+                              elif ($slotids | index($r.line_slot_id)) != null then "another existing slot"
+                              else "a slot that no longer exists" end),
+                      role: $r.role,
+                      binder: (if $r.binder_id == null then "none" else "set" end)
+                    })
+                  | group_by([.where, .role, .binder])[]
+                  | "    line_slot_id=\(.[0].where)  role=\(.[0].role)  binder=\(.[0].binder)  x\(length)"'
+                nulls=$(printf '%s' "$detail" | jq '[.[] | select(.line_slot_id == null)] | length')
+                elsewhere=$(printf '%s' "$detail" | jq '[.[] | select(.line_slot_id != null)] | length')
+                echo "  line_slot_id NULL: $nulls    pointing at a different slot: $elsewhere"
+                if [ "$elsewhere" -eq 0 ]; then
+                  echo "  VERDICT: all $nulls have a NULL slot pointer — the leak is a MOVE-OUT/UNSHELVE path that never clears line_slot, NOT line-new's auto-pull."
+                elif [ "$nulls" -eq 0 ]; then
+                  echo "  VERDICT: all $elsewhere point at a different slot — this is line-new's auto-pull overwriting copy.line_slot_id without clearing the old slot (UIL-061 as designed-for)."
+                else
+                  echo "  VERDICT: BOTH paths leak — $nulls via a move-out that leaves the slot filled, $elsewhere via an auto-pull that does not clear the old slot. Two fixes, not one."
+                fi
+              else
+                echo "::warning::could not re-fetch the drifted copies — B remains unsplit."
+              fi
+            fi
           else
             echo "::warning::could not read line_slot or copy — UIL-061 integrity undetermined."
           fi
