@@ -13,14 +13,17 @@ import { availableVariants, toCardVariants } from "@/lib/plan";
 import {
   commitCardPlacement,
   commitHaul,
+  deriveSpotlightPlacement,
   existingCopyIds,
   getOwnerContext,
   groupPlan,
   loadPendingPlacements,
   loadPlanContext,
   loadPlanFingerprint,
+  PlacementChangedError,
   planFromDraft,
   type DraftItem,
+  type PlanItem,
 } from "@/lib/plan";
 import { loadMoveOptions, type MoveOptions } from "@/lib/line";
 import type { MoveDestination } from "@/lib/line/types";
@@ -163,9 +166,20 @@ export async function shelveCardAction(input: {
   haulId?: string | null;
   /** Copy ids still queued, so the returned stamp matches what the screen will hold next. */
   pendingCopyIds?: string[];
+  /**
+   * Digest of the placement the screen was displaying (UIL-045). The write refuses rather than landing
+   * somewhere she did not read off the screen and physically use.
+   */
+  expectedDigest?: string | null;
 }): Promise<
   | { ok: true; haulId: string | null; counts: CommitCounts; stamp: string }
-  | { ok: false; error: string }
+  /**
+   * Not a failure: the placement moved under her, nothing was written, and the screen should show
+   * `fresh` and let her look again. Distinguished from `ok: false` so the UI does not offer "retry"
+   * for something that would just conflict again.
+   */
+  | { ok: false; changed: true; fresh: PlanItem | null; freshDigest: string; error: string }
+  | { ok: false; changed?: false; error: string }
 > {
   try {
     const { db } = await getOwnerContext();
@@ -180,9 +194,56 @@ export async function shelveCardAction(input: {
       },
       override: input.override ?? null,
       haulId: input.haulId ?? null,
+      expectedDigest: input.expectedDigest ?? null,
     });
     const stamp = await loadPlanFingerprint(db, input.pendingCopyIds ?? []);
     return { ok: true, haulId: res.haulId, counts: res.counts, stamp };
+  } catch (err) {
+    if (err instanceof PlacementChangedError) {
+      // `actualDigest` is what the server just derived, so the next Done is still guarded rather than
+      // falling back to an unchecked write.
+      return {
+        ok: false,
+        changed: true,
+        fresh: err.fresh,
+        freshDigest: err.actualDigest,
+        error: err.message,
+      };
+    }
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * Re-derive ONE card against current state — the card in the spotlight (UIL-045).
+ *
+ * Called when the cursor lands on a card, so the destination she reads is the one the write will use.
+ * Only the spotlight card: the rest of the worklist stays the original forecast and is labelled an
+ * estimate, because re-planning the whole tail would cost eight uncached reads per Done across a
+ * 685-card sitting.
+ */
+export async function refreshSpotlightAction(input: {
+  card: DraftPayloadItem;
+}): Promise<
+  { ok: true; item: PlanItem | null; digest: string | null } | { ok: false; error: string }
+> {
+  try {
+    const { db } = await getOwnerContext();
+    const card: DraftItem = {
+      id: input.card.id,
+      tcgdexId: input.card.tcgdexId,
+      variant: input.card.variant,
+      existingCopyId: input.card.existingCopyId ?? null,
+    };
+    // EXACTLY the set `commitCardPlacement` withholds — this one card's own existing copy, and
+    // nothing else. It deliberately does NOT withhold the rest of the sitting's pending copies: an
+    // unshelved pending copy is not yet placed, so the cascade already treats it as absent, and
+    // withholding a DIFFERENT set here than the write uses would make the digest disagree with the
+    // write on every card and turn the guard into permanent false conflicts.
+    const res = await deriveSpotlightPlacement(db, card, {
+      excludeOwnedCopyIds: existingCopyIds([card]),
+    });
+    return { ok: true, item: res?.item ?? null, digest: res?.digest ?? null };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }

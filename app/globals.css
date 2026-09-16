@@ -2751,3 +2751,69 @@ nav.menu .tab .n {
 .bandgroup .bandhead {
   top: var(--haulbar-h, 0px);
 }
+
+/* UIL-045 — the spotlight card is re-derived against current state, and when that
+   changes where the card goes, the panel says so.
+
+   Why it needs saying at all: the worklist's rows come from one cascade run that
+   never advanced between cards, so a card interacting with one she has ALREADY
+   shelved this haul shows a pocket the write will not use. She reads that row to
+   decide which physical pocket to use, so a silent correction produces a wrong
+   shelf that nothing ever contradicts. `.changedtag` names the old and the new
+   destination together, because "this changed" without the before-and-after reads
+   like a bug rather than the cascade doing its job.
+
+   Deliberately the `--note` amber rather than the error pink: nothing is wrong.
+   Stacks under `.doit`, matching `.movedtag`'s placement so the two read as the
+   same family of annotation. */
+.changedtag {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--note);
+  border: 2px solid var(--ink);
+  border-radius: 2px;
+  font-size: 10px;
+  line-height: 1.7;
+  /* `min-width: 0` so a long "was … now …" wraps instead of widening the panel —
+     the UIL-007 failure, where an unshrinkable flex child blew the page sideways. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.changedtag b {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* No `.wy` inside `.changedtag` any more — the reason lives in the panel's own `.wy` below, in
+   sentence case. Kept as a guard: `.changedtag` carries `.u`, so anything nested that is prose rather
+   than a label must opt out of the uppercase or it arrives as three lines of shouting on a phone. */
+.changedtag .wy {
+  color: var(--ink-2);
+  font-size: 10px;
+  text-transform: none;
+}
+
+/* In-flight re-derivation. Additive only: the panel keeps showing the forecast
+   rather than blanking, because a labelled stale answer beats an empty one. */
+.checkingtag {
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--ink-2);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* The worklist rows below the spotlight are a FORECAST, not a promise (UIL-045):
+   they were all computed against pre-haul state. Only the card in the spotlight is
+   re-derived, so the list gets a standing caption rather than per-row hedging that
+   would make 685 rows unreadable. */
+.worktools .estimate {
+  flex-basis: 100%;
+  font-size: 10px;
+  color: var(--ink-2);
+  letter-spacing: 0.04em;
+  text-transform: none;
+}

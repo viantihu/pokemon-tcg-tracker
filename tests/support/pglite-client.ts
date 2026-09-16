@@ -47,6 +47,8 @@ class PgQuery {
   private cols = "*";
   private filters: Filter[] = [];
   private orderCol: string | null = null;
+  private orderAsc = true;
+  private limitOffset: { from: number; to: number } | null = null;
   private wantCount = false;
   private mode: "select" | "insert" | "update" = "select";
   private writeValues: Row | Row[] | null = null;
@@ -100,8 +102,24 @@ class PgQuery {
     return this;
   }
 
-  order(col: string): this {
+  order(col: string, opts?: { ascending?: boolean }): this {
     this.orderCol = col;
+    // Honoured rather than ignored: silently sorting ascending for a `{ ascending: false }` caller is
+    // the shape of double that certifies wrong behaviour (see tests/catalog/card-search.test.ts).
+    this.orderAsc = opts?.ascending ?? true;
+    return this;
+  }
+
+  /**
+   * PostgREST's `range(from, to)` — INCLUSIVE both ends, so it compiles to
+   * `limit (to - from + 1) offset from`. Needed by `pageAll`/`listAll`, which is how every read that
+   * can exceed the row cap now works (UIL-031).
+   */
+  range(from: number, to: number): this {
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from) {
+      throw new Error(`pglite-client: bad range(${from}, ${to})`);
+    }
+    this.limitOffset = { from, to };
     return this;
   }
 
@@ -132,7 +150,12 @@ class PgQuery {
     const sql =
       `select ${this.cols} from ${quoteIdent(this.table)}` +
       this.whereClause(params) +
-      (this.orderCol ? ` order by ${quoteIdent(this.orderCol)} asc` : "");
+      (this.orderCol
+        ? ` order by ${quoteIdent(this.orderCol)} ${this.orderAsc ? "asc" : "desc"}`
+        : "") +
+      (this.limitOffset
+        ? ` limit ${this.limitOffset.to - this.limitOffset.from + 1} offset ${this.limitOffset.from}`
+        : "");
     return [sql, params];
   }
 
@@ -140,6 +163,32 @@ class PgQuery {
     const [sql, params] = this.compile();
     const res = await this.db.query<Row>(sql, params);
     return res.rows;
+  }
+
+  /**
+   * The real row count for these filters, ignoring any range — see the note in `then`.
+   *
+   * The ORDER BY has to come off as well as the range. `select count(*) … order by tcgdex_id` is
+   * invalid SQL ("must appear in the GROUP BY clause or be used in an aggregate function"), so leaving
+   * it on made this throw for exactly the readers that matter: a paged read always orders by its
+   * primary key. Ordering is meaningless for a scalar count anyway.
+   */
+  private async total(): Promise<number> {
+    const saved = this.limitOffset;
+    const savedCols = this.cols;
+    const savedOrder = this.orderCol;
+    this.limitOffset = null;
+    this.orderCol = null;
+    this.cols = "count(*)::int as n";
+    try {
+      const [sql, params] = this.compile();
+      const res = await this.db.query<{ n: number }>(sql, params);
+      return res.rows[0]?.n ?? 0;
+    } finally {
+      this.limitOffset = saved;
+      this.cols = savedCols;
+      this.orderCol = savedOrder;
+    }
   }
 
   private async runInsert(): Promise<Row[]> {
@@ -193,13 +242,19 @@ class PgQuery {
         : this.mode === "update"
           ? this.runUpdate()
           : this.rows();
-    return run
-      .then((rows) => ({
-        data: this.wantSingle ? (rows[0] ?? null) : rows,
-        error: null as null,
-        count: this.wantCount ? rows.length : null,
-      }))
-      .then(onFulfilled, onRejected);
+    return (
+      run
+        // `async` because the count below is a second query (see its note); #119's version needed none.
+        .then(async (rows) => ({
+          data: this.wantSingle ? (rows[0] ?? null) : rows,
+          error: null as null,
+          // NOT `rows.length`: with a `range` applied that is the page size, and reporting it as the
+          // total is exactly how `assertReadComplete` would be fooled into thinking a truncated read
+          // was complete. Counted with the same filters and NO limit/offset, so it stays the real total.
+          count: this.wantCount ? await this.total() : null,
+        }))
+        .then(onFulfilled, onRejected)
+    );
   }
 }
 
