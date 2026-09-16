@@ -302,6 +302,61 @@ jobs:
             echo "::warning::set_release_date present on only $with_date of $copies_total rows — the sampled-coverage caveat was real. NULLs order last, so this degrades rather than breaks."
           fi
 
+          # ---- UIL-061: line_slot / copy referential drift.
+          #
+          # A new line's auto-pull can take a copy that already fills another line's slot, overwriting
+          # `copy.line_slot_id` and leaving the OLD slot still `filled` while pointing at a copy that
+          # has moved on. Two shapes of orphan:
+          #   A. state='filled' with copy_id NULL           — filled but pointing at nothing
+          #   B. state='filled' whose copy has moved        — copy.line_slot_id != this slot's id
+          #      (or the copy row is missing entirely)
+          # PostgREST cannot join, so both sides are fetched and compared here. Counts and slot STATES
+          # only — no card identity, no catalog ids.
+          echo
+          echo "--- UIL-061: line_slot referential integrity ---"
+          fetch_rows_early() {
+            case "$SERVICE_KEY" in
+              eyJ*) curl -sS --retry 3 --retry-delay 5 -H "apikey: $SERVICE_KEY" \
+                      -H "Authorization: Bearer $SERVICE_KEY" "$rest/$1" ;;
+              *)    curl -sS --retry 3 --retry-delay 5 -H "apikey: $SERVICE_KEY" "$rest/$1" ;;
+            esac
+          }
+          slots=$(fetch_rows_early "line_slot?select=id,state,copy_id")
+          slotcopies=$(fetch_rows_early "copy?select=id,line_slot_id&line_slot_id=not.is.null")
+          lines_total=$(count_of "evolution_line?select=id")
+          if printf '%s' "$slots" | jq -e 'type == "array"' > /dev/null 2>&1 \
+             && printf '%s' "$slotcopies" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            echo "evolution_line rows: $lines_total"
+            echo "line_slot rows:      $(printf '%s' "$slots" | jq 'length')"
+            echo "by state:"
+            printf '%s' "$slots" | jq -r 'group_by(.state)[] | "  \(.[0].state): \(length)"'
+            echo "copies claiming a line slot: $(printf '%s' "$slotcopies" | jq 'length')"
+
+            # A: filled, no copy_id.
+            orphan_a=$(printf '%s' "$slots" | jq '[.[] | select(.state == "filled" and .copy_id == null)] | length')
+            # B: filled, has copy_id, but that copy does not point back at this slot.
+            orphan_b=$(jq -n --argjson s "$slots" --argjson c "$slotcopies" '
+              ($c | map({key: .id, value: .line_slot_id}) | from_entries) as $back
+              | [ $s[]
+                  | select(.state == "filled" and .copy_id != null)
+                  | select(($back[.copy_id] // null) != .id) ] | length')
+            # Inverse, worth knowing: a copy pointing at a slot that is not filled by it.
+            dangling_copy=$(jq -n --argjson s "$slots" --argjson c "$slotcopies" '
+              ($s | map({key: .id, value: .copy_id}) | from_entries) as $fwd
+              | [ $c[] | select(($fwd[.line_slot_id] // null) != .id) ] | length')
+
+            echo "A. filled slots with copy_id NULL:            $orphan_a"
+            echo "B. filled slots whose copy moved away:        $orphan_b"
+            echo "C. copies pointing at a slot not holding them: $dangling_copy"
+            if [ "$((orphan_a + orphan_b + dangling_copy))" -eq 0 ]; then
+              echo "VERDICT: no line_slot/copy drift — nothing to repair, so no cleanup entry needed."
+            else
+              echo "::warning::line_slot drift present (A=$orphan_a B=$orphan_b C=$dangling_copy) — a repair item is warranted. C is the inverse of B and would indicate the overwrite happened without the old slot being cleared."
+            fi
+          else
+            echo "::warning::could not read line_slot or copy — UIL-061 integrity undetermined."
+          fi
+
           # ---- UIL-047: does a learned set alias survive and apply on a re-import?
           #
           # THE JOIN KEY IS NOT dex_set_name. `set_alias` is keyed `(locale, dex_code)` where
