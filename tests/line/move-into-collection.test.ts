@@ -305,9 +305,11 @@ describe("applyMove into a collection (real modules, real Postgres, real RPC)", 
     const client = pgliteClient(db);
 
     await applyMove(client, { copyId: CARD, destination: { kind: "bulk" } }, names);
+    // Front half, deliberately (UIL-056): a back-half shelf now needs a `lineJoin`, which is not
+    // what this test is about — that rule has its own coverage below.
     await applyMove(
       client,
-      { copyId: CARD, destination: { kind: "shelf", binderId: GEN, half: "back", band: "red" } },
+      { copyId: CARD, destination: { kind: "shelf", binderId: GEN, half: "front", band: "red" } },
       names,
     );
 
@@ -317,7 +319,7 @@ describe("applyMove into a collection (real modules, real Postgres, real RPC)", 
     expect(await targetsOf(COL)).toEqual(["cardX"]);
     expect(await copyRow()).toMatchObject({
       binder_id: GEN,
-      binder_half: "back",
+      binder_half: "front",
       color_band: "red",
     });
   });

@@ -565,3 +565,120 @@ describe("a line-join move cannot half-apply", () => {
     expect((await copyRow(CARD)).binder_half).toBe("front");
   });
 });
+
+/* ================ moving OFF a line into bulk / front-half shelf releases the slot ================
+ * Prompted by live data on Testing showing filled line_slot rows whose copy has since moved
+ * (18 filled slots, only 13 copies claiming one — a broken bidirectional link). `reopenSlotId` in
+ * applyMove is computed from the copy's CURRENT line_slot_id independent of the destination kind, so
+ * bulk/front-half-shelf SHOULD release the old slot the same way collection already does — verified
+ * here rather than just re-read, since move-into-collection.test.ts only covered bulk/shelf for the
+ * chase-list side, never for slot release specifically. */
+describe("applyMove: moving OFF a line into bulk or a front-half shelf releases the old slot", () => {
+  async function seedCardFillingASlot(): Promise<void> {
+    await seedCard({
+      id: "emberling",
+      name: "Emberling",
+      dexId: EMBERLING_DEX,
+      stage: "Basic",
+      evolveFrom: null,
+    });
+    await seedCard({
+      id: "emberdrake",
+      name: "Emberdrake",
+      dexId: EMBERDRAKE_DEX,
+      stage: "Stage1",
+      evolveFrom: "Emberling",
+    });
+    await seedShelvedFront(OTHER, "emberling");
+    await seedShelvedFront(CARD, "emberdrake");
+    await db.exec(`
+      insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+        values ('${LINE}', '${OWNER}', ${EMBERLING_DEX}, 'red', '${GEN}', 'back', 'complete');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+        values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OTHER}');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+        values ('${SLOT_NEXT}', '${OWNER}', '${LINE}', 1, 'Stage1', 'filled', '${CARD}');
+      update copy set line_slot_id = '${SLOT_ROOT}', binder_half = 'back' where id = '${OTHER}';
+      update copy set line_slot_id = '${SLOT_NEXT}', binder_half = 'back' where id = '${CARD}';
+    `);
+  }
+
+  it("releases the old slot and demotes the line when the destination is bulk", async () => {
+    await seedCardFillingASlot();
+    await asOwner(db);
+
+    await applyMove(pgliteClient(db), { copyId: CARD, destination: { kind: "bulk" } }, names);
+
+    await asSuperuser(db);
+    expect(await copyRow(CARD)).toMatchObject({ role: "bulk", line_slot_id: null });
+    expect(
+      (
+        await q<{ state: string; copy_id: string | null }>(
+          `select state, copy_id from line_slot where id = '${SLOT_NEXT}'`,
+        )
+      )[0],
+    ).toEqual({ state: "placeholder", copy_id: null });
+    expect(
+      (await q<{ status: string }>(`select status from evolution_line where id = '${LINE}'`))[0]
+        .status,
+    ).toBe("open"); // was "complete"; losing this slot's filled member demotes it
+  });
+
+  it("releases the old slot when the destination is a front-half shelf (no line concept there)", async () => {
+    await seedCardFillingASlot();
+    await asOwner(db);
+
+    await applyMove(
+      pgliteClient(db),
+      {
+        copyId: CARD,
+        destination: { kind: "shelf", binderId: GEN, half: "front", band: "red" },
+      },
+      names,
+    );
+
+    await asSuperuser(db);
+    expect(await copyRow(CARD)).toMatchObject({ binder_half: "front", line_slot_id: null });
+    expect(
+      (
+        await q<{ state: string; copy_id: string | null }>(
+          `select state, copy_id from line_slot where id = '${SLOT_NEXT}'`,
+        )
+      )[0],
+    ).toEqual({ state: "placeholder", copy_id: null });
+  });
+});
+
+/* ============ server-side enforcement: a back-half move needs a line even off-panel ============ */
+
+describe("applyMove REFUSES a back-half shelf with no lineJoin, server-side", () => {
+  it("throws rather than silently stranding the copy with line_slot_id: null", async () => {
+    await seedCard({
+      id: "onlymon",
+      name: "Onlymon",
+      dexId: ONLYMON_DEX,
+      stage: "Basic",
+      evolveFrom: null,
+    });
+    await seedShelvedFront(CARD, "onlymon");
+    await asOwner(db);
+
+    await expect(
+      applyMove(
+        pgliteClient(db),
+        {
+          copyId: CARD,
+          // No `lineJoin` — exactly what a pre-UIL-056 client, or any caller that bypasses the
+          // panel's Confirm gate, would still send.
+          destination: { kind: "shelf", binderId: GEN, half: "back", band: "red" },
+        },
+        names,
+      ),
+    ).rejects.toThrow(/incomplete/i);
+
+    await asSuperuser(db);
+    // Nothing moved — the same "refuse before any write" pattern assertCollectionDestinationLives
+    // already uses for a stale collection destination.
+    expect(await copyRow(CARD)).toMatchObject({ binder_half: "front", line_slot_id: null });
+  });
+});

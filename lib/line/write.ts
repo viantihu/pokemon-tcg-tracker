@@ -49,6 +49,7 @@ import {
   buildMoveOps,
   buildNewLineJoinOps,
   describeMove,
+  isMoveDestinationComplete,
   lineJoinOf,
   type MoveNameLookups,
 } from "./move";
@@ -78,6 +79,15 @@ export async function applyMove(
 ): Promise<MoveResult> {
   const copy = await copyRepo.getByPk(db, req.copyId);
   if (!copy) throw new Error("That card is no longer in the collection.");
+
+  // `isMoveDestinationComplete` is also the panel's Confirm gate, but that gate is client-side only
+  // — nothing stopped a stale tab, a bundle from before UIL-056, or any caller that skips the panel
+  // from sending a back-half destination with no line and reproducing the exact strand this fix
+  // exists to close. Re-checked here for the same reason a stale slot/line id is never trusted from
+  // the browser: the ONE rule, enforced in the ONE place that can't be bypassed.
+  if (!isMoveDestinationComplete(req.destination)) {
+    throw new Error("That destination is incomplete — reload the screen and pick again.");
+  }
 
   await assertCollectionDestinationLives(db, req.destination);
 
