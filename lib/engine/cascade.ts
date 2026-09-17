@@ -7,8 +7,10 @@
  *   1. COLLECTION CLAIM   → specialty binder (beats a line that needed the card)
  *   2. CARD CLASS         → specialty binder (ex / V / full art / …)
  *   3. DUPLICATE          → bulk, or a holo-swap; checked against SHELVED copies only
- *   4. LINE PARTICIPATION → fill an existing slot, extend a line, or (viable) create one
- *   5. BASIC, no line     → front half, matching band
+ *   4. LINE PARTICIPATION → fill an existing slot (Basic or Stage 1/2), or — Stage 1/2 only —
+ *      extend/create a viable line (UIL-063: a Basic can JOIN an existing line but never CREATE
+ *      one; manual creation from a single card is her call, not the cascade's — UIL-056)
+ *   5. BASIC, no existing line → front half, matching band
  *   6. TRAINER/…          → front half, White band
  *
  * Steps 1–4 are prescriptive; steps 5–6 suggest a binder from free capacity. Every block, cap and
@@ -285,9 +287,13 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
     };
   }
 
-  // STEP 4 — LINE PARTICIPATION (Stage 1 / Stage 2 only).
+  // STEP 4 — LINE PARTICIPATION. Stage 1/2 can JOIN an existing line or (viable) CREATE one; a Basic
+  // can only JOIN — never create, since manual creation from a single card is her call, not the
+  // cascade's (UIL-056: she approves every new line). A Basic with no existing line to join falls
+  // through to STEP 5 unchanged, same as it always has (UIL-063).
   const isLineStage = incoming.card.stage === "Stage1" || incoming.card.stage === "Stage2";
-  if (isLineStage) {
+  const isBasic = incoming.card.stage === "Basic";
+  if (isLineStage || isBasic) {
     const existing = existingLineSlot(incoming, ctx, b);
     if (existing) {
       if (existing.slot.state === "placeholder" || existing.slot.state === "block") {
@@ -316,7 +322,9 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
         target: { kind: "front-half", binderId: frontHalfBinderId(ctx, b), band: b },
       };
     }
+  }
 
+  if (isLineStage) {
     // No line yet → viability test.
     const via = testViability(incoming, ctx.owned, ctx.catalog, map);
     if (via.viable) {
