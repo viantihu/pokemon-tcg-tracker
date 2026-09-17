@@ -4362,6 +4362,61 @@ decision resolution, and UIL-061's owned-pull op (which does set the pointer) �
 unaffected in the earlier passes above. This fifth path is the one none of those checks covered.
 Verified independently against `origin/develop`, matching FSD-1's read on the fix in progress.
 
+**Update 2026-09-17 (later the same day): the "second Done" paragraph above is retracted — it
+required two write events per copy, and the data has exactly one.** A further measurement (tech lead)
+gives each of the 5 drifted copies exactly one `placement_decision` row, by type: **4 ×
+`placement-override` / `resolved_by: 'user'`**, **1 × `line-existing` / `resolved_by: 'auto'`**. One
+decision means one commit event touched that copy's placement columns — the double-commit story above
+needed two (a correct placement, then a later leaking one) and doesn't fit. Withdrawing it.
+
+**Verified cause for the 4: `writeOverriddenCard` has no slot-release step, and never did.**
+`MoveDestination` ([`lib/line/types.ts:214-223`](../lib/line/types.ts:214)) grew a `lineJoin` field on
+its `"shelf"` kind under #120/UIL-056 (`buildNewLineJoinOps`/`buildExistingLineJoinOps`,
+[`lib/line/move.ts:308-337`](../lib/line/move.ts:308)) — but that machinery is wired into
+`buildMoveOps`, the **Lines-page move path**, only. `placementForMove`
+([`lib/line/move.ts:40-66`](../lib/line/move.ts:40)) itself is unchanged by that PR and still returns
+`line_slot_id: null` for every destination kind, every time — by itself that's fine, because
+`buildMoveOps` overwrites it with a resolved slot id when `lineJoin` applies. `writeOverriddenCard`
+(the **haul-plan override path**, [`lib/plan/commit.ts:439-467`](../lib/plan/commit.ts:439)) was never
+touched by #120: it calls `placementForMove(dest)` and feeds the raw result straight to
+`emitIncomingCopy`, with only a collection-membership join alongside it — no slot lookup, no release,
+no `lineJoin` resolution at all. So overriding a copy that currently has a real `line_slot_id` clears
+that copy's own pointer and never touches the slot it vacates. The commit that fired this on 4 of the 5
+is the `insert_decision` with `decision: "placement-override"`
+([`lib/plan/commit.ts:314-323`](../lib/plan/commit.ts:314)), which matches the measured type exactly.
+
+**How an override ever reaches an already-slotted copy without a second commit: the slot fill and the
+leak are two different copies' events.** `writeNewLine`'s pull ([`commit.ts:607`](../lib/plan/commit.ts:607)
+region) sets a pulled copy's `line_slot_id` as a side effect of the INCOMING card's own decision and
+writes no `placement_decision` of its own (UIL-061). So a copy can start occupying a slot with zero
+decision history, then be overridden later — its first-ever `placement_decision` is the leaking one,
+and "exactly one row" holds without needing two events on the same copy.
+
+**Respectful disagreement with the relay on the 5th row — same mechanism, not a distinct second
+flavour.** The relay reads `line-existing`/`auto` landing in the front half as "wrong in two ways in
+one write." But `step: "line-existing"` in `placeCard` is shared by TWO different branches
+([`lib/engine/cascade.ts:292-315`](../lib/engine/cascade.ts:292)): filling an open placeholder slot
+(pairs with `filledExistingSlot`, sets the pointer correctly — not this), and "the line already holds
+this stage; the extra copy goes to the front half (lines tracked once)" — which is a real, intentional,
+documented outcome with **no** `filledExistingSlot` and no bug in that branch itself. If the
+already-slotted copy from a prior silent pull is the one that gets re-cascaded — reachable the same
+way as the 4 overrides, just auto instead of manual — `existingLineSlot` finds its OWN slot already
+`state: "filled"` (since it's sitting there) and this branch fires: front half, `line-existing`,
+`auto`, no slot-release anywhere in the chain, matching all three measured facts without a second gap.
+Recording this as the more likely reading, not asserting it over the relay — the two theories aren't
+distinguishable from the fields measured so far (both predict identical output), so treat this as a
+noted disagreement rather than a settled correction to the relay's fifth-row account.
+
+**Unifying root cause, either way:** no commit-time write path outside the Lines-page move
+(`applyMove`/`buildMoveOps`, and now its `lineJoin` extension) ever checks whether the copy it's about
+to write new placement columns for currently holds a real `line_slot_id` that needs releasing. Both
+`writeOverriddenCard` and STEP 4's "lines tracked once" branch assume they're placing a copy that has
+nowhere else to leave from — true for a first-time commit, false whenever a silently-pulled copy is
+reprocessed. Repair direction holds regardless of which of the two produced row 5: since no
+`MoveDestination` can express "leave it in the line slot" outside `lineJoin`, and `resolved_by` marks
+her override/the auto-decision as authoritative in all five cases, the copy side is correct as written
+in every row — repair vacates the stale slot, never writes a pointer back.
+
 **Priority rationale.** High, per the Senior BA: this is the same silent-disagreement-with-reality
 class the log has repeatedly treated as High, on the screen whose whole job is showing her what she
 physically owns and where. Flagging for Karvi's confirmation since severity calls are hers.
