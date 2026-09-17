@@ -26,14 +26,7 @@ import {
 import { band } from "@/lib/engine";
 import { getOwnerContext, toCatalogCard } from "@/lib/plan";
 import { errorMessage } from "@/lib/errors";
-import {
-  applyCollectionLog,
-  applyCollectionRemoval,
-  blockedBinderRebind,
-  blockedBinderRebindMessage,
-  blockedTargetDrops,
-  blockedTargetDropsMessage,
-} from "@/lib/coll";
+import { applyCollectionLog, applyCollectionRemoval, applyCollectionSave } from "@/lib/coll";
 import { buildMoveOptions, type MoveDestination, type MoveNameLookups } from "@/lib/line";
 import {
   collectionMode,
@@ -47,6 +40,7 @@ import type {
   CollectionCardView,
   CollectionInput,
   CollectionView,
+  SaveCollectionResult,
   SaveResult,
 } from "./coll-types";
 import type { LookupCard } from "../plan/plan-types";
@@ -140,6 +134,8 @@ export async function loadCollHub(): Promise<CollHubData> {
       cards: cardsView,
       ownedCount: cardsView.filter((c) => c.owned).length,
       totalCount: cardsView.length,
+      // A draft the autosave path (UIL-038) created but she hasn't finished naming/homing yet.
+      incomplete: col.name.trim().length === 0 || (col.current_binder_ids ?? []).length === 0,
     };
   });
 
@@ -206,53 +202,19 @@ export async function loadCollHub(): Promise<CollHubData> {
  * Removing an owned card is a move; it goes through `removeCardFromCollection`. Dropping an un-owned
  * target — a gap she has stopped chasing — strands nothing and is still allowed.
  */
-export async function saveCollection(input: CollectionInput): Promise<SaveResult> {
-  const name = input.name.trim();
-  if (!name) return { ok: false, error: "A collection needs a name." };
+/**
+ * Thin `getOwnerContext()` wrapper; the testable core (guards, binder creation, insert-or-update) is
+ * `applyCollectionSave`. `draft: true` (UIL-038) is for the autosave path only — it tolerates an empty
+ * name and an unresolved new-binder pick, which a still-being-built draft can be mid-typing through;
+ * every stranding guard (UIL-014, UIL-040) still runs regardless.
+ */
+export async function saveCollection(
+  input: CollectionInput,
+  opts: { draft?: boolean } = {},
+): Promise<SaveCollectionResult> {
   try {
     const { db, ownerId } = await getOwnerContext();
-
-    let binderId = input.binderId;
-    if (binderId === "__new") {
-      const bn = (input.newBinderName ?? "").trim();
-      if (!bn) return { ok: false, error: "Name the new binder." };
-      const created = await binderRepo.insert(db, {
-        owner_id: ownerId,
-        name: bn,
-        type: "specialty",
-        pages: 20,
-        pockets_per_page: 9,
-        is_active: false,
-      });
-      binderId = created.id;
-    }
-
-    if (input.id) {
-      const existing = await collectionRepo.getByPk(db, input.id);
-      if (!existing) return { ok: false, error: "That collection no longer exists." };
-
-      const blocked = await blockedTargetDrops(db, existing, input.targetTcgdexIds);
-      if (blocked.length > 0) return { ok: false, error: blockedTargetDropsMessage(blocked) };
-
-      const blockedBinder = await blockedBinderRebind(db, existing, [binderId]);
-      if (blockedBinder.length > 0) {
-        return { ok: false, error: blockedBinderRebindMessage(blockedBinder) };
-      }
-    }
-
-    const patch = {
-      name,
-      mode: input.mode,
-      current_binder_ids: [binderId],
-      target_catalog_card_ids: input.targetTcgdexIds,
-    };
-
-    if (input.id) {
-      await collectionRepo.update(db, input.id, patch);
-    } else {
-      await collectionRepo.insert(db, { owner_id: ownerId, definition_type: "curated", ...patch });
-    }
-    return { ok: true };
+    return await applyCollectionSave(db, ownerId, input, opts);
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }

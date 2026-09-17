@@ -25,6 +25,7 @@ import { CardFace } from "../_components/CardFace";
 import { CardLookup } from "../_components/CardLookup";
 import { MoveOverlay } from "../_components/MoveOverlay";
 import type { LookupCard } from "../plan/plan-types";
+import { createAutosaveScheduler } from "./autosave";
 import {
   deleteCollection,
   loadCollHub,
@@ -67,7 +68,16 @@ interface RemovalTarget {
 }
 
 interface EditorState {
-  id: string | null;
+  /** Always a real row id (UIL-038) — a draft is created server-side the moment the editor opens. */
+  id: string;
+  /**
+   * A collection created THIS session and not yet explicitly finished. Drives the reversibility
+   * split: everything autosaves for a brand-new draft (nothing has real placement consequences yet),
+   * but editing an EXISTING collection keeps target-removal and binder-rebind as their own deliberate
+   * click — those can strand real shelved copies, so they get the same immediate, self-contained
+   * confirm-or-refuse shape the Collections page's own Remove button already uses.
+   */
+  isNewDraft: boolean;
   name: string;
   mode: "finite" | "open";
   binderId: string; // an existing specialty binder id, or "__new"
@@ -129,20 +139,44 @@ export function CollHub() {
     }
   }
 
-  function openNew() {
+  /**
+   * UIL-038: the draft exists server-side from the moment the editor opens, not only after an
+   * explicit "Save collection" click — an interruption before that click used to lose everything
+   * typed, with nothing server-side to resume. Creating it empty (`draft: true`) and letting the
+   * editor's autosave take over from here is what closes that gap.
+   */
+  async function openNew() {
     const first = data?.specialtyBinders[0]?.id ?? "__new";
+    const res = await saveCollection(
+      {
+        id: null,
+        name: "",
+        mode: "finite",
+        binderId: first,
+        newBinderName: "",
+        targetTcgdexIds: [],
+      },
+      { draft: true },
+    );
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
     setEditor({
-      id: null,
+      id: res.id,
+      isNewDraft: true,
       name: "",
       mode: "finite",
       binderId: first,
       newBinderName: "",
       targets: [],
     });
+    await refresh(); // so it shows up (marked incomplete) if she leaves without finishing it
   }
   function openEdit(c: CollectionView) {
     setEditor({
       id: c.id,
+      isNewDraft: false,
       name: c.name,
       mode: c.mode,
       binderId: c.binderIds[0] ?? "__new",
@@ -188,6 +222,17 @@ export function CollHub() {
     };
     const ok = await run(() => saveCollection(input));
     if (ok) setEditor(null);
+  }
+
+  /**
+   * UIL-038/UIL-009: closing no longer needs a "discard this?" confirmation — autosave already has
+   * whatever was typed. The only remaining question is whether a still-completely-empty draft is
+   * worth keeping (delete it) or was actually built up (keep it, refreshed into the list).
+   */
+  async function closeEditor(id: string, deleteIfEmpty: boolean) {
+    if (deleteIfEmpty) await run(() => deleteCollection(id));
+    else await refresh();
+    setEditor(null);
   }
 
   return (
@@ -247,7 +292,7 @@ export function CollHub() {
           binders={data?.specialtyBinders ?? []}
           busy={busy}
           onChange={setEditor}
-          onClose={() => setEditor(null)}
+          onClose={(deleteIfEmpty) => closeEditor(editor.id, deleteIfEmpty)}
           onSubmit={submitEditor}
         />
       )}
@@ -428,9 +473,19 @@ export function CollectionCard(props: {
           <span aria-hidden>{collapsed ? "▶" : "▼"}</span>
         </button>
         <div style={{ minWidth: 0 }}>
-          <div className="collname">{c.name}</div>
+          <div className="collname">
+            {c.name || "Untitled collection"}
+            {c.incomplete && (
+              <span
+                className="cpill draft u"
+                title="Still missing a name or a binder — pick up where you left off with Edit."
+              >
+                Draft
+              </span>
+            )}
+          </div>
           <div className="collmeta u">
-            {c.binderNames.join(" · ") || "No binder"} ·{" "}
+            {c.binderNames.join(" · ") || "No binder yet"} ·{" "}
             {fin ? "Finite set list" : "Open running count"} ·{" "}
             {fin ? `${prog.owned} / ${prog.total} owned · ${prog.pct}%` : `${c.totalCount} logged`}
           </div>
@@ -684,43 +739,87 @@ function WishlistBinder({ group }: { group: WishlistBinderGroup }) {
 
 /* --------------------------- editor + log modals -------------------------- */
 
+/** `CollectionInput` built from the editor's working state — the shape every save call sends. */
+function inputFrom(state: EditorState): CollectionInput {
+  return {
+    id: state.id,
+    name: state.name,
+    mode: state.mode,
+    binderId: state.binderId,
+    newBinderName: state.newBinderName,
+    targetTcgdexIds: state.targets.map((t) => t.tcgdexId),
+  };
+}
+
+/** A binder pick that hasn't named its new binder yet has nothing resolvable to send. */
+function resolvable(state: EditorState): boolean {
+  return state.binderId !== "__new" || state.newBinderName.trim().length > 0;
+}
+
 function CollectionEditor(props: {
   state: EditorState;
   binders: { id: string; name: string }[];
   busy: boolean;
   onChange: (s: EditorState) => void;
-  onClose: () => void;
+  onClose: (deleteIfEmpty: boolean) => void;
   onSubmit: () => void;
 }) {
   const { state, binders, busy, onChange, onClose, onSubmit } = props;
-  const isNew = !state.id;
+  const isNew = state.isNewDraft;
+  const [inlineError, setInlineError] = useState<string | null>(null);
+
+  // Captured once per mount (the editor remounts fresh each time it opens) — the baseline "untouched"
+  // binder pick, for deciding on close whether a still-empty NEW draft is worth keeping.
+  const [initialBinderId] = useState(state.binderId);
 
   /**
-   * UIL-009: a stray click outside the panel used to unmount this editor and throw away everything
-   * typed — no confirmation, no draft kept, no undo. Building a finite collection means picking cards
-   * one at a time, so the work at risk grows the longer she stays, and the misclick costs most when
-   * she is nearly done.
-   *
-   * The backdrop no longer dismisses at all: this is a form, not a lightbox. Close and Escape stay,
-   * but both ask first once anything has been entered. Captured on mount, which is when the editor
-   * opens, so "dirty" means changed since it was opened rather than merely non-empty (editing an
-   * existing collection starts populated).
+   * UIL-038: one scheduler per editing session, created once when the editor mounts. Debounced +
+   * serialized (see `./autosave`) — passive edits (name, mode, target adds) flow through it and never
+   * block typing on a round trip.
    */
-  const [initial] = useState(() => JSON.stringify(state));
-  const dirty = JSON.stringify(state) !== initial;
+  const [autosave] = useState(() =>
+    createAutosaveScheduler<EditorState>(async (s) => {
+      const res = await saveCollection(inputFrom(s), { draft: true });
+      if (!res.ok) setInlineError(res.error); // rare here — these fields carry no stranding guard
+    }, 600),
+  );
 
-  const requestClose = useCallback(() => {
-    if (
-      dirty &&
-      !window.confirm("Discard this collection? Everything entered here will be lost.")
-    ) {
-      return;
+  /** Passive: update the UI immediately, autosave in the background. Safe for any field a fresh
+   * draft can be missing — `draft: true` tolerates it — because nothing routed here ever touches an
+   * EXISTING collection's already-resolved binder (see the reversibility split below). */
+  function passiveChange(next: EditorState) {
+    onChange(next);
+    autosave.schedule(next);
+  }
+
+  /**
+   * Deliberate: target removal and a binder rebind on an EXISTING collection, each its own click —
+   * not the passive debounce, not deferred behind "Save collection". Both can strand real shelved
+   * copies (UIL-014, UIL-040), so the UI only updates once the server has actually accepted it; on
+   * refusal the click is a no-op and the reason shows right here.
+   */
+  async function immediateChange(next: EditorState) {
+    await autosave.flush(); // keep this in order behind anything already mid-save
+    const res = await saveCollection(inputFrom(next), { draft: true });
+    if (res.ok) {
+      setInlineError(null);
+      onChange(next);
+    } else {
+      setInlineError(res.error);
     }
-    onClose();
-  }, [dirty, onClose]);
+  }
 
-  // Escape is the only keyboard way out of a modal; it routes through the same guard. No setState in
-  // the effect body — the listener is registered, and only fires later.
+  const requestClose = useCallback(async () => {
+    await autosave.flush();
+    const empty =
+      state.isNewDraft &&
+      state.name.trim().length === 0 &&
+      state.targets.length === 0 &&
+      state.binderId === initialBinderId;
+    onClose(empty);
+  }, [autosave, state, initialBinderId, onClose]);
+
+  // Escape is the only keyboard way out of a modal; it routes through the same close path.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") requestClose();
@@ -731,7 +830,7 @@ function CollectionEditor(props: {
 
   function addTarget(card: LookupCard) {
     if (state.targets.some((t) => t.tcgdexId === card.tcgdexId)) return;
-    onChange({
+    passiveChange({
       ...state,
       targets: [
         ...state.targets,
@@ -752,17 +851,48 @@ function CollectionEditor(props: {
    * a card she owns it silently produced an untracked copy, still shelved in the collection's binder
    * but invisible in every collection and wishlist view. Owned rows no longer offer it (the server
    * refuses the drop either way); their removal is a move, from the card in the collection's grid.
+   *
+   * A brand-new draft has nothing shelved in it yet, so removal there is passive like everything
+   * else; an existing collection's list can have real owned cards on it, so it's deliberate.
    */
   function removeTarget(id: string) {
     if (state.targets.find((t) => t.tcgdexId === id)?.owned) return;
-    onChange({ ...state, targets: state.targets.filter((t) => t.tcgdexId !== id) });
+    const next = { ...state, targets: state.targets.filter((t) => t.tcgdexId !== id) };
+    if (isNew) passiveChange(next);
+    else immediateChange(next);
+  }
+
+  /** Picking an existing binder is one click either way — deliberate for an existing collection. */
+  function pickBinder(binderId: string) {
+    const next = { ...state, binderId };
+    if (isNew) passiveChange(next);
+    else immediateChange(next);
+  }
+
+  /**
+   * "+ New binder" only stages the chip locally: nothing is resolvable until she names it, and
+   * sending an unresolved pick in draft mode would leave `current_binder_ids` empty — fine for a new
+   * draft that has none yet, but not for an existing collection that already has a real one.
+   */
+  function pickNewBinderChip() {
+    onChange({ ...state, binderId: "__new" });
+  }
+
+  function newBinderNameChange(value: string) {
+    const next = { ...state, binderId: "__new", newBinderName: value };
+    onChange(next);
+    if (isNew && resolvable(next)) autosave.schedule(next);
+  }
+
+  function newBinderNameBlur() {
+    if (!isNew && resolvable(state)) immediateChange(state);
   }
 
   const valid =
     state.name.trim().length > 0 &&
     (state.binderId !== "__new" || state.newBinderName.trim().length > 0);
 
-  // No backdrop onClick: dismissing a part-built collection by misclick is UIL-009.
+  // No backdrop onClick: a click meant for something behind the modal shouldn't be able to close it.
   return (
     <div className="veil on">
       <div className="dsheet panel" role="dialog" aria-modal="true">
@@ -773,12 +903,19 @@ function CollectionEditor(props: {
           </button>
         </div>
         <div className="body">
+          {inlineError && (
+            <div className="alertbar" role="alert" style={{ background: "#FFD9DF" }}>
+              <span>!</span>
+              <b>{inlineError}</b>
+            </div>
+          )}
+
           <label className="orow">
             <div className="ol u">Name</div>
             <input
               className="field"
               value={state.name}
-              onChange={(e) => onChange({ ...state, name: e.target.value })}
+              onChange={(e) => passiveChange({ ...state, name: e.target.value })}
               placeholder="e.g. Matsuno illustrations"
             />
           </label>
@@ -788,13 +925,13 @@ function CollectionEditor(props: {
             <div className="modetoggle" style={{ marginLeft: 0 }}>
               <button
                 className={"modebtn u" + (state.mode === "finite" ? " on" : "")}
-                onClick={() => onChange({ ...state, mode: "finite" })}
+                onClick={() => passiveChange({ ...state, mode: "finite" })}
               >
                 Finite
               </button>
               <button
                 className={"modebtn u" + (state.mode === "open" ? " on" : "")}
-                onClick={() => onChange({ ...state, mode: "open" })}
+                onClick={() => passiveChange({ ...state, mode: "open" })}
               >
                 Open
               </button>
@@ -808,14 +945,14 @@ function CollectionEditor(props: {
                 <button
                   key={b.id}
                   className={"ochip u" + (state.binderId === b.id ? " on" : "")}
-                  onClick={() => onChange({ ...state, binderId: b.id })}
+                  onClick={() => pickBinder(b.id)}
                 >
                   {b.name}
                 </button>
               ))}
               <button
                 className={"ochip u" + (state.binderId === "__new" ? " on" : "")}
-                onClick={() => onChange({ ...state, binderId: "__new" })}
+                onClick={pickNewBinderChip}
               >
                 + New binder
               </button>
@@ -828,7 +965,8 @@ function CollectionEditor(props: {
               <input
                 className="field"
                 value={state.newBinderName}
-                onChange={(e) => onChange({ ...state, newBinderName: e.target.value })}
+                onChange={(e) => newBinderNameChange(e.target.value)}
+                onBlur={newBinderNameBlur}
                 placeholder="e.g. Specialty Binder B"
               />
             </label>
@@ -889,14 +1027,18 @@ function CollectionEditor(props: {
               className="btn btn-primary u"
               style={{ marginLeft: "auto" }}
               disabled={!valid || busy}
-              onClick={onSubmit}
+              onClick={async () => {
+                await autosave.flush();
+                onSubmit();
+              }}
             >
               {busy ? "Saving…" : "Save collection"}
             </button>
           </div>
           <div className="hint u">
-            Saving is instant across the app — a new binder joins the binder list and this
-            collection joins the placement picker.
+            Everything here is already saved as you go — Save collection just confirms you&rsquo;re
+            done. A new binder joins the binder list and this collection joins the placement picker
+            the moment it has a name.
           </div>
         </div>
       </div>

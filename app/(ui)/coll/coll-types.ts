@@ -35,6 +35,13 @@ export interface CollectionView {
   cards: CollectionCardView[];
   ownedCount: number;
   totalCount: number;
+  /**
+   * Missing a name or a binder — a draft the autosave flow (UIL-038) created but she hasn't finished
+   * naming/homing yet. Shown as a visible "Draft" marker rather than left to look like a collection
+   * that just doesn't work: confusing state is what pushed her to destructive workarounds before
+   * (the pre-UIL-027 haul flow).
+   */
+  incomplete: boolean;
 }
 
 /** A specialty binder offered in the create/edit + log pickers. */
@@ -69,3 +76,9 @@ export interface CollectionInput {
 }
 
 export type SaveResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * `saveCollection`'s result — carries the id so the caller can keep autosaving into a row it just
+ * created (UIL-038), rather than waiting on a full `loadCollHub` refresh to learn it.
+ */
+export type SaveCollectionResult = { ok: true; id: string } | { ok: false; error: string };

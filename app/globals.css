@@ -2817,3 +2817,18 @@ nav.menu .tab .n {
   letter-spacing: 0.04em;
   text-transform: none;
 }
+
+/* ---- Draft-collection marker (UIL-038) ----------------------------------------
+   A collection the autosave path created but she hasn't finished naming/homing
+   yet must read as unfinished, not broken — she has reset her own database over
+   confusing app state before. Reuses `.cpill`'s existing pill shape rather than
+   inventing a second badge style; only the color and inline placement are new. */
+.collname .cpill.draft {
+  margin-top: 0;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.cpill.draft {
+  background: var(--note);
+  color: var(--ink);
+}
