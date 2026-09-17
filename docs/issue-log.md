@@ -3993,7 +3993,7 @@ dead end.
 ## UIL-058 — The pinned progress bar (UIL-019's fix) now overlaps the spotlight panel on desktop
 
 - **Reported:** 2026-09-14 (Karvi, retesting UIL-019's fix, PR #109)
-- **Status:** **Fixed** — PR [#134](https://github.com/viantihu/pokemon-tcg-tracker/pull/134) MERGED to
+- **Status:** **Closed** — PR [#134](https://github.com/viantihu/pokemon-tcg-tracker/pull/134) MERGED to
   `develop` 2026-09-15 (squash `6776da3`), QA-gated, confirmed **deployed** to Testing (all four
   conditions green). One rule: `.spot` now offsets by the haul bar's published height
   (`top: calc(var(--haulbar-h, 0px) + 14px)`, `z-index: 4`, between `.bandhead` and `.haulbar`).
