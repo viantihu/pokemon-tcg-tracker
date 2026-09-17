@@ -4460,6 +4460,39 @@ later, more specific measurement (exact dex-scoped counts, not an approximate "a
 this entry treats as correct, so it does **not** claim any connection to UIL-063. If that turns out
 wrong, it's a data question for the tech lead, not a code question this entry can settle.
 
+**Update 2026-09-17: fixed and repaired — PR [#151](https://github.com/viantihu/pokemon-tcg-tracker/pull/151)
+(squash `26b6971`), prevention and a data migration, both verified against `origin/develop`.** This also
+corrects my own earlier guess at row 5's exact mechanism — it was neither UIL-061's pull nor the
+"lines tracked once" front-half branch I'd floated as a possibility; see below.
+
+**Row 5's real mechanism: the `filledExistingSlot` branch wrote both pointers only inside `if (slot)`,
+with no `else`.** ([`lib/plan/commit.ts:410-434`](../lib/plan/commit.ts:410).) When the cascade names a
+stage/line to fill but that slot can't be resolved against the loaded context, `emitIncomingCopy` had
+already run and written the back-half placement columns with `line_slot_id: null` — neither pointer op
+then fires, and the commit still succeeds: card physically shelved, its line still showing that stage
+as unfilled. **This is a distinct code path from the 4 override rows** (which come from
+`writeOverriddenCard` never emitting a slot op at all, confirmed in the retraction/override-cause
+updates above) — same *symptom* (a stale pointer pair), two different missing pieces of code. The fix
+now throws instead of half-writing: one `apply_write_ops` transaction, so throwing leaves zero rows and
+she retries against fresh state, rather than a silent half-write nothing on screen contradicts.
+
+**Prevention for the override path: a new shared `releaseSlotOps`
+([`lib/line/move.ts`](../lib/line/move.ts)), opt-in on a positive match.** Three callers now emit it
+(the Line-screen move, collection removal, and — the one that was missing it — the Haul Plan override).
+Release fires only when the copy's OWN current slot still names that same copy, not merely whenever the
+copy has a pointer at all — an earlier version of the fix released on pointer-presence alone, which
+would evict a card that never moved if the pointer was already stale; a test pins this.
+
+**Repair: migration 0010** (`supabase/migrations/0010_release_stale_line_slots.sql`) clears the 5 stale
+slots to `placeholder`/`copy_id: null`, predicate `state = 'filled' AND copy_id IS NOT NULL AND NOT
+EXISTS (copy row whose own line_slot_id points back)`. Idempotent, no-op against Production's empty
+table. **The 8 unlinked back-half copies are deliberately untouched, and the breakdown is sharper than
+my earlier note:** of the 8, 5 have a placeholder in the right binder+band but wanting a *different*
+card, and 3 have no placeholder there at all — zero have one that's rightfully theirs to reattach to.
+A migration that picked a slot for any of them would be inventing a placement decision on her behalf;
+she can attach them herself from the Lines page's "not in a line yet" list (UIL-056/#120). A test pins
+that they stay untouched.
+
 **Priority rationale.** High, per the Senior BA: this is the same silent-disagreement-with-reality
 class the log has repeatedly treated as High, on the screen whose whole job is showing her what she
 physically owns and where. Flagging for Karvi's confirmation since severity calls are hers.
@@ -4683,15 +4716,28 @@ reachable by giving her a free band choice for the first time; before that, ever
 cascade-derived and therefore always matched a future card's natural band by construction.
 
 **Fix direction (Senior BA, following the same principle her UIL-064 ruling already established for
-this file): match on the chain root regardless of band, and let a card joining a line take the LINE's
-band, not its own natural one — she chose where the line physically lives, so the line's band should
-win.** Assigned to FSD-2 to fold into the UIL-064 work rather than ship separately: same file
-(`lib/engine/cascade.ts`/`lib/line/move.ts`), same "pick the line, derive the placement" inversion,
-and shipping them apart would have her retest the same flow twice.
+this file): match on species alone, and let a card joining a line take the LINE's band, not its own
+natural one — she chose where the line physically lives, so the line's band should win.** Folded into
+the UIL-064 work rather than shipped separately: same file, same "pick the line, derive the placement"
+inversion, and shipping them apart would have her retest the same flow twice.
 
 **Cross-reference.** UIL-056 (the manual-creation UI that made this reachable), UIL-063 (the symptom
 this reproduces by a second route, despite being marked Fixed), UIL-064 (the line-join rework this is
-being folded into).
+folded into).
+
+**Update 2026-09-17: fix built, open as PR [#154](https://github.com/viantihu/pokemon-tcg-tracker/pull/154),
+verified against its actual diff (not yet merged as of this writing).** Goes further than first
+described: the band filter is dropped from **both** call sites — STEP 1's collection-claim check and
+STEP 4's line-participation check — since the same gap hit both, not only the one this entry named.
+`existingLineSlot` now matches on `dexId` alone; the caller takes `existing.line.colorBand` for
+placement instead of the card's own derived band, in both branches. **One exception worth recording
+precisely because it's easy to get backwards later: a card that falls to the front half because its
+line's stage is already filled (the "lines tracked once" branch) keeps its OWN natural band there, not
+the line's** — the front half isn't the line, so her band choice for the line doesn't follow a spare
+copy that never joins it. Verified nothing downstream re-derives band independently:
+`copyPlacementFromTarget` ([`lib/plan/placement.ts:36-40`](../lib/plan/placement.ts:36)) and
+`assemble.ts`'s `describeReason` ([`lib/plan/assemble.ts:43-45`](../lib/plan/assemble.ts:43)) both pass
+`target.band` through verbatim, so the line's band propagates correctly end to end.
 
 **Priority rationale.** High, per the Senior BA: reproduces an already-Fixed defect's exact symptom
 through a path the fix didn't cover, on the same core flow the log has repeatedly treated as High.
