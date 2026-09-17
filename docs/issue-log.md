@@ -3956,7 +3956,17 @@ so a future session doesn't log the same gap a third time.
 ## UIL-057 — The line-decision screen shows wishlist alternatives but won't let her pick one
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#146](https://github.com/viantihu/pokemon-tcg-tracker/pull/146) MERGED to
+  `develop` 2026-09-16 (squash `a108854`), QA-gated on the merged tree with four mutations verified,
+  confirmed **deployed** to Testing (all four conditions green on that SHA). The wishlist alternates are
+  now selectable and the chosen catalog id is threaded through `DecisionCard` → `onChoose` →
+  `resolveDecisionAction` → `applyDecision` → `resolveDecisionWrites` → `wishlistUpsertFor`, replacing the
+  always-cheapest server pick. The id is **validated against the decision's own freshly-derived option
+  set** before it is trusted, so a stale id from the browser falls back to the default rather than being
+  written. Known test gap, recorded rather than logged: `applyDecision`'s pass-through of the pick has no
+  test of its own (dropping it leaves 606/606 green), so a broken wire there would silently revert to
+  always-cheapest; correct by reading, handed to the dev to pin. No browser verification — the Line screen
+  is behind auth and that session had no Supabase credentials. Awaiting Karvi's confirmation.
 - **Priority:** Medium (Claude's read — needs Karvi's confirmation)
 - **Area:** Lines
 - **Env:** Testing
@@ -3983,15 +3993,15 @@ dead end.
 ## UIL-058 — The pinned progress bar (UIL-019's fix) now overlaps the spotlight panel on desktop
 
 - **Reported:** 2026-09-14 (Karvi, retesting UIL-019's fix, PR #109)
-- **Status:** **Fixed** — PR [#134](https://github.com/viantihu/pokemon-tcg-tracker/pull/134) MERGED to
+- **Status:** **Closed** — PR [#134](https://github.com/viantihu/pokemon-tcg-tracker/pull/134) MERGED to
   `develop` 2026-09-15 (squash `6776da3`), QA-gated, confirmed **deployed** to Testing (all four
   conditions green). One rule: `.spot` now offsets by the haul bar's published height
   (`top: calc(var(--haulbar-h, 0px) + 14px)`, `z-index: 4`, between `.bandhead` and `.haulbar`).
   Verified by browser measurement at 1440 / 1000 / 375 px with a revert check — 52 px of the spotlight
   cap hidden before, 0 after; inert in the two narrower layouts. No unit test is possible for a computed
-  offset. Related product question open with Karvi, deliberately not changed here: at ≤720 px the
-  spotlight stacks **above** the pinned bar, so the progress counter is hidden on a phone. Awaiting her
-  confirmation on desktop: scroll until the bar pins, the "NOW HANDLING" cap sits fully below it.
+  offset. **Confirmed resolved by Karvi on Testing 2026-09-16.** Related product question still open with
+  her, deliberately not changed here: at ≤720 px the spotlight stacks **above** the pinned bar, so the
+  progress counter is hidden on a phone — it becomes its own entry only if she wants the counter there.
 - **Priority:** Medium (Claude's read — needs Karvi's confirmation)
 - **Area:** Plan
 - **Env:** Testing
