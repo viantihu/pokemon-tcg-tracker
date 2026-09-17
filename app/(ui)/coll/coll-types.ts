@@ -82,3 +82,52 @@ export type SaveResult = { ok: true } | { ok: false; error: string };
  * created (UIL-038), rather than waiting on a full `loadCollHub` refresh to learn it.
  */
 export type SaveCollectionResult = { ok: true; id: string } | { ok: false; error: string };
+
+/* ------------------------------- card search (UIL-039) ------------------------------- */
+
+/** One catalog card on the search grid — image-first per her standing design principle. */
+export interface BrowseCard {
+  tcgdexId: string;
+  name: string;
+  setId: string | null;
+  setName: string | null;
+  localId: string | null;
+  illustrator: string | null;
+  types: string[];
+  imageUrl: string | null;
+  /** A shelved OR bulk copy exists — she holds this printing somewhere, not just in this collection. */
+  owned: boolean;
+}
+
+/** All filters combine with AND. Blank/undefined means "don't filter on this". */
+export interface BrowseFilters {
+  text?: string;
+  illustrator?: string;
+  setId?: string;
+  dexId?: number;
+  type?: string;
+  owned?: "any" | "owned" | "unowned";
+}
+
+export interface BrowsePage {
+  cards: BrowseCard[];
+  /** True when there is more to load. */
+  hasMore: boolean;
+  /**
+   * Pass this back as the next call's `offset`. NOT `offset + cards.length` — when an owned/unowned
+   * filter is active, filtering happens in memory across possibly several raw catalog pages, so the
+   * raw position consumed to produce this page is not simply its size.
+   */
+  nextOffset: number;
+}
+
+export interface SetOption {
+  setId: string;
+  setName: string;
+}
+
+/**
+ * Bulk-add outcome. `added` may be fewer than requested — an id already on the target list is
+ * skipped rather than erroring, so re-submitting a partially-successful selection is harmless.
+ */
+export type BulkAddResult = { ok: true; added: number } | { ok: false; error: string };

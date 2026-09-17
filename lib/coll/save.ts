@@ -26,7 +26,7 @@
  */
 
 import { binderRepo, collectionRepo, type DbClient } from "@/lib/repo";
-import type { CollectionMode } from "@/lib/surfaces";
+import { collectionMode, type CollectionMode } from "@/lib/surfaces";
 import {
   blockedBinderRebind,
   blockedBinderRebindMessage,
@@ -106,4 +106,43 @@ export async function applyCollectionSave(
     ...patch,
   });
   return { ok: true, id: created.id };
+}
+
+/**
+ * Bulk-add from the search grid (UIL-039) — one write for N cards, reusing `applyCollectionSave`
+ * rather than a second target-list write path (the UIL-033 principle: one definition of what joining
+ * a collection means). Name/mode/binder are re-sent unchanged, so `blockedBinderRebind` never fires
+ * here; only ever-growing the target list means `blockedTargetDrops` never fires either — this path
+ * cannot strand anything, by construction, not because a guard happens not to trigger today.
+ *
+ * Already-listed ids are silently skipped rather than erroring, so re-submitting a selection that
+ * partially landed (a flaky request, a double click) is harmless.
+ */
+export async function applyBulkAddTargets(
+  db: DbClient,
+  ownerId: string,
+  collectionId: string,
+  tcgdexIds: string[],
+): Promise<{ ok: true; added: number } | { ok: false; error: string }> {
+  const existing = await collectionRepo.getByPk(db, collectionId);
+  if (!existing) return { ok: false, error: "That collection no longer exists." };
+
+  const current = new Set(existing.target_catalog_card_ids ?? []);
+  const merged = [...current, ...tcgdexIds.filter((id) => !current.has(id))];
+  const added = merged.length - current.size;
+
+  const res = await applyCollectionSave(
+    db,
+    ownerId,
+    {
+      id: collectionId,
+      name: existing.name,
+      mode: collectionMode(existing.mode),
+      binderId: existing.current_binder_ids?.[0] ?? "__new",
+      newBinderName: "",
+      targetTcgdexIds: merged,
+    },
+    { draft: true },
+  );
+  return res.ok ? { ok: true, added } : res;
 }

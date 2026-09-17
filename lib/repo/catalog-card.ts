@@ -209,6 +209,53 @@ export const catalogCardRepo = {
   },
 
   /**
+   * Filtered, paged listing for the card-search grid (UIL-039) — deliberately separate from
+   * `search()`, which is a small type-ahead for the single-pick surfaces (Log a card, Backfill,
+   * Lookup) and stays that way. `browse` is for a page meant to show dozens-to-hundreds of results
+   * (an illustrator's whole output, a full set), so it pages rather than capping at 12.
+   *
+   * All filters AND together. `illustrator` and `text` are `ilike` substring matches — illustrator
+   * credits and card names are not typed consistently enough for exact match to be usable here.
+   */
+  async browse(
+    db: DbClient,
+    filters: {
+      text?: string;
+      illustrator?: string;
+      setId?: string;
+      dexId?: number;
+      /**
+       * Raw TCGdex type strings to match, ANY of (not all) — a band like White covers several raw
+       * types at once (Colorless, Metal, every Trainer/Energy card), so the caller expands one band
+       * pick into this list via `type_color_map` before calling `browse`.
+       */
+      types?: string[];
+    },
+    opts: { limit: number; offset: number },
+  ): Promise<Row<"catalog_card">[]> {
+    // Deliberately no owned/unowned filter here: that set is hundreds of ids, and folding it into
+    // a `.in()`/`.not.in()` filter puts all of them on the request URL, which is the "fine at a
+    // handful, wrong at real scale" shape this app keeps finding elsewhere. The caller (browseCards
+    // action) filters in memory against `copyRepo.ownedCatalogCardIdSet` and re-pages as needed to
+    // keep pagination correct instead.
+    let q = db.from("catalog_card").select("*").eq("is_digital_only", false);
+    if (filters.illustrator) q = q.ilike("illustrator", `%${filters.illustrator}%`);
+    if (filters.setId) q = q.eq("set_id", filters.setId);
+    if (filters.dexId != null) q = q.contains("dex_id", [filters.dexId]);
+    if (filters.types && filters.types.length > 0) q = q.overlaps("types", filters.types);
+    if (filters.text) {
+      const like = `%${filters.text.replace(/[,()%*/]/g, " ").trim()}%`;
+      q = q.or(`name.ilike.${like},local_id.ilike.${like}`);
+    }
+    const { data, error } = await q
+      .order("name", { ascending: true })
+      .order("tcgdex_id", { ascending: true }) // total order: name alone ties within a set
+      .range(opts.offset, opts.offset + opts.limit - 1);
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  /**
    * Distinct TCGdex set ids whose `set_name` matches a human set name exactly. The sync's
    * set-code-miss fallback (sync-architecture §1.3) resolves an unknown Dex code by matching the
    * Dex `Set` column against the mirrored set names, then learns the alias. Returns every distinct

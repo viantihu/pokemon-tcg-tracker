@@ -26,7 +26,13 @@ import {
 import { band } from "@/lib/engine";
 import { getOwnerContext, toCatalogCard } from "@/lib/plan";
 import { errorMessage } from "@/lib/errors";
-import { applyCollectionLog, applyCollectionRemoval, applyCollectionSave } from "@/lib/coll";
+import {
+  applyBulkAddTargets,
+  applyCardBrowse,
+  applyCollectionLog,
+  applyCollectionRemoval,
+  applyCollectionSave,
+} from "@/lib/coll";
 import { buildMoveOptions, type MoveDestination, type MoveNameLookups } from "@/lib/line";
 import {
   collectionMode,
@@ -36,12 +42,17 @@ import {
 } from "@/lib/surfaces";
 import { lookupCatalog } from "../plan/actions";
 import type {
+  BrowseCard,
+  BrowseFilters,
+  BrowsePage,
+  BulkAddResult,
   CollHubData,
   CollectionCardView,
   CollectionInput,
   CollectionView,
   SaveCollectionResult,
   SaveResult,
+  SetOption,
 } from "./coll-types";
 import type { LookupCard } from "../plan/plan-types";
 
@@ -319,6 +330,67 @@ export async function wishlistCollectionCard(
       will_live_in_specialty: true,
     });
     return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/* --------------------------------- card search (UIL-039) -------------------------------- */
+
+/**
+ * Thin `getOwnerContext()` wrapper; the testable core (band expansion, owned/unowned re-paging) is
+ * `applyCardBrowse`, same seam as `applyCollectionSave`. Separate from the type-ahead `searchCatalog`
+ * (used by the single-pick sites: Log a card, Backfill, Lookup) — this is a browse page meant to show
+ * dozens-to-hundreds of results, paged rather than capped at 12.
+ */
+export async function browseCards(filters: BrowseFilters, offset: number): Promise<BrowsePage> {
+  const { db } = await getOwnerContext();
+  const page = await applyCardBrowse(db, filters, offset);
+  return { cards: page.cards as BrowseCard[], hasMore: page.hasMore, nextOffset: page.nextOffset };
+}
+
+/** Distinct sets in the catalog, for the search grid's set filter. Sorted by name. */
+export async function listSetOptions(): Promise<SetOption[]> {
+  const { db } = await getOwnerContext();
+  const rows = await catalogCardRepo.listAllFields(db, ["set_id", "set_name"]);
+  const seen = new Map<string, string>();
+  for (const r of rows) {
+    if (r.set_id && !seen.has(r.set_id)) seen.set(r.set_id, r.set_name ?? r.set_id);
+  }
+  return [...seen.entries()]
+    .map(([setId, setName]) => ({ setId, setName }))
+    .sort((a, b) => a.setName.localeCompare(b.setName));
+}
+
+/**
+ * Species name → dex id, for the search grid's Pokémon filter — `catalogCardRepo.findByDexId` takes
+ * the number, not a name, and nothing resolves the other direction yet. A regional form/printing
+ * shares its species' dex id (schema comment on `catalog_card.dex_id`), so the first name match's
+ * `dex_id[0]` is every printing's key, not just that one row's.
+ */
+export async function resolveSpeciesToDexId(name: string): Promise<number | null> {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const { db } = await getOwnerContext();
+  const rows = await catalogCardRepo.browse(db, { text: trimmed }, { limit: 1, offset: 0 });
+  return rows[0]?.dex_id?.[0] ?? null;
+}
+
+/** Just the name — the search page's header, without loading the whole hub for one string. */
+export async function getCollectionName(collectionId: string): Promise<string | null> {
+  const { db } = await getOwnerContext();
+  const col = await collectionRepo.getByPk(db, collectionId);
+  return col?.name ?? null;
+}
+
+/** Add every selected card to a collection's chase list in one write (UIL-039's bulk add). */
+export async function bulkAddTargets(
+  collectionId: string,
+  tcgdexIds: string[],
+): Promise<BulkAddResult> {
+  try {
+    const { db, ownerId } = await getOwnerContext();
+    return await applyBulkAddTargets(db, ownerId, collectionId, tcgdexIds);
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }

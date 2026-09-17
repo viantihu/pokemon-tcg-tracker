@@ -9,10 +9,11 @@
  * through a fully green suite exactly that way). Reads here go through the same SQL the repo layer's
  * PostgREST calls compile to, under `set role authenticated`, so RLS applies as it does in production.
  *
- * DELIBERATELY NARROW: only the read surface `lib/repo` actually uses on these paths
- * (`select` / `eq` / `in` / `order` / `maybeSingle` / awaited-list) plus `rpc`. Anything else throws
- * loudly rather than quietly returning the wrong rows — if a repo grows a new call shape, the test
- * fails instead of lying.
+ * DELIBERATELY NARROW: only the read/write surface `lib/repo` actually uses on these paths
+ * (`select` / `eq` / `in` / `ilike` / `contains` / `overlaps` / `or` / `order` / `range` /
+ * `maybeSingle` / `insert` / `update` / awaited-list) plus `rpc`. Anything else throws loudly rather
+ * than quietly returning the wrong rows — if a repo grows a new call shape, the test fails instead
+ * of lying. `ilike`/`contains`/`overlaps`/`or` added for UIL-039's `catalogCardRepo.browse`.
  *
  * `select(cols, { count: "exact" })` is supported (UIL-031's `assertReadComplete` needs it), and the
  * count it reports is real: this runs the query's actual SQL with no `LIMIT`/`OFFSET`, so `count` is
@@ -26,7 +27,11 @@
 import type { PGlite } from "@electric-sql/pglite";
 import type { DbClient } from "@/lib/repo";
 
-type Filter = { kind: "eq" | "in"; col: string; value: unknown };
+type Filter =
+  | { kind: "eq" | "in"; col: string; value: unknown }
+  | { kind: "ilike"; col: string; pattern: string }
+  | { kind: "contains" | "overlaps"; col: string; value: unknown }
+  | { kind: "or"; clauses: { col: string; pattern: string }[] };
 
 function quoteIdent(name: string): string {
   if (!/^[a-z_][a-z0-9_]*$/i.test(name)) throw new Error(`pglite-client: bad identifier ${name}`);
@@ -102,6 +107,39 @@ class PgQuery {
     return this;
   }
 
+  ilike(col: string, pattern: string): this {
+    this.filters.push({ kind: "ilike", col, pattern });
+    return this;
+  }
+
+  /** Array column contains ALL of `value` (`@>`) — e.g. `dex_id` holding a given species key. */
+  contains(col: string, value: unknown[]): this {
+    this.filters.push({ kind: "contains", col, value });
+    return this;
+  }
+
+  /** Array column shares ANY element with `value` (`&&`) — e.g. `types` matching any raw type in a
+   * color band's expansion. */
+  overlaps(col: string, value: unknown[]): this {
+    this.filters.push({ kind: "overlaps", col, value });
+    return this;
+  }
+
+  /**
+   * PostgREST's `or("a.ilike.x,b.ilike.y")` mini-language — narrow on purpose, same discipline as
+   * the rest of this shim: only the `col.ilike.pattern` clause shape `search()`/`browse()` actually
+   * emit is parsed; anything else throws rather than silently matching nothing.
+   */
+  or(expr: string): this {
+    const clauses = expr.split(",").map((part) => {
+      const m = /^([a-zA-Z_][a-zA-Z0-9_]*)\.ilike\.(.*)$/.exec(part);
+      if (!m) throw new Error(`pglite-client: unsupported or() clause "${part}"`);
+      return { col: m[1], pattern: m[2] };
+    });
+    this.filters.push({ kind: "or", clauses });
+    return this;
+  }
+
   order(col: string, opts?: { ascending?: boolean }): this {
     this.orderCol = col;
     // Honoured rather than ignored: silently sorting ascending for a `{ ascending: false }` caller is
@@ -129,7 +167,7 @@ class PgQuery {
       if (f.kind === "eq") {
         params.push(f.value);
         where.push(`${quoteIdent(f.col)} = $${params.length}`);
-      } else {
+      } else if (f.kind === "in") {
         const list = f.value as unknown[];
         if (list.length === 0) {
           where.push("false");
@@ -140,6 +178,21 @@ class PgQuery {
           return `$${params.length}`;
         });
         where.push(`${quoteIdent(f.col)} in (${slots.join(", ")})`);
+      } else if (f.kind === "ilike") {
+        params.push(f.pattern);
+        where.push(`${quoteIdent(f.col)} ilike $${params.length}`);
+      } else if (f.kind === "contains") {
+        params.push(f.value);
+        where.push(`${quoteIdent(f.col)} @> $${params.length}`);
+      } else if (f.kind === "overlaps") {
+        params.push(f.value);
+        where.push(`${quoteIdent(f.col)} && $${params.length}`);
+      } else if (f.kind === "or") {
+        const parts = f.clauses.map((c) => {
+          params.push(c.pattern);
+          return `${quoteIdent(c.col)} ilike $${params.length}`;
+        });
+        where.push(`(${parts.join(" or ")})`);
       }
     }
     return where.length > 0 ? ` where ${where.join(" and ")}` : "";
