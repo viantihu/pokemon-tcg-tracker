@@ -73,21 +73,32 @@ export async function loadCapacity(): Promise<CapacityData> {
  * still needs the half for pocket classification. Sorted the way the binder actually sits: front
  * before back, then rainbow band order within a half, then name.
  *
- * Reuses `copyRepo.listShelved` (every shelved copy, already fetched for `loadCapacity` were it
- * called alongside this) and filters to the one binder, rather than adding a new by-binder finder to
- * `lib/repo/copy.ts` for a read this screen makes one binder at a time.
+ * Reads via `copyRepo.listShelvedInSection`, one query per section of THIS binder, rather than
+ * `listShelved`'s single unpaged "every shelved copy in the collection" select — that read is capped
+ * at Supabase's 1000-row default, and unlike `browse()`'s pagination (a partial page that says so),
+ * a silent cap here would drop cards from a binder with no error: she opens it, doesn't see a card
+ * she owns, and reads that as having lost it — UIL-031's failure shape, and the one this screen exists
+ * to prevent, not a performance footnote to accept. One binder's one section is bounded by physical
+ * pocket capacity regardless of how large the collection overall grows, so this has no such ceiling.
+ * Queried for all three sections unconditionally (a specialty binder's front/back come back empty, a
+ * general binder's single section comes back empty) rather than branching on the binder's type first —
+ * one extra empty, indexed query is cheaper than a second round trip to look the type up.
  */
 export async function loadBinderCards(binderId: string): Promise<BinderCardTile[]> {
   const { db } = await getOwnerContext();
-  const shelved = await copyRepo.listShelved(db);
-  const inBinder = shelved.filter((c) => c.binder_id === binderId);
+  const [front, back, single] = await Promise.all([
+    copyRepo.listShelvedInSection(db, binderId, "front"),
+    copyRepo.listShelvedInSection(db, binderId, "back"),
+    copyRepo.listShelvedInSection(db, binderId, null),
+  ]);
+  const inBinder = [...front, ...back, ...single];
   if (inBinder.length === 0) return [];
 
   const cardIds = [...new Set(inBinder.map((c) => c.catalog_card_id))];
   const cards = await catalogCardRepo.listByIds(db, cardIds);
   const cardById = new Map(cards.map((c) => [c.tcgdex_id, c]));
 
-  const halfOrder: Record<string, number> = { front: 0, back: 1 };
+  const halfOrder: Record<string, number> = { front: 0, back: 1, single: 2 };
   return inBinder
     .map((c) => {
       const card = cardById.get(c.catalog_card_id);
@@ -97,7 +108,7 @@ export async function loadBinderCards(binderId: string): Promise<BinderCardTile[
         name: card?.name ?? c.catalog_card_id,
         localId: card?.local_id ?? null,
         imageUrl: card?.image_url ?? null,
-        half: c.binder_half ?? "front",
+        half: c.binder_half ?? "single",
         bandKey: c.color_band,
       };
     })
