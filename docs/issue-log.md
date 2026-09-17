@@ -4290,3 +4290,84 @@ myself.
 **Priority rationale.** High, per the Senior BA: this is the same silent-disagreement-with-reality
 class the log has repeatedly treated as High, on the screen whose whole job is showing her what she
 physically owns and where. Flagging for Karvi's confirmation since severity calls are hers.
+
+## UIL-063 — A Basic card's spotlight says "no line yet" even when a line for that exact species already exists on the Lines page, and a Dragonair she says she committed still shows as un-owned
+
+- **Reported:** 2026-09-16 (Karvi, relayed precisely by Junior BA - 2 — not her diagnosis, a careful
+  transcript of a contradiction she flagged)
+- **Status:** Open
+- **Priority:** High (Claude's read — needs Karvi's confirmation)
+- **Area:** Plan, Lines
+- **Env:** Testing
+
+**The sequence, in order:**
+
+1. In the Haul Plan, card 101 of 614 — a Dratini — showed the spotlight text "Basic Pokémon with no
+   line yet — goes to the front half, Olive band," proposing a brand-new placement.
+2. Asked whether she'd already clicked Done on a Dragonair earlier in this same session, she said yes.
+3. She then showed a screenshot of the Lines page's existing "DRATINI LINE": Basic (Dratini, #147)
+   **OWNED/FILLED**; Stage1 (Dragonair, #151, Ascended Heroes) **OPEN/HUNTING** with priced wishlist
+   alternates ($0.15/$0.20/$0.21), labeled "DRAGONAIR is a hunt, not owned yet"; Stage2 (Dragonite,
+   #149) **OWNED/FILLED**.
+
+In her words (via Junior BA - 2): "I want to note, this line does not look right either. The Dratini
+card should not be visible in the line until I've approved it. It can be suggested but the UI does not
+seem to be suggesting."
+
+**Confirmed: the "no line yet" text is not about whether a line exists — a Basic card never checks.**
+`placeCard`'s STEP 4 ([`lib/engine/cascade.ts:288`](../lib/engine/cascade.ts:288)) gates ALL
+line-lookup and line-creation logic — `existingLineSlot`, `testViability`, `generateSlots`, the whole
+new-line/join-line branch — behind `isLineStage = incoming.card.stage === "Stage1" ||
+incoming.card.stage === "Stage2"`. A Basic never satisfies that condition, so it falls straight through
+to STEP 5 ([`cascade.ts:389`](../lib/engine/cascade.ts:389)), which unconditionally returns "Basic with
+no line; to the front half" — **it does not look at `ctx.lines` at all.** So this spotlight text would
+read exactly the same whether zero lines exist for that species or, as here, one already does with two
+of its three stages filled. The sentence isn't wrong about THIS Dratini specifically failing some
+check; it's a sentence a Basic always gets, regardless of reality. Only Stage1/Stage2 incoming cards
+ever look up or start a line — a fresh Basic pull can never join one, even a viable, mostly-filled one
+for its own species.
+
+**Her stated hypothesis (forecast leaking onto the committed Lines page) does not hold up against the
+read code, though the confusion is understandable.** `buildScreenModel`
+([`lib/line/load.ts:2`](../lib/line/load.ts:2), "Load persisted line state") reads `line_slot.state`
+and `copy_id` directly — there is no forecast overlay on that screen, so a slot showing FILLED reflects
+a real, previously-committed `copy` row, not an in-progress or unapproved haul decision. The Dratini and
+Dragonite filling this line almost certainly came from an EARLIER commit, not this haul's card 101 —
+most plausibly a prior Dragonite (Stage2) Done, which — per STEP 4 — runs `testViability` and
+`generateSlots`, finds her Dratini already owned and pulls it into the Basic slot (system-design §6),
+and finds Dragonair not owned but catalog-confirmed, wishlisting it with priced alternates. That would
+produce exactly this screenshot without any bug. **This is inference from how the engine is supposed to
+behave, not a confirmed reconstruction of her specific history** — I have no way to see which card
+actually created this line without a DB read.
+
+**Unresolved: why a Dragonair she says she committed still shows as a hunt.** Three ways this could
+happen, none confirmed:
+1. Her Dragonair Done landed somewhere other than this line's Stage1 slot — e.g. routed as a duplicate
+   (STEP 3) if she already held a shelved Dragonair, or into a differently-banded line if this
+   printing's colour doesn't match "Olive." `existingLineSlot` matches on `colorBand` and `dexId`
+   together ([`cascade.ts:168-179`](../lib/engine/cascade.ts:168)) — a mismatch on either sends it
+   elsewhere silently.
+2. Her Dragonair Done predated the line's existence (e.g. it committed before whatever created the
+   DRATINI LINE), so at that moment `existingLineSlot` found nothing and it was never a "fill this
+   slot" write to begin with.
+3. `commitCardPlacement`'s re-derivation guard ([`lib/plan/commit.ts:165-201`](../lib/plan/commit.ts:165))
+   only refuses a stale write when the caller supplies `expectedDigest` — it's explicitly optional, "do
+   not check" when absent. If that write's request omitted it, or the check passed against a
+   digest that itself no longer matches current reality, the copy could have committed to a
+   destination other than the one she read off the screen with nothing on screen ever contradicting it
+   (the exact risk that comment names, UIL-045).
+
+None of these is confirmed. This needs a fresh Testing-DB check for where her Dragonair copy currently
+sits — bulk, a different binder, or genuinely nowhere (never committed) — before a cause can be named.
+
+**Cross-reference.** UIL-045 (the digest-guard mechanism cited in #3) and UIL-062 (concurrently under
+investigation for a different placement-drift shape) are both about forecast/commit or record/reality
+divergence; if the DB check resolves this to the same family, fold the finding in rather than treating
+it as a fourth unrelated cause. The STEP-4 gate finding above stands on its own regardless of how the
+Dragonair question resolves.
+
+**Priority rationale.** High, provisionally: misleading spotlight text on the app's core placement flow
+is the same class the log has repeatedly flagged High, and if any of the three Dragonair explanations
+is real it means a "Done" click can silently not do what the screen said. Flagging for Karvi's
+confirmation since severity calls are hers, and because the Dragonair half of this report is still
+unresolved.
