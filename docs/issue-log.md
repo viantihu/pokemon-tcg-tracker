@@ -4937,3 +4937,48 @@ should be a direct option alongside joining a line, not one step behind it.
 
 **Priority rationale.** Flagging for Claude's read and Karvi's confirmation — feedback on a screen that
 shipped days ago, not a data-correctness defect.
+
+## UIL-069 — The Haul Plan proposes putting a Purple-natured card into an Orange line, and she reads that as wrong regardless of the reason given
+
+- **Reported:** 2026-09-17 (Karvi, screenshot of the Haul Plan spotlight for Annihilape, card 441/600).
+  In her words: "This is an incorrect suggestion. This is a purple card but is being asked to fill an
+  orange line."
+- **Status:** Open
+- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Area:** Plan, Lines
+- **Env:** Testing
+
+**Not a matching bug — this is UIL-064/065's "the line's band wins" ruling, working exactly as
+shipped, seen for the first time in a concrete case.** The spotlight card identity shows Annihilape's
+own natural band — Purple — computed by `band(incoming.card, pc.ctx.typeColorMap)`
+([`lib/plan/context.ts:209`](../lib/plan/context.ts:209) /
+[`lib/plan/spotlight.ts:146`](../lib/plan/spotlight.ts:146), both feeding
+`toPlanItem`'s `bandKey`). The destination and reason text ("Fills the open Stage2 slot on the
+existing Orange line, in the back half") come from a **different** value —
+`existing.line.colorBand` — set in the STEP 4 branch of `placeCard`
+([`lib/engine/cascade.ts`](../lib/engine/cascade.ts), the #154/UIL-065 fix). Those two bands are
+deliberately allowed to differ: #154 shipped "match an existing line by species alone, and a card
+joining one takes the LINE's band, not its own" specifically because she ruled, on UIL-064, that she
+chose where a line physically lives and the line should win. This screen is doing precisely that — the
+Orange line is presumably one she built herself (UIL-056 manual creation, most likely in a non-natural
+band, UIL-065's exact scenario) — and Annihilape, a Mankey/Primeape/Annihilape-chain Stage2 she's
+never placed before, is the first card that's tried to join it since.
+
+**What's actually being asked of her, not diagnosed further here: does the ruling itself need
+revisiting, or is this a display problem?** Two different things could be true and would call for
+different fixes:
+1. She's fine with "the line's band wins" in principle but seeing "Purple card → Orange line" stated
+   flatly, with no acknowledgment that they differ, reads as an error rather than a deliberate outcome
+   — a wording/display fix (e.g. naming the mismatch explicitly: "this card is naturally Purple; the
+   line it's joining lives in Orange").
+2. She actually doesn't want a card placed into a line whose band doesn't match its own, full stop —
+   which would mean reversing the UIL-064/065 precedent this shipped from, not just wording it better.
+
+This entry doesn't guess which; that's hers to rule on, the same way UIL-064's four problems were.
+
+**Cross-reference UIL-064 (where "the line's band wins" was ruled) and UIL-065 (the fix that shipped
+it, #154, merged `218ac0a`).**
+
+**Priority rationale.** Flagging for Claude's read and Karvi's confirmation — this could be a High if
+the ruling itself reverses (a design defect on the core placement flow), or a Low/wording fix if it's
+purely how the mismatch is explained. Her answer decides which.
