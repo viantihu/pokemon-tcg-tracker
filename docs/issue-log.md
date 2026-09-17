@@ -4259,6 +4259,34 @@ side the write path treats as authoritative, so reconciliation must clear the st
 closes the exact gap in #1 above). This entry, UIL-062, covers *repairing the ones already on Testing*
 plus resolving whether #3 is a real second leak. Cross-reference both ways.
 
+**Update 2026-09-16: the sub-shape split is in, and it rules out cause #1 above for these five.** A
+second measurement (tech lead, same diagnostic branch, 2026-09-15 ~04:05) resolves all five stale
+copies to the same shape: `line_slot_id = NULL`, `role = 'shelved'`, `binder_id` set — none of the five
+now point at a different slot. UIL-061's new-line pull (cause #1) always re-points a pulled copy's
+`line_slot_id` at the NEW slot; it never leaves a copy with `line_slot_id = NULL`. So cause #1 does not
+explain these five — the leak is a **move-out of a line into a plain shelf/bulk placement that clears
+the copy's own link but never releases the slot it vacated.**
+
+**Re-checked cause #3 directly against `e8b1499` — does not hold up as stated.** The relayed inference
+was that `buildMoveOps`/`placementForMove`'s `"shelf"` branch emits the `update_copy` without a paired
+`update_slot`. Read in full again, straight from `origin/develop` (not the shared local worktree, which
+had drifted 20 commits behind and would have been the wrong thing to trust here): `buildMoveOps`
+([`lib/line/move.ts:190-213`](../lib/line/move.ts:190)) pairs the release unconditionally on
+`plan.reopenSlotId` truthiness — not conditioned on destination kind, so `"shelf"` gets no different
+treatment than any other destination. Its caller, `applyMove`
+([`lib/line/write.ts:73-84`](../lib/line/write.ts:73)), re-derives `reopenSlotId` from a fresh
+`getByPk` read of the copy's current `line_slot_id`, confirmed against `slot.copy_id === req.copyId`,
+immediately before building the op set — the same pattern `applyCollectionRemoval`
+([`lib/coll/remove.ts:247-262`](../lib/coll/remove.ts:247)) uses for its own removal path. Both read as
+symmetric. Also checked and cleared: sync's retire path
+([`lib/sync/exec.ts:251-260`](../lib/sync/exec.ts:251)) releases a slot the same way when a card is
+retired, and decision resolution ([`lib/line/decisions.ts`](../lib/line/decisions.ts)) never rewrites
+an already-placed copy's binder/role columns at all. None of the four move-out paths in the codebase as
+it stands at `e8b1499` reproduce this shape. The cause of these five specific orphans is still open —
+either a mechanism not yet found, or residue from a version of one of these paths that predates the
+current symmetric form. Flagging back to the Senior BA/FSD-2 rather than closing this line of inquiry
+myself.
+
 **Priority rationale.** High, per the Senior BA: this is the same silent-disagreement-with-reality
 class the log has repeatedly treated as High, on the screen whose whole job is showing her what she
 physically owns and where. Flagging for Karvi's confirmation since severity calls are hers.
