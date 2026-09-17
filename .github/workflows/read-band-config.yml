@@ -490,7 +490,7 @@ jobs:
           echo "--- UIL-062 shape 3: back-half copies with no slot pointer (the HUNTING symptom) ---"
           orphan_copies=$(count_of "copy?select=id&role=eq.shelved&binder_half=eq.back&line_slot_id=is.null")
           echo "copies role=shelved, binder_half=back, line_slot_id NULL: $orphan_copies"
-          oc_rows=$(fetch_rows_early "copy?select=id,catalog_card_id,binder_id,color_band&role=eq.shelved&binder_half=eq.back&line_slot_id=is.null&limit=1000")
+          oc_rows=$(fetch_rows_early "copy?select=id,catalog_card_id,binder_id,color_band,variant,dex_variant_raw,created_at&role=eq.shelved&binder_half=eq.back&line_slot_id=is.null&limit=1000")
           ph_rows=$(fetch_rows_early "line_slot?select=id,line_id,target_catalog_card_id&state=eq.placeholder")
           all_lines=$(fetch_rows_early "evolution_line?select=id,binder_id,color_band,root_dex_id")
           if printf '%s' "$oc_rows" | jq -e 'type == "array"' > /dev/null 2>&1 \
@@ -556,6 +556,43 @@ jobs:
                 "    SEVERAL slots match this copy (ambiguous):            \($manyslots)",
                 "    no matching slot (stays hers):                        \($noslot)",
                 "    -> migration would relink \($oneone) of \($rows | length); \($manycopies + $manyslots) skipped as ambiguous, \($noslot) have no candidate"'
+
+            # ---- ARE THE COMPETING COPIES FUNGIBLE? For the "one slot, several copies" cases, the
+            # copies share a `catalog_card_id` — which is all `target_catalog_card_id` matches on — but
+            # `copy.variant` is per-copy and the slot says nothing about it. So:
+            #   variants IDENTICAL -> genuinely interchangeable; a created_at tie-break puts a correct
+            #                         card in the slot and the pair could be relinked at no cost.
+            #   variants DIFFER    -> which printing sits in the line is HER call (a reverse holo in a
+            #                         display line is not the same thing as a plain one), so they stay
+            #                         hers rather than becoming a deferred repair.
+            echo "  are the competing copies fungible? (variant check on the ambiguous groups)"
+            jq -rn --argjson oc "$oc_rows" --argjson ph "$ph_rows" --argjson ln "$all_lines" '
+              ($ln | map({key: .id, value: .}) | from_entries) as $lineById
+              | ([ $ph[] | . as $s | ($lineById[$s.line_id]) as $l | select($l != null)
+                   | {binder: $l.binder_id, band: $l.color_band, target: $s.target_catalog_card_id} ]) as $slots
+              # Groups of affected copies sharing (binder, band, card) that ONE placeholder wants.
+              | [ $oc[] | {binder: .binder_id, band: .color_band, card: .catalog_card_id,
+                           variant: .variant, raw: .dex_variant_raw, created: .created_at} ]
+              | group_by([.binder, .band, .card])
+              | [ .[]
+                  | . as $grp
+                  | ($grp[0]) as $k
+                  | ([ $slots[] | select(.binder == $k.binder and .band == $k.band and .target == $k.card) ] | length) as $nslots
+                  | select(($grp | length) > 1 and $nslots == 1)
+                  | {
+                      copies: ($grp | length),
+                      distinct_variants: ([ $grp[].variant ] | unique | length),
+                      variants: ([ $grp[].variant ] | unique),
+                      distinct_raw: ([ $grp[].raw ] | unique | length),
+                      oldest: ([ $grp[].created ] | min)
+                    } ]
+              | if length == 0 then "    (no one-slot-many-copies groups found)"
+                else
+                  (.[] | "    group of \(.copies) copies · distinct variant=\(.distinct_variants) \(.variants | tostring) · distinct dex_variant_raw=\(.distinct_raw) · oldest \(.oldest)"),
+                  (if ([ .[] | select(.distinct_variants > 1 or .distinct_raw > 1) ] | length) == 0
+                   then "    VERDICT: every competing pair shares its variant — genuinely FUNGIBLE. A created_at tie-break puts a correct card in the slot; relinking these is safe and needs no decision from her."
+                   else "    VERDICT: at least one competing pair DIFFERS in variant — NOT fungible. Which printing sits in the line is her call; leave these to her rather than tie-breaking." end)
+                end'
 
             if [ "$orphan_copies" != "unknown" ] && [ "$orphan_copies" -gt 5 ]; then
               echo "::warning::$orphan_copies back-half copies have no slot pointer — materially MORE than the 5 filled-slot orphans. This is the shape she can see (stage reads HUNTING after Done), and it is the real blast radius."
