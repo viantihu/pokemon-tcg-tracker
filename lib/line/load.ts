@@ -84,6 +84,16 @@ const EMPTY_FACTS: StageFacts = {
   chosenLocalId: null,
 };
 
+/** Closest-to-complete first (UIL-064 part 1) — finishing a nearly-done line is the more satisfying
+ *  default, and in practice a card's species usually matches at most one candidate anyway. */
+function sortJoinCandidates(list: LineJoinCandidate[]): LineJoinCandidate[] {
+  return [...list].sort((a, b) => {
+    const ratioA = a.totalCount > 0 ? a.filledCount / a.totalCount : 0;
+    const ratioB = b.totalCount > 0 ? b.filledCount / b.totalCount : 0;
+    return ratioB - ratioA || a.speciesLabel.localeCompare(b.speciesLabel);
+  });
+}
+
 /** Everything the loader assembles: view lines + the decisions (cards + server-side resolutions). */
 export interface ScreenModel {
   lines: LineView[];
@@ -267,6 +277,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
       list.push({
         lineId: line.id,
         slotId: s.id,
+        binderId: line.binder_id,
         bandKey: line.color_band,
         speciesLabel: lineSpeciesLabel,
         stage: s.stage,
@@ -420,10 +431,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
     const dexId = cc?.dexId[0];
     if (!cc || dexId === undefined) continue;
     const bandKey = c.color_band ?? bandOf(cc, typeColorMap);
-    const joinCandidatesByBand: Record<string, LineJoinCandidate[]> = {};
-    for (const cand of openSlotsByDexId.get(dexId) ?? []) {
-      (joinCandidatesByBand[cand.bandKey] ??= []).push(cand);
-    }
+    const joinCandidates = sortJoinCandidates(openSlotsByDexId.get(dexId) ?? []);
 
     // THIS card's own chain root (may differ from its own dexId, e.g. a Stage1 whose Basic exists in
     // the catalog) — the same key `applyMove`'s "does a line already exist" check uses, so a band
@@ -431,8 +439,9 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
     const cardChain = buildChain({ id: "u", card: cc, variant: "normal" } as IncomingCard, catalog);
     const cardRootDexId = cardChain[0]?.dexId ?? dexId;
     const existingLineByBand: Record<string, ExistingLineBlock> = {};
+    const candidateBands = new Set(joinCandidates.map((cand) => cand.bandKey));
     for (const b of bandRows) {
-      if ((joinCandidatesByBand[b.band]?.length ?? 0) > 0) continue; // already has an open slot
+      if (candidateBands.has(b.band)) continue; // already has an open slot
       const existing = lineByRootBand.get(`${cardRootDexId}:${b.band}`);
       if (existing) existingLineByBand[b.band] = existing;
     }
@@ -444,7 +453,9 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
         ? `${binderNameById.get(c.binder_id) ?? "Binder"} · ${c.binder_half === "back" ? "Back" : "Front"} · ${bandDisplayByKey.get(bandKey) ?? bandKey}`
         : "Unshelved",
       dexId,
-      joinCandidatesByBand,
+      binderHalf: (c.binder_half as "front" | "back" | null) ?? null,
+      naturalBandKey: bandOf(cc, typeColorMap),
+      joinCandidates,
       existingLineByBand,
     });
   }

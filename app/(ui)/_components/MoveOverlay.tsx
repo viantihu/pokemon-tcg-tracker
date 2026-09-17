@@ -24,10 +24,15 @@ export interface MoveTargetCard {
   bandKey: string;
   currentLabel: string;
   initial?: MoveDestination;
-  /** Line screen only (UIL-056): existing lines this card could join, by band, plus "start new". */
-  lineJoinCandidatesByBand?: Record<string, LineJoinCandidate[]>;
+  /** Line screen only (UIL-056/064): existing lines this card could join, flat across every band —
+   *  present (even if empty) turns the picker's line-first flow on; absent (a card already filling a
+   *  slot elsewhere) keeps today's plain binder/half/band flow. */
+  joinCandidates?: LineJoinCandidate[];
   /** Line screen only (UIL-056): a band whose only matching line has this card's stage filled. */
   existingLineByBand?: Record<string, ExistingLineBlock>;
+  /** Line screen only (UIL-064 part 1): this card's own type-derived band — the default for "start a
+   *  new line"'s one remaining pick. */
+  naturalBandKey?: string;
 }
 
 export function MoveOverlay({
@@ -104,8 +109,9 @@ export function MoveOverlay({
             options={options}
             initial={card.initial}
             allowLineJoin={allowLineJoin}
-            lineJoinCandidatesByBand={card.lineJoinCandidatesByBand}
+            joinCandidates={card.joinCandidates}
             existingLineByBand={card.existingLineByBand}
+            naturalBandKey={card.naturalBandKey}
             onConfirm={onConfirm}
           />
           <div className="hint">Pick a new home. No rule applies here — it is your call.</div>

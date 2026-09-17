@@ -85,27 +85,75 @@ describe("loadLineScreen's unlinedCards (UIL-056)", () => {
 
     const drake = byId.get(UNLINED_EMBERDRAKE);
     expect(drake).toBeDefined();
-    const drakeCandidates = drake!.joinCandidatesByBand.red ?? [];
-    expect(drakeCandidates).toHaveLength(1);
-    // The disambiguating info note 2 asked for — not just a species label, but progress on the line.
-    expect(drakeCandidates[0]).toMatchObject({
+    // Flat across every band now (UIL-064 part 1) — this fixture only has one band, so the flat list
+    // and the old red-only slice happen to be the same length.
+    expect(drake!.joinCandidates).toHaveLength(1);
+    // The disambiguating info note 2 asked for — not just a species label, but progress on the line
+    // — plus the candidate's OWN binder (UIL-064: picking it derives the destination binder too).
+    expect(drake!.joinCandidates[0]).toMatchObject({
       lineId: LINE,
       slotId: SLOT_NEXT,
+      binderId: GEN,
+      bandKey: "red",
       speciesLabel: "EMBERLING LINE",
       filledCount: 1,
       totalCount: 2,
     });
     expect(drake!.existingLineByBand.red).toBeUndefined(); // it HAS an open candidate — not blocked
+    // Data fields UIL-064 added: CURRENT half (not parsed from the display label) and this card's
+    // own type-derived band (the "start a new line" default).
+    expect(drake!.binderHalf).toBe("front");
+    expect(drake!.naturalBandKey).toBe("red");
 
     const dupe = byId.get(DUPLICATE_EMBERLING);
     expect(dupe).toBeDefined();
     // No open candidate for the duplicate — its own (Basic) stage is already filled by the FIRST copy.
-    expect(dupe!.joinCandidatesByBand.red ?? []).toHaveLength(0);
+    expect(dupe!.joinCandidates).toHaveLength(0);
     // But it's explained, not just silently empty (note 3).
     expect(dupe!.existingLineByBand.red).toMatchObject({
       speciesLabel: "EMBERLING LINE",
       filledCount: 1,
       totalCount: 2,
     });
+  });
+
+  it("orders candidates closest-to-complete first (UIL-064) — reversing the sort would still pass every OTHER assertion", async () => {
+    const LINE_B = "10000000-0000-0000-0000-0000000000f2";
+    const SLOT_B = "50000000-0000-0000-0000-0000000000f3";
+
+    await seedBinders(db, [{ id: GEN, type: "general", name: "Binder 1" }]);
+    await seedCard("emberling", "Emberling", EMBERLING_DEX, "Basic", null);
+    await seedCard("emberdrake", "Emberdrake", EMBERDRAKE_DEX, "Stage1", "Emberling");
+    await seedShelvedFront(UNLINED_EMBERDRAKE, "emberdrake");
+    // The Basic slot's owner — seeded before either line so the FK on `line_slot.copy_id` resolves.
+    await seedShelvedFront(OWNED_EMBERLING, "emberling");
+
+    // Line B is seeded FIRST and is the LESS complete of the two (0/1 filled — a lone open Stage1
+    // slot, no Basic slot at all). If the candidate list merely reflected insertion/scan order, B
+    // would lead; closest-to-complete-first must put A ahead of it regardless.
+    await db.exec(`
+      insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+        values ('${LINE_B}', '${OWNER}', ${EMBERLING_DEX}, 'green', '${GEN}', 'back', 'open');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state)
+        values ('${SLOT_B}', '${OWNER}', '${LINE_B}', 1, 'Stage1', 'placeholder');
+    `);
+    // Line A: 1/2 filled (its Basic slot owned by OWNED_EMBERLING) — the MORE complete of the two.
+    await db.exec(`
+      insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+        values ('${LINE}', '${OWNER}', ${EMBERLING_DEX}, 'red', '${GEN}', 'back', 'open');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+        values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OWNED_EMBERLING}');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state)
+        values ('${SLOT_NEXT}', '${OWNER}', '${LINE}', 1, 'Stage1', 'placeholder');
+      update copy set line_slot_id = '${SLOT_ROOT}', binder_half = 'back' where id = '${OWNED_EMBERLING}';
+    `);
+
+    const data = await loadLineScreen(pgliteClient(db));
+    const drake = data.unlinedCards.find((c) => c.copyId === UNLINED_EMBERDRAKE);
+
+    expect(drake!.joinCandidates).toHaveLength(2);
+    expect(drake!.joinCandidates.map((c) => c.lineId)).toEqual([LINE, LINE_B]);
+    expect(drake!.joinCandidates[0]).toMatchObject({ filledCount: 1, totalCount: 2 }); // A: 0.5
+    expect(drake!.joinCandidates[1]).toMatchObject({ filledCount: 0, totalCount: 1 }); // B: 0
   });
 });
