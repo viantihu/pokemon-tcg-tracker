@@ -259,4 +259,39 @@ describe("applyCollectionSave draft mode", () => {
     const row = await collectionRepo.getByPk(pgliteClient(db), COL);
     expect(row?.current_binder_ids).toEqual([SPEC]); // refused — untouched
   });
+
+  it("an unresolved __new pick on an EXISTING collection keeps its current binder, not null (QA)", async () => {
+    // The defect: passiveChange always sends the FULL state, including whatever binderId/
+    // newBinderName currently sit at — so an unrelated passive edit (she typed a name, toggled
+    // mode, added a target) after clicking "+ New binder" but before naming it carries binderId
+    // "__new" alongside it. Pre-fix, draft mode resolved that to null unconditionally, silently
+    // clearing an EXISTING collection's real binder even though nothing about the binder was
+    // actually confirmed.
+    await seedBinders(db, [{ id: SPEC, type: "specialty", name: "Specialty A" }]);
+    await seedCollections(db, [
+      { id: COL, name: "Matsuno", targetCatalogCardIds: [], currentBinderIds: [SPEC] },
+    ]);
+    await asOwner(db);
+    const client = pgliteClient(db);
+
+    const res = await applyCollectionSave(
+      client,
+      OWNER,
+      {
+        id: COL,
+        name: "Matsuno renamed",
+        mode: "finite",
+        binderId: "__new",
+        newBinderName: "",
+        targetTcgdexIds: [],
+      },
+      { draft: true },
+    );
+    expect(res.ok).toBe(true);
+
+    await asSuperuser(db);
+    const row = await collectionRepo.getByPk(pgliteClient(db), COL);
+    expect(row?.current_binder_ids).toEqual([SPEC]);
+    expect(row?.name).toBe("Matsuno renamed"); // the actual edit still landed
+  });
 });

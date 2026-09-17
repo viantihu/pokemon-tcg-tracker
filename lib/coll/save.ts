@@ -17,6 +17,12 @@
  * copies (editing an existing, already-active collection) can strand them exactly the same way a
  * fully "saved" edit could. `draft` only ever widens what an EMPTY field is allowed to look like; it
  * never narrows what a WRITE is allowed to do.
+ *
+ * An unresolved `"__new"` pick's fallback depends on whether a real collection already exists: a
+ * brand-new draft has no binder yet, so leaving `current_binder_ids` empty loses nothing; an EXISTING
+ * collection already has a real one, and an unfinished "+ New binder" click sitting alongside some
+ * unrelated passive edit (she typed a name before naming the binder) must not clear it. So `existing`
+ * is loaded before the binder is resolved, and its current binder is the fallback, not null.
  */
 
 import { binderRepo, collectionRepo, type DbClient } from "@/lib/repo";
@@ -48,6 +54,9 @@ export async function applyCollectionSave(
   const name = input.name.trim();
   if (!name && !opts.draft) return { ok: false, error: "A collection needs a name." };
 
+  const existing = input.id ? await collectionRepo.getByPk(db, input.id) : null;
+  if (input.id && !existing) return { ok: false, error: "That collection no longer exists." };
+
   let binderId: string | null = input.binderId;
   if (binderId === "__new") {
     const bn = (input.newBinderName ?? "").trim();
@@ -62,16 +71,15 @@ export async function applyCollectionSave(
       });
       binderId = created.id;
     } else if (opts.draft) {
-      binderId = null; // nothing chosen yet — tolerated only while still a draft
+      // Nothing named yet. A brand-new draft has no binder to lose, so this is null; an existing
+      // collection keeps whatever it already has rather than being cleared by an unfinished pick.
+      binderId = existing?.current_binder_ids?.[0] ?? null;
     } else {
       return { ok: false, error: "Name the new binder." };
     }
   }
 
-  if (input.id) {
-    const existing = await collectionRepo.getByPk(db, input.id);
-    if (!existing) return { ok: false, error: "That collection no longer exists." };
-
+  if (existing) {
     const blocked = await blockedTargetDrops(db, existing, input.targetTcgdexIds);
     if (blocked.length > 0) return { ok: false, error: blockedTargetDropsMessage(blocked) };
 
