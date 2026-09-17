@@ -2292,6 +2292,20 @@ purpose, not a peripheral complaint, and it changes the transaction model for ev
 something to patch quietly — flagging as a redesign that needs its own scoped implementation, likely
 larger than any single entry above it today.
 
+**Update 2026-09-17: the dead bulk-commit entry point is being deleted, on her explicit instruction.**
+While designing UIL-069's colour-mismatch choice, the question came up of what a whole-haul bulk commit
+should do when there's no per-card screen to ask on. Verified directly: `commitHaulAction`
+([`app/(ui)/plan/actions.ts:124`](<../app/(ui)/plan/actions.ts>:124)) has **zero callers** anywhere in
+`app/` or `lib/` on `origin/develop` — this per-card rework left it unreachable since #83/#109, and it
+was never removed at the time. Asked whether to delete it or keep it in case bulk commit ever returned,
+her words: **"delete it, we're not going back to bulk commit."** So `commitHaulAction` and `commitHaul`
+come out; `buildHaulCommitPayload` and the rest of the shared write machinery **stay**, since
+`commitCardPlacement` (the per-card path this entry's fix put in place) depends on them directly
+([`lib/plan/commit.ts:132`](../lib/plan/commit.ts:132) and
+[`:216`](../lib/plan/commit.ts:216) both call it) — this removes the unreachable bulk entry point, not
+the plumbing underneath it. Also settles, by superseding it, a briefly-considered approach of refusing
+a band-mismatch card specifically in the bulk path (UIL-069) — moot once the bulk path itself is gone.
+
 ## UIL-028 — The batched catalog lookup is unpaged, so raising its chunk size would silently truncate results
 
 - **Reported:** 2026-09-13 (not from Karvi — found by QA reviewing #70's sync batching, corroborated
@@ -4937,7 +4951,14 @@ picks; it should ask for the line" — #154 fixed that by making the line questi
 everything else. Her new report is that the collapse went further than she wanted: manual placement
 should be a direct option alongside joining a line, not one step behind it.
 
-**Cross-reference UIL-064 (the rework this is direct feedback on).**
+**Cross-reference UIL-064 (the rework this is direct feedback on) and UIL-070 (its item 1, "being sent
+away from the Haul Plan," is largely this same complaint from a different screen).** Once this fix
+ships — dropping the `<details>` wrapper so front half, collection, and bulk sit directly alongside the
+line-join options rather than behind a toggle — that resolves the front-half/bulk/collection part of the
+"sent away" complaint everywhere the panel mounts, including the Haul Plan. It does **not** resolve the
+back-half-specific case there: UIL-056's server-side invariant still requires a line pick for any
+back-half placement, correctly, and the Haul Plan has no line picker at all today — that residual is
+UIL-070's item 1, not this entry's.
 
 **Priority rationale.** Flagging for Claude's read and Karvi's confirmation — feedback on a screen that
 shipped days ago, not a data-correctness defect.
@@ -4948,7 +4969,8 @@ shipped days ago, not a data-correctness defect.
   In her words: "This is an incorrect suggestion. This is a purple card but is being asked to fill an
   orange line."
 - **Status:** Open
-- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Priority:** High (Senior BA's read; Karvi to confirm) — she's ruled on the shape of the fix, not yet
+  explicitly on severity
 - **Area:** Plan, Lines
 - **Env:** Testing
 
@@ -4980,12 +5002,38 @@ different fixes:
 
 This entry doesn't guess which; that's hers to rule on, the same way UIL-064's four problems were.
 
-**Cross-reference UIL-064 (where "the line's band wins" was ruled) and UIL-065 (the fix that shipped
-it, #154, merged `218ac0a`).**
+**Update 2026-09-17: her ruling is in, and it's option 3 of the two this entry raised — reversal.**
+Asked directly with three shapes to choose from, verbatim: **when a card's own band differs from the
+band of the line it would join, the app must ASK rather than decide.** Her chosen screen, verbatim:
 
-**Priority rationale.** Flagging for Claude's read and Karvi's confirmation — this could be a High if
-the ruling itself reverses (a design defect on the core placement flow), or a Low/wording fix if it's
-purely how the mismatch is explained. Her answer decides which.
+```
+NOW HANDLING  Annihilape
+  COLOUR MISMATCH - choose:
+  ( ) Join PRIMEAPE line      Binder 1 - Back - Orange
+  ( ) File by its own colour  Binder 1 - Front - Purple
+            [ Done ]
+```
+
+**Rejected, recorded so neither gets re-proposed:** keeping the line's band and only wording the
+mismatch better (this entry's option 1 above); making the card's own band win outright and no longer
+offering a mismatched line at all (a stronger version of option 2). Neither of her two surviving
+choices may be pre-selected as a default — she's rejecting a silent default, not picking a better one.
+
+**What this does to UIL-065, precisely.** The cross-band **lookup** stands and UIL-065 stays Fixed for
+it — a line living in another band still has to be found, and that was the real defect UIL-065 named.
+What's reversed is the automatic **consequence** that followed the lookup: "a joining card takes the
+line's band" was the Senior BA's own ruling under UIL-064's derive-from-the-line principle, made before
+anyone had seen it play out on a real card. Seeing it concretely, she's rejected the silent part of
+it. **This entry supersedes that placement-precedence half of UIL-065; UIL-065 itself is not being
+reopened or corrected — the two entries now divide the behavior between them.**
+
+**Cross-reference UIL-064 (where "the line's band wins" was originally ruled), UIL-065 (the fix that
+shipped it, #154, merged `218ac0a`, and whose lookup half still stands), and UIL-061 (the same
+offer-don't-decide shape: surface the choice, never silently pick for her).**
+
+**Priority rationale.** High, per the Senior BA: it produces a suggestion she's called incorrect on the
+flow she uses constantly, and the current behavior is live in her app now. Not yet built — assigned to
+the dev already in `cascade.ts` and the panel from UIL-068/070, ahead of those two.
 
 ## UIL-070 — UIL-064's two unfixed parts, carried forward per her own "every report gets a number" rule after she chose to close the parent
 
@@ -5002,7 +5050,12 @@ remain open. UIL-064 itself is being marked Closed on her explicit instruction, 
 remained — this entry exists only because her standing rule is that every report gets its own number,
 not to quietly drop the two leftovers with the parent.
 
-**1. "Being sent away from the Haul Plan."** Confirmed still live, in two layers. `PlanScreen.openMove`
+**1. "Being sent away from the Haul Plan" — narrowed to what survives UIL-068's fix: back-half
+placement specifically, from the Haul Plan.** UIL-068 (once shipped) resolves the front-half, bulk, and
+collection part of this everywhere the panel mounts, including here — see the cross-reference added to
+that entry. What UIL-068 does **not** touch is the back half: UIL-056's server-side invariant correctly
+still requires a line pick for any back-half placement, and the Haul Plan has no line picker at all.
+Confirmed in two layers. `PlanScreen.openMove`
 ([`app/(ui)/plan/PlanScreen.tsx:296-318`](../app/(ui)/plan/PlanScreen.tsx:296)) builds its
 `MoveTargetCard` with no `joinCandidates`, `existingLineByBand`, or `naturalBandKey`, and its
 `<MoveOverlay>` call site ([`PlanScreen.tsx:597-602`](../app/(ui)/plan/PlanScreen.tsx:597)) passes no
@@ -5011,12 +5064,9 @@ plain-move fallback text, "Back-half moves choose a line. Do this from the Lines
 read half were wired up, the write half would silently drop the choice: `writeOverriddenCard`
 ([`lib/plan/commit.ts`](../lib/plan/commit.ts), confirmed repeatedly elsewhere in this log this week)
 has no line side effects at all — the UIL-045 shape, a screen showing one thing and the write doing
-another. **This may be the same complaint as UIL-068** ("I should have the option to move the card
-anywhere"), just triggered from a different screen — both are about the line-first flow not offering a
-direct enough path to a non-line placement; worth reading together rather than as two independent asks.
-Fix direction on record: this should land as an **extraction** of the one derivation
-`lib/line/load.ts`'s `buildScreenModel` already performs for the Line screen, not a second
-implementation, and it should land together with whatever consumes it.
+another. This is a two-layer job, not a UX tweak. Fix direction on record: this should land as an
+**extraction** of the one derivation `lib/line/load.ts`'s `buildScreenModel` already performs for the
+Line screen, not a second implementation, and it should land together with whatever consumes it.
 
 **2. "It's somewhat buggy and the icons are not aligned."** Still unaddressed — no specifics from her
 by design, and no session has been able to open an authed screen to look. A layout-measurement pass on
@@ -5024,8 +5074,8 @@ the Move panel (static render against `globals.css`, no server/auth needed) is o
 verification available without one.
 
 **Cross-reference.** UIL-064 (the closed parent), UIL-045 (the display/write divergence shape #1
-repeats), UIL-056 (the manual line-creation UI all of this sits on top of), UIL-068 (the likely-same
-complaint from the Lines screen instead of the Haul Plan).
+repeats), UIL-056 (the manual line-creation UI all of this sits on top of), UIL-068 (resolves the
+front-half/bulk/collection part of #1; back-half is what's left here).
 
 **Priority rationale.** Deliberately left unrated rather than guessed. She chose to close the parent
 knowing #1 was open, which may mean she doesn't want it at all — rating it myself would assert an
