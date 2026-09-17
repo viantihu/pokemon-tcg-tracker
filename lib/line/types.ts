@@ -249,6 +249,9 @@ export interface MoveOptions {
 export interface LineJoinCandidate {
   lineId: string;
   slotId: string;
+  /** The line's own binder (UIL-064 part 1) — picking a candidate derives the destination binder
+   *  from ITS line rather than asking her to pick one first. */
+  binderId: string | null;
   bandKey: string;
   speciesLabel: string;
   stage: string;
@@ -285,7 +288,21 @@ export interface UnlinedCard {
   currentLabel: string;
   /** This card's own dexId — fixed, used to match candidate lines' open slots. */
   dexId: number;
-  joinCandidatesByBand: Record<string, LineJoinCandidate[]>;
+  /** Its CURRENT half, straight off `copy.binder_half` — a data field, not parsed out of
+   *  `currentLabel` (UIL-064 part 3's "stranded in the back half" split keys off this). */
+  binderHalf: "front" | "back" | null;
+  /** This card's own type-derived band (`lib/engine` `band()`, same derivation the cascade uses) —
+   *  the sane default for "start a new line"'s one remaining band pick (UIL-064 part 1), regardless
+   *  of which band it happens to be shelved under right now. */
+  naturalBandKey: string;
+  /**
+   * Existing lines this card could join, across every band, flat and sorted closest-to-complete
+   * first (UIL-064 part 1) — each candidate already carries its own `bandKey` and `binderId`, so
+   * picking one derives the whole destination instead of requiring band to be picked first. The
+   * band-keyed `Record` this replaced was itself the reason a band had to be chosen before any line
+   * ever appeared.
+   */
+  joinCandidates: LineJoinCandidate[];
   /** Set for a band with no open candidate BECAUSE a line for this family already exists there
    *  (see `ExistingLineBlock`) — absent, not just empty, when no line exists there at all. */
   existingLineByBand: Record<string, ExistingLineBlock>;

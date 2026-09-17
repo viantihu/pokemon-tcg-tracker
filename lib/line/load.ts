@@ -84,6 +84,16 @@ const EMPTY_FACTS: StageFacts = {
   chosenLocalId: null,
 };
 
+/** Closest-to-complete first (UIL-064 part 1) — finishing a nearly-done line is the more satisfying
+ *  default, and in practice a card's species usually matches at most one candidate anyway. */
+function sortJoinCandidates(list: LineJoinCandidate[]): LineJoinCandidate[] {
+  return [...list].sort((a, b) => {
+    const ratioA = a.totalCount > 0 ? a.filledCount / a.totalCount : 0;
+    const ratioB = b.totalCount > 0 ? b.filledCount / b.totalCount : 0;
+    return ratioB - ratioA || a.speciesLabel.localeCompare(b.speciesLabel);
+  });
+}
+
 /** Everything the loader assembles: view lines + the decisions (cards + server-side resolutions). */
 export interface ScreenModel {
   lines: LineView[];
@@ -267,6 +277,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
       list.push({
         lineId: line.id,
         slotId: s.id,
+        binderId: line.binder_id,
         bandKey: line.color_band,
         speciesLabel: lineSpeciesLabel,
         stage: s.stage,
@@ -420,10 +431,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
     const dexId = cc?.dexId[0];
     if (!cc || dexId === undefined) continue;
     const bandKey = c.color_band ?? bandOf(cc, typeColorMap);
-    const joinCandidatesByBand: Record<string, LineJoinCandidate[]> = {};
-    for (const cand of openSlotsByDexId.get(dexId) ?? []) {
-      (joinCandidatesByBand[cand.bandKey] ??= []).push(cand);
-    }
+    const joinCandidates = sortJoinCandidates(openSlotsByDexId.get(dexId) ?? []);
 
     // THIS card's own chain root (may differ from its own dexId, e.g. a Stage1 whose Basic exists in
     // the catalog) — the same key `applyMove`'s "does a line already exist" check uses, so a band
@@ -431,8 +439,9 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
     const cardChain = buildChain({ id: "u", card: cc, variant: "normal" } as IncomingCard, catalog);
     const cardRootDexId = cardChain[0]?.dexId ?? dexId;
     const existingLineByBand: Record<string, ExistingLineBlock> = {};
+    const candidateBands = new Set(joinCandidates.map((cand) => cand.bandKey));
     for (const b of bandRows) {
-      if ((joinCandidatesByBand[b.band]?.length ?? 0) > 0) continue; // already has an open slot
+      if (candidateBands.has(b.band)) continue; // already has an open slot
       const existing = lineByRootBand.get(`${cardRootDexId}:${b.band}`);
       if (existing) existingLineByBand[b.band] = existing;
     }
@@ -444,7 +453,9 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
         ? `${binderNameById.get(c.binder_id) ?? "Binder"} · ${c.binder_half === "back" ? "Back" : "Front"} · ${bandDisplayByKey.get(bandKey) ?? bandKey}`
         : "Unshelved",
       dexId,
-      joinCandidatesByBand,
+      binderHalf: (c.binder_half as "front" | "back" | null) ?? null,
+      naturalBandKey: bandOf(cc, typeColorMap),
+      joinCandidates,
       existingLineByBand,
     });
   }
@@ -500,6 +511,89 @@ export async function loadMoveOptions(db: DbClient): Promise<MoveOptions> {
     colorBandRepo.listOrdered(db),
   ]);
   return buildMoveOptions(binderRows, collectionRows, bandRows);
+}
+
+/**
+ * Join candidates for ONE card's dexId (UIL-064 part 2) — for a caller that shows a single card's
+ * move panel without rendering the whole line screen (the Haul Plan spotlight, Collections). Loads
+ * only lines + slots + the catalog mirror (the catalog is unavoidable — chain-walking a line's
+ * `root_dex_id` to its per-stage species needs it, the same tradeoff `buildScreenModel`'s own
+ * docstring already flags); it skips copies, wishlist items, binders, collections and bands
+ * entirely, since a candidate list needs none of them.
+ *
+ * NOTE (UIL-064 part 2 is deliberately half-delivered): this is the read side only. Wiring it into
+ * the Plan spotlight or Collections also needs `lib/plan/commit.ts`'s `writeOverriddenCard` to stop
+ * dropping a resolved `lineJoin` on the floor at commit — that function is being rewritten for
+ * UIL-062's slot-release fix, so the write-side wiring is a follow-on for whoever picks that up next,
+ * not built here.
+ */
+export async function loadLineJoinCandidatesForCard(
+  db: DbClient,
+  dexId: number,
+): Promise<{
+  joinCandidates: LineJoinCandidate[];
+  existingLineByBand: Record<string, ExistingLineBlock>;
+}> {
+  const [lineRows, slotRows, catalogRows] = await Promise.all([
+    evolutionLineRepo.listAll(db),
+    lineSlotRepo.listAll(db),
+    catalogCardRepo.listAll(db),
+  ]);
+  const catalog = catalogRows.map(toCatalogCard);
+
+  const slotsByLine = new Map<string, Row<"line_slot">[]>();
+  for (const s of slotRows) {
+    const list = slotsByLine.get(s.line_id) ?? [];
+    list.push(s);
+    slotsByLine.set(s.line_id, list);
+  }
+
+  // THIS card's own chain root, same as `buildScreenModel`'s per-unlined-card computation — may
+  // differ from `dexId` itself (e.g. a Stage1 whose Basic exists in the catalog as a placeholder).
+  const ownSeed = catalog.find((c) => !c.isDigitalOnly && c.dexId.includes(dexId));
+  const cardRootDexId = ownSeed
+    ? (buildChain({ id: "u", card: ownSeed, variant: "normal" } as IncomingCard, catalog)[0]
+        ?.dexId ?? dexId)
+    : dexId;
+
+  const joinCandidates: LineJoinCandidate[] = [];
+  const existingLineByBand: Record<string, ExistingLineBlock> = {};
+
+  for (const line of lineRows) {
+    const slots = (slotsByLine.get(line.id) ?? [])
+      .slice()
+      .sort((a, b) => a.stage_index - b.stage_index);
+    const seed = catalog.find((c) => !c.isDigitalOnly && c.dexId.includes(line.root_dex_id));
+    const chain = seed
+      ? buildChain({ id: "r", card: seed, variant: "normal" } as IncomingCard, catalog)
+      : [];
+    const rootName = chain[0]?.name;
+    const speciesLabel = rootName ? `${rootName.toUpperCase()} LINE` : "EVOLUTION LINE";
+    const filledCount = slots.filter((s) => s.state === "filled").length;
+    const totalCount = slots.length;
+
+    let matchedHere = false;
+    for (const s of slots) {
+      if (s.state === "filled") continue;
+      if (chain[s.stage_index]?.dexId !== dexId) continue;
+      matchedHere = true;
+      joinCandidates.push({
+        lineId: line.id,
+        slotId: s.id,
+        binderId: line.binder_id,
+        bandKey: line.color_band,
+        speciesLabel,
+        stage: s.stage,
+        filledCount,
+        totalCount,
+      });
+    }
+    if (!matchedHere && line.root_dex_id === cardRootDexId) {
+      existingLineByBand[line.color_band] = { speciesLabel, filledCount, totalCount };
+    }
+  }
+
+  return { joinCandidates: sortJoinCandidates(joinCandidates), existingLineByBand };
 }
 
 /** The client-facing screen data (decisions flattened to their cards). */

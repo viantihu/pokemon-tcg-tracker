@@ -147,8 +147,9 @@ export function LineScreen() {
       imageUrl: card.card.imageUrl,
       bandKey: card.card.bandKey,
       currentLabel: card.currentLabel,
-      lineJoinCandidatesByBand: card.joinCandidatesByBand,
+      joinCandidates: card.joinCandidates,
       existingLineByBand: card.existingLineByBand,
+      naturalBandKey: card.naturalBandKey,
     });
   }
 
@@ -191,7 +192,7 @@ export function LineScreen() {
           <MoveOverlay
             card={move}
             options={data.moveOptions}
-            allowLineJoin={Boolean(move.lineJoinCandidatesByBand)}
+            allowLineJoin={Boolean(move.joinCandidates)}
             onConfirm={onMoveConfirm}
             onClose={() => setMove(null)}
           />
@@ -362,7 +363,7 @@ export function LineScreen() {
         <MoveOverlay
           card={move}
           options={data.moveOptions}
-          allowLineJoin={Boolean(move.lineJoinCandidatesByBand)}
+          allowLineJoin={Boolean(move.joinCandidates)}
           onConfirm={onMoveConfirm}
           onClose={() => setMove(null)}
         />
@@ -381,6 +382,12 @@ export function LineScreen() {
  * Shelved cards with no line yet (UIL-056) — the way OFF the front half her UAT report was missing.
  * Nothing to show is the common case (most shelved cards are already lined or have no line
  * concept), so this collapses to nothing rather than an empty panel.
+ *
+ * UIL-064 part 3: split by CURRENT HALF, not flattened together. A back-half card with no line is
+ * the strand this feature exists for — it sits in the lines area with nothing tracking it. A
+ * front-half card with no line is not an anomaly (most front-half cards never get one), so it is the
+ * common case, not something needing attention; folding hundreds of those in with the 5-10 that
+ * actually need a decision was itself part of what made this list unusable.
  */
 function UnlinedCardsPanel({
   cards,
@@ -390,34 +397,58 @@ function UnlinedCardsPanel({
   onMove: (card: UnlinedCard) => void;
 }) {
   if (cards.length === 0) return null;
+  const stranded = cards.filter((c) => c.binderHalf === "back");
+  const rest = cards.filter((c) => c.binderHalf !== "back");
   return (
     <div className="lineinfo" style={{ marginTop: 16 }}>
-      <div className="box panel" style={{ gridColumn: "1 / -1" }}>
-        <div className="k u">NOT IN A LINE YET</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
-          {cards.map((c) => (
-            <div key={c.copyId} className="hand" style={{ minWidth: 160 }}>
-              <CardFace name={c.card.name} imageUrl={c.card.imageUrl} size="m" />
-              <div style={{ minWidth: 0 }}>
-                <div className="nm" style={{ fontSize: 13 }}>
-                  {c.card.name}
-                </div>
-                <div className="u" style={{ fontSize: 10, color: "var(--ink-2)", marginTop: 4 }}>
-                  {c.currentLabel}
-                </div>
-                <button
-                  type="button"
-                  className="movebtn u"
-                  style={{ marginTop: 6 }}
-                  onClick={() => onMove(c)}
-                >
-                  ↔ Move
-                </button>
-              </div>
-            </div>
-          ))}
+      {stranded.length > 0 ? (
+        <div className="box panel" style={{ gridColumn: "1 / -1" }}>
+          <div className="k u">STRANDED IN THE BACK HALF · {stranded.length}</div>
+          <UnlinedCardGrid cards={stranded} onMove={onMove} />
         </div>
-      </div>
+      ) : null}
+      {rest.length > 0 ? (
+        <details className="box panel" style={{ gridColumn: "1 / -1" }}>
+          <summary className="k u" style={{ cursor: "pointer" }}>
+            OTHER UNLINED CARDS (FRONT HALF) · {rest.length}
+          </summary>
+          <UnlinedCardGrid cards={rest} onMove={onMove} />
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function UnlinedCardGrid({
+  cards,
+  onMove,
+}: {
+  cards: UnlinedCard[];
+  onMove: (card: UnlinedCard) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
+      {cards.map((c) => (
+        <div key={c.copyId} className="hand" style={{ minWidth: 160 }}>
+          <CardFace name={c.card.name} imageUrl={c.card.imageUrl} size="m" />
+          <div style={{ minWidth: 0 }}>
+            <div className="nm" style={{ fontSize: 13 }}>
+              {c.card.name}
+            </div>
+            <div className="u" style={{ fontSize: 10, color: "var(--ink-2)", marginTop: 4 }}>
+              {c.currentLabel}
+            </div>
+            <button
+              type="button"
+              className="movebtn u"
+              style={{ marginTop: 6 }}
+              onClick={() => onMove(c)}
+            >
+              ↔ Move
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

@@ -85,22 +85,30 @@ describe("loadLineScreen's unlinedCards (UIL-056)", () => {
 
     const drake = byId.get(UNLINED_EMBERDRAKE);
     expect(drake).toBeDefined();
-    const drakeCandidates = drake!.joinCandidatesByBand.red ?? [];
-    expect(drakeCandidates).toHaveLength(1);
-    // The disambiguating info note 2 asked for — not just a species label, but progress on the line.
-    expect(drakeCandidates[0]).toMatchObject({
+    // Flat across every band now (UIL-064 part 1) — this fixture only has one band, so the flat list
+    // and the old red-only slice happen to be the same length.
+    expect(drake!.joinCandidates).toHaveLength(1);
+    // The disambiguating info note 2 asked for — not just a species label, but progress on the line
+    // — plus the candidate's OWN binder (UIL-064: picking it derives the destination binder too).
+    expect(drake!.joinCandidates[0]).toMatchObject({
       lineId: LINE,
       slotId: SLOT_NEXT,
+      binderId: GEN,
+      bandKey: "red",
       speciesLabel: "EMBERLING LINE",
       filledCount: 1,
       totalCount: 2,
     });
     expect(drake!.existingLineByBand.red).toBeUndefined(); // it HAS an open candidate — not blocked
+    // Data fields UIL-064 added: CURRENT half (not parsed from the display label) and this card's
+    // own type-derived band (the "start a new line" default).
+    expect(drake!.binderHalf).toBe("front");
+    expect(drake!.naturalBandKey).toBe("red");
 
     const dupe = byId.get(DUPLICATE_EMBERLING);
     expect(dupe).toBeDefined();
     // No open candidate for the duplicate — its own (Basic) stage is already filled by the FIRST copy.
-    expect(dupe!.joinCandidatesByBand.red ?? []).toHaveLength(0);
+    expect(dupe!.joinCandidates).toHaveLength(0);
     // But it's explained, not just silently empty (note 3).
     expect(dupe!.existingLineByBand.red).toMatchObject({
       speciesLabel: "EMBERLING LINE",
