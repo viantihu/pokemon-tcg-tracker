@@ -5027,3 +5027,49 @@ complaint from the Lines screen instead of the Haul Plan).
 knowing #1 was open, which may mean she doesn't want it at all — rating it myself would assert an
 intent she hasn't stated. #2 is a defect she personally observed and should not sit unrated forever,
 but needs something to show her first.
+
+## UIL-071 — She wants the grid-style search UIL-039 built for Collections used everywhere the app searches the catalog
+
+- **Reported:** 2026-09-17 (Karvi, relayed by Junior BA - 2 — a generalization of UIL-039, not a
+  separate defect). In her words: "The search throughout the app should be uniform."
+- **Status:** Open
+- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Area:** Plan, Lookup, Backfill, Sync, Collections
+- **Env:** Testing
+
+**Confirmed footprint, found by searching the whole app rather than trusting a partial list.** One
+shared component, `CardLookup` ([`app/(ui)/_components/CardLookup.tsx`](../app/(ui)/_components/CardLookup.tsx))
+— a single debounced text field against the local catalog mirror, one result list, one `onPick` — is
+used at **six call sites across five screens**, unchanged since UIL-039 confirmed the same pattern
+there:
+
+1. **Lookup** ([`app/(ui)/look/LookupScreen.tsx:43`](../app/(ui)/look/LookupScreen.tsx:43)) —
+   "Where is my…", the standalone Lookup tab.
+2. **Backfill**, front-half intake
+   ([`app/(ui)/backfill/BackfillScreen.tsx:227`](../app/(ui)/backfill/BackfillScreen.tsx:227)) —
+   "Set + number or name…".
+3. **Backfill**, picking an owned printing during back-line resolution
+   ([`BackfillScreen.tsx:476`](../app/(ui)/backfill/BackfillScreen.tsx:476)).
+4. **Sync**, pinning an unresolved entry to a real catalog card
+   ([`app/(ui)/sync/SyncScreen.tsx:631`](../app/(ui)/sync/SyncScreen.tsx:631)).
+5. **Collections' "Log a card" modal** ([`app/(ui)/coll/CollHub.tsx:1075`](../app/(ui)/coll/CollHub.tsx:1075))
+   — "Search the catalog…". This is the ONE case UIL-039 didn't touch: that fix replaced the
+   collection-*builder* grid search entirely, but this separate, still-inline "log a single card into
+   this collection" modal is a distinct `CardLookup` call site UIL-039 left alone.
+6. **Haul Plan's own add-card intake**
+   ([`app/(ui)/plan/PlanScreen.tsx:727`](../app/(ui)/plan/PlanScreen.tsx:727)) — not named in the
+   relay, but the same component, found by grepping every usage rather than working from the
+   relayed list alone.
+
+**Not scoping a fix here — just the footprint, so whoever does isn't guessing at it.** Six call sites,
+five screens, each with a different `placeholder` and a different downstream action after `onPick`
+(add to a haul draft, log into a collection, pin a sync entry, fill a backfill slot) — a uniform
+front end would need to keep those six different "what happens next" behaviors distinct even if the
+search-and-pick experience itself becomes one shared grid component, the way UIL-039 built it for
+Collections' builder.
+
+**Cross-reference UIL-039** (the grid-search page this generalizes from, `/coll/search`, PR #155).
+
+**Priority rationale.** Flagging for Claude's read and Karvi's confirmation — this is a consistency
+request across five screens that already work, not a defect, so it doesn't inherit UIL-039's own
+Medium by default; the scope (six call sites, not one) is worth her seeing before a priority is set.
