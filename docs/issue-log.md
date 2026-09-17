@@ -4269,7 +4269,10 @@ that split next.
 card is shelved somewhere else or built into a different line. The record and the shelf disagree, and
 nothing on screen says so.
 
-**One confirmed cause, one path checked and cleared, one path still open.**
+**One confirmed cause, one path checked and cleared, one path still open.** *(Superseded — see the
+2026-09-17 updates below. Item 1's "confirmed cause" label does not survive the later measurement:
+UIL-061's pull is CLEARED, not a cause, for all 5 rows. Left as-is for the record of what was believed
+at the time.)*
 
 1. **Confirmed cause: UIL-061's new-line pull.** `writeNewLine`
    ([`lib/plan/commit.ts:557-568`](../lib/plan/commit.ts:557)) overwrites a pulled copy's
@@ -4417,6 +4420,22 @@ reprocessed. Repair direction holds regardless of which of the two produced row 
 her override/the auto-decision as authoritative in all five cases, the copy side is correct as written
 in every row — repair vacates the stale slot, never writes a pointer back.
 
+**Update 2026-09-17 (further measurement): blast radius is 8 orphaned copies, not 5 — the 5 stale
+slots are a subset, not the whole picture.** The tech lead separately counted shelved, back-half
+copies with a NULL `line_slot_id` pointer at 8, of which the 5 stale-slot rows above are one part.
+**None of the 8 have an intended placeholder slot to reattach to**, so the repair migration clears the
+5 stale slots to `placeholder` and stops there — it must not try to relink any of the 8 copies to a
+slot. She can reattach those herself via UIL-056's "Not in a line yet" list once the fix ships.
+
+**Flagging an internal contradiction rather than silently picking a side.** The relay that supplied the
+8-count also read "about 4 of which render HUNTING" as an explanation for her UIL-063 Dragonair report.
+The Senior BA's own later, more carefully measured message on UIL-063 (dex-scoped read, exact
+timestamp) says she owns **zero** Dragonair copies across all 32 printings — so no orphaned Dragonair
+copy can exist to render anything. These two claims from the same investigation don't reconcile; the
+later, more specific measurement (exact dex-scoped counts, not an approximate "about 4") is the one
+this entry treats as correct, so it does **not** claim any connection to UIL-063. If that turns out
+wrong, it's a data question for the tech lead, not a code question this entry can settle.
+
 **Priority rationale.** High, per the Senior BA: this is the same silent-disagreement-with-reality
 class the log has repeatedly treated as High, on the screen whose whole job is showing her what she
 physically owns and where. Flagging for Karvi's confirmation since severity calls are hers.
@@ -4496,8 +4515,32 @@ divergence; if the DB check resolves this to the same family, fold the finding i
 it as a fourth unrelated cause. The STEP-4 gate finding above stands on its own regardless of how the
 Dragonair question resolves.
 
+**Update 2026-09-17: the Dragonair half is resolved — no data defect, and it does not connect to
+UIL-062.** A dex-scoped measurement (tech lead) on the DRATINI line itself (`root_dex_id` 147, Olive,
+created `2026-09-16T03:32:35Z`) reads stage 0 (Basic) **filled**, stage 1 (Stage1) **placeholder**
+wanting `me02.5-151`, stage 2 (Stage2) **filled** — and **she owns zero Dragonair copies across all 32
+printings.** All three candidate explanations above required a Dragonair copy row to exist somewhere;
+there isn't one, so none of them apply. `state: placeholder` with a wishlist target is the correct
+representation of "not owned yet," and "HUNTING" is its correct rendering — the Lines page told her the
+truth, and the line is internally consistent: two stages owned, one wanted.
+
+**Correcting a detail in the original report:** "#151" was the printed collector number in Ascended
+Heroes (`151/xxx`), not a dex id — that read as a contradiction because dex 151 is Mew, not Dragonair.
+Dragonair is dex **148**. The line's own three dex ids (147 Dratini, 148 Dragonair, 149 Dragonite) are
+consecutive and consistent throughout; only the collector-number label was ambiguous in how it reached
+the log.
+
+**What's still open is upstream of the app and only Karvi can settle it:** whether the Haul Plan row she
+pressed Done on actually said Dragonair, or whether Dragonair is a card she physically holds that the
+app never learned about (missing from a Dex import). Those point at different things — a Done that
+didn't do what the screen said, versus a card absent from her catalog sync — and only she can say which.
+Awaiting one clarification from her; recording as no data defect found on this line pending that answer.
+
+**The STEP 4 finding stands on its own, unweakened by this resolution.** A Basic card never checking
+`ctx.lines` at all is confirmed independent of what happened to any specific Dragonair — assigned to
+FSD-2.
+
 **Priority rationale.** High, provisionally: misleading spotlight text on the app's core placement flow
-is the same class the log has repeatedly flagged High, and if any of the three Dragonair explanations
-is real it means a "Done" click can silently not do what the screen said. Flagging for Karvi's
-confirmation since severity calls are hers, and because the Dragonair half of this report is still
-unresolved.
+is the same class the log has repeatedly flagged High. The Dragonair half is now resolved as "no
+defect, pending one clarification from Karvi" rather than an open cause; the STEP 4 gate is the entry's
+standing confirmed defect. Flagging for Karvi's confirmation since severity calls are hers.
