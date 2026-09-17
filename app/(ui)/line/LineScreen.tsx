@@ -90,12 +90,16 @@ export function LineScreen() {
     window.setTimeout(() => setToast((t) => (t === msg ? null : t)), 2600);
   }, []);
 
-  async function onChoose(decisionId: string, choiceId: DecisionChoiceId) {
+  async function onChoose(
+    decisionId: string,
+    choiceId: DecisionChoiceId,
+    pickedCatalogCardId?: string,
+  ) {
     const decision = decisions.find((d) => d.id === decisionId);
     const label = decision?.choices.find((c) => c.id === choiceId)?.label ?? "Resolved";
     setBusy(true);
     setError(null);
-    const res = await resolveDecisionAction(decisionId, choiceId);
+    const res = await resolveDecisionAction(decisionId, choiceId, pickedCatalogCardId);
     setBusy(false);
     if (res.ok) {
       setData(res.data);
@@ -341,10 +345,13 @@ export function LineScreen() {
           }}
         >
           <DecisionCard
+            key={activeDecision.id}
             decision={activeDecision}
             resolvedLabel={resolved[activeDecision.id] ?? null}
             busy={busy}
-            onChoose={(choiceId) => onChoose(activeDecision.id, choiceId)}
+            onChoose={(choiceId, pickedCatalogCardId) =>
+              onChoose(activeDecision.id, choiceId, pickedCatalogCardId)
+            }
             onReopen={() => onReopen(activeDecision.id)}
             onClose={() => setActiveDecisionId(null)}
           />

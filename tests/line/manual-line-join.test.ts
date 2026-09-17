@@ -69,13 +69,15 @@ interface CardFixture {
   dexId: number;
   stage: string;
   evolveFrom: string | null;
+  /** Defaults to Fire — override to give a sibling stage a DIFFERENT natural band than the root's. */
+  type?: string;
 }
 
 async function seedCard(c: CardFixture): Promise<void> {
   await db.query(
     `insert into catalog_card (tcgdex_id, name, dex_id, types, stage, evolve_from, card_class)
-       values ($1, $2, $3, '{Fire}', $4, $5, 'standard')`,
-    [c.id, c.name, [c.dexId], c.stage, c.evolveFrom],
+       values ($1, $2, $3, $6, $4, $5, 'standard')`,
+    [c.id, c.name, [c.dexId], c.stage, c.evolveFrom, [c.type ?? "Fire"]],
   );
 }
 
@@ -367,6 +369,57 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
       (await q<{ color_band: string }>(`select color_band from evolution_line`))[0].color_band,
     ).toBe("green");
     expect((await copyRow(CARD)).color_band).toBe("green");
+  });
+
+  it("the destinationBand override reaches slot generation too, not just insert_line's own column", async () => {
+    // Emberling (root, Fire → natural band "red") evolves into Emberdrake, whose OWN catalog
+    // printing is Water-typed (→ "light_blue"), not Fire. She picks "light_blue" as the destination.
+    // If the override only reached insert_line's column (a mutant this test is built to catch), the
+    // sibling's same-colour check would still run against Emberling's natural "red" and find no
+    // Emberdrake printing there — a BLOCK. With the override honoured everywhere, it finds
+    // Emberdrake's Water/light_blue printing — a PLACEHOLDER instead.
+    await seedCard({
+      id: "emberling",
+      name: "Emberling",
+      dexId: EMBERLING_DEX,
+      stage: "Basic",
+      evolveFrom: null,
+      type: "Fire",
+    });
+    await seedCard({
+      id: "emberdrake",
+      name: "Emberdrake",
+      dexId: EMBERDRAKE_DEX,
+      stage: "Stage1",
+      evolveFrom: "Emberling",
+      type: "Water",
+    });
+    await seedShelvedFront(CARD, "emberling");
+    await asOwner(db);
+
+    await applyMove(
+      pgliteClient(db),
+      {
+        copyId: CARD,
+        destination: {
+          kind: "shelf",
+          binderId: GEN,
+          half: "back",
+          band: "light_blue",
+          lineJoin: { mode: "new" },
+        },
+      },
+      names,
+    );
+
+    await asSuperuser(db);
+    const slots = await q<{ stage_index: number; state: string }>(
+      `select stage_index, state from line_slot order by stage_index`,
+    );
+    expect(slots).toEqual([
+      { stage_index: 0, state: "filled" },
+      { stage_index: 1, state: "placeholder" }, // NOT "block" — the mutant this test kills
+    ]);
   });
 });
 
