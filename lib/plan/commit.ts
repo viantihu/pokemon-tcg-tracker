@@ -30,7 +30,7 @@
 import { effectiveType, type Role } from "@/lib/engine";
 import { applyWriteOps, type DbClient, type WriteOp, type WritePayload } from "@/lib/repo";
 // Leaf import (lib/line/move depends only on lib/line/types → lib/engine; no cycle back to lib/plan).
-import { collectionTargetJoinOp, placementForMove } from "@/lib/line/move";
+import { collectionTargetJoinOp, placementForMove, releaseSlotOps } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
 import { copyPlacementFromTarget } from "./placement";
 import { loadPlanContext, planFromDraft, type DraftItem, type PlanContext } from "./context";
@@ -323,7 +323,7 @@ export function buildHaulCommitPayload(
     const override = input.overrides?.[p.incomingId];
     if (override) {
       // Manual placement wins: place the copy where she said, skip all cascade side effects.
-      const copyId = writeOverriddenCard(ops, haulId, p, override, now, counts);
+      const copyId = writeOverriddenCard(ops, haulId, p, override, pc, slotsByLine, now, counts);
       ops.push({
         op: "insert_decision",
         haul_id: decisionHaulId,
@@ -413,12 +413,32 @@ function writeCard(
     const { lineId, stageIndex } = result.filledExistingSlot;
     const slots = slotsByLine.get(lineId) ?? [];
     const slot = slots.find((s) => s.stage_index === stageIndex);
-    if (slot) {
-      slot.state = "filled";
-      slot.copy_id = copyId;
-      ops.push({ op: "update_slot", id: slot.id, patch: { state: "filled", copy_id: copyId } });
-      ops.push({ op: "update_copy", id: copyId, patch: { line_slot_id: slot.id } });
+    /**
+     * ALL OR NOTHING (UIL-062). The two pointers are one fact stored twice — `slot.copy_id` and
+     * `copy.line_slot_id` — and the app is only correct when they agree.
+     *
+     * This used to be `if (slot) { … }` with no else. When the slot could not be resolved, the cascade
+     * had already decided "fill stage N of line L" and `emitIncomingCopy` had already written the
+     * back-half placement columns with `line_slot_id: null` (`copyPlacementFromTarget` carries no slot
+     * id for any target kind). Neither pointer op then ran, so the commit succeeded having shelved the
+     * card in the back half while the line still showed that stage as wanting a card — her Dragonair
+     * report: pressed Done, card is physically in the binder, Lines page says HUNTING.
+     *
+     * Failing loudly is right rather than harsh. The write is one `apply_write_ops` transaction, so
+     * throwing leaves ZERO rows and she retries against fresh state; the alternative is a silent
+     * half-write that no screen contradicts. If this ever fires it means the context and the cascade
+     * disagree about a line's slots, which is a bug worth surfacing rather than absorbing.
+     */
+    if (!slot) {
+      throw new Error(
+        `Cannot commit: the cascade chose stage ${stageIndex} of line ${lineId} for this card, but ` +
+          `that slot is not in the loaded line state. Re-run the plan so it reflects current lines.`,
+      );
     }
+    slot.state = "filled";
+    slot.copy_id = copyId;
+    ops.push({ op: "update_slot", id: slot.id, patch: { state: "filled", copy_id: copyId } });
+    ops.push({ op: "update_copy", id: copyId, patch: { line_slot_id: slot.id } });
     return copyId;
   }
 
@@ -449,10 +469,52 @@ function writeOverriddenCard(
   haulId: string | null,
   p: PlannedCard,
   dest: MoveDestination,
+  pc: PlanContext,
+  slotsByLine: Map<string, MutableSlot[]>,
   now: string,
   counts: CommitCounts,
 ): string {
   const placement = placementForMove(dest);
+
+  /**
+   * RELEASE THE SLOT SHE IS MOVING IT OUT OF (UIL-062).
+   *
+   * `placementForMove` clears `line_slot_id` for every destination kind — correctly, since no
+   * `MoveDestination` can express "into a line slot". But this function skipped every line side effect,
+   * so the copy side was written and the slot side was not: the vacated slot kept `state: 'filled'`
+   * naming a copy that was no longer in it. The Lines page reads the SLOT, so it rendered as occupied
+   * by a card that had moved, and nothing on screen contradicted it. Measured on Testing as 5 stale
+   * slots, 4 of them from exactly this path.
+   *
+   * Resolved from the context we already hold rather than from the client — the same rule
+   * `applyMove` follows — and emitted through the shared `releaseSlotOps` so the Line screen's release
+   * and this one cannot drift.
+   */
+  const existing = p.existingCopyId ? pc.copyRowById.get(p.existingCopyId) : undefined;
+  const leavingSlotId = existing?.line_slot_id ?? null;
+  if (leavingSlotId) {
+    // Release ONLY a slot that actually names this copy. If it names someone else the pointer was
+    // already stale, and clearing it would evict a card that never moved — turning a repair into a
+    // second bug. So this is opt-in on a positive match, not "release unless proven otherwise".
+    let release = false;
+    let demoteLineId: string | null = null;
+    for (const [lineId, slots] of pc.slotRowsByLine) {
+      const slot = slots.find((sl) => sl.id === leavingSlotId);
+      if (!slot) continue;
+      if (slot.copy_id === existing?.id) {
+        release = true;
+        const line = pc.ctx.lines.find((l) => l.id === lineId);
+        if (line?.status === "complete") demoteLineId = lineId;
+      }
+      break;
+    }
+    if (release) {
+      ops.push(...releaseSlotOps(leavingSlotId, demoteLineId));
+      // Keep the in-pass mirror honest, or a later card in the same sitting would think the slot is
+      // still filled and skip a stage it could now use.
+      touchSlot(slotsByLine, leavingSlotId, null);
+    }
+  }
   const copyId = emitIncomingCopy(
     ops,
     haulId,
@@ -701,9 +763,9 @@ function writeNewLine(
 /**
  * Update the live slot mirror so a later card in the same pass sees this change.
  *
- * `copyId: null` RELEASES the slot rather than filling it (UIL-061/UIL-062) — a confirmed pull vacates
- * whatever slot the copy was in, and the mirror has to agree with the ops or a second card in the same
- * pass would fill a slot this one just emptied, or skip one it just freed.
+ * `copyId: null` RELEASES the slot rather than filling it (UIL-061/UIL-062) — a confirmed pull or an
+ * override vacates whatever slot the copy was in, and the mirror has to agree with the ops or a later
+ * card in the same pass would fill a slot this one just emptied, or skip a stage it just freed.
  */
 function touchSlot(
   slotsByLine: Map<string, MutableSlot[]>,

@@ -413,3 +413,69 @@ describe("UIL-045 · the write refuses a placement she was not shown", () => {
     expect(res.counts.copies).toBe(1);
   });
 });
+
+/**
+ * The digest's SIDE-EFFECT components (QA finding on #121).
+ *
+ * `placementDigest` folds in `filledExistingSlot`, `newLine` and `swap` alongside the target, because
+ * each changes which physical pocket the card ends up in. None of them had a test: QA mutated them out
+ * and 567/567 still passed, so the guard protected only the target. The case that slips is the one where
+ * the TARGET IS IDENTICAL and only the side effect differs — a holo arriving where a normal already
+ * sits inherits the normal's exact placement, so target-only digests are equal while one write also
+ * displaces a card to bulk.
+ *
+ * Each test below fails if its own component is dropped from the digest.
+ */
+describe("UIL-045 · the digest covers side effects, not just the pocket", () => {
+  const base = { target: { kind: "bulk" } } as unknown as Parameters<typeof placementDigest>[0];
+
+  it("distinguishes a swap from a plain placement with the same target", () => {
+    const plain = placementDigest(base);
+    const swapped = placementDigest({
+      ...base,
+      swap: { displacedCopyId: "copy-a", incomingInherits: {} },
+    } as unknown as Parameters<typeof placementDigest>[0]);
+    expect(swapped).not.toBe(plain);
+  });
+
+  it("distinguishes WHICH copy a swap displaces", () => {
+    const a = placementDigest({
+      ...base,
+      swap: { displacedCopyId: "copy-a", incomingInherits: {} },
+    } as unknown as Parameters<typeof placementDigest>[0]);
+    const b = placementDigest({
+      ...base,
+      swap: { displacedCopyId: "copy-b", incomingInherits: {} },
+    } as unknown as Parameters<typeof placementDigest>[0]);
+    // Same pocket for the incoming card, different card sent to bulk. Not the same outcome.
+    expect(a).not.toBe(b);
+  });
+
+  it("distinguishes filling an existing slot from not filling one", () => {
+    const plain = placementDigest(base);
+    const filled = placementDigest({
+      ...base,
+      filledExistingSlot: { lineId: "line-1", stageIndex: 1 },
+    } as unknown as Parameters<typeof placementDigest>[0]);
+    expect(filled).not.toBe(plain);
+  });
+
+  it("distinguishes WHICH line and stage is filled", () => {
+    const mk = (lineId: string, stageIndex: number) =>
+      placementDigest({
+        ...base,
+        filledExistingSlot: { lineId, stageIndex },
+      } as unknown as Parameters<typeof placementDigest>[0]);
+    expect(mk("line-1", 1)).not.toBe(mk("line-2", 1));
+    expect(mk("line-1", 1)).not.toBe(mk("line-1", 2));
+  });
+
+  it("distinguishes starting a new line from not starting one", () => {
+    const plain = placementDigest(base);
+    const newLine = placementDigest({
+      ...base,
+      newLine: { rootDexId: 4, colorBand: "red", slots: [] },
+    } as unknown as Parameters<typeof placementDigest>[0]);
+    expect(newLine).not.toBe(plain);
+  });
+});

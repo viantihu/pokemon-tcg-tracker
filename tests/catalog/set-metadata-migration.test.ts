@@ -47,10 +47,14 @@ describe("0009_set_metadata migration (fresh Postgres via PGlite)", () => {
     db = await freshDb();
   }, 30_000);
 
-  it("includes 0009 in the ordered chain and it sorts last", () => {
+  it("includes 0009 in the ordered chain, applied after 0008", () => {
     const files = orderedMigrations();
     expect(files).toContain("0009_set_metadata.sql");
-    expect(files[files.length - 1]).toBe("0009_set_metadata.sql");
+    // Relative order, not "sorts last": this asserted last-ness, which was only incidentally true and
+    // broke the moment 0010 was added. What 0009 actually needs is to come after the schema it extends.
+    expect(files.indexOf("0009_set_metadata.sql")).toBeGreaterThan(
+      files.indexOf("0008_collection_removal_ops.sql"),
+    );
   });
 
   it("adds set_card_count_official (integer) and set_release_date (date), both nullable", async () => {
