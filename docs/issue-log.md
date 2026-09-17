@@ -3080,7 +3080,23 @@ priority at all.
 ## UIL-039 — Card search for building a collection needs to be its own filterable, grid page with bulk add
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#155](https://github.com/viantihu/pokemon-tcg-tracker/pull/155) MERGED to
+  `develop` 2026-09-16 (squash `83e1e44`), QA-gated on the merged tree, confirmed **deployed** to Testing
+  (all four conditions green on that SHA). Card search for building a collection is now its own grid page
+  at `/coll/search`, image-first per her standing visual-search principle, filterable by **illustrator**
+  (her stated primary case, not just one filter among several), set, species, type and an explicit
+  "cards I own" / "cards I'm missing" / "all cards" toggle, with the collector-number-aware free text kept
+  as a fallback. Bulk add ticks tiles and commits the selected ids in **one** write through UIL-038's
+  draft-tolerant path, so there is no separate Save step. The editor's inline `CardLookup` add is removed
+  and replaced by a link in **the same PR** — verified in review that both directions work before the
+  removal landed, since a gap there would have left her unable to add a card at all. Cost stated rather
+  than implied: `browse()` pages at 60 rows with `range()` and deliberately **no** `count: "exact"` (an
+  exact count belongs on a read-everything query where partiality is a bug, not on a paginated browse where
+  it is the design — `hasMore`/`nextOffset` are the contract), and the owned/unowned filter is bounded at
+  15 pages × 60 = 900 rows, never the 23,548-row catalog. No migration. **Known gap, being fixed
+  separately:** the search link does not flush the autosave debounce before navigating, so up to 600ms of
+  typing can be lost — a data-loss path inside the feature built to prevent data loss, so it is not
+  being left as a rough edge. Awaiting Karvi's confirmation.
 - **Priority:** Medium (Claude's read — a redesign of working functionality, not a defect; needs
   Karvi's confirmation)
 - **Area:** Collections
@@ -4266,7 +4282,25 @@ scope.
 
 - **Reported:** 2026-09-15 (not from Karvi — measured on Testing by the tech lead via the
   `ops/read-band-config` diagnostic branch, relayed by the Senior BA)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#151](https://github.com/viantihu/pokemon-tcg-tracker/pull/151) MERGED to
+  `develop` 2026-09-16 (squash `26b6971`), QA-gated with every mutation reproduced, confirmed **deployed**
+  to Testing, and — the part that matters — **verified by row count rather than by a green run**
+  (diagnostic run `35175445323`): filled slots whose copy no longer points back went **5 → 0**, `copy`
+  stayed byte-identical at 706 and `presence_group` at 681, and the slot arithmetic reconciles exactly
+  (22 − 5 released + 2 newly filled = 19 filled; 6 + 5 + 1 = 12 placeholder), so precisely **5** slots were
+  released and the migration's effect is separable from her ongoing placing. Prevention: `writeOverriddenCard`
+  now releases the slot it leaves through a shared `releaseSlotOps`, and `filledExistingSlot`'s unresolvable
+  case throws instead of committing a placement with neither pointer set — one transaction, so zero rows and
+  a clean retry beat a silent half-write. Repair migration `0010` clears only a filled slot whose copy no
+  longer points back, never writes a pointer onto a copy, and is idempotent because its predicate excludes
+  its own output. **The 8 shelved back-half copies with a null pointer were deliberately left untouched**
+  and measured still 8 — a test pins that, because none had an intended placeholder at the time and a
+  migration guessing a slot would be inventing her placement decisions. Note for anyone reading the
+  numbers: `placement_decision` 71 → 105 across this window is **entirely her own placement work**;
+  `0010` writes no decisions. Follow-ups tracked, not folded in: a fourth release path routed through the
+  shared emitter (PR #158), and a possible relink of 5 of the 8 now that releasing their slots re-exposed
+  each slot's original target — held pending a pairing-cardinality measurement, since "a slot wants this
+  card" is an existence claim and a safe relink needs a **uniqueness** claim. Awaiting Karvi's confirmation.
 - **Priority:** High (Senior BA's read — the record disagreeing with the physical shelf is the app's
   core failure class; Karvi to confirm)
 - **Area:** Lines, Plan
@@ -4621,7 +4655,24 @@ standing confirmed defect. Flagging for Karvi's confirmation since severity call
   put to her, all four selected verbatim: "It's somewhat buggy and the icons are not aligned" / "Too
   many picks; it should ask for the line" / "Being sent away from the Haul Plan" / "The list of cards
   not in a line is unusable."
-- **Status:** Open
+- **Status:** **Fixed (parts 1 and 3 of 4)** — PR [#154](https://github.com/viantihu/pokemon-tcg-tracker/pull/154)
+  MERGED to `develop` 2026-09-16 (squash `218ac0a`), QA-gated on the merged tree, confirmed **deployed** to
+  Testing (all four conditions green on that SHA). **Part 1, too many picks:** the panel now leads with
+  "join a line" — candidates flat and sorted nearest-complete, each showing its own band — and picking one
+  **derives** binder, half and band from the line instead of demanding them first; "start a new line"
+  pre-selects the card's natural band from `type_color_map` rather than offering ten empty chips; the old
+  binder → half → band flow survives behind "place it manually" for a genuine forced override. The
+  band-keyed wrapper that forced a band choice was a Senior BA design error, now removed. **Part 3, the
+  unusable list:** the Lines page splits by current half — "stranded in the back half · N" prominent, the
+  hundreds of front-half shelved cards collapsed below — because a front-half card with join candidates is
+  ordinary collection state, not an anomaly. **Still open, and this entry is NOT closed by the above:**
+  **part 2**, a line choice on the Haul Plan itself, is only half-possible today — the read half was
+  deliberately **dropped** from this PR rather than shipped as a second implementation of a derivation
+  `buildScreenModel` already performs (two implementations drift, and a drifted one would offer a line the
+  write path won't honour, the UIL-045 shape), and the write half needs `writeOverriddenCard` to gain line
+  side effects it does not have; and **part 4**, the bugginess and misaligned icons she reported, is
+  unaddressed pending a layout measurement pass, since no session could open an authed screen to look.
+  Reversing the "do this from the Lines page" redirect was a Senior BA decision, recorded as such.
 - **Priority:** High (Senior BA's read — she rejected shipped work on a core flow; hers pending)
 - **Area:** Lines, Plan, Collections
 - **Env:** Testing
@@ -4677,7 +4728,19 @@ severity calls are hers.
 
 - **Reported:** 2026-09-17 (not from Karvi — found by QA while gating #149, verified in the cascade's
   own lookup, relayed by the Senior BA)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#154](https://github.com/viantihu/pokemon-tcg-tracker/pull/154) MERGED to
+  `develop` 2026-09-16 (squash `218ac0a`), QA-gated, confirmed **deployed** to Testing. The band filter is
+  dropped from `existingLineSlot` at **both** sites the gap reached — STEP 1's collection-claim check and
+  STEP 4's line participation — and a card joining a line now takes **the line's** `colorBand` rather than
+  its own natural one, which is the same "pick the line, derive the placement" inversion Karvi's UIL-064
+  ruling established, so the engine now agrees with the panel instead of contradicting it. Verified that
+  nothing downstream re-derives the band independently: `copyPlacementFromTarget` and `describeReason` both
+  pass `target.band` through verbatim. One subtlety pinned by a test because it is easy to get wrong later:
+  a card that falls back to the **front half** keeps its **own** natural band, not the line's — the front
+  half is not part of the line. The mutation split is what establishes both sites were needed: restoring
+  the filter at STEP 4 alone fails the cross-band tests while the STEP 1 test still passes, and vice versa.
+  Awaiting Karvi's confirmation: a line she created in a non-natural band should now be found by the next
+  card of that species, and that card should land in the line's band.
 - **Priority:** High (Senior BA's read; Karvi to confirm)
 - **Area:** Lines, Plan
 - **Env:** Testing
