@@ -23,3 +23,14 @@ export interface CapacityData {
   /** Back halves that can seat a new line, most free first — "which binder has room for a Fire line". */
   roomForLine: { binderId: string; binderName: string; freePockets: number }[];
 }
+
+/** One shelved card in the binder-browse grid (UIL-055) — image-first per her standing principle. */
+export interface BinderCardTile {
+  copyId: string;
+  tcgdexId: string;
+  name: string;
+  localId: string | null;
+  imageUrl: string | null;
+  half: string;
+  bandKey: string | null;
+}

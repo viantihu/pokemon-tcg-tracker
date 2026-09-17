@@ -8,9 +8,10 @@
  */
 
 import { getOwnerContext } from "@/lib/plan";
-import { binderRepo, binderSectionRepo } from "@/lib/repo";
+import { bandPosition } from "@/lib/engine";
+import { binderRepo, binderSectionRepo, catalogCardRepo, copyRepo } from "@/lib/repo";
 import { fullness, hasRoomForLine, type SectionView } from "@/lib/surfaces";
-import type { CapacityData, CapacitySection } from "./binders-types";
+import type { BinderCardTile, CapacityData, CapacitySection } from "./binders-types";
 
 export async function loadCapacity(): Promise<CapacityData> {
   const { db } = await getOwnerContext();
@@ -64,4 +65,46 @@ export async function loadCapacity(): Promise<CapacityData> {
     .map((v) => ({ binderId: v.binderId, binderName: v.binderName, freePockets: v.freePockets }));
 
   return { sections, roomForLine };
+}
+
+/**
+ * Every shelved card in ONE binder, both halves unioned into a single list (UIL-055) — she is
+ * objecting to front/back reading as two binders in this VIEW, not to the underlying model, which
+ * still needs the half for pocket classification. Sorted the way the binder actually sits: front
+ * before back, then rainbow band order within a half, then name.
+ *
+ * Reuses `copyRepo.listShelved` (every shelved copy, already fetched for `loadCapacity` were it
+ * called alongside this) and filters to the one binder, rather than adding a new by-binder finder to
+ * `lib/repo/copy.ts` for a read this screen makes one binder at a time.
+ */
+export async function loadBinderCards(binderId: string): Promise<BinderCardTile[]> {
+  const { db } = await getOwnerContext();
+  const shelved = await copyRepo.listShelved(db);
+  const inBinder = shelved.filter((c) => c.binder_id === binderId);
+  if (inBinder.length === 0) return [];
+
+  const cardIds = [...new Set(inBinder.map((c) => c.catalog_card_id))];
+  const cards = await catalogCardRepo.listByIds(db, cardIds);
+  const cardById = new Map(cards.map((c) => [c.tcgdex_id, c]));
+
+  const halfOrder: Record<string, number> = { front: 0, back: 1 };
+  return inBinder
+    .map((c) => {
+      const card = cardById.get(c.catalog_card_id);
+      return {
+        copyId: c.id,
+        tcgdexId: c.catalog_card_id,
+        name: card?.name ?? c.catalog_card_id,
+        localId: card?.local_id ?? null,
+        imageUrl: card?.image_url ?? null,
+        half: c.binder_half ?? "front",
+        bandKey: c.color_band,
+      };
+    })
+    .sort(
+      (a, b) =>
+        (halfOrder[a.half] ?? 9) - (halfOrder[b.half] ?? 9) ||
+        bandPosition(a.bandKey ?? "") - bandPosition(b.bandKey ?? "") ||
+        a.name.localeCompare(b.name),
+    );
 }

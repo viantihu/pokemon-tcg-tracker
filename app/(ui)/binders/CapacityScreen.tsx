@@ -1,16 +1,23 @@
 "use client";
 
 /**
- * Capacity review — per `binder_section` (dev-spec §5 M8; system-design §7E).
+ * Capacity review — per binder (dev-spec §5 M8; system-design §7E; UIL-055).
  *
- * Each section shows capacity, shelved, block pockets, open placeholders, and free space, flags
- * near-full sections, and answers "which binder has room for a new Fire line" up top. Read-only;
- * client-driven so there is no DB access at build/prerender time.
+ * Each binder shows capacity, shelved, block pockets, open placeholders, and free space per half,
+ * flags near-full sections, and answers "which binder has room for a new Fire line" up top.
+ * Front and back are ONE binder card here (she is objecting to the presentation reading as two
+ * binders, not to the underlying per-half model — capacity math still needs the half, since front and
+ * back hold genuinely different things). Clicking a card reveals its shelved cards, image-first, per
+ * her standing design principle: folded by default and mounting nothing until expanded, the same
+ * discipline UIL-034 established for Collections, so this never starts out with UIL-034's problem.
+ *
+ * Read-only; client-driven so there is no DB access at build/prerender time.
  */
 
 import { useEffect, useState } from "react";
-import { loadCapacity } from "./actions";
-import type { CapacityData, CapacitySection } from "./binders-types";
+import { CardFace } from "../_components/CardFace";
+import { loadBinderCards, loadCapacity } from "./actions";
+import type { BinderCardTile, CapacityData, CapacitySection } from "./binders-types";
 
 const HALF_LABEL: Record<string, string> = { front: "FRONT", back: "BACK", single: "SPECIALTY" };
 const FULLNESS_LABEL: Record<string, string> = {
@@ -19,10 +26,41 @@ const FULLNESS_LABEL: Record<string, string> = {
   ok: "ROOM",
   empty: "UNSIZED",
 };
+/** Worst-first, for picking one flag to represent a binder's several sections at a glance. */
+const FULLNESS_SEVERITY: Record<string, number> = { full: 3, near: 2, ok: 1, empty: 0 };
+
+interface BinderGroup {
+  binderId: string;
+  binderName: string;
+  binderType: "general" | "specialty";
+  sections: CapacitySection[];
+}
+
+function groupByBinder(sections: CapacitySection[]): BinderGroup[] {
+  const order: string[] = [];
+  const groups = new Map<string, BinderGroup>();
+  for (const s of sections) {
+    let g = groups.get(s.binderId);
+    if (!g) {
+      g = {
+        binderId: s.binderId,
+        binderName: s.binderName,
+        binderType: s.binderType,
+        sections: [],
+      };
+      groups.set(s.binderId, g);
+      order.push(s.binderId);
+    }
+    g.sections.push(s);
+  }
+  return order.map((id) => groups.get(id)!);
+}
 
 export function CapacityScreen() {
   const [data, setData] = useState<CapacityData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Collapsed by default (UIL-055/UIL-034): mount nothing until she asks for it.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadCapacity()
@@ -31,6 +69,15 @@ export function CapacityScreen() {
         setError(e instanceof Error ? e.message : "Could not load capacity. Is the DB reachable?"),
       );
   }, []);
+
+  function toggle(binderId: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(binderId)) next.delete(binderId);
+      else next.add(binderId);
+      return next;
+    });
+  }
 
   if (error) {
     return (
@@ -47,6 +94,8 @@ export function CapacityScreen() {
       </div>
     );
   }
+
+  const groups = groupByBinder(data.sections);
 
   return (
     <div className="capwrap">
@@ -74,15 +123,20 @@ export function CapacityScreen() {
         )}
       </div>
 
-      {data.sections.length === 0 && (
+      {groups.length === 0 && (
         <div className="stub panel">
           <p>No binders yet. Add one in Settings.</p>
         </div>
       )}
 
       <div className="capgrid">
-        {data.sections.map((s) => (
-          <SectionCard key={`${s.binderId}-${s.half}`} s={s} />
+        {groups.map((g) => (
+          <BinderCard
+            key={g.binderId}
+            g={g}
+            expanded={expanded.has(g.binderId)}
+            onToggle={() => toggle(g.binderId)}
+          />
         ))}
       </div>
 
@@ -93,16 +147,44 @@ export function CapacityScreen() {
   );
 }
 
-function SectionCard({ s }: { s: CapacitySection }) {
+function BinderCard({
+  g,
+  expanded,
+  onToggle,
+}: {
+  g: BinderGroup;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const worst = g.sections.reduce(
+    (acc, s) => (FULLNESS_SEVERITY[s.fullness] > FULLNESS_SEVERITY[acc] ? s.fullness : acc),
+    g.sections[0]?.fullness ?? "empty",
+  );
+  return (
+    <div className={"capcard panel fill-" + worst}>
+      <button type="button" className="capfold" onClick={onToggle} aria-expanded={expanded}>
+        <span aria-hidden>{expanded ? "▼" : "▶"}</span>
+        <span className="nm u">{g.binderName}</span>
+        <span className={"flag u flag-" + worst} style={{ marginLeft: "auto" }}>
+          {FULLNESS_LABEL[worst] ?? ""}
+        </span>
+      </button>
+
+      {g.sections.map((s) => (
+        <SectionRow key={s.half} s={s} />
+      ))}
+
+      {expanded && <BinderCardGrid binderId={g.binderId} />}
+    </div>
+  );
+}
+
+function SectionRow({ s }: { s: CapacitySection }) {
   const used = s.shelvedCount + s.blockPockets + s.openPlaceholders;
   const pct = s.capacity > 0 ? Math.min(100, Math.round((used / s.capacity) * 100)) : 0;
   return (
-    <div className={"capcard panel fill-" + s.fullness}>
-      <div className="caphead">
-        <span className="nm u">{s.binderName}</span>
-        <span className="half u">{HALF_LABEL[s.half] ?? s.half.toUpperCase()}</span>
-        <span className={"flag u flag-" + s.fullness}>{FULLNESS_LABEL[s.fullness] ?? ""}</span>
-      </div>
+    <div className="capsection">
+      {s.half !== "single" && <div className="half u">{HALF_LABEL[s.half] ?? s.half}</div>}
       <div className="cbar">
         <i
           style={{ width: `${pct}%` }}
@@ -123,8 +205,53 @@ function SectionCard({ s }: { s: CapacitySection }) {
 function Stat({ label, value, strong }: { label: string; value: number; strong?: boolean }) {
   return (
     <div className="capstat">
-      <div className={"sv" + (strong ? " strong" : "")}>{value}</div>
       <div className="sl u">{label}</div>
+      <div className={"sv" + (strong ? " strong" : "")}>{value}</div>
+    </div>
+  );
+}
+
+/** The binder's shelved cards, both halves unioned — fetched only once expanded. */
+function BinderCardGrid({ binderId }: { binderId: string }) {
+  const [cards, setCards] = useState<BinderCardTile[] | null>(null);
+  const [gridError, setGridError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    loadBinderCards(binderId).then(
+      (rows) => alive && setCards(rows),
+      (e) =>
+        alive &&
+        setGridError(e instanceof Error ? e.message : "Could not load this binder's cards."),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [binderId]);
+
+  if (gridError) {
+    return <div className="cehint u">{gridError}</div>;
+  }
+  if (!cards) {
+    return <div className="cehint u">Reading this binder…</div>;
+  }
+  if (cards.length === 0) {
+    return <div className="cehint u">Nothing shelved here yet.</div>;
+  }
+  return (
+    <div className="cgrid" style={{ marginTop: 10 }}>
+      {cards.map((c) => (
+        <div key={c.copyId} className="ccard">
+          <CardFace name={c.name} imageUrl={c.imageUrl} size="m" />
+          <div className="cn u">{c.name}</div>
+          {c.localId ? <div className="cno">{c.localId}</div> : null}
+          {c.half !== "single" && (
+            <span className="cpill u" style={{ background: "var(--panel-2)" }}>
+              {HALF_LABEL[c.half] ?? c.half}
+            </span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

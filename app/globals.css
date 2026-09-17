@@ -2209,20 +2209,39 @@ nav.menu .tab .n {
 .capcard {
   padding: 13px;
 }
-.caphead {
+/* UIL-055: the whole header is the fold toggle (front/back is ONE binder card now, not two, so
+   there is exactly one header to make into a button — same shape as `.bandhead`/`.collfold`). */
+.capfold {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   margin-bottom: 10px;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
 }
-.caphead .nm {
+.capfold .nm {
   font-size: 13px;
   letter-spacing: 0.06em;
 }
-.caphead .half {
+/* One binder can hold two sections (front/back); each gets its own labelled block within the ONE
+   card rather than its own card — that split is what UIL-055 asked to stop looking like. */
+.capsection + .capsection {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 2px solid var(--lo);
+}
+.capsection .half {
   font-size: 9px;
   color: var(--ink-2);
   letter-spacing: 0.1em;
+  margin-bottom: 4px;
 }
 .flag {
   margin-left: auto;
@@ -2245,28 +2264,33 @@ nav.menu .tab .n {
   background: var(--panel-2);
   color: var(--ink-2);
 }
+/* UIL-055: was a 5-column grid, value stacked above an 8px label — five illegible columns in one
+   card. Horizontal "LABEL … value" rows instead: a label reads left to right at a normal size, and
+   five rows read as a small table rather than a strip of unlabelled numbers. */
 .capnums {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   margin-top: 10px;
 }
 .capstat {
-  text-align: center;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.capstat .sl {
+  font-size: 10px;
+  color: var(--ink-2);
+  letter-spacing: 0.06em;
 }
 .capstat .sv {
-  font-size: 17px;
+  font-size: 14px;
   letter-spacing: 0.02em;
 }
 .capstat .sv.strong {
   color: var(--ink-3);
   font-weight: 700;
-}
-.capstat .sl {
-  font-size: 8px;
-  color: var(--ink-2);
-  letter-spacing: 0.06em;
-  margin-top: 2px;
 }
 
 /* ---------- settings ---------- */
@@ -2559,9 +2583,6 @@ nav.menu .tab .n {
 @media (max-width: 720px) {
   .where {
     font-size: 22px;
-  }
-  .capnums {
-    grid-template-columns: repeat(5, 1fr);
   }
   .collactions {
     width: 100%;
