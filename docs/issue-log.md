@@ -4866,3 +4866,74 @@ written and merged under that exception.
 already self-limiting once billing is resolved, not a product defect — but High-adjacent in effect
 while it lasts, since it silently removed the one automated check standing between a merge and a
 schema mismatch.
+
+## UIL-067 — The decision card is too crowded and shows information that isn't helpful for making the actual call
+
+- **Reported:** 2026-09-17 (Karvi, screenshot of a live "COLLECTION CLAIM VS LINE SLOT" decision for
+  Charizard). In her words: "This UX is too crowded, and a lot of the information here is not helpful.
+  I need something simpler."
+- **Status:** Open
+- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Area:** Lines
+- **Env:** Testing
+
+**Confirmed structure, read directly from the component she's describing.** `DecisionCard`
+([`app/(ui)/_components/DecisionCard.tsx:106-134`](../app/(ui)/_components/DecisionCard.tsx:106))
+renders three evidence columns — CATALOG, YOU OWN, WHY — above the proposal, then (when the decision
+carries one) a full grid of wishlist alternates with card art and price, then the choice buttons. For
+the collection-claim case she screenshotted specifically
+([`lib/line/decisions.ts:254-289`](../lib/line/decisions.ts:254)):
+
+- **CATALOG** is built by `catalogEvidence` ([`decisions.ts:107-121`](../lib/line/decisions.ts:107)):
+  total printings for the species, a standard-band count, a specialty-band count, an "other band"
+  example, and the cheapest same-band printing — five data points, all catalog statistics rather than
+  anything about the specific card in front of her.
+- **YOU OWN** lists every stage in the line (owned/open/blocked) plus a line stating the claimed copy
+  lives in a running collection.
+- **WHY** is two full sentences of prose explaining the cascade's rule ordering.
+- Below that, the full wishlist grid repeats card art, set/number, and price for every ranked
+  alternate, not just the one or two she'd actually consider.
+
+**Not diagnosing which specific pieces to cut — that's a design call, not a code-correctness one — but
+recording what's on screen precisely so whoever picks this up isn't starting from a description alone.**
+The one data point the current card does NOT surface plainly is the thing her question ("collection
+still wins?") is actually about: which of the two — the collection or the line — physically ends up
+with this exact copy. That's implied by the proposal string but not called out as its own line the way
+the five catalog stats are.
+
+**Cross-reference UIL-064.** Same underlying pattern as her line-join complaint: a screen that surfaces
+every fact the engine used to reach its recommendation, rather than the smaller set she needs to
+confirm or override it.
+
+**Priority rationale.** Flagging for Claude's read and Karvi's confirmation — this is a design
+complaint on a screen she uses often, but not a data-correctness defect, so it doesn't automatically
+inherit the "silent wrong data" High bucket the way UIL-062/063/065 did.
+
+## UIL-068 — Moving a shelved card anywhere manual isn't a direct option — it's collapsed behind "place it manually," one extra step past the line-join flow
+
+- **Reported:** 2026-09-17 (Karvi, screenshot of the "MOVE A SHELVED CARD" panel for a Pikachu with no
+  existing line candidates). In her words: "I should have the option to move the card anywhere."
+- **Status:** Open
+- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Area:** Lines
+- **Env:** Testing
+
+**Confirmed in the shipped UIL-064 rework (#154).** `MovePanel`
+([`app/(ui)/_components/MovePanel.tsx:354-359`](../app/(ui)/_components/MovePanel.tsx:354)) puts every
+manual destination — any binder, front or back half, band, the collection binders, the bulk box —
+inside a collapsed `<details>` labeled "Not this — place it manually," reachable only after the
+line-join options above it. When a card has no existing line to join, as in her screenshot, that
+section's only visible content is "+ Start a new line"; manual placement requires opening the
+collapsed toggle first, and the confirm button reads "PLACING · KB-001 · BACK HALF · YELLOW · PICK A
+LINE" — disabled — until a line choice is made, even for someone who wants to skip the line question
+entirely.
+
+**This is the flip side of UIL-064's own complaint, not a contradiction of it.** UIL-064 was "too many
+picks; it should ask for the line" — #154 fixed that by making the line question first and collapsing
+everything else. Her new report is that the collapse went further than she wanted: manual placement
+should be a direct option alongside joining a line, not one step behind it.
+
+**Cross-reference UIL-064 (the rework this is direct feedback on).**
+
+**Priority rationale.** Flagging for Claude's read and Karvi's confirmation — feedback on a screen that
+shipped days ago, not a data-correctness defect.
