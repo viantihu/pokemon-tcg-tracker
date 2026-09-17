@@ -519,6 +519,44 @@ jobs:
                 "  with an EXACT intended placeholder (same binder+band, target = this card): \(.with_exact_intended_slot)",
                 "  same binder+band placeholder but different target:                        \(.with_same_binder_band_placeholder_only)",
                 "  no placeholder in that binder+band at all:                                \(.no_candidate_slot)"'
+            # ---- PAIRING CARDINALITY, the relink migration's guard input.
+            #
+            # "N have an exact intended placeholder" is an EXISTENCE claim; a safe relink needs a
+            # UNIQUENESS claim. Two ways a naive pairing would guess:
+            #   - two unlinked copies of one card against one placeholder  -> which copy?
+            #   - two placeholders wanting one card in one binder+band     -> which slot?
+            # So report, per affected copy, how many placeholders match it AND how many copies match
+            # that placeholder, and count how many are strictly 1:1 in BOTH directions.
+            echo "  pairing cardinality (the relink guard's input):"
+            jq -rn --argjson oc "$oc_rows" --argjson ph "$ph_rows" --argjson ln "$all_lines" '
+              ($ln | map({key: .id, value: .}) | from_entries) as $lineById
+              | ([ $ph[] | . as $s | ($lineById[$s.line_id]) as $l | select($l != null)
+                   | {slot: $s.id, binder: $l.binder_id, band: $l.color_band, target: $s.target_catalog_card_id} ]) as $slots
+              # For each affected copy: the slots that match it on binder+band+card.
+              | [ $oc[]
+                  | . as $c
+                  | ([ $slots[] | select(.binder == $c.binder_id and .band == $c.color_band and .target == $c.catalog_card_id) ]) as $ms
+                  | {
+                      copy: $c.id,
+                      slots_matching_this_copy: ($ms | length),
+                      # When exactly one slot matches, how many affected copies does THAT slot match?
+                      copies_matching_that_slot: (
+                        if ($ms | length) == 1
+                        then ($ms[0]) as $s
+                             | ([ $oc[] | select(.binder_id == $s.binder and .color_band == $s.band and .catalog_card_id == $s.target) ] | length)
+                        else null end)
+                    } ]
+              | . as $rows
+              | ([ $rows[] | select(.slots_matching_this_copy == 1 and .copies_matching_that_slot == 1) ] | length) as $oneone
+              | ([ $rows[] | select(.slots_matching_this_copy > 1) ] | length) as $manyslots
+              | ([ $rows[] | select(.slots_matching_this_copy == 1 and (.copies_matching_that_slot // 0) > 1) ] | length) as $manycopies
+              | ([ $rows[] | select(.slots_matching_this_copy == 0) ] | length) as $noslot
+              | "    strictly 1:1 (safe to relink):                        \($oneone)",
+                "    one slot but SEVERAL copies want it (ambiguous):      \($manycopies)",
+                "    SEVERAL slots match this copy (ambiguous):            \($manyslots)",
+                "    no matching slot (stays hers):                        \($noslot)",
+                "    -> migration would relink \($oneone) of \($rows | length); \($manycopies + $manyslots) skipped as ambiguous, \($noslot) have no candidate"'
+
             if [ "$orphan_copies" != "unknown" ] && [ "$orphan_copies" -gt 5 ]; then
               echo "::warning::$orphan_copies back-half copies have no slot pointer — materially MORE than the 5 filled-slot orphans. This is the shape she can see (stage reads HUNTING after Done), and it is the real blast radius."
             fi
