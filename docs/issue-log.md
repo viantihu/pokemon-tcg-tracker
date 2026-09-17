@@ -4150,7 +4150,22 @@ give those two rows a path forward.
 ## UIL-061 — Creating a new line can silently relocate other already-owned cards, with no confirmation and no audit trail, and there is no way to choose the line yourself
 
 - **Reported:** 2026-09-14
-- **Status:** Open
+- **Status:** **Fixed** — PR [#145](https://github.com/viantihu/pokemon-tcg-tracker/pull/145) MERGED to
+  `develop` 2026-09-16 (squash `77fb23f`), QA-gated on the merged tree with independent revert checks
+  (consent gate dropped → 4 tests fail; slot release deleted → exactly 1 fails, no overlap), confirmed
+  **deployed** to Testing (all four conditions green on that SHA). Starting a new line now moves **nothing
+  she has not ticked**: each owned copy the line could pull is disclosed with its current location and
+  defaults to unticked, every confirmed pull gets its own `placement_decision` so "why did this card move"
+  is answerable, and a confirmed pull out of another line's slot releases that slot in the same
+  transaction. An unticked stage stays a placeholder and deliberately gets **no wishlist row** — she owns
+  that card, so listing it as something to acquire would be wrong. The trace widened this entry's own
+  claim: `ownedAt` matched species + band with **no role filter** and the writer never read `pullFrom`, so
+  bulk, binder blocks, specialty binders and other lines' slots were all in scope, not only front-half
+  shelved copies. The consent block sits under the destination block it qualifies rather than below the
+  reason, because at 375×812 the first version put it 55% down an 808px scroll area — she would have had to
+  scroll past the consent gate to reach Done. **This does NOT fix the five stale slots measured on
+  Testing** (that is UIL-062's `writeOverriddenCard` gap); the dev rewrote its own commit message to drop
+  that claim when the measurement landed mid-build. Awaiting Karvi's confirmation.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Plan, Lines
 - **Env:** Testing
@@ -4453,7 +4468,19 @@ physically owns and where. Flagging for Karvi's confirmation since severity call
 
 - **Reported:** 2026-09-16 (Karvi, relayed precisely by Junior BA - 2 — not her diagnosis, a careful
   transcript of a contradiction she flagged)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#149](https://github.com/viantihu/pokemon-tcg-tracker/pull/149) MERGED to
+  `develop` 2026-09-16 (squash `fab3245`), QA-gated, confirmed **deployed** to Testing (all four conditions
+  green on that SHA). A Basic now enters the **same** existing-slot-fill path Stage1/Stage2 already used —
+  one changed condition, not a parallel branch — so it fills an open slot in a line that already exists for
+  its species, and the stage-agnostic line-existing reason string names that line instead of asserting
+  "Basic with no line yet." That sentence was the actual defect: every Basic got it regardless of reality,
+  which is what she hit. A Basic still **cannot create** a line — the fallback for a genuinely line-less
+  Basic is byte-for-byte unchanged and never reaches `testViability`/`generateSlots` — and that is pinned
+  by a test, because line creation is her decision (UIL-056). Fixtures are key-form bands
+  (`Dragon: "olive"`) per UIL-012's lesson, reproducing her exact species and band. **Known limit, tracked
+  as UIL-065:** the lookup still keys on the card's *natural* band, so a line she created manually in a
+  different band remains invisible for every stage — the same symptom by a second route, so this being
+  Fixed does not mean the symptom is gone in that case. Awaiting Karvi's confirmation.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Plan, Lines
 - **Env:** Testing
