@@ -4287,6 +4287,43 @@ either a mechanism not yet found, or residue from a version of one of these path
 current symmetric form. Flagging back to the Senior BA/FSD-2 rather than closing this line of inquiry
 myself.
 
+**Update 2026-09-17: cause found and verified — none of the four move-out paths above, a fifth path
+none of us had checked yet.** A further measurement (tech lead) splits the five differently than
+"which path moved them": **4 of 5 never left their slot at all** — same binder, same back half, same
+colour band as their own slot's line, and `evolution_line.half` is CHECK-constrained to `'back'`, so
+that is exactly where the slot would have placed them; each line was created only 1–2 minutes before
+that copy's `placement_decision`. **1 of 5 is genuinely in the front half** of the same binder — it did
+leave. All post-date the 02:30 clear, so still live-path, not residue.
+
+**The real mechanism is in the haul-commit path, not a move at all.** `copyPlacementFromTarget`
+([`lib/plan/placement.ts:20-40`](../lib/plan/placement.ts:20)) returns a `CopyPlacement` with exactly
+four fields — `role`, `binderId`, `binderHalf`, `colorBand` — **there is no `lineSlotId` field on that
+type**, for any target kind including `back-half-line`. `emitIncomingCopy`
+([`lib/plan/commit.ts:494-505`](../lib/plan/commit.ts:494)) takes that placement and, for a **routed**
+card (`p.existingCopyId` set — the UIL-003 sync-copy path, which is how her ~705 existing cards reach
+the cascade), writes `line_slot_id: placement.lineSlotId ?? null` — since the field is never present,
+this is unconditionally `null`. On a normal, first-time commit this is harmless: `writeCard`
+([`lib/plan/commit.ts:330-412`](../lib/plan/commit.ts:330)) calls `emitIncomingCopy` first and then, in
+the SAME op set, immediately re-sets the correct slot id — either via `filledExistingSlot`'s own
+`update_copy` ([`commit.ts:411`](../lib/plan/commit.ts:411)) or `writeNewLine`'s `if (isIncoming)`
+branch ([`commit.ts:607`](../lib/plan/commit.ts:607)). Net effect on a fresh commit: correct.
+
+**The leak is committing the SAME already-slotted copy a second time.** `commitCardPlacement`
+(lib/plan/commit.ts) has no guard against re-committing a copy that already has a `line_slot_id` — and
+UIL-006's resumed sessionStorage draft can still list a card she already pressed Done on. Re-run it:
+`emitIncomingCopy` nulls the copy's *existing* slot pointer first, exactly as before — but this second
+time, if the cascade re-derives a DIFFERENT step for it (four of the five: re-derives the *same*
+back-half-line placement but for some reason without taking the `filledExistingSlot`/`writeNewLine`
+branch that would re-set the pointer; one of the five: re-derives to "line already holds this stage,
+extra copy to the front half" per the STEP 4 duplicate-tracking branch, which explains the lone
+front-half outlier exactly) — the null-write is never followed by a correcting one. The copy loses its
+link; the slot it vacated is never touched and stays `filled`, naming a copy that no longer points back.
+
+**Cleared, not this:** `buildMoveOps`/`applyMove`, `applyCollectionRemoval`, sync's retire path,
+decision resolution, and UIL-061's owned-pull op (which does set the pointer) — all confirmed
+unaffected in the earlier passes above. This fifth path is the one none of those checks covered.
+Verified independently against `origin/develop`, matching FSD-1's read on the fix in progress.
+
 **Priority rationale.** High, per the Senior BA: this is the same silent-disagreement-with-reality
 class the log has repeatedly treated as High, on the screen whose whole job is showing her what she
 physically owns and where. Flagging for Karvi's confirmation since severity calls are hers.
