@@ -4982,3 +4982,48 @@ it, #154, merged `218ac0a`).**
 **Priority rationale.** Flagging for Claude's read and Karvi's confirmation — this could be a High if
 the ruling itself reverses (a design defect on the core placement flow), or a Low/wording fix if it's
 purely how the mismatch is explained. Her answer decides which.
+
+## UIL-070 — UIL-064's two unfixed parts, carried forward per her own "every report gets a number" rule after she chose to close the parent
+
+- **Reported:** 2026-09-17 (not from Karvi directly — she ruled to close UIL-064 after being told
+  plainly that two of its four selected problems were still unfixed; relayed by the Senior BA, who is
+  recording that closure on her explicit instruction)
+- **Status:** Open
+- **Priority:** Not yet rated (see rationale)
+- **Area:** Plan, Lines
+- **Env:** Testing
+
+Two of UIL-064's four originally-selected problems (both in her own words, from that entry's ruling)
+remain open. UIL-064 itself is being marked Closed on her explicit instruction, having been told what
+remained — this entry exists only because her standing rule is that every report gets its own number,
+not to quietly drop the two leftovers with the parent.
+
+**1. "Being sent away from the Haul Plan."** Confirmed still live, in two layers. `PlanScreen.openMove`
+([`app/(ui)/plan/PlanScreen.tsx:296-318`](../app/(ui)/plan/PlanScreen.tsx:296)) builds its
+`MoveTargetCard` with no `joinCandidates`, `existingLineByBand`, or `naturalBandKey`, and its
+`<MoveOverlay>` call site ([`PlanScreen.tsx:597-602`](../app/(ui)/plan/PlanScreen.tsx:597)) passes no
+`allowLineJoin` — so choosing the back half from the Plan spotlight still shows `MovePanel`'s
+plain-move fallback text, "Back-half moves choose a line. Do this from the Lines page." Even if that
+read half were wired up, the write half would silently drop the choice: `writeOverriddenCard`
+([`lib/plan/commit.ts`](../lib/plan/commit.ts), confirmed repeatedly elsewhere in this log this week)
+has no line side effects at all — the UIL-045 shape, a screen showing one thing and the write doing
+another. **This may be the same complaint as UIL-068** ("I should have the option to move the card
+anywhere"), just triggered from a different screen — both are about the line-first flow not offering a
+direct enough path to a non-line placement; worth reading together rather than as two independent asks.
+Fix direction on record: this should land as an **extraction** of the one derivation
+`lib/line/load.ts`'s `buildScreenModel` already performs for the Line screen, not a second
+implementation, and it should land together with whatever consumes it.
+
+**2. "It's somewhat buggy and the icons are not aligned."** Still unaddressed — no specifics from her
+by design, and no session has been able to open an authed screen to look. A layout-measurement pass on
+the Move panel (static render against `globals.css`, no server/auth needed) is owed and is the only
+verification available without one.
+
+**Cross-reference.** UIL-064 (the closed parent), UIL-045 (the display/write divergence shape #1
+repeats), UIL-056 (the manual line-creation UI all of this sits on top of), UIL-068 (the likely-same
+complaint from the Lines screen instead of the Haul Plan).
+
+**Priority rationale.** Deliberately left unrated rather than guessed. She chose to close the parent
+knowing #1 was open, which may mean she doesn't want it at all — rating it myself would assert an
+intent she hasn't stated. #2 is a defect she personally observed and should not sit unrated forever,
+but needs something to show her first.
