@@ -4805,3 +4805,64 @@ copy that never joins it. Verified nothing downstream re-derives band independen
 **Priority rationale.** High, per the Senior BA: reproduces an already-Fixed defect's exact symptom
 through a path the fix didn't cover, on the same core flow the log has repeatedly treated as High.
 Flagging for Karvi's confirmation since severity calls are hers.
+
+## UIL-066 — GitHub Actions billing lockout renders every check red, indistinguishable from a real test failure, for as long as it lasts
+
+- **Reported:** 2026-09-17 (not from Karvi — found by the tech lead during tonight's outage)
+- **Status:** Open
+- **Priority:** Medium (Senior BA's read — an ops/CI incident, not a product defect Karvi will see)
+- **Area:** Deploy
+- **Env:** CI (GitHub Actions)
+
+**Confirmed, independently, against the live account: this is real and ongoing as of this writing.**
+Since **02:57Z on 2026-09-17**, GitHub Actions has refused to start jobs on this account. Every run on
+`CI`, `Deploy`, and the `ops/read-band-config` diagnostic workflow since then shows `completed`/red —
+identical to a genuine test or migration failure in the Actions tab, with nothing there to tell the two
+apart. The actual reason is visible only through the check-run **annotations API**, verified verbatim
+just now:
+
+> "The job was not started because recent account payments have failed or your spending limit needs to
+> be increased. Please check the 'Billing & plans' section in your settings"
+
+**The cheap tell, worth recording as the standing diagnostic:** a run whose jobs report `steps: 0`
+never executed anything — it isn't a code or migration failure, it's the runner never starting.
+```bash
+gh api repos/viantihu/pokemon-tcg-tracker/actions/runs/<id>/jobs --jq '.jobs[].steps | length'
+```
+Confirmed on the latest run at time of writing: both `verify` and `migration-order` jobs report `0`
+steps, `started_at`/`completed_at` three seconds apart. Anyone triaging a red check from the Actions tab
+alone would reasonably read this as a broken build and re-run it — which cannot help, since nothing
+ever ran.
+
+**Why this earns its own entry rather than folding into a billing fix-and-move-on: app code kept
+shipping to Testing while migrations could not apply.** Vercel bills separately from GitHub Actions and
+kept deploying through the block, so the ordinary safeguard — CI's `migration-order` check gating a
+merge — was itself one of the blocked jobs. This is UIL-005's "deploy outruns the DB" condition
+returning by a different route, and worse this time: the schema read-back check added specifically to
+catch that class of drift is, itself, a GitHub Actions job, and therefore also blocked.
+
+**The luck, recorded plainly rather than assumed:** nothing that merged during the block touches a
+migration. Two commits landed after 02:57Z — `5d249f8` (`ci: run migration-order on push, not only on
+pull_request`, workflow config only) and `cce1bbe` (`docs(issue-log): ...`, status lines only, verified
+65 entries before and after). Neither is a migration or a product change, so Testing's schema is
+current at all 10 migrations and **no damage occurred this time.** This should not be trusted to hold
+if the block runs long — it is a fact about what happened to merge, not a property of the lockout
+itself.
+
+**Recovery order on record, since a future reader will need it more than the billing fix itself:**
+
+1. Re-run CI on **develop's tip**, not the sum of each PR's own (pre-merge) run — two commits merged
+   with zero validation during the block, and this repo has independently produced a clean-merge that
+   doesn't build four times in one day even under normal conditions.
+2. Confirm `migrate` reports all 10 migrations applied on that tip. This closes the "is code ahead of
+   schema" question with evidence, not reasoning from what's believed to have merged.
+3. Then the held migration `0011`, then Testing's re-counts, then the variant check — in that order.
+
+**Merge policy for the duration:** anything with a migration or a product change is frozen. Docs-only
+issue-log PRs remain safe to merge, since they touch nothing CI validates — this entry itself was
+written and merged under that exception.
+
+**Priority rationale.** Medium, per the Senior BA: an infrastructure incident invisible to Karvi and
+already self-limiting once billing is resolved, not a product defect — but High-adjacent in effect
+while it lasts, since it silently removed the one automated check standing between a merge and a
+schema mismatch.
