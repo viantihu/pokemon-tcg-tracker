@@ -49,7 +49,22 @@ function toLookupCard(r: Row<"catalog_card">): LookupCard {
   };
 }
 
-/** Type-ahead against the local mirror. Returns [] on error so typing never breaks. */
+/**
+ * Type-ahead against the local mirror.
+ *
+ * THROWS on failure rather than returning `[]` (UIL-035). It used to swallow everything, so a Supabase
+ * outage, an expired session and a genuinely unknown card all produced the same empty dropdown reading
+ * "No match in the local mirror" — telling her the card does not exist when the truth was that nothing
+ * was asked. During an outage that is the single most misleading thing the app could say.
+ *
+ * Deliberately a throw and not a result union: `CardLookup`'s `search` prop is
+ * `(q) => Promise<LookupCard[]>` and five screens across three different owners pass their own
+ * implementation into it. Widening that type would force edits in files this change has no business
+ * touching, whereas throwing keeps the signature identical and lets the shared component distinguish
+ * the two cases for every caller at once — including the ones I am not editing.
+ *
+ * An empty array now means exactly one thing: the mirror was asked and had nothing.
+ */
 export async function lookupCatalog(query: string): Promise<LookupCard[]> {
   const q = query.trim();
   if (q.length < 2) return [];
@@ -57,8 +72,8 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
     const { db } = await getOwnerContext();
     const rows = await catalogCardRepo.search(db, q, 12);
     return rows.map(toLookupCard);
-  } catch {
-    return [];
+  } catch (err) {
+    throw new Error(`Could not search the catalog: ${errorMessage(err)}`);
   }
 }
 
