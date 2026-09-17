@@ -3029,7 +3029,23 @@ the one screen built for verifying them. Flagging for her confirmation since sev
 ## UIL-038 — No concept of a draft collection; saving is immediately live
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009, not the same defect — see note below)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#126](https://github.com/viantihu/pokemon-tcg-tracker/pull/126) MERGED to
+  `develop` 2026-09-16 (squash `e1f6a45`), QA-gated on the merged tree with the guards mutation-verified,
+  confirmed **deployed** to Testing (Vercel / migrate / smoke / acceptance all green on `075f170`).
+  **Scoped from Karvi's own answer to what "draft" protects against — losing in-progress work, not hiding
+  half-built collections** — so no `status` gating and no migration. The editor now creates the collection
+  the moment it opens and autosaves each edit (debounced, serialized so a fast name-then-binder edit can't
+  land out of order); closing an entirely empty one (no name AND no targets AND untouched binder) deletes
+  it; an incomplete collection carries a **Draft** badge. **UIL-009's "discard changes?" confirm is
+  removed by design** — with nothing left to lose there is nothing to discard; recorded here because it is
+  a visible behaviour change on a screen she has already confirmed, not a regression. Reversibility split
+  held: name edits and target adds autosave, while **target removal and binder rebind stay an explicit
+  click** with the UIL-014 / UIL-040 refusals surfacing inline, so a stray click cannot take effect before
+  she notices. One defect QA found and the UX Dev fixed on the same head: an existing collection could
+  lose its binder if she opened "+ New binder" and then edited any other field before naming it — the
+  server now falls back to the collection's current binder when the pick is unresolved. No component-render
+  test infrastructure exists in this repo, so the click/type/close wiring is covered at the server and
+  scheduler layers rather than through the DOM. Awaiting Karvi's confirmation.
 - **Priority:** Unscoped — needs Karvi's clarification before a priority means anything
 - **Area:** Collections
 - **Env:** Testing
@@ -3869,7 +3885,29 @@ The orientation fix is cosmetic and could ship separately as Low.
 ## UIL-056 — Evolution lines can't be created manually, so Basics and non-viable lines strand with no recovery
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet — two reports, one root cause)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#120](https://github.com/viantihu/pokemon-tcg-tracker/pull/120) MERGED to
+  `develop` 2026-09-16 (squash `79eb187`), QA-gated on the merged tree, confirmed **deployed** to Testing
+  (all four conditions green). Shipped: a back-half move now resolves a line — join an existing line's open
+  slot (candidates listed with band and filled/total so two lines for one species are distinguishable) or
+  **start a new line**, which builds the family's slots from the chain walk; a "NOT IN A LINE YET" section
+  on the Lines page lists shelved line-less cards, **without which the fix would have been correct but
+  unreachable** for an already-stranded Basic. Done as an additive optional `lineJoin` on the `shelf`
+  destination rather than a new `MoveDestination` variant, so the Plan and Collections paths are untouched.
+  Two real defects were found while building it and are fixed here: the existing-line check compared the
+  moved card's own dexId instead of the chain's root (which could have created a second colliding line —
+  the `(root_dex_id, color_band)` pair has an index, not a unique constraint, so nothing downstream would
+  have caught it), and "start a new line" ignored the band she picked in favour of the card's natural type
+  band. A third, found by QA and fixed on the same head: the back-half-needs-a-line rule was enforced only
+  in the panel's Confirm button, so `applyMove` itself now checks it — an existing test was silently
+  reproducing the very strand this entry describes. On the Plan spotlight and Collections, where the line
+  picker is not offered, the panel now defaults to the front half and says "Back-half moves choose a line.
+  Do this from the Lines page" rather than presenting a destination it can never confirm. **Not fixed here,
+  by decision:** line-join from the Plan spotlight (owed with UIL-061), pulling other owned family members
+  into a newly started line, and the picker on an already-lined card's move. **Test debt recorded rather
+  than logged as entries:** the destination-band override inside slot generation and the unlined-cards
+  filter are correct by reading but not pinned by a test, and "start a new line" reads the catalog uncached
+  (~24 pages) where the plan path uses the cache — a rare manual action, not a blocker. Awaiting Karvi's
+  confirmation.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Plan, Lines
 - **Env:** Testing
