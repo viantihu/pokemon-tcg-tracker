@@ -11,7 +11,9 @@
  * Client-driven: loads via `loadCollHub` on mount and re-loads after each mutation.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { MoveDestination } from "@/lib/line/types";
 import {
   buildWishlistCopyText,
@@ -93,6 +95,9 @@ export function CollHub() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [logFor, setLogFor] = useState<CollectionView | null>(null);
   const [removeFor, setRemoveFor] = useState<RemovalTarget | null>(null);
+  const searchParams = useSearchParams();
+  const editParam = searchParams.get("edit");
+  const consumedEditParam = useRef<string | null>(null);
 
   // Reused by mutation handlers. setState lands only inside .then/.catch (never synchronously).
   const refresh = useCallback(
@@ -122,6 +127,17 @@ export function CollHub() {
       alive = false;
     };
   }, []);
+
+  // Returning from "Search & add cards" (UIL-039) reopens the editor on the same collection rather
+  // than dropping her back on the plain list — the link out of the editor and the link back in have
+  // to agree, or "Back to collection" is a worse regression than the inline add it replaces. Fires
+  // once per `edit` value: closing the editor herself afterward must not reopen it.
+  useEffect(() => {
+    if (!data || !editParam || consumedEditParam.current === editParam) return;
+    consumedEditParam.current = editParam;
+    const col = data.collections.find((c) => c.id === editParam);
+    if (col) openEdit(col);
+  }, [data, editParam]);
 
   async function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
     setBusy(true);
@@ -828,23 +844,6 @@ function CollectionEditor(props: {
     return () => window.removeEventListener("keydown", onKey);
   }, [requestClose]);
 
-  function addTarget(card: LookupCard) {
-    if (state.targets.some((t) => t.tcgdexId === card.tcgdexId)) return;
-    passiveChange({
-      ...state,
-      targets: [
-        ...state.targets,
-        {
-          tcgdexId: card.tcgdexId,
-          name: card.name,
-          setName: card.setName,
-          localId: card.localId,
-          owned: false,
-        },
-      ],
-    });
-  }
-
   /**
    * Drop a card from the chase list. UIL-014 defect 2: this only ever edited the draft, and
    * `saveCollection` persisted it as `target_catalog_card_ids` without touching the `copy` row — so for
@@ -977,7 +976,9 @@ function CollectionEditor(props: {
               <div className="cerow-h u">
                 Set list — the cards you chase. Owned status is derived from your shelf.
               </div>
-              <CardLookup search={searchCatalog} onPick={addTarget} placeholder="Add a card…" />
+              <Link href={`/coll/search?collectionId=${state.id}`} className="btn u">
+                Search &amp; add cards →
+              </Link>
               <div className="celist">
                 {state.targets.map((t) => (
                   <div key={t.tcgdexId} className={"cerow" + (t.owned ? " own" : "")}>
@@ -1004,7 +1005,9 @@ function CollectionEditor(props: {
                   </div>
                 ))}
                 {state.targets.length === 0 && (
-                  <div className="cehint u">No cards yet. Search above to build the set list.</div>
+                  <div className="cehint u">
+                    No cards yet. Search &amp; add cards above to build the set list.
+                  </div>
                 )}
               </div>
               {state.targets.some((t) => t.owned) && (

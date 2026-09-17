@@ -35,6 +35,25 @@ export const copyRepo = {
   },
 
   /**
+   * Every catalog card she holds ANYWHERE, at least once — shelved or bulk (a `block` marks a slot
+   * no card can ever fill, not a physical card she owns, same exclusion as UIL-048's
+   * `findExistingCopy`). Paged past the row cap: the search grid (UIL-039) uses this both to badge
+   * "owned" on a page of results and, as an id list, to filter to owned/unowned at the DB level so
+   * pagination stays correct (excluding after the fact would make a page's count a lie).
+   */
+  async ownedCatalogCardIdSet(db: DbClient): Promise<Set<string>> {
+    const rows = await pageFiltered<{ catalog_card_id: string }>("copy", (from, to) =>
+      db
+        .from("copy")
+        .select("catalog_card_id")
+        .in("role", ["shelved", "bulk"])
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+    return new Set(rows.map((r) => r.catalog_card_id));
+  },
+
+  /**
    * Copies that hold NO placement: in the bulk box, in no binder, in no line slot. This is the raw
    * candidate set for the Haul Plan's pending-placement queue (UIL-003) — the shape sync's `creates`
    * and manual-match leave behind (`role: 'bulk'`, everything else null; lib/sync/exec.ts). It also
