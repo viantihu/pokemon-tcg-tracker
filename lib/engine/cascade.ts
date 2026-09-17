@@ -9,7 +9,10 @@
  *   3. DUPLICATE          → bulk, or a holo-swap; checked against SHELVED copies only
  *   4. LINE PARTICIPATION → fill an existing slot (Basic or Stage 1/2), or — Stage 1/2 only —
  *      extend/create a viable line (UIL-063: a Basic can JOIN an existing line but never CREATE
- *      one; manual creation from a single card is her call, not the cascade's — UIL-056)
+ *      one; manual creation from a single card is her call, not the cascade's — UIL-056). An
+ *      existing line is matched by SPECIES ALONE, never band (UIL-065): her manually-created lines
+ *      live in whatever band she picked, not the card's natural one, and a card joining one takes
+ *      the LINE's band, not its own.
  *   5. BASIC, no existing line → front half, matching band
  *   6. TRAINER/…          → front half, White band
  *
@@ -166,15 +169,20 @@ function newLineBinderId(ctx: EngineContext): string | null {
   return (roomiest ?? active ?? generalBinders(ctx)[0])?.id ?? null;
 }
 
-/** Find an existing line (unique per species-chain + colour) whose slot matches the incoming stage. */
+/**
+ * Find an existing line whose slot matches the incoming stage — by species (dexId) ALONE, not band
+ * (UIL-065). A line's band is her own free pick (UIL-056 "start a new line"), not something the
+ * cascade derives from the card's type, so filtering this lookup on the card's natural band made a
+ * manually-banded line invisible to every future card of that species forever — silently defeating
+ * UIL-063's fix for exactly the lines she built herself. The caller takes the LINE's own band for
+ * placement (`existing.line.colorBand`), not the card's — she chose where the line physically lives.
+ */
 function existingLineSlot(
   incoming: IncomingCard,
   ctx: EngineContext,
-  b: Band,
 ): { line: EvolutionLine; slot: LineSlotRecord } | null {
   const dexId = incoming.card.dexId[0];
   for (const line of ctx.lines) {
-    if (line.colorBand !== b) continue;
     const slot = line.slots.find((s) => s.dexId === dexId);
     if (slot) return { line, slot };
   }
@@ -206,10 +214,17 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
       },
     };
     // If a line still needs this stage, it keeps its placeholder and we list priced alternates.
-    const needed = existingLineSlot(incoming, ctx, b);
+    // Matched by species alone (UIL-065) — a manually-banded line still needs this stage regardless
+    // of the claimed card's own natural band, and alternates are ranked in the LINE's band, since
+    // that is the band the eventual copy would actually have to match.
+    const needed = existingLineSlot(incoming, ctx);
     if (needed && needed.slot.state !== "filled") {
+      // `EvolutionLine.colorBand` is a plain string (a persisted DB-key); `Band` is nominal
+      // display-space, but production already trusts DB-key strings through it everywhere else in
+      // this file (see `PlacementTarget.band`'s own docs elsewhere) — same trust here.
+      const lineBand = needed.line.colorBand as Band;
       // The claimed copy lives in the specialty binder, so it is not itself an alternate to chase.
-      const alt = rankAlternates(incoming.card.dexId[0], b, ctx.catalog, map, priceOf, [
+      const alt = rankAlternates(incoming.card.dexId[0], lineBand, ctx.catalog, map, priceOf, [
         incoming.card.tcgdexId,
       ]);
       result.wishlist = [
@@ -226,7 +241,7 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
       result.proposals = [
         {
           kind: "collection-vs-line",
-          reason: `The ${b} line still needs its ${needed.slot.stage}; its slot stays a placeholder and these printings are proposed cheapest first.`,
+          reason: `The ${lineBand} line still needs its ${needed.slot.stage}; its slot stays a placeholder and these printings are proposed cheapest first.`,
           lineId: needed.line.id,
           stageIndex: needed.slot.stageIndex,
         },
@@ -294,17 +309,24 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
   const isLineStage = incoming.card.stage === "Stage1" || incoming.card.stage === "Stage2";
   const isBasic = incoming.card.stage === "Basic";
   if (isLineStage || isBasic) {
-    const existing = existingLineSlot(incoming, ctx, b);
+    // Matched by species alone (UIL-065) — see existingLineSlot's docstring.
+    const existing = existingLineSlot(incoming, ctx);
     if (existing) {
+      // The LINE's own band, not the card's natural one: she chose where the line physically lives
+      // (UIL-056), and deriving placement from the line is the same inversion UIL-064's picker
+      // already made in the UI — the engine should agree with it, not contradict it. Cast for the
+      // same reason as STEP 1 above — `colorBand` is a persisted DB-key string, not the nominal
+      // display-space `Band` union.
+      const lineBand = existing.line.colorBand as Band;
       if (existing.slot.state === "placeholder" || existing.slot.state === "block") {
         return {
           ...head,
           step: "line-existing",
-          reason: `Fills the open ${existing.slot.stage} slot of the existing ${b} line, in the back half.`,
+          reason: `Fills the open ${existing.slot.stage} slot of the existing ${lineBand} line, in the back half.`,
           target: {
             kind: "back-half-line",
             binderId: existing.line.binderId,
-            band: b,
+            band: lineBand,
             lineId: existing.line.id,
             stageIndex: existing.slot.stageIndex,
           },
@@ -314,11 +336,13 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
           },
         };
       }
-      // Slot already filled → this stage is tracked once; the extra copy goes to the front half.
+      // Slot already filled → this stage is tracked once; the extra copy goes to the front half,
+      // in ITS OWN natural band — the front half is not the line, so her band choice for the line
+      // does not follow this spare copy there.
       return {
         ...head,
         step: "line-existing",
-        reason: `The ${b} line already holds this stage; the extra copy goes to the front half (lines tracked once).`,
+        reason: `The ${lineBand} line already holds this stage; the extra copy goes to the front half (lines tracked once).`,
         target: { kind: "front-half", binderId: frontHalfBinderId(ctx, b), band: b },
       };
     }
