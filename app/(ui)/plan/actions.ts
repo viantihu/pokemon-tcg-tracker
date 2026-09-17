@@ -24,6 +24,7 @@ import {
   planFromDraft,
   type DraftItem,
   type PlanItem,
+  type ProposedPull,
 } from "@/lib/plan";
 import { loadMoveOptions, type MoveOptions } from "@/lib/line";
 import type { MoveDestination } from "@/lib/line/types";
@@ -171,6 +172,8 @@ export async function shelveCardAction(input: {
    * somewhere she did not read off the screen and physically use.
    */
   expectedDigest?: string | null;
+  /** Copy ids she ticked to move into the line this card starts (UIL-061). Absent ⇒ move nothing. */
+  confirmedPulls?: string[];
 }): Promise<
   | { ok: true; haulId: string | null; counts: CommitCounts; stamp: string }
   /**
@@ -195,6 +198,7 @@ export async function shelveCardAction(input: {
       override: input.override ?? null,
       haulId: input.haulId ?? null,
       expectedDigest: input.expectedDigest ?? null,
+      confirmedPulls: input.confirmedPulls ?? [],
     });
     const stamp = await loadPlanFingerprint(db, input.pendingCopyIds ?? []);
     return { ok: true, haulId: res.haulId, counts: res.counts, stamp };
@@ -225,7 +229,8 @@ export async function shelveCardAction(input: {
 export async function refreshSpotlightAction(input: {
   card: DraftPayloadItem;
 }): Promise<
-  { ok: true; item: PlanItem | null; digest: string | null } | { ok: false; error: string }
+  | { ok: true; item: PlanItem | null; digest: string | null; proposedPulls: ProposedPull[] }
+  | { ok: false; error: string }
 > {
   try {
     const { db } = await getOwnerContext();
@@ -243,7 +248,12 @@ export async function refreshSpotlightAction(input: {
     const res = await deriveSpotlightPlacement(db, card, {
       excludeOwnedCopyIds: existingCopyIds([card]),
     });
-    return { ok: true, item: res?.item ?? null, digest: res?.digest ?? null };
+    return {
+      ok: true,
+      item: res?.item ?? null,
+      digest: res?.digest ?? null,
+      proposedPulls: res?.proposedPulls ?? [],
+    };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }

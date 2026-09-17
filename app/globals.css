@@ -2832,3 +2832,81 @@ nav.menu .tab .n {
   background: var(--note);
   color: var(--ink);
 }
+/* UIL-061 — the cards of HERS a new line would relocate, each an explicit tick.
+
+   Why this exists rather than a count: the spotlight used to say "starts a new
+   line for X (3 same-colour cards so far)" while the write silently moved those
+   cards out of wherever they were. A number is not disclosure — she cannot check
+   a number against her binder. These rows name the card and where it is now.
+
+   Amber `--note`, not the error pink: nothing is wrong, she is being asked. Sits
+   directly above the Done button so it is the last thing read before the click. */
+.pulls {
+  margin-top: 10px;
+  border: 2px solid var(--ink);
+  border-radius: 2px;
+  background: var(--note);
+}
+.pulls .pullhead {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  border-bottom: 2px solid var(--ink);
+}
+.pulls .pullhead b {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.pulls .pullhead span {
+  /* Prose, so it opts out of the uppercase the `u` label above uses — three lines of
+     capitals on a phone is what UIL-045's badge got wrong. */
+  text-transform: none;
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--ink-2);
+}
+.pullrow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  cursor: pointer;
+  /* `min-width: 0` + wrapping: a long binder · half · band label must wrap, not widen
+     the panel (the UIL-007 sideways-scroll failure). */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+}
+.pullrow:first-of-type {
+  border-top: 0;
+}
+.pullrow.on {
+  background: rgba(255, 255, 255, 0.45);
+}
+.pullrow input {
+  /* Big enough to hit while holding cards — the same reason the band header is the
+     control rather than a 20px caret. */
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  accent-color: var(--ink);
+}
+.pullrow .pullnm {
+  font-size: 12px;
+  min-width: 0;
+}
+.pullrow .pullfrom {
+  font-size: 10px;
+  color: var(--ink-2);
+  min-width: 0;
+}
+.pullrow .pullwarn {
+  font-size: 9px;
+  padding: 1px 5px;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  background: var(--panel);
+}

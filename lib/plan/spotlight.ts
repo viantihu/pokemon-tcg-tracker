@@ -49,7 +49,7 @@
  */
 
 import { band, placeCard, type CascadeResult, type PlacementTarget } from "@/lib/engine";
-import type { DbClient } from "@/lib/repo";
+import type { DbClient, Row } from "@/lib/repo";
 import { buildIncoming, loadPlanContext, type DraftItem, type PlanContext } from "./context";
 import { toPlanItem } from "./assemble";
 import type { PlanItem } from "./types";
@@ -88,11 +88,35 @@ export function placementDigest(result: CascadeResult): string {
   return parts.join("|");
 }
 
+/**
+ * A card of HERS the cascade wants to relocate into the line this card would start (UIL-061).
+ *
+ * Disclosure, not a decision: each one has to be ticked before it moves. `generateSlots` fills a new
+ * line's stages from her whole collection, so without naming these the panel says "starts a new line"
+ * while the write quietly relocates cards she never touched.
+ */
+export interface ProposedPull {
+  copyId: string;
+  /** Card name, so the row reads as a card and not an id. */
+  name: string;
+  /** Where it is NOW, in the same vocabulary the rest of the screen uses. */
+  fromLabel: string;
+  /** Which stage of the new line it would fill, for ordering. */
+  stageIndex: number;
+  /** True when it currently occupies another line's slot — worth saying, it leaves that line short. */
+  fromLine: boolean;
+}
+
 export interface SpotlightPlacement {
   /** The row to display — freshly derived, so it names the pocket the write will actually use. */
   item: PlanItem;
   /** Sent back with the Done click; the write refuses if its own derivation disagrees. */
   digest: string;
+  /**
+   * Cards of hers this placement would move. Empty for everything except a new line with owned chain
+   * members. Nothing here moves unless its `copyId` comes back in `confirmedPulls`.
+   */
+  proposedPulls: ProposedPull[];
 }
 
 /**
@@ -123,5 +147,52 @@ export function derivePlacementFrom(pc: PlanContext, card: DraftItem): Spotlight
   return {
     item: toPlanItem(incoming, result, bandKey, pc.lookups),
     digest: placementDigest(result),
+    proposedPulls: proposedPullsFor(result, pc, card.id),
   };
+}
+
+/**
+ * The owned copies a new-line placement would relocate.
+ *
+ * Reads the slots the engine already produced rather than re-deriving the chain — the engine is the one
+ * authority on which copies a line claims, and a second walk here could disagree with the one the write
+ * uses, which is the drift UIL-045 exists to prevent.
+ *
+ * Deliberately NOT filtered by `pullFrom`. `pullFrom` is only set for a front-half shelved copy, but the
+ * writer moves ANY owned copy the slot names — `ownedAt` matches species + band with no role filter — so
+ * a copy in bulk, a block, a specialty binder or another line's slot is equally in scope. Disclosing only
+ * the `pullFrom` ones would under-report exactly the cases nobody expected (UIL-061, UIL-062).
+ */
+function proposedPullsFor(
+  result: CascadeResult,
+  pc: PlanContext,
+  incomingId: string,
+): ProposedPull[] {
+  const slots = result.newLine?.slots;
+  if (!slots) return [];
+  const out: ProposedPull[] = [];
+  for (const slot of slots) {
+    if (!slot.copyId || slot.copyId === incomingId) continue;
+    const row = pc.copyRowById.get(slot.copyId);
+    if (!row) continue;
+    const card = pc.catalogById.get(row.catalog_card_id);
+    out.push({
+      copyId: slot.copyId,
+      name: card?.name ?? row.catalog_card_id,
+      fromLabel: describeCurrentPlacement(row, pc),
+      stageIndex: slot.stageIndex,
+      fromLine: row.line_slot_id !== null,
+    });
+  }
+  return out;
+}
+
+/** Where a copy sits right now, in the screen's own vocabulary. */
+function describeCurrentPlacement(row: Row<"copy">, pc: PlanContext): string {
+  if (row.role === "bulk") return "Bulk box";
+  if (row.role === "block") return "A binder block";
+  const binder = (row.binder_id && pc.lookups.binderNameById.get(row.binder_id)) || "Binder";
+  const half = row.binder_half === "front" ? "Front" : row.binder_half === "back" ? "Back" : null;
+  const band = row.color_band ? pc.lookups.bandDisplayByKey.get(row.color_band) : null;
+  return [binder, half, band].filter(Boolean).join(" · ");
 }

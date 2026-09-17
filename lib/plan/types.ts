@@ -58,6 +58,16 @@ export interface PlannedCard {
    */
   existingCopyId?: string | null;
   result: CascadeResult;
+  /**
+   * Copy ids she has EXPLICITLY agreed to relocate into the line this card starts (UIL-061).
+   *
+   * The cascade proposes pulls: `generateSlots` fills a new line's stages from `ctx.owned` — her whole
+   * collection — so starting a line can relocate cards she never touched. Absent or empty means MOVE
+   * NOTHING, and every unconfirmed stage stays a placeholder. That default is the point: consent is
+   * opt-in, so a caller that forgets to thread this through under-moves rather than silently moving
+   * inventory. Her words: "the user must validate each and every single line."
+   */
+  confirmedPulls?: string[];
 }
 
 /** A basics or non-basics run inside a band, rows already action-ordered. */
