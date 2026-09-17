@@ -420,7 +420,34 @@ jobs:
               line_ids=$(printf '%s' "$slotrows" | jq -r '[.[].line_id] | unique | join(",")')
               linerows=$(fetch_rows_early "evolution_line?select=id,color_band,binder_id,half,created_at&id=in.($line_ids)")
               copyrows=$(fetch_rows_early "copy?select=id,binder_id,binder_half,color_band,role,line_slot_id&id=in.($drifted)")
-              decisions=$(fetch_rows_early "placement_decision?select=copy_id,created_at&copy_id=in.($drifted)&order=created_at.asc")
+              # `placement_decision.copy_id` is the ONLY copy reference on the table (0002:222-231) —
+              # there is no separate incoming/draft id — so this is the whole picture per copy.
+              #
+              # HYPOTHESIS BEING TESTED: a SECOND "Done" on an already-placed copy (a plan resumed from
+              # sessionStorage still listing it) re-runs the incoming-copy write with `line_slot_id`
+              # null and re-shelves it, leaving the slot filled and naming it. >=2 decisions on ANY of
+              # the five confirms it; exactly 1 each refutes it.
+              decisions=$(fetch_rows_early "placement_decision?select=copy_id,created_at,decision,resolved_by,haul_id&copy_id=in.($drifted)&order=created_at.asc")
+              if printf '%s' "$decisions" | jq -e 'type == "array"' > /dev/null 2>&1; then
+                echo "  placement_decision rows per drifted copy:"
+                printf '%s' "$decisions" | jq -r '
+                  group_by(.copy_id)
+                  | map(length)
+                  | group_by(.)[]
+                  | "    \(.[0]) decision(s): \(length) cop(y|ies)"'
+                echo "  distinct drifted copies with >=1 decision: $(printf '%s' "$decisions" | jq '[.[].copy_id] | unique | length') of 5"
+                echo "  by (decision, resolved_by):"
+                printf '%s' "$decisions" | jq -r 'group_by([.decision, .resolved_by])[] | "    \(.[0].decision) / \(.[0].resolved_by)  x\(length)"'
+                echo "  distinct haul_ids across them: $(printf '%s' "$decisions" | jq '[.[].haul_id] | unique | length')"
+                maxdec=$(printf '%s' "$decisions" | jq '[group_by(.copy_id)[] | length] | max // 0')
+                if [ "${maxdec:-0}" -ge 2 ]; then
+                  echo "  VERDICT: at least one drifted copy has $maxdec decisions — CONFIRMS the double-Done hypothesis (a resumed plan re-committing an already-placed copy)."
+                else
+                  echo "  VERDICT: every drifted copy has exactly one decision — REFUTES the double-Done hypothesis. The pointer was missed on the FIRST and only commit, not overwritten by a second."
+                fi
+              else
+                echo "::warning::could not read placement_decision for the drifted copies."
+              fi
               if printf '%s' "$slotrows" | jq -e 'type == "array"' > /dev/null 2>&1 \
                  && printf '%s' "$linerows" | jq -e 'type == "array"' > /dev/null 2>&1 \
                  && printf '%s' "$copyrows" | jq -e 'type == "array"' > /dev/null 2>&1; then
