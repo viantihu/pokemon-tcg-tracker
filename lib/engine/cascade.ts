@@ -250,31 +250,47 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
     return result;
   }
 
-  // STEP 2 — CARD CLASS. Specialty class → specialty binder.
-  if (incoming.card.cardClass === "specialty") {
-    return {
-      ...head,
-      step: "card-class",
-      reason: `cardClass = specialty (${incoming.card.rarity ?? "specialty"}); routes to the specialty binder.`,
-      target: { kind: "specialty", binderId: specialtyBinderId(ctx), collectionId: null },
-    };
-  }
-
-  // STEP 3 — DUPLICATE, vs SHELVED copies only. Holo-swap, else bulk.
+  /**
+   * STEP 2 — DUPLICATE, vs SHELVED copies only. Holo-swap, else bulk.
+   *
+   * BEFORE the card-class check, deliberately (UIL-049). Her rule: "All cards, regardless of whether
+   * they are specialty or not, must be suggested as 'Bulk' if they are duplicates." Card class used to
+   * return first, so a specialty printing that duplicated something already shelved went to the
+   * specialty binder — the opposite of that. A reordering, not a removal: a specialty card that is NOT a
+   * duplicate still routes to the specialty binder in the step below.
+   *
+   * Narrow by construction: `resolveDuplicate` keys on `artworkGroupId` or the same `(setId, localId)`,
+   * and a full-art specialty usually has different art from the standard print — so this fires for a
+   * second copy of the SAME specialty printing, which is the case she described.
+   */
   const dup = resolveDuplicate(incoming.card, incoming.variant, ctx.owned, ctx.openBlockNeeds ?? 0);
   if (dup.kind === "holo-swap") {
     const inherit = dup.swap.incomingInherits;
     const inheritedBand = (inherit.colorBand as Band) ?? b;
+    /**
+     * A displaced copy with NO binder half was in a specialty binder, which has neither halves nor
+     * colour bands (system-design §4). Inheriting its place therefore means a `specialty` target, not a
+     * front half.
+     *
+     * This branch only became reachable when UIL-049 moved the duplicate check above the card-class
+     * check: before that a specialty card returned at card-class and never reached the swap. Without it
+     * the swap emitted `{kind: "front-half", binderId: <the specialty binder>}` — a combination the write
+     * layer cannot express, since `placementForMove` clears half and band for a collection destination.
+     * The issue entry recorded this interaction as already safe; it was not, and the test above is what
+     * caught it.
+     */
     const target: PlacementTarget =
-      inherit.binderHalf === "back" && inherit.lineSlotId
-        ? {
-            kind: "back-half-line",
-            binderId: inherit.binderId,
-            band: inheritedBand,
-            lineId: "inherited",
-            stageIndex: -1,
-          }
-        : { kind: "front-half", binderId: inherit.binderId, band: inheritedBand };
+      inherit.binderHalf === null
+        ? { kind: "specialty", binderId: inherit.binderId, collectionId: null }
+        : inherit.binderHalf === "back" && inherit.lineSlotId
+          ? {
+              kind: "back-half-line",
+              binderId: inherit.binderId,
+              band: inheritedBand,
+              lineId: "inherited",
+              stageIndex: -1,
+            }
+          : { kind: "front-half", binderId: inherit.binderId, band: inheritedBand };
     return {
       ...head,
       step: "duplicate",
@@ -299,6 +315,19 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
         dup.offerBlockRepurpose ? " Offered as a repurposed binder block." : ""
       }`,
       target: { kind: "bulk" },
+    };
+  }
+
+  // STEP 3 — CARD CLASS. Specialty class → specialty binder.
+  //
+  // Now AFTER the duplicate check (UIL-049), so a duplicate specialty printing is bulked rather than
+  // shelved a second time. Unchanged for every non-duplicate specialty card.
+  if (incoming.card.cardClass === "specialty") {
+    return {
+      ...head,
+      step: "card-class",
+      reason: `cardClass = specialty (${incoming.card.rarity ?? "specialty"}); routes to the specialty binder.`,
+      target: { kind: "specialty", binderId: specialtyBinderId(ctx), collectionId: null },
     };
   }
 
