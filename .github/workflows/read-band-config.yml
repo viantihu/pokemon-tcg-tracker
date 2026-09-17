@@ -396,6 +396,57 @@ jobs:
               else
                 echo "::warning::could not re-fetch the drifted copies — B remains unsplit."
               fi
+
+              # ---- DID THEY EVER LEAVE? FSD-2 traced every Move path on develop and found they all
+              # reopen the vacated slot, so "moved out, slot not cleared" may be wrong. The alternative
+              # is that the copy NEVER received its line_slot_id at commit time — a deferred-pointer
+              # miss in the haul commit's line-new / fill-existing-slot write.
+              #
+              # The discriminator is geometry. `evolution_line.half` is `check (half = 'back')`, so a
+              # line ALWAYS lives in the back half of its binder. So if a drifted copy sits in the SAME
+              # binder, in the BACK half, in the SAME band as its slot's line, it is exactly where that
+              # slot would have put it — it never left, and the pointer was simply never written.
+              # A different binder, the front half, or a different band means it genuinely moved.
+              #
+              # NOTE: `line_slot` has no `created_at` column, so the slot-vs-decision timestamp compare
+              # is not available. `evolution_line.created_at` is, and is used instead.
+              echo "  did they ever leave? (line.half is always 'back', so geometry decides)"
+              naming=$(jq -rn --argjson s "$slots" --argjson c "$slotcopies" '
+                ($c | map({key: .id, value: .line_slot_id}) | from_entries) as $back
+                | [ $s[] | select(.state == "filled" and .copy_id != null)
+                    | select(($back[.copy_id] // null) != .id) ] ')
+              slot_ids=$(printf '%s' "$naming" | jq -r '[.[].id] | join(",")')
+              slotrows=$(fetch_rows_early "line_slot?select=id,line_id,copy_id,stage_index&id=in.($slot_ids)")
+              line_ids=$(printf '%s' "$slotrows" | jq -r '[.[].line_id] | unique | join(",")')
+              linerows=$(fetch_rows_early "evolution_line?select=id,color_band,binder_id,half,created_at&id=in.($line_ids)")
+              copyrows=$(fetch_rows_early "copy?select=id,binder_id,binder_half,color_band,role,line_slot_id&id=in.($drifted)")
+              decisions=$(fetch_rows_early "placement_decision?select=copy_id,created_at&copy_id=in.($drifted)&order=created_at.asc")
+              if printf '%s' "$slotrows" | jq -e 'type == "array"' > /dev/null 2>&1 \
+                 && printf '%s' "$linerows" | jq -e 'type == "array"' > /dev/null 2>&1 \
+                 && printf '%s' "$copyrows" | jq -e 'type == "array"' > /dev/null 2>&1; then
+                jq -rn --argjson sl "$slotrows" --argjson ln "$linerows" --argjson cp "$copyrows" '
+                  ($ln | map({key: .id, value: .}) | from_entries)  as $lineById
+                  | ($cp | map({key: .id, value: .}) | from_entries) as $copyById
+                  | [ $sl[]
+                      | . as $slot
+                      | ($lineById[$slot.line_id]) as $line
+                      | ($copyById[$slot.copy_id]) as $copy
+                      | {
+                          same_binder: ($copy != null and $line != null and $copy.binder_id == $line.binder_id),
+                          back_half:   ($copy != null and $copy.binder_half == "back"),
+                          same_band:   ($copy != null and $line != null and $copy.color_band == $line.color_band),
+                          line_half:   ($line.half // "?")
+                        } ]
+                  | map(. + {verdict: (if (.same_binder and .back_half and .same_band)
+                                       then "NEVER LEFT (pointer never written)"
+                                       else "genuinely moved out" end)})
+                  | group_by([.verdict, .same_binder, .back_half, .same_band])[]
+                  | "    \(.[0].verdict)  [same_binder=\(.[0].same_binder) back_half=\(.[0].back_half) same_band=\(.[0].same_band)]  x\(length)"'
+                echo "  earliest/latest placement_decision on these copies: $(printf '%s' "$decisions" | jq -r 'if type=="array" and length>0 then "\(.[0].created_at) .. \(.[-1].created_at)  (\(length) rows)" else "none" end')"
+                echo "  their lines were created: $(printf '%s' "$linerows" | jq -r '[.[].created_at] | if length>0 then "\(min) .. \(max)" else "?" end')"
+              else
+                echo "::warning::could not read the slot/line/copy triple — the never-left check is undetermined."
+              fi
             fi
           else
             echo "::warning::could not read line_slot or copy — UIL-061 integrity undetermined."
