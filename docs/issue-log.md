@@ -4655,7 +4655,11 @@ standing confirmed defect. Flagging for Karvi's confirmation since severity call
   put to her, all four selected verbatim: "It's somewhat buggy and the icons are not aligned" / "Too
   many picks; it should ask for the line" / "Being sent away from the Haul Plan" / "The list of cards
   not in a line is unusable."
-- **Status:** **Fixed (parts 1 and 3 of 4)** — PR [#154](https://github.com/viantihu/pokemon-tcg-tracker/pull/154)
+- **Status:** **Closed on Karvi's explicit instruction** — she was told plainly that two of the four
+  parts were **not** fixed and chose to close the entry anyway, so this is an informed acceptance of parts
+  1 and 3 as sufficient rather than a confirmation that all four are done. The two remaining parts are
+  carried in their own entry (see the end of this entry) so they are not lost with the closure, per her
+  standing rule that a report keeps its own number. **Fixed (parts 1 and 3 of 4)** — PR [#154](https://github.com/viantihu/pokemon-tcg-tracker/pull/154)
   MERGED to `develop` 2026-09-16 (squash `218ac0a`), QA-gated on the merged tree, confirmed **deployed** to
   Testing (all four conditions green on that SHA). **Part 1, too many picks:** the panel now leads with
   "join a line" — candidates flat and sorted nearest-complete, each showing its own band — and picking one
