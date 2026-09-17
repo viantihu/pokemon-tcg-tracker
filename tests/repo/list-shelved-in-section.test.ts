@@ -36,7 +36,8 @@ beforeEach(async () => {
         ('c0000000-0000-0000-0000-000000000f02', '${OWNER}', 'cardB', 'shelved', '${GENERAL}', 'back', 'red'),
         ('c0000000-0000-0000-0000-000000000f03', '${OWNER}', 'cardC', 'shelved', '${SPECIALTY}', null, 'red'),
         ('c0000000-0000-0000-0000-000000000f04', '${OWNER}', 'cardD', 'shelved', '${OTHER_GENERAL}', 'front', 'red'),
-        ('c0000000-0000-0000-0000-000000000f05', '${OWNER}', 'cardA', 'bulk', null, null, null);
+        ('c0000000-0000-0000-0000-000000000f05', '${OWNER}', 'cardA', 'bulk', null, null, null),
+        ('c0000000-0000-0000-0000-000000000f06', '${OWNER}', 'cardA', 'block', '${GENERAL}', 'front', 'red');
   `);
   await asOwner(db); // RLS on from here — matches how the real action reads.
 });
@@ -68,5 +69,13 @@ describe("copyRepo.listShelvedInSection", () => {
   it("excludes bulk (unshelved) copies", async () => {
     const rows = await copyRepo.listShelvedInSection(pgliteClient(db), SPECIALTY, null);
     expect(rows.some((r) => r.catalog_card_id === "cardA" && r.role === "bulk")).toBe(false);
+  });
+
+  // QA on #159: the bulk-copy fixture above has no binder_id, so the binder filter alone already
+  // excludes it — that test passes even with the role filter removed entirely. A block-role copy
+  // in the SAME binder and half as a real shelved one is what actually pins the role filter.
+  it("excludes a block copy in the same binder and half as a real shelved one", async () => {
+    const rows = await copyRepo.listShelvedInSection(pgliteClient(db), GENERAL, "front");
+    expect(rows.map((r) => r.role)).toEqual(["shelved"]);
   });
 });
