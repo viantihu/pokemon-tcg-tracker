@@ -22,7 +22,7 @@ import type { Variant } from "@/lib/engine";
 // ./session, which pulls lib/supabase/server (and `next/headers`) into the browser bundle. The
 // `import type` below is fine because types are erased; a VALUE import is not.
 import { progressPips } from "@/lib/plan/progress";
-import type { PlanBandGroup, PlanItem } from "@/lib/plan";
+import type { PlanBandGroup, PlanItem, ProposedPull } from "@/lib/plan";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
 // Leaf import of the pure move module (its only dependency is ./types; the `WriteOp` it names is a
 // type-only import), so bringing `describeMove` into the browser bundle drags in no server code.
@@ -190,7 +190,14 @@ export function PlanScreen({
     id: string;
     item: PlanItem | null;
     digest: string | null;
+    proposedPulls: ProposedPull[];
   } | null>(null);
+  /**
+   * Pulls she has ticked, per draft id (UIL-061). Starts EMPTY for every card and is never
+   * pre-populated: starting a line must move nothing she has not explicitly agreed to, and a
+   * pre-checked box is not agreement. Cleared with the plan, like the overrides map.
+   */
+  const [confirmedPulls, setConfirmedPulls] = useState<Record<string, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [cur, setCur] = useState(resumed?.cur ?? 0);
   /**
@@ -277,6 +284,8 @@ export function PlanScreen({
     setDraft(next);
     setPlan(null);
     setOverrides({});
+    // Consent was given against a plan that no longer exists (UIL-061).
+    setConfirmedPulls({});
   }
 
   function flashToast(msg: string) {
@@ -339,6 +348,7 @@ export function PlanScreen({
       setDone(new Set());
       // A new run is new work: nothing is finished yet, so nothing should arrive folded.
       setCollapsed(new Set());
+      setConfirmedPulls({});
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not run the plan.");
     } finally {
@@ -381,12 +391,24 @@ export function PlanScreen({
         // Only when we hold a fresh derivation FOR THIS CARD (UIL-045). Sending the stale forecast's
         // digest would conflict on every interacting card; sending none keeps the old behaviour.
         expectedDigest: fresh?.id === item.incomingId ? fresh.digest : null,
+        // Only what she ticked FOR THIS CARD, and only while the derivation it was ticked against is
+        // still the current one — consent is specific to a placement, not to a card (UIL-061).
+        confirmedPulls:
+          fresh?.id === item.incomingId ? (confirmedPulls[item.incomingId] ?? []) : [],
       });
       if (!res.ok) {
         // The placement moved under her. Nothing was written; show the new one and let her look
         // again rather than reporting a failure for something that is working correctly.
         if (res.changed) {
-          setFresh({ id: item.incomingId, item: res.fresh, digest: res.freshDigest });
+          // A conflict re-derives server-side, so its pull proposal may differ too; drop the stale
+          // tick list rather than carrying consent across a placement that changed underneath it.
+          setFresh({
+            id: item.incomingId,
+            item: res.fresh,
+            digest: res.freshDigest,
+            proposedPulls: [],
+          });
+          setConfirmedPulls((prev) => ({ ...prev, [item.incomingId]: [] }));
           setError(res.error);
           return false;
         }
@@ -415,6 +437,7 @@ export function PlanScreen({
     setCur(0);
     setError(null);
     setOverrides({});
+    setConfirmedPulls({});
     setMoveTarget(null);
     setPlanIsResumed(false);
     setHaulId(null);
@@ -480,10 +503,11 @@ export function PlanScreen({
           id: spotlightId,
           item: res.ok ? res.item : null,
           digest: res.ok ? res.digest : null,
+          proposedPulls: res.ok ? res.proposedPulls : [],
         });
       })
       .catch(() => {
-        if (live) setFresh({ id: spotlightId, item: null, digest: null });
+        if (live) setFresh({ id: spotlightId, item: null, digest: null, proposedPulls: [] });
       });
     return () => {
       live = false;
@@ -502,6 +526,17 @@ export function PlanScreen({
       return next;
     });
   }
+  /** Tick or untick one proposed pull for one card (UIL-061). */
+  function onTogglePull(draftId: string, copyId: string) {
+    setConfirmedPulls((prev) => {
+      const cur = prev[draftId] ?? [];
+      return {
+        ...prev,
+        [draftId]: cur.includes(copyId) ? cur.filter((c) => c !== copyId) : [...cur, copyId],
+      };
+    });
+  }
+
   function advance() {
     let i = cur + 1;
     while (i < flatItems.length && done.has(flatItems[i].incomingId)) i++;
@@ -544,6 +579,8 @@ export function PlanScreen({
           shelveCard={shelveCard}
           shelving={shelving}
           fresh={fresh}
+          confirmedPulls={confirmedPulls}
+          onTogglePull={onTogglePull}
           advance={advance}
           onBack={() => setPlan(null)}
           onReset={resetAll}
@@ -804,7 +841,15 @@ function PlanView(props: {
   /** Draft id of the card mid-write, so only its own control shows a pending state. */
   shelving: string | null;
   /** The spotlight card re-derived against current state, keyed by draft id (UIL-045). */
-  fresh: { id: string; item: PlanItem | null; digest: string | null } | null;
+  fresh: {
+    id: string;
+    item: PlanItem | null;
+    digest: string | null;
+    proposedPulls: ProposedPull[];
+  } | null;
+  /** Pulls she has ticked, by draft id (UIL-061). */
+  confirmedPulls: Record<string, string[]>;
+  onTogglePull: (draftId: string, copyId: string) => void;
   advance: () => void;
   onBack: () => void;
   onReset: () => void;
@@ -829,6 +874,8 @@ function PlanView(props: {
     shelveCard,
     shelving,
     fresh,
+    confirmedPulls,
+    onTogglePull,
     advance,
     onBack,
     onReset,
@@ -1067,6 +1114,16 @@ function PlanView(props: {
               /* Derived, not stored (UIL-045): a re-derivation is outstanding exactly when one is
                  expected for this card and we do not hold its answer yet. Keeping this out of state
                  is also what keeps the effect free of a synchronous setState. */
+              proposedPulls={
+                flatItems[cur] && fresh?.id === flatItems[cur].incomingId ? fresh.proposedPulls : []
+              }
+              confirmedPulls={
+                flatItems[cur] ? (confirmedPulls[flatItems[cur].incomingId] ?? []) : []
+              }
+              onTogglePull={(copyId) => {
+                const id = flatItems[cur]?.incomingId;
+                if (id) onTogglePull(id, copyId);
+              }}
               refreshing={
                 !!flatItems[cur] &&
                 doneCount > 0 &&
@@ -1283,6 +1340,11 @@ export function Spotlight(props: {
   freshItem?: PlanItem | null;
   /** A re-derivation is in flight, so the destination shown may be about to change. */
   refreshing?: boolean;
+  /** Cards of hers this placement would relocate, each needing an explicit tick (UIL-061). */
+  proposedPulls?: ProposedPull[];
+  /** Which of them she has ticked. */
+  confirmedPulls?: string[];
+  onTogglePull?: (copyId: string) => void;
 }) {
   const {
     item: forecast,
@@ -1296,6 +1358,9 @@ export function Spotlight(props: {
     onMove,
     freshItem,
     refreshing = false,
+    proposedPulls = [],
+    confirmedPulls = [],
+    onTogglePull,
   } = props;
   if (!forecast) return <p style={{ fontSize: 11, color: "var(--ink-2)" }}>No cards to handle.</p>;
   /**
@@ -1339,6 +1404,40 @@ export function Spotlight(props: {
         <b>{disp.big}</b>
         <span className="sg u">{disp.destination}</span>
       </div>
+
+      {/* UIL-061 — every card of HERS this would move, named, each an explicit opt-in.
+          Unticked by default and never pre-checked: "the user must validate each and every single
+          line", and a pre-ticked box is not validation. An unticked stage stays a placeholder, so
+          declining costs her nothing but the line does not pretend to hold a card still in her binder. */}
+      {proposedPulls.length > 0 ? (
+        <div className="pulls">
+          <div className="pullhead u">
+            <b>Also move your own cards?</b>
+            <span>
+              Starting this line can pull {proposedPulls.length} card
+              {proposedPulls.length === 1 ? "" : "s"} you already own. Nothing moves unless you tick
+              it.
+            </span>
+          </div>
+          {proposedPulls.map((pull) => {
+            const on = confirmedPulls.includes(pull.copyId);
+            return (
+              <label key={pull.copyId} className={"pullrow" + (on ? " on" : "")}>
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => onTogglePull?.(pull.copyId)}
+                  disabled={done || busy}
+                />
+                <span className="pullnm">{pull.name}</span>
+                <span className="pullfrom u">from {pull.fromLabel}</span>
+                {/* Worth saying on its own: taking it leaves the OTHER line a card short. */}
+                {pull.fromLine ? <span className="pullwarn u">in another line</span> : null}
+              </label>
+            );
+          })}
+        </div>
+      ) : null}
 
       {/* "Moved" as its own label because Done is now the commit (UIL-027) — there is no separate
           commit step for the override to be "at". The `.movedtag u` styling is preserved. */}
