@@ -229,12 +229,16 @@ export async function applyDecision(
   ownerId: string,
   decisionId: string,
   choiceId: DecisionChoiceId,
+  pickedCatalogCardId?: string,
 ): Promise<void> {
   const model = await buildScreenModel(db);
   const derived = model.derived.find((d) => d.card.id === decisionId);
   if (!derived) throw new Error("That decision is no longer open — the line state has changed.");
 
-  const writes = resolveDecisionWrites(derived.resolution, choiceId);
+  // `pickedCatalogCardId` is validated against THIS freshly-derived resolution's own options inside
+  // resolveDecisionWrites/wishlistUpsertFor — never trusted outright, the same rule a stale slot/line
+  // id already follows here.
+  const writes = resolveDecisionWrites(derived.resolution, choiceId, pickedCatalogCardId);
 
   // Line status.
   if (writes.linePatch?.status) {

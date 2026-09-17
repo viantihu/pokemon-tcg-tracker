@@ -12,6 +12,7 @@
  * this session, mirroring the prototype's resolved map). The host wraps this sheet in a veil.
  */
 
+import { useState } from "react";
 import type {
   DecisionCard as DecisionCardModel,
   DecisionChoiceId,
@@ -45,7 +46,9 @@ export function DecisionCard({
   decision: DecisionCardModel;
   resolvedLabel?: string | null;
   busy?: boolean;
-  onChoose: (choiceId: DecisionChoiceId) => void;
+  /** `pickedCatalogCardId` (UIL-057): which wishlist alternate she has selected, when there is one —
+   *  the host thread this through resolveDecisionWrites instead of always taking the cheapest. */
+  onChoose: (choiceId: DecisionChoiceId, pickedCatalogCardId?: string) => void;
   onReopen: () => void;
   onClose: () => void;
 }) {
@@ -53,6 +56,10 @@ export function DecisionCard({
   // Overridden = she picked a non-recommended option (amber "you overrode" vs green "you chose").
   const chosen = resolvedLabel ? d.choices.find((c) => c.label === resolvedLabel) : undefined;
   const overridden = Boolean(resolvedLabel && chosen && !chosen.recommended);
+  // Defaults to the server's own recommendation (index 0, "CHEAPEST") — she can pick a different one
+  // before confirming; the parent remounts this component per decision (`key={decision.id}`), so this
+  // never carries a stale selection over from a different decision's wishlist.
+  const [pickedAlt, setPickedAlt] = useState<string | null>(d.wishlist[0]?.tcgdexId ?? null);
 
   return (
     <div className="dsheet panel">
@@ -133,23 +140,47 @@ export function DecisionCard({
                 {d.wishlist.length === 1 ? "WISHLIST TARGET" : "WISHLIST OPTIONS"} · CHEAPEST FIRST
               </span>
               <span className="sel">
-                WISHLISTING · {d.wishlist[0].name} {d.wishlist[0].localId ?? ""}{" "}
-                {fmtPrice(d.wishlist[0].priceMarket) ?? ""}
+                WISHLISTING ·{" "}
+                {(() => {
+                  const picked = d.wishlist.find((w) => w.tcgdexId === pickedAlt) ?? d.wishlist[0];
+                  return `${picked.name} ${picked.localId ?? ""} ${fmtPrice(picked.priceMarket) ?? ""}`;
+                })()}
               </span>
             </div>
             <div className="wcards">
-              {d.wishlist.map((w, i) => (
-                <div key={w.tcgdexId} className={"wcard" + (i === 0 ? " on" : "")}>
-                  <div className="top">
-                    <CardFace name={w.name} imageUrl={w.imageUrl} size="m" />
-                    {w.badge ? <span className="badge">{w.badge}</span> : null}
+              {d.wishlist.map((w) => {
+                const isPicked = w.tcgdexId === pickedAlt;
+                return (
+                  <div
+                    key={w.tcgdexId}
+                    className={"wcard" + (isPicked ? " on" : "")}
+                    role={resolvedLabel ? undefined : "button"}
+                    tabIndex={resolvedLabel ? undefined : 0}
+                    aria-pressed={resolvedLabel ? undefined : isPicked}
+                    onClick={resolvedLabel ? undefined : () => setPickedAlt(w.tcgdexId)}
+                    onKeyDown={
+                      resolvedLabel
+                        ? undefined
+                        : (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setPickedAlt(w.tcgdexId);
+                            }
+                          }
+                    }
+                    style={resolvedLabel ? undefined : { cursor: "pointer" }}
+                  >
+                    <div className="top">
+                      <CardFace name={w.name} imageUrl={w.imageUrl} size="m" />
+                      {w.badge ? <span className="badge">{w.badge}</span> : null}
+                    </div>
+                    <div className="wn">{w.name}</div>
+                    <div className="wno">{w.localId ?? ""}</div>
+                    <div className="wpx">{fmtPrice(w.priceMarket) ?? "—"}</div>
+                    {isPicked ? <span className="pill">WISHLISTING</span> : null}
                   </div>
-                  <div className="wn">{w.name}</div>
-                  <div className="wno">{w.localId ?? ""}</div>
-                  <div className="wpx">{fmtPrice(w.priceMarket) ?? "—"}</div>
-                  {i === 0 ? <span className="pill">WISHLISTING</span> : null}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : null}
@@ -190,7 +221,7 @@ export function DecisionCard({
                   type="button"
                   className={"dchoice" + (c.recommended ? " rec" : "")}
                   disabled={busy}
-                  onClick={() => onChoose(c.id)}
+                  onClick={() => onChoose(c.id, pickedAlt ?? undefined)}
                 >
                   <span className={`tick ${c.recommended ? "y" : "n"}`} style={{ marginTop: 5 }} />
                   <span>

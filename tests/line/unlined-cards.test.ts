@@ -78,6 +78,11 @@ describe("loadLineScreen's unlinedCards (UIL-056)", () => {
     const data = await loadLineScreen(pgliteClient(db));
     const byId = new Map(data.unlinedCards.map((c) => [c.copyId, c]));
 
+    // A card already filling a slot is NOT unlined — it already has a line. Removing the
+    // `|| c.line_slot_id` guard in load.ts's filter would let this leak in with no candidates and no
+    // explanation, since it fills the very slot this test uses to derive both.
+    expect(byId.has(OWNED_EMBERLING)).toBe(false);
+
     const drake = byId.get(UNLINED_EMBERDRAKE);
     expect(drake).toBeDefined();
     const drakeCandidates = drake!.joinCandidatesByBand.red ?? [];

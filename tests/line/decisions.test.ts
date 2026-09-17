@@ -251,6 +251,46 @@ describe("resolveDecisionWrites", () => {
     expect(w.decision.decision).toBe("decision-deferred");
   });
 
+  /* UIL-057 — she can pick any wishlist alternate the decision card showed, not just the
+   * server-computed cheapest (the pre-fix behavior: chosenCatalogCardId was always capRes's own
+   * default, no matter what choosing-a-different-alternate meant). */
+  describe("picking a wishlist alternate (UIL-057)", () => {
+    it("choosing the second alternative writes THAT catalog id to the wishlist row", () => {
+      const w = resolveDecisionWrites(capRes, "confirm-cap", "Charizard ex-183");
+      expect(w.wishlistUpserts[0].chosenCatalogCardId).toBe("Charizard ex-183");
+      // The one she didn't pick becomes the alternate — never a self-reference.
+      expect(w.wishlistUpserts[0].alternateCatalogCardIds).toEqual(["Charizard ex-006"]);
+    });
+
+    it("collection-wins ALSO honours a picked alternate, not just confirm-cap", () => {
+      const collRes = {
+        ...capRes,
+        kind: "collection-vs-line" as const,
+        willLiveInSpecialty: false,
+      };
+      const w = resolveDecisionWrites(collRes, "collection-wins", "Charizard ex-183");
+      expect(w.wishlistUpserts[0].chosenCatalogCardId).toBe("Charizard ex-183");
+      expect(w.wishlistUpserts[0].willLiveInSpecialty).toBe(false);
+    });
+
+    it("with no pick, still defaults to the server-computed cheapest (unchanged default)", () => {
+      const w = resolveDecisionWrites(capRes, "confirm-cap");
+      expect(w.wishlistUpserts[0].chosenCatalogCardId).toBe("Charizard ex-006");
+      expect(w.wishlistUpserts[0].alternateCatalogCardIds).toEqual(["Charizard ex-183"]);
+    });
+
+    it("REFUSES a catalog id that was never one of this decision's options — never trust the browser", () => {
+      const w = resolveDecisionWrites(capRes, "confirm-cap", "some-other-unrelated-card");
+      expect(w.wishlistUpserts[0].chosenCatalogCardId).toBe("Charizard ex-006"); // falls back
+      expect(w.wishlistUpserts[0].alternateCatalogCardIds).toEqual(["Charizard ex-183"]);
+    });
+
+    it("a choice that does not write a wishlist target ignores the pick harmlessly", () => {
+      const w = resolveDecisionWrites(capRes, "block-instead", "Charizard ex-183");
+      expect(w.wishlistUpserts).toHaveLength(0);
+    });
+  });
+
   it("every resolution records exactly one user audit decision", () => {
     for (const choice of [
       "confirm-cap",

@@ -60,10 +60,11 @@ export type DecisionActionResult =
 export async function resolveDecisionAction(
   decisionId: string,
   choiceId: DecisionChoiceId,
+  pickedCatalogCardId?: string,
 ): Promise<DecisionActionResult> {
   try {
     const { db, ownerId } = await getOwnerContext();
-    await applyDecision(db, ownerId, decisionId, choiceId);
+    await applyDecision(db, ownerId, decisionId, choiceId, pickedCatalogCardId);
     const data = await loadLineScreen(db);
     return { ok: true, data };
   } catch (err) {

@@ -357,16 +357,36 @@ export function deriveAllDecisions(lines: DecisionLineInput[]): DerivedDecision[
 
 /* --------------------------------- resolve --------------------------------- */
 
-function wishlistUpsertFor(res: DecisionResolution, willSpecialty: boolean) {
+/**
+ * `pickedCatalogCardId` is UIL-057: she can choose any alternate the decision card showed, not just
+ * the server-computed cheapest. Only accepted when it is genuinely one of the options THIS decision
+ * offered — never trust an arbitrary catalog id from the browser, the same rule a stale slot/line id
+ * already follows elsewhere in this module. `res.chosenCatalogCardId` and `res.alternateCatalogCardIds`
+ * can overlap (the persisted target is usually also alternates[0]), so the option set is deduped
+ * before picking — and the stored alternates are always "every option minus whichever is chosen",
+ * never a self-reference, regardless of which one that ends up being.
+ */
+function wishlistUpsertFor(
+  res: DecisionResolution,
+  willSpecialty: boolean,
+  pickedCatalogCardId?: string,
+) {
   if (!res.slotId) return [];
+  const options = [...new Set([res.chosenCatalogCardId, ...res.alternateCatalogCardIds])].filter(
+    (id): id is string => Boolean(id),
+  );
+  const chosen =
+    pickedCatalogCardId && options.includes(pickedCatalogCardId)
+      ? pickedCatalogCardId
+      : res.chosenCatalogCardId;
   return [
     {
       lineSlotId: res.slotId,
       requiredDexId: res.requiredDexId,
       requiredType: res.requiredType,
       requiredStage: res.requiredStage,
-      chosenCatalogCardId: res.chosenCatalogCardId,
-      alternateCatalogCardIds: res.alternateCatalogCardIds,
+      chosenCatalogCardId: chosen,
+      alternateCatalogCardIds: options.filter((id) => id !== chosen),
       willLiveInSpecialty: willSpecialty,
     },
   ];
@@ -376,10 +396,15 @@ function wishlistUpsertFor(res: DecisionResolution, willSpecialty: boolean) {
  * Turn a chosen option into the writes it implies (dev-spec §5 M7 acceptance). A confirmed cap sets
  * the line `capped` and wishlists the ex with `willLiveInSpecialty`. Every branch records a
  * `PlacementDecision` (`resolved_by: 'user'`) — the audit trail is not optional (dev-spec §4).
+ *
+ * `pickedCatalogCardId` (UIL-057) is the wishlist alternate she selected on the decision card, when
+ * the choice is one that writes a wishlist target at all (`confirm-cap`/`collection-wins`) — ignored
+ * by every other branch.
  */
 export function resolveDecisionWrites(
   res: DecisionResolution,
   choiceId: DecisionChoiceId,
+  pickedCatalogCardId?: string,
 ): DecisionWrites {
   const base: Omit<DecisionWrites, "decision"> = {
     slotPatches: [],
@@ -392,7 +417,7 @@ export function resolveDecisionWrites(
       return {
         ...base,
         linePatch: { status: "capped" },
-        wishlistUpserts: wishlistUpsertFor(res, true),
+        wishlistUpserts: wishlistUpsertFor(res, true, pickedCatalogCardId),
         decision: {
           decision: "line-cap-confirmed",
           reason:
@@ -491,7 +516,7 @@ export function resolveDecisionWrites(
     case "collection-wins":
       return {
         ...base,
-        wishlistUpserts: wishlistUpsertFor(res, res.willLiveInSpecialty),
+        wishlistUpserts: wishlistUpsertFor(res, res.willLiveInSpecialty, pickedCatalogCardId),
         decision: {
           decision: "collection-wins",
           reason:
