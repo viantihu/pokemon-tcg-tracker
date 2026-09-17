@@ -118,6 +118,37 @@ export function moveNameLookups(options: MoveOptions): MoveNameLookups {
   };
 }
 
+/**
+ * Ops that let go of the line slot a copy is leaving (removal symmetry, sync-arch §1.6).
+ *
+ * ONE definition, because there are now three callers and the third was missing (UIL-062). `applyMove`
+ * did this correctly; the Haul Plan's `writeOverriddenCard` did not, so overriding a card that filled a
+ * slot cleared the copy's pointer — `placementForMove` clears `line_slot_id` for EVERY destination kind
+ * — and left the slot `state: 'filled'` naming a copy that was no longer in it. Measured on Testing as
+ * 5 stale slots. The Lines page reads the slot, so it rendered them as occupied by a card that had
+ * moved, and nothing on screen contradicted it.
+ *
+ * `demoteLineId` is separate on purpose: a line that was `complete` is not complete once a stage
+ * empties, and forgetting that leaves a line claiming completion it no longer has.
+ *
+ * Deliberately takes ids rather than resolving them: the Line screen resolves them with DB reads and
+ * the Haul Plan resolves them from its in-memory context. Sharing the RESOLUTION would force one of
+ * them into the wrong shape; sharing the emission is what stops the op lists drifting.
+ */
+export function releaseSlotOps(
+  slotId: string | null | undefined,
+  demoteLineId: string | null | undefined,
+): WriteOp[] {
+  const ops: WriteOp[] = [];
+  if (slotId) {
+    ops.push({ op: "update_slot", id: slotId, patch: { state: "placeholder", copy_id: null } });
+  }
+  if (demoteLineId) {
+    ops.push({ op: "update_line", id: demoteLineId, patch: { status: "open" } });
+  }
+  return ops;
+}
+
 /** The `PlacementDecision.reason` recorded for a manual move (always `resolved_by: 'user'`). */
 export function moveDecisionReason(dest: MoveDestination, destLabel: string): string {
   const where =
@@ -348,18 +379,9 @@ export function buildMoveOps(plan: MovePlan): WriteOp[] {
     },
   ];
 
-  // Moving a card OFF a line reopens the slot it filled (removal symmetry, sync-arch §1.6) …
-  if (plan.reopenSlotId) {
-    ops.push({
-      op: "update_slot",
-      id: plan.reopenSlotId,
-      patch: { state: "placeholder", copy_id: null },
-    });
-  }
-  // … and a line that was complete is no longer complete.
-  if (plan.demoteLineId) {
-    ops.push({ op: "update_line", id: plan.demoteLineId, patch: { status: "open" } });
-  }
+  // Moving a card OFF a line reopens the slot it filled, and a line that was complete no longer is.
+  // Shared with the Haul Plan's override path (UIL-062) so the two cannot drift.
+  ops.push(...releaseSlotOps(plan.reopenSlotId, plan.demoteLineId));
 
   // Landing in a collection means joining ITS chase list, or the card is orphaned there (UIL-022).
   const join = collectionTargetJoinOp(plan.destination, plan.catalogCardId);
