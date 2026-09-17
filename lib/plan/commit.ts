@@ -174,6 +174,12 @@ export async function commitCardPlacement(
     /** The haul this sitting already opened; null/absent opens one on the first new card. */
     haulId?: string | null;
     /**
+     * Copy ids she ticked to relocate into the line this card starts (UIL-061). Absent means MOVE
+     * NOTHING — the default is deliberately the safe one, so a caller that forgets to thread it
+     * through leaves her collection alone rather than relocating it.
+     */
+    confirmedPulls?: string[];
+    /**
      * The `placementDigest` of what the screen was SHOWING when she clicked Done (UIL-045).
      *
      * The write re-derives from current state, so without this it can silently land somewhere other
@@ -192,6 +198,8 @@ export async function commitCardPlacement(
   const draft = [input.card];
   const pc = await loadPlanContext(db, { excludeOwnedCopyIds: existingCopyIds(draft) });
   const { planned } = planFromDraft(pc, draft);
+  // Consent rides on the planned card, so `writeNewLine` never has to guess (UIL-061).
+  const withConsent = planned.map((pl) => ({ ...pl, confirmedPulls: input.confirmedPulls ?? [] }));
 
   // Compare BEFORE building the payload, so a conflict costs nothing and writes nothing.
   if (input.expectedDigest && !input.override && planned[0]) {
@@ -205,7 +213,7 @@ export async function commitCardPlacement(
     }
   }
 
-  const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, {
+  const { payload, haulId, counts } = buildHaulCommitPayload(pc, withConsent, {
     source: input.source,
     notes: input.notes ?? null,
     draft,
@@ -577,10 +585,24 @@ function writeNewLine(
   const slotIdByStage = new Map<number, string>();
   const mirror: MutableSlot[] = [];
 
+  /**
+   * Pulls she has agreed to. Empty means move nothing (UIL-061) — the cascade's proposal is a
+   * proposal, and every stage it wanted to fill from her collection stays a placeholder instead.
+   */
+  const confirmed = new Set(p.confirmedPulls ?? []);
+
   for (const slot of plan.slots) {
     const isIncoming = slot.copyId === p.incomingId;
-    const ownedCopyId = !isIncoming && slot.copyId ? slot.copyId : null;
+    const proposedPullId = !isIncoming && slot.copyId ? slot.copyId : null;
+    // A proposed pull she has not confirmed is not written. The slot degrades to a placeholder so the
+    // line still records that the stage exists, without claiming to hold a card that is really still
+    // in her binder. Deliberately NO wishlist row for it: the engine only proposes wishlist entries for
+    // stages it found nothing for, and she already OWNS this card — she just kept it where it was.
+    // Adding one would put a card she owns on a list of cards to acquire.
+    const ownedCopyId = proposedPullId && confirmed.has(proposedPullId) ? proposedPullId : null;
+    const declinedPull = proposedPullId !== null && ownedCopyId === null;
     const copyIdForSlot = isIncoming ? incomingCopyId : ownedCopyId;
+    const slotState = declinedPull ? "placeholder" : slot.state;
 
     const slotId = crypto.randomUUID();
     ops.push({
@@ -589,17 +611,19 @@ function writeNewLine(
       line_id: lineId,
       stage_index: slot.stageIndex,
       stage: slot.stage,
-      state: slot.state,
+      state: slotState,
       copy_id: copyIdForSlot,
       target_catalog_card_id: slot.targetCatalogCardId,
-      note: slot.note ?? null,
+      // Say WHY it is open, so the Lines screen can distinguish "never owned" from "she kept it where
+      // it was" without inferring it.
+      note: declinedPull ? "left in place (not confirmed)" : (slot.note ?? null),
     });
     counts.slots += 1;
     slotIdByStage.set(slot.stageIndex, slotId);
     mirror.push({
       id: slotId,
       stage_index: slot.stageIndex,
-      state: slot.state,
+      state: slotState,
       copy_id: copyIdForSlot,
     });
 
@@ -607,10 +631,23 @@ function writeNewLine(
     if (isIncoming) {
       ops.push({ op: "update_copy", id: incomingCopyId, patch: { line_slot_id: slotId } });
     }
-    // Pull an owned front-half copy into the line's back half (worklist "pull" action).
+    // A CONFIRMED pull: relocate the copy into this line's back half.
     if (ownedCopyId) {
       const owned = pc.copyRowById.get(ownedCopyId);
       if (owned) {
+        // Release the slot it is leaving, if it was in one (UIL-062). Overwriting `line_slot_id`
+        // without patching the vacated slot leaves that slot `filled` pointing at a copy that has
+        // moved — measured on Testing as 5 stale slots, with this exact write named as the cause. The
+        // old line then shows an occupied stage holding a card that is physically elsewhere, and
+        // nothing on screen contradicts it.
+        if (owned.line_slot_id) {
+          ops.push({
+            op: "update_slot",
+            id: owned.line_slot_id,
+            patch: { state: "placeholder", copy_id: null },
+          });
+          touchSlot(slotsByLine, owned.line_slot_id, null);
+        }
         ops.push({
           op: "update_copy",
           id: ownedCopyId,
@@ -621,6 +658,20 @@ function writeNewLine(
             line_slot_id: slotId,
           },
         });
+        // Its own audit row. Without this the move is not merely unconfirmed, it is UNTRACKED: the
+        // commit loop writes one decision per incoming DRAFT card, so a pulled copy previously got
+        // none at all and "why is this Charmander in the back half" had no answer anywhere.
+        ops.push({
+          op: "insert_decision",
+          haul_id: null, // not acquired in this haul — it was already hers
+          copy_id: ownedCopyId,
+          decision: "line-pull-confirmed",
+          reason:
+            `Moved into the new ${plan.colorBand} line for ${p.tcgdexId} at your confirmation ` +
+            `(was ${owned.binder_half ?? "unplaced"}${owned.color_band ? ` · ${owned.color_band}` : ""}, role ${owned.role}).`,
+          resolved_by: "user",
+        });
+        counts.decisions += 1;
       }
     }
   }
@@ -647,11 +698,22 @@ function writeNewLine(
 }
 
 /** Mutate the mirror so a subsequent same-pass read of this slot sees the fill. */
-function touchSlot(slotsByLine: Map<string, MutableSlot[]>, slotId: string, copyId: string): void {
+/**
+ * Update the live slot mirror so a later card in the same pass sees this change.
+ *
+ * `copyId: null` RELEASES the slot rather than filling it (UIL-061/UIL-062) — a confirmed pull vacates
+ * whatever slot the copy was in, and the mirror has to agree with the ops or a second card in the same
+ * pass would fill a slot this one just emptied, or skip one it just freed.
+ */
+function touchSlot(
+  slotsByLine: Map<string, MutableSlot[]>,
+  slotId: string,
+  copyId: string | null,
+): void {
   for (const slots of slotsByLine.values()) {
     const slot = slots.find((s) => s.id === slotId);
     if (slot) {
-      slot.state = "filled";
+      slot.state = copyId ? "filled" : "placeholder";
       slot.copy_id = copyId;
       return;
     }
