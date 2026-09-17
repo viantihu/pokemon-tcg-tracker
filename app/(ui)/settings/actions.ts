@@ -20,7 +20,15 @@ import {
   lineSlotRepo,
   typeColorMapRepo,
 } from "@/lib/repo";
-import { recomputeBands, type RecomputeCopy, type RecomputeLine } from "@/lib/surfaces";
+import {
+  binderSplit,
+  recomputeBands,
+  strandedSections,
+  strandedSectionsMessage,
+  type RecomputeCopy,
+  type RecomputeLine,
+} from "@/lib/surfaces";
+import { readShelvedBySection } from "@/lib/binders/save";
 import type { CatalogCard as EngineCatalogCard } from "@/lib/engine";
 import { errorMessage } from "@/lib/errors";
 import type { BinderInput, RecomputeCounts, SettingsData, SettingsResult } from "./settings-types";
@@ -52,7 +60,16 @@ export async function loadSettings(): Promise<SettingsData> {
   };
 }
 
-/** Create or update a binder. Setting one active clears `is_active` on every other binder. */
+/**
+ * Create or update a binder. Setting one active clears `is_active` on every other binder.
+ *
+ * UIL-050: editing an EXISTING binder is checked against what is actually shelved there first —
+ * shrinking pages, moving the divider forward, or clearing `back_half_start_page` can all leave fewer
+ * pockets than cards already shelved, the "shelved is greater than capacity" number she reported.
+ * Blocked and named, not silently rebalanced: this app doesn't move her cards without her asking
+ * (UIL-061), and a resize can't relocate a physical card regardless. A brand-new binder has nothing
+ * shelved in it yet, so nothing to check.
+ */
 export async function saveBinder(input: BinderInput): Promise<SettingsResult> {
   const name = input.name.trim();
   if (!name) return { ok: false, error: "A binder needs a name." };
@@ -70,6 +87,12 @@ export async function saveBinder(input: BinderInput): Promise<SettingsResult> {
           : null,
       is_active: input.isActive,
     };
+
+    if (input.id) {
+      const shelved = await readShelvedBySection(db, input.id);
+      const blocked = strandedSections(binderSplit(input), shelved);
+      if (blocked.length > 0) return { ok: false, error: strandedSectionsMessage(blocked) };
+    }
 
     let savedId = input.id ?? null;
     if (input.id) {
