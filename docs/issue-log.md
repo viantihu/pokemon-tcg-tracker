@@ -4543,3 +4543,62 @@ FSD-2.
 is the same class the log has repeatedly flagged High. The Dragonair half is now resolved as "no
 defect, pending one clarification from Karvi" rather than an open cause; the STEP 4 gate is the entry's
 standing confirmed defect. Flagging for Karvi's confirmation since severity calls are hers.
+
+## UIL-064 — The line-join UX #120 shipped doesn't work for her: too many manual picks, gets her kicked off the Haul Plan, and the "not in a line" list is unusable
+
+- **Reported:** 2026-09-17 (Karvi, via Junior BA - 2). Initial report, verbatim: "we need to review 056
+  because the new UX makes no sense." Followed by her ruling on four candidate problems the Senior BA
+  put to her, all four selected verbatim: "It's somewhat buggy and the icons are not aligned" / "Too
+  many picks; it should ask for the line" / "Being sent away from the Haul Plan" / "The list of cards
+  not in a line is unusable."
+- **Status:** Open
+- **Priority:** High (Senior BA's read — she rejected shipped work on a core flow; hers pending)
+- **Area:** Lines, Plan, Collections
+- **Env:** Testing
+
+This is a UX rejection of what #120 (UIL-056) shipped, not a named defect — logged under its own number
+rather than reopening UIL-056, per the standing rule that her report gets its own entry regardless of
+where the cause traces. **UIL-056 stays Fixed, not reopened: the strand it closed (a shelved card had
+no way off the front half into a line) is genuinely closed. This entry carries the rework.**
+
+**Problem 1 — too many manual picks; confirmed in code.** To put a stranded card into a line, `MovePanel`
+([`app/(ui)/_components/MovePanel.tsx`](../app/(ui)/_components/MovePanel.tsx)) walks her through
+**BINDER** (:115) → **HALF** (:182) → **COLOR BAND · RAINBOW ORDER** (:201) → **JOIN A LINE** (:239) →
+Confirm — four sequential picks before she can say which line. Two of those, half and band, are values
+the app derives everywhere else in the app (the cascade computes the band from the card's type via
+`type_color_map`). Her own read matches exactly: "too many picks; it should ask for the line." **Fix
+direction (Senior BA): show candidate lines for this specific card first; derive binder/half/band from
+whichever line she picks; keep manual picks available but not required.**
+
+**Problem 2 — sent away from the Haul Plan; confirmed in code, and this was a deliberate call, not a
+bug.** `MovePanel`'s own doc comment: `allowLineJoin` (UIL-056) is "opt-in, default off, so the plan
+spotlight and Collections' existing usage are untouched; only the Line screen turns it on." Where it's
+off, the panel shows "Back-half moves choose a line. Do this from the Lines page."
+([`MovePanel.tsx:232`](../app/(ui)/_components/MovePanel.tsx:232)) instead of the line-join picker — so
+a back-half placement decision from the Haul Plan or Collections always bounces her to a different
+screen. **This was the Senior BA's own instruction to the dev, recorded here at their request rather
+than attributed to the implementation** — and it's reversed: the fix direction is to move the line
+step onto the Plan spotlight itself so a haul can be placed without leaving the screen.
+
+**Problem 3 — the "not in a line" list is unusable; confirmed in code.** `UnlinedCardsPanel`'s own doc
+comment claims "nothing to show is the common case (most shelved cards are already lined or have no
+line concept)," but the list backing it (`lib/line/load.ts`, the `unlinedCards` loop) filters only on
+`c.role !== "shelved" || c.line_slot_id` — **it never checks `binder_half`.** Every front-half shelved
+card (which has no line concept at all, by design — lines only ever live in the back half) qualifies
+for this list exactly as much as a genuinely stranded back-half card does. With most of her shelved
+collection sitting in the front half, this floods the panel with hundreds of irrelevant entries instead
+of surfacing the handful that are actually actionable. **Fix direction: filter to `binder_half ===
+"back"`, or split/order the list so the actionable set surfaces first.**
+
+**Problem 4 — "somewhat buggy and the icons are not aligned."** No specifics requested from her by
+design — FSD-2 is running a browser pass at desktop and 375px widths to find what she's seeing rather
+than asking her to itemize it. Recording as under investigation, no further detail available yet.
+
+**Cross-reference.** UIL-056 (the strand this rework replaces, left Fixed), UIL-061 (its Plan-side
+`lineJoin` design work carries forward into this entry's Problem 2 fix), UIL-063 (a Basic card still
+can't join an existing line automatically at all — separate from this entry's manual-join UX, but part
+of why she needs the manual path in the first place).
+
+**Priority rationale.** High, per the Senior BA: rejecting shipped work on a core, everyday flow — not
+holding the assignment on Karvi's priority read given that. Flagging for her confirmation since
+severity calls are hers.
