@@ -41,11 +41,27 @@
 -- placeholder 12 → 9; `copy` unchanged at 706. IF IT RELINKS 5, SOMETHING WENT WRONG RATHER THAN WELL —
 -- that would mean the ambiguity guard did not hold.
 --
--- A NOTE THAT BELONGS WITH 0010. That migration's header describes its cause as "her Dragonair report".
--- That report resolved to NO defect — she owns no Dragonair copy and the slot in question was a correct
--- placeholder — so the phrase attaches a real repair to a false example, and it has already misled two
--- sessions. 0010 is applied and therefore frozen, so it is not edited; the correction lives here
--- instead. 0010's actual cause was an override clearing a copy's pointer without vacating its slot.
+-- TWO CORRECTIONS THAT BELONG WITH 0010, which is applied and therefore frozen — so they live here,
+-- in the file a reader of 0010 meets next. Both are in 0010's line 30:
+--
+--     "(about 4 of which render as HUNTING — the Dragonair report, UIL-063)"
+--
+-- 1. THE ATTRIBUTION IS WRONG. That report resolved to no defect at all: no Dragonair copy exists and
+--    the slot in question was a correct placeholder. The phrase attaches a real repair to a false
+--    example, and it had already misled two sessions before it was caught. 0010's actual cause was an
+--    override clearing a copy's `line_slot_id` without vacating the slot that named it.
+--
+-- 2. "ABOUT 4 ... RENDER AS HUNTING" WAS NEVER TRUE, and it describes a state that could not exist yet.
+--    When 0010 was written, NONE of the 8 rendered HUNTING, because none had a placeholder naming its
+--    card. The 5 that do now are a CONSEQUENCE of 0010 itself: releasing those stale slots re-exposed
+--    each slot's original `target_catalog_card_id`, which is the very thing that makes this migration
+--    possible (see above). So a comment attached to 0010 describes an effect of running 0010.
+--
+--    The tell is inside 0010's own paragraph: two lines below that clause it states that measurement
+--    showed ZERO of the 8 have an intended placeholder to re-attach to. Both cannot be true — if none
+--    had a placeholder naming it, none could read as HUNTING for that card. A future reader who spots
+--    the contradiction should trust the ZERO and disregard the "about 4"; it was an estimate written as
+--    though it were a measurement, which is the part worth not repeating.
 
 -- Candidate pairs: a placeholder slot and a shelved back-half copy that agree on the card, and whose
 -- line agrees with the copy on both binder and colour band.
