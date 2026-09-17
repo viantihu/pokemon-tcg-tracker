@@ -479,6 +479,53 @@ jobs:
             echo "::warning::could not read line_slot or copy — UIL-061 integrity undetermined."
           fi
 
+          # ---- UIL-062 SHAPE 3, the user-visible one: a copy physically in a line (back half) whose
+          # `line_slot_id` is NULL and whose slot was never filled at all — so the Lines page still
+          # shows that stage HUNTING after she pressed Done. Invisible to the B count, which only sees
+          # a FILLED slot whose copy left. This is the shape Karvi reported on Dragonair.
+          #
+          # Structural only: counts, plus binder/band agreement and an exact intended-slot match via a
+          # placeholder's `target_catalog_card_id`. No card names.
+          echo
+          echo "--- UIL-062 shape 3: back-half copies with no slot pointer (the HUNTING symptom) ---"
+          orphan_copies=$(count_of "copy?select=id&role=eq.shelved&binder_half=eq.back&line_slot_id=is.null")
+          echo "copies role=shelved, binder_half=back, line_slot_id NULL: $orphan_copies"
+          oc_rows=$(fetch_rows_early "copy?select=id,catalog_card_id,binder_id,color_band&role=eq.shelved&binder_half=eq.back&line_slot_id=is.null&limit=1000")
+          ph_rows=$(fetch_rows_early "line_slot?select=id,line_id,target_catalog_card_id&state=eq.placeholder")
+          all_lines=$(fetch_rows_early "evolution_line?select=id,binder_id,color_band,root_dex_id")
+          if printf '%s' "$oc_rows" | jq -e 'type == "array"' > /dev/null 2>&1 \
+             && printf '%s' "$ph_rows" | jq -e 'type == "array"' > /dev/null 2>&1 \
+             && printf '%s' "$all_lines" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            echo "placeholder slots available: $(printf '%s' "$ph_rows" | jq 'length')"
+            jq -rn --argjson oc "$oc_rows" --argjson ph "$ph_rows" --argjson ln "$all_lines" '
+              ($ln | map({key: .id, value: .}) | from_entries) as $lineById
+              # Placeholder slots annotated with their line geometry.
+              | ([ $ph[] | . as $s | ($lineById[$s.line_id]) as $l
+                   | select($l != null)
+                   | {binder: $l.binder_id, band: $l.color_band, target: $s.target_catalog_card_id} ]) as $slots
+              | [ $oc[]
+                  | . as $c
+                  | {
+                      exact:  ([ $slots[] | select(.binder == $c.binder_id and .band == $c.color_band and .target == $c.catalog_card_id) ] | length),
+                      geo:    ([ $slots[] | select(.binder == $c.binder_id and .band == $c.color_band) ] | length)
+                    } ]
+              | {
+                  total: length,
+                  with_exact_intended_slot: ([ .[] | select(.exact > 0) ] | length),
+                  with_same_binder_band_placeholder_only: ([ .[] | select(.exact == 0 and .geo > 0) ] | length),
+                  no_candidate_slot: ([ .[] | select(.geo == 0) ] | length)
+                }
+              | "  affected copies scanned:                      \(.total)",
+                "  with an EXACT intended placeholder (same binder+band, target = this card): \(.with_exact_intended_slot)",
+                "  same binder+band placeholder but different target:                        \(.with_same_binder_band_placeholder_only)",
+                "  no placeholder in that binder+band at all:                                \(.no_candidate_slot)"'
+            if [ "$orphan_copies" != "unknown" ] && [ "$orphan_copies" -gt 5 ]; then
+              echo "::warning::$orphan_copies back-half copies have no slot pointer — materially MORE than the 5 filled-slot orphans. This is the shape she can see (stage reads HUNTING after Done), and it is the real blast radius."
+            fi
+          else
+            echo "::warning::could not read the shape-3 triple — undetermined."
+          fi
+
           # ---- UIL-047: does a learned set alias survive and apply on a re-import?
           #
           # THE JOIN KEY IS NOT dex_set_name. `set_alias` is keyed `(locale, dex_code)` where
