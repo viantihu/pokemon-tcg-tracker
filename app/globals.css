@@ -2243,6 +2243,16 @@ nav.menu .tab .n {
   letter-spacing: 0.1em;
   margin-bottom: 4px;
 }
+/* Front/back header inside the expanded card grid (UIL-055) — same sizing as `.capsection .half`
+   above, since both label "which half" within the one binder card; no left indent, unlike `.subhead`,
+   because there's no icon gutter here to align to. Top spacing between groups is set inline per
+   instance (0 for the first group, 10px after) since `:first-child` can't tell "first group" from
+   "first child of its own wrapper" here — every group wrapper's header is that. */
+.cghead {
+  font-size: 9px;
+  color: var(--ink-2);
+  letter-spacing: 0.1em;
+}
 .flag {
   margin-left: auto;
   font-size: 9px;

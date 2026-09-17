@@ -238,18 +238,37 @@ function BinderCardGrid({ binderId }: { binderId: string }) {
   if (cards.length === 0) {
     return <div className="cehint u">Nothing shelved here yet.</div>;
   }
+
+  // `cards` is already sorted front-then-back (`loadBinderCards`), so a contiguous-run grouping is
+  // enough — no separate sort/bucket step needed. One binder, one card, but the half stays legible as
+  // a header inside it rather than as a pill on every tile (she objected to two CARDS, not to knowing
+  // which half a card sits in). Skipped entirely when only one half is present.
+  const groups: { half: string; cards: BinderCardTile[] }[] = [];
+  for (const c of cards) {
+    const last = groups[groups.length - 1];
+    if (last && last.half === c.half) last.cards.push(c);
+    else groups.push({ half: c.half, cards: [c] });
+  }
+  const showHeaders = groups.length > 1;
+
   return (
-    <div className="cgrid" style={{ marginTop: 10 }}>
-      {cards.map((c) => (
-        <div key={c.copyId} className="ccard">
-          <CardFace name={c.name} imageUrl={c.imageUrl} size="m" />
-          <div className="cn u">{c.name}</div>
-          {c.localId ? <div className="cno">{c.localId}</div> : null}
-          {c.half !== "single" && (
-            <span className="cpill u" style={{ background: "var(--panel-2)" }}>
-              {HALF_LABEL[c.half] ?? c.half}
-            </span>
+    <div style={{ marginTop: 10 }}>
+      {groups.map((grp, i) => (
+        <div key={i}>
+          {showHeaders && (
+            <div className="cghead u" style={{ marginTop: i === 0 ? 0 : 10 }}>
+              {HALF_LABEL[grp.half] ?? grp.half}
+            </div>
           )}
+          <div className="cgrid" style={{ marginTop: showHeaders ? 6 : 0 }}>
+            {grp.cards.map((c) => (
+              <div key={c.copyId} className="ccard">
+                <CardFace name={c.name} imageUrl={c.imageUrl} size="m" />
+                <div className="cn u">{c.name}</div>
+                {c.localId ? <div className="cno">{c.localId}</div> : null}
+              </div>
+            ))}
+          </div>
         </div>
       ))}
     </div>
