@@ -7,8 +7,11 @@
  * cascade: no rule applies, it is her call. Moving a card off a line clears its `line_slot_id`; the
  * I/O layer reopens the vacated slot (removal symmetry, sync-arch §1.6).
  *
- * Coarse location only: a move sets binder + half + band (or a collection, or bulk). It never
- * auto-joins a line and never addresses a pocket or page.
+ * Coarse location only: a move sets binder + half + band (or a collection, or bulk); it never
+ * addresses a pocket or page. It DOES resolve a line for a back-half destination now (UIL-056) — the
+ * back half IS the lines area, so a shelf move that landed there with no line was always the same
+ * strand `line_slot_id: null` describes. `buildNewLineJoinOps`/`buildExistingLineJoinOps` do that;
+ * see `MoveDestination`'s `lineJoin` in ./types.
  *
  * This module is the ONE authority on what a destination means. That now covers two things, because
  * collection membership is derived from two facts, not one (app/(ui)/coll/actions.ts `loadCollHub`):
@@ -22,8 +25,16 @@
  * on lib/repo and no cycle.
  */
 
+import {
+  generateSlots,
+  testViability,
+  type Band,
+  type CatalogCard,
+  type IncomingCard,
+  type TypeColorMap,
+} from "@/lib/engine";
 import type { WriteOp } from "@/lib/repo";
-import type { CopyPlacementPatch, MoveDestination, MoveOptions } from "./types";
+import type { CopyPlacementPatch, LineJoinChoice, MoveDestination, MoveOptions } from "./types";
 
 /** Derive the four placement columns (+ cleared line link) for a moved copy. */
 export function placementForMove(dest: MoveDestination): CopyPlacementPatch {
@@ -126,8 +137,26 @@ export function isMoveDestinationComplete(dest: MoveDestination): boolean {
     case "collection":
       return Boolean(dest.binderId && dest.collectionId);
     case "shelf":
+      // The back half IS the lines area (UIL-056) — a back-half shelf is incomplete without a line
+      // choice, the same way a specialty binder is incomplete without a collection.
+      if (dest.half === "back" && !dest.lineJoin) return false;
       return Boolean(dest.binderId && dest.half && dest.band);
   }
+}
+
+/**
+ * The half a FRESH move panel opens on (no `initial` destination) — a regression `isMoveDestinationComplete`
+ * itself surfaced (UIL-056): without the line picker (`allowLineJoin` false — the Plan spotlight,
+ * Collections), defaulting to "back" opened the panel on a destination that check can never confirm,
+ * with Confirm just sitting disabled and nothing explaining why. Only a caller that HAS the picker
+ * (the Line screen) should default toward the back half — that is the entire point of that flow.
+ */
+export function defaultMoveHalf(
+  initial: MoveDestination | undefined,
+  allowLineJoin: boolean,
+): "front" | "back" {
+  if (initial?.kind === "shelf") return initial.half;
+  return allowLineJoin ? "back" : "front";
 }
 
 /* ------------------- membership: the other half of a collection destination ------------------- */
@@ -160,6 +189,108 @@ export function collectionTargetJoinOp(
   };
 }
 
+/* ---------------------- line join: the back-half destination's line target (UIL-056) --------------------- */
+
+/** Fresh state a `{ mode: "new" }` join needs to build the family's line + slots. */
+export interface NewLineContext {
+  incoming: IncomingCard;
+  catalog: CatalogCard[];
+  typeColorMap: TypeColorMap;
+  binderId: string | null;
+  /**
+   * The band SHE picked in the panel, not the card's own natural band. Coarse location is a
+   * feature (system-design §12) — a move destination's band is her call, never re-derived — so the
+   * line this creates, and every same-colour/placeholder lookup that builds its slots, must use this
+   * band or the line would silently land in a different band than the copy it was created for.
+   */
+  destinationBand: string;
+}
+
+/**
+ * Build the `insert_line` + `insert_slot` ops for starting a new line around `incoming` (UIL-056).
+ * Reuses the M3 engine's own chain-walk and slot generation (`lib/engine/line.ts`) — the exact same
+ * shapes the cascade's own line-new step produces — but forces `viable: true` regardless of the
+ * `>= 2` same-colour threshold: a manual start is Karvi's own call on a single card, not a proposal
+ * the engine is confident in, so the engine's confidence threshold does not apply here. `owned` is
+ * passed as `[]` deliberately — this creates placeholders/blocks for the rest of the family but does
+ * not reach out and pull any OTHER owned copy into the new line as a side effect of this move; she
+ * can join those the same way (an "existing line" join) afterward.
+ */
+export function buildNewLineJoinOps(ctx: NewLineContext): {
+  ops: WriteOp[];
+  slotId: string | null;
+  /** The line's actual root — NOT necessarily `incoming`'s own dexId when it isn't the chain's
+   *  root (e.g. starting a line from a Stage1 whose Basic exists in the catalog as a placeholder).
+   *  The caller's "does a line already exist" check must key on this, not the card's own dexId. */
+  rootDexId: number;
+} {
+  const chainViability = testViability(ctx.incoming, [], ctx.catalog, ctx.typeColorMap);
+  // Chain-walking is species-only (no band involved); same-colour/placeholder matching is not — so
+  // `band` is overridden to HER destination band here, before any of that matching runs, rather than
+  // trusting `testViability`'s own band guess from the card's type.
+  // `Band` is a nominal display-space union; production actually carries DB-key strings through it
+  // (the same trust the rest of this codebase already gives `band()`'s own return value) — never
+  // validated against the ten literals here, same as elsewhere.
+  const viability = { ...chainViability, band: ctx.destinationBand as Band, viable: true };
+  const gen = generateSlots(ctx.incoming, viability, [], ctx.catalog, ctx.typeColorMap);
+  const lineId = crypto.randomUUID();
+  const rootDexId = viability.chain[0]?.dexId ?? ctx.incoming.card.dexId[0];
+  const ops: WriteOp[] = [
+    {
+      op: "insert_line",
+      id: lineId,
+      root_dex_id: rootDexId,
+      color_band: ctx.destinationBand,
+      binder_id: ctx.binderId,
+      half: "back",
+      status: gen.status,
+    },
+  ];
+  let ownSlotId: string | null = null;
+  for (const slot of gen.slots) {
+    const slotId = crypto.randomUUID();
+    const isIncoming = slot.stageIndex === gen.incomingStageIndex;
+    if (isIncoming) ownSlotId = slotId;
+    ops.push({
+      op: "insert_slot",
+      id: slotId,
+      line_id: lineId,
+      stage_index: slot.stageIndex,
+      stage: slot.stage,
+      state: slot.state,
+      copy_id: isIncoming ? ctx.incoming.id : null,
+      target_catalog_card_id: slot.targetCatalogCardId,
+      note: slot.note ?? null,
+    });
+  }
+  return { ops, slotId: ownSlotId, rootDexId };
+}
+
+/**
+ * Build the ops for joining an EXISTING line's open slot (UIL-056): fill the slot, and complete the
+ * line when this was its last open stage. `slotIsLastOpen` is computed by the caller against fresh
+ * slot rows — never trusted from the client, the same rule `reopenSlotId`/`demoteLineId` follow.
+ */
+export function buildExistingLineJoinOps(params: {
+  copyId: string;
+  lineId: string;
+  slotId: string;
+  slotIsLastOpen: boolean;
+}): { ops: WriteOp[]; slotId: string } {
+  const ops: WriteOp[] = [
+    { op: "update_slot", id: params.slotId, patch: { state: "filled", copy_id: params.copyId } },
+  ];
+  if (params.slotIsLastOpen) {
+    ops.push({ op: "update_line", id: params.lineId, patch: { status: "complete" } });
+  }
+  return { ops, slotId: params.slotId };
+}
+
+/** Read the `lineJoin` choice off a destination, if any (only a back-half shelf carries one). */
+export function lineJoinOf(dest: MoveDestination): LineJoinChoice | null {
+  return dest.kind === "shelf" ? (dest.lineJoin ?? null) : null;
+}
+
 /* ------------------------------ the whole move, as one op set ------------------------------ */
 
 /** A move fully resolved against FRESH state: every id read from the DB, ready to become ops. */
@@ -173,6 +304,16 @@ export interface MovePlan {
   /** The `complete` line to demote back to `open` because that slot is no longer filled. */
   demoteLineId: string | null;
   destinationLabel: string;
+  /**
+   * Ops a resolved `lineJoin` needs (UIL-056) — either filling an existing slot (+ completing its
+   * line) or creating a new line and its slots. Must land BEFORE the copy's own placement update: a
+   * new line's slot ids do not exist until `insert_line`/`insert_slot` run, and the copy update
+   * below references one of them via `resolvedLineSlotId`. Resolved fresh by the caller (`applyMove`)
+   * — never trusted from the client — the same rule `reopenSlotId`/`demoteLineId` already follow.
+   */
+  lineJoinOps?: WriteOp[];
+  /** Overrides `placementForMove`'s default `null` when `lineJoinOps` resolved a slot to fill. */
+  resolvedLineSlotId?: string | null;
 }
 
 /**
@@ -189,7 +330,11 @@ export interface MovePlan {
  */
 export function buildMoveOps(plan: MovePlan): WriteOp[] {
   const patch = placementForMove(plan.destination);
+  if (plan.resolvedLineSlotId !== undefined) patch.line_slot_id = plan.resolvedLineSlotId;
   const ops: WriteOp[] = [
+    // A new line's slots (or the existing slot being filled) must exist before the copy update below
+    // can reference one by id.
+    ...(plan.lineJoinOps ?? []),
     {
       op: "update_copy",
       id: plan.copyId,

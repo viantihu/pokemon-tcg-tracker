@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  defaultMoveHalf,
   describeMove,
   isMoveDestinationComplete,
   moveDecisionReason,
@@ -57,18 +58,67 @@ describe("isMoveDestinationComplete", () => {
   it("bulk is always complete", () => {
     expect(isMoveDestinationComplete({ kind: "bulk" })).toBe(true);
   });
-  it("a shelf move needs a band", () => {
+  it("a front-half shelf move needs a band, and nothing else — no line concept applies", () => {
     expect(
-      isMoveDestinationComplete({ kind: "shelf", binderId: "b1", half: "back", band: "" }),
+      isMoveDestinationComplete({ kind: "shelf", binderId: "b1", half: "front", band: "" }),
     ).toBe(false);
     expect(
+      isMoveDestinationComplete({ kind: "shelf", binderId: "b1", half: "front", band: "red" }),
+    ).toBe(true);
+  });
+  it("a back-half shelf move ALSO needs a line choice (UIL-056) — a band alone is not enough", () => {
+    expect(
       isMoveDestinationComplete({ kind: "shelf", binderId: "b1", half: "back", band: "red" }),
+    ).toBe(false);
+    expect(
+      isMoveDestinationComplete({
+        kind: "shelf",
+        binderId: "b1",
+        half: "back",
+        band: "red",
+        lineJoin: { mode: "new" },
+      }),
+    ).toBe(true);
+    expect(
+      isMoveDestinationComplete({
+        kind: "shelf",
+        binderId: "b1",
+        half: "back",
+        band: "red",
+        lineJoin: { mode: "existing", lineId: "l1", slotId: "s1" },
+      }),
     ).toBe(true);
   });
   it("a collection move needs a collection", () => {
     expect(
       isMoveDestinationComplete({ kind: "collection", binderId: "b2", collectionId: "" }),
     ).toBe(false);
+  });
+});
+
+/**
+ * Regression (UIL-056): defaulting a fresh panel to "back" when it has no line picker opened the
+ * Plan spotlight and Collections' move panel on a destination `isMoveDestinationComplete` can never
+ * confirm — Confirm sat disabled with nothing explaining why, on the two surfaces that got the
+ * back-half-needs-a-line rule "for free" without the picker that makes it satisfiable.
+ */
+describe("defaultMoveHalf", () => {
+  it("defaults to front without the line picker — a back-half default there is a dead end", () => {
+    expect(defaultMoveHalf(undefined, false)).toBe("front");
+  });
+  it("defaults to back WITH the line picker (the Line screen) — that is the point of that flow", () => {
+    expect(defaultMoveHalf(undefined, true)).toBe("back");
+  });
+  it("an explicit initial shelf destination wins over the default either way", () => {
+    const initial = { kind: "shelf", binderId: "b1", half: "back", band: "red" } as const;
+    expect(defaultMoveHalf(initial, false)).toBe("back");
+    expect(defaultMoveHalf(initial, true)).toBe("back");
+  });
+  it("a non-shelf initial (bulk/collection) falls back to the same allowLineJoin-based default", () => {
+    expect(defaultMoveHalf({ kind: "bulk" }, false)).toBe("front");
+    expect(defaultMoveHalf({ kind: "collection", binderId: "b2", collectionId: "c1" }, true)).toBe(
+      "back",
+    );
   });
 });
 

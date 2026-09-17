@@ -27,19 +27,32 @@
  * SERVER ONLY.
  */
 
+import { toCatalogCard } from "@/lib/plan/adapt";
+import type { IncomingCard, TypeColorMap, Variant } from "@/lib/engine";
 import {
   applyWriteOps,
+  catalogCardRepo,
   collectionRepo,
   copyRepo,
   evolutionLineRepo,
   lineSlotRepo,
   placementDecisionRepo,
+  typeColorMapRepo,
   wishlistItemRepo,
   type DbClient,
+  type WriteOp,
 } from "@/lib/repo";
 import { resolveDecisionWrites } from "./decisions";
 import { buildScreenModel } from "./load";
-import { buildMoveOps, describeMove, type MoveNameLookups } from "./move";
+import {
+  buildExistingLineJoinOps,
+  buildMoveOps,
+  buildNewLineJoinOps,
+  describeMove,
+  isMoveDestinationComplete,
+  lineJoinOf,
+  type MoveNameLookups,
+} from "./move";
 import type { DecisionChoiceId, MoveDestination, MoveRequest } from "./types";
 
 export interface MoveResult {
@@ -67,6 +80,15 @@ export async function applyMove(
   const copy = await copyRepo.getByPk(db, req.copyId);
   if (!copy) throw new Error("That card is no longer in the collection.");
 
+  // `isMoveDestinationComplete` is also the panel's Confirm gate, but that gate is client-side only
+  // — nothing stopped a stale tab, a bundle from before UIL-056, or any caller that skips the panel
+  // from sending a back-half destination with no line and reproducing the exact strand this fix
+  // exists to close. Re-checked here for the same reason a stale slot/line id is never trusted from
+  // the browser: the ONE rule, enforced in the ONE place that can't be bypassed.
+  if (!isMoveDestinationComplete(req.destination)) {
+    throw new Error("That destination is incomplete — reload the screen and pick again.");
+  }
+
   await assertCollectionDestinationLives(db, req.destination);
 
   // Moving a card OUT of a line reopens the slot it filled and demotes a completed line.
@@ -83,6 +105,71 @@ export async function applyMove(
     }
   }
 
+  // Moving a card INTO the back half resolves a line target (UIL-056) — re-derived fresh here, same
+  // as reopenSlotId/demoteLineId above, never trusted from the client.
+  const join = lineJoinOf(req.destination);
+  let lineJoinOps: WriteOp[] | undefined;
+  let resolvedLineSlotId: string | null | undefined;
+  if (join && req.destination.kind === "shelf") {
+    if (join.mode === "existing") {
+      const slot = await lineSlotRepo.getByPk(db, join.slotId);
+      if (!slot || slot.line_id !== join.lineId) {
+        throw new Error("That line slot no longer exists — reload the screen and pick again.");
+      }
+      if (slot.state === "filled") {
+        throw new Error("That slot has already been filled — reload the screen and pick again.");
+      }
+      const siblings = await lineSlotRepo.listByLine(db, join.lineId);
+      const slotIsLastOpen = siblings.every((s) => s.id === slot.id || s.state === "filled");
+      const built = buildExistingLineJoinOps({
+        copyId: req.copyId,
+        lineId: join.lineId,
+        slotId: slot.id,
+        slotIsLastOpen,
+      });
+      lineJoinOps = built.ops;
+      resolvedLineSlotId = built.slotId;
+    } else {
+      const card = await catalogCardRepo.getByPk(db, copy.catalog_card_id);
+      if (!card) throw new Error("That card's catalog entry is missing — reload and try again.");
+      const cc = toCatalogCard(card);
+      const [catalogRows, typeMapRows] = await Promise.all([
+        catalogCardRepo.listAll(db),
+        typeColorMapRepo.list(db),
+      ]);
+      const typeColorMap: TypeColorMap = {};
+      for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
+      const incoming: IncomingCard = {
+        id: req.copyId,
+        card: cc,
+        variant: (copy.variant as Variant) ?? "normal",
+      };
+      const built = buildNewLineJoinOps({
+        incoming,
+        catalog: catalogRows.map(toCatalogCard),
+        typeColorMap,
+        binderId: req.destination.binderId,
+        destinationBand: req.destination.band,
+      });
+      // Checked against the line's ACTUAL root (built.rootDexId) rather than the moved card's own
+      // dexId — those differ whenever the card is not itself the chain's root (e.g. starting a line
+      // from a Stage1 whose Basic exists in the catalog as a placeholder). Discarding `built.ops` on
+      // a throw is safe: they are pure data, no I/O has happened yet.
+      const existing = await evolutionLineRepo.findByRootAndBand(
+        db,
+        built.rootDexId,
+        req.destination.band,
+      );
+      if (existing) {
+        throw new Error(
+          "A line for this species and band already exists — reload the screen and join it instead.",
+        );
+      }
+      lineJoinOps = built.ops;
+      resolvedLineSlotId = built.slotId;
+    }
+  }
+
   const destinationLabel = describeMove(req.destination, names);
   await applyWriteOps(db, {
     ops: buildMoveOps({
@@ -92,6 +179,8 @@ export async function applyMove(
       reopenSlotId,
       demoteLineId,
       destinationLabel,
+      lineJoinOps,
+      resolvedLineSlotId,
     }),
   });
 
