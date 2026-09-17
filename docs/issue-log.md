@@ -4612,3 +4612,60 @@ of why she needs the manual path in the first place).
 **Priority rationale.** High, per the Senior BA: rejecting shipped work on a core, everyday flow — not
 holding the assignment on Karvi's priority read given that. Flagging for her confirmation since
 severity calls are hers.
+
+## UIL-065 — A line she deliberately created in a non-natural colour band is invisible to the cascade forever, silently defeating UIL-063's fix for exactly the lines she built herself
+
+- **Reported:** 2026-09-17 (not from Karvi — found by QA while gating #149, verified in the cascade's
+  own lookup, relayed by the Senior BA)
+- **Status:** Open
+- **Priority:** High (Senior BA's read; Karvi to confirm)
+- **Area:** Lines, Plan
+- **Env:** Testing
+
+**Confirmed against `fab3245` (the UIL-063 fix, #149, already on develop): `existingLineSlot` matches
+on the incoming card's own natural band, and a manually-created line's band is her free choice —
+those two facts don't agree with each other.** `existingLineSlot`
+([`lib/engine/cascade.ts:168-179`](../lib/engine/cascade.ts:168)) filters `ctx.lines` on
+`line.colorBand !== b`, where `b = band(incoming.card, map)` — the band the cascade derives from the
+card's own type via `type_color_map`, computed identically for a Basic, Stage1, or Stage2 incoming
+card. `#149` (fab3245) made a Basic run this same lookup, but did not touch how `b` is computed.
+Meanwhile `buildNewLineJoinOps` ([`lib/line/move.ts:219-248`](../lib/line/move.ts:219)) — the write
+path behind UIL-056's manual "start a new line" — writes the new `evolution_line.color_band` as
+`ctx.destinationBand`, her own MovePanel pick, with a comment stating the override is deliberate:
+"`band` is overridden to HER destination band here... rather than trusting `testViability`'s own band
+guess from the card's type." `MoveDestination`'s `shelf.band` field is exactly that free pick — nothing
+forces it to match the card's natural type-derived band.
+
+**Consequence: if she ever puts a manually-created line in a band that isn't the species' natural one,
+no card of that species — Basic, Stage1, or Stage2, present or future — will ever find that line
+again.** `existingLineSlot` checks `dexId` and band together; the species matches, the band never will,
+so every future card for that line falls through exactly as if the line didn't exist. Two things worth
+stating plainly because they're easy to miss:
+
+1. **This silently defeats `fab3245` for exactly the lines she built herself.** The fix's whole point
+   was "a Basic's spotlight should say the truth about whether a line exists for it" — but for a
+   manually-banded line, it still won't, because the lookup that fix now runs was never the part that
+   was broken for this case.
+2. **It reproduces her original UIL-063 symptom by a second, independent route.** A reader who sees
+   UIL-063 marked Fixed would reasonably conclude "no line yet" can no longer be shown to her
+   incorrectly. It still can, whenever the line in question is one she banded herself.
+
+**Pre-existing, not caused by #120.** The band-keyed lookup in `existingLineSlot` predates UIL-056's
+manual-creation UI entirely — it's the same lookup the auto-cascade always used. #120 made this
+reachable by giving her a free band choice for the first time; before that, every line's band was always
+cascade-derived and therefore always matched a future card's natural band by construction.
+
+**Fix direction (Senior BA, following the same principle her UIL-064 ruling already established for
+this file): match on the chain root regardless of band, and let a card joining a line take the LINE's
+band, not its own natural one — she chose where the line physically lives, so the line's band should
+win.** Assigned to FSD-2 to fold into the UIL-064 work rather than ship separately: same file
+(`lib/engine/cascade.ts`/`lib/line/move.ts`), same "pick the line, derive the placement" inversion,
+and shipping them apart would have her retest the same flow twice.
+
+**Cross-reference.** UIL-056 (the manual-creation UI that made this reachable), UIL-063 (the symptom
+this reproduces by a second route, despite being marked Fixed), UIL-064 (the line-join rework this is
+being folded into).
+
+**Priority rationale.** High, per the Senior BA: reproduces an already-Fixed defect's exact symptom
+through a path the fix didn't cover, on the same core flow the log has repeatedly treated as High.
+Flagging for Karvi's confirmation since severity calls are hers.
