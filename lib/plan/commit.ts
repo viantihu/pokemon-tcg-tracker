@@ -458,8 +458,13 @@ function writeCard(
      * had already decided "fill stage N of line L" and `emitIncomingCopy` had already written the
      * back-half placement columns with `line_slot_id: null` (`copyPlacementFromTarget` carries no slot
      * id for any target kind). Neither pointer op then ran, so the commit succeeded having shelved the
-     * card in the back half while the line still showed that stage as wanting a card — her Dragonair
-     * report: pressed Done, card is physically in the binder, Lines page says HUNTING.
+     * card in the back half while the line still showed that stage as wanting a card: Done pressed, card
+     * physically in the binder, that stage still reading as unfilled on the Lines page.
+     *
+     * Described as the PATH, deliberately, and not as the report that prompted the look. The report was
+     * a Dragonair reading HUNTING, and that turned out to be no defect at all — she owns no Dragonair
+     * and the slot was a correct placeholder. Naming it here would hand the next reader a conflation
+     * that already cost two sessions and one spurious re-check request.
      *
      * Failing loudly is right rather than harsh. The write is one `apply_write_ops` transaction, so
      * throwing leaves ZERO rows and she retries against fresh state; the alternative is a silent
