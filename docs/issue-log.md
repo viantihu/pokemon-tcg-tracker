@@ -3492,6 +3492,38 @@ two of the same card. Not blocked on anything, not caused by anything in flight.
 Karvi directly, since she is mid-placement tonight and needs to know the screen can be wrong for
 duplicates and line-mates until this lands.
 
+**Update 2026-09-18: partial fix, and this stays one entry rather than splitting — her explicit
+grouping instruction.** In her words, given directly on this exact case: "I want to track these in the
+same issue rather than different ones. As a BA, you should be grouping issues by functional
+requirements, not technical ones." The functional requirement this entry is actually about is **"the
+displayed placement must match what actually gets written"** — one requirement, two surfaces. #121
+closed it for the spotlight only; it is still open for the worklist table, for the identical
+duplicate/line-mate cases described above.
+
+**Confirmed precisely why the table still drifts, even after #121.** `runHaulPlan`
+([`app/(ui)/plan/actions.ts:97-101`](<../app/(ui)/plan/actions.ts>:97)) calls `planFromDraft` **once**,
+against pre-haul state, and its `items`/`groups` become the `plan` React state
+([`app/(ui)/plan/PlanScreen.tsx:162,343`](<../app/(ui)/plan/PlanScreen.tsx>:162)) that the worklist
+table renders row by row. `refreshSpotlightAction` ([`actions.ts:229-257`](<../app/(ui)/plan/actions.ts>:229))
+— #121's actual fix — is a **separate** call whose result lands in a **separate**, single-slot state
+variable, `fresh`, keyed to whichever card is currently the spotlight
+([`PlanScreen.tsx:480-513`](<../app/(ui)/plan/PlanScreen.tsx>:480)). Nothing ever feeds a re-derived
+placement back into `plan.groups`. So the table cell for a duplicate or line-mate keeps showing
+whatever the one-time pre-haul pass computed — "front half," say — for the entire sitting, even after
+that exact card has been correctly re-derived to "duplicate → bulk" in the spotlight and correctly
+**written** that way at commit. The write is right; the spotlight she confirms against is right; the
+table row for that same card, once she's scrolled past it, is not.
+
+**Cross-reference UIL-037 (same standard, already shipped for a different pair of surfaces).** UIL-037
+made the spotlight and worklist chip agree on an *overridden* card's destination. This is the
+cascade-placed-card version of the identical requirement, and it's the standard this fix should be
+held to: spotlight and worklist row must never disagree, for any card, overridden or not.
+
+**Reopening note for the Senior BA, not a status change I'm making myself:** the current `Fixed` status
+line describes #121 accurately for the spotlight; whether that line should now read as a partial fix,
+or whether this warrants its own transition, is a call for whoever owns status here — flagging rather
+than touching it.
+
 ## UIL-046 — Unresolved entries never record a retry attempt, so "self-heal when the catalog catches up" may never actually run
 
 - **Reported:** 2026-09-14 (not from Karvi — measured on Testing by the Senior BA/tech-lead)
@@ -4884,6 +4916,35 @@ written and merged under that exception.
 already self-limiting once billing is resolved, not a product defect — but High-adjacent in effect
 while it lasts, since it silently removed the one automated check standing between a merge and a
 schema mismatch.
+
+**Update 2026-09-18: resolved, and the two cause descriptions reconcile.** Karvi confirmed the root
+cause: the account's Free-plan monthly Actions minutes were exhausted, not a card-on-file payment
+failure — a private repo on Free gets 2,000 minutes/month, and measurement over 200 runs (Sep 14–17)
+put usage around 990 billed minutes across 397 runs, roughly 5 minutes each, with `verify` alone
+accounting for about three quarters of it. Three days of UAT activity used a month's allotment. That
+reconciles with the annotation text captured earlier in this entry ("recent account payments have
+failed or your spending limit needs to be increased"): on a Free plan with no payment method on file,
+running out of included minutes has nowhere to fall back to, so it surfaces as the same
+payment/spending-limit message a real billing failure would — one underlying condition, one message,
+not two different causes.
+
+**Fix: the repository was made public**, 2026-09-17 23:52Z — confirmed directly
+(`GET /repos/viantihu/pokemon-tcg-tracker` reports `private: false`) — which moves the account onto
+unlimited standard-runner minutes for public repos, no payment or spending-limit change needed. A
+full-history secret scan run beforehand as a precaution found only placeholder values, no real keys or
+personal emails (taken as reported; not independently re-run).
+
+**Recovery verified directly on develop's tip `1a86505`**, all conditions green:
+`Vercel: success`, `verify: success`, `migrate: success` (all 10 migrations, 0001–0010, applied on
+Testing), `smoke: success`, `acceptance: success`. No migration merged during the lockout (confirmed
+earlier in this entry), so Testing's schema never diverged — the freeze held.
+
+**Side finding, recorded here rather than as its own entry since it's a symptom of the same load
+spike, not a new independent cause:** `tests/catalog/artwork.test.ts`'s "scale sanity" test
+(confirmed present) is load-sensitive — it runs close to vitest's 5s default timeout normally (2.7–3.2s)
+and timed out on 5 of 6 simultaneous reruns during the recovery burst, passing unchanged on retry each
+time. An explicit, longer timeout on that one test is the fix in progress; not itself a CI-billing
+issue, just discovered while confirming the billing recovery.
 
 ## UIL-067 — The decision card is too crowded and shows information that isn't helpful for making the actual call
 
