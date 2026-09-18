@@ -899,6 +899,72 @@ jobs:
             echo "$table.$a vs $b: rows=$total   differ=$differ   either-null=$either_null"
           done
 
+      # ---- UIL-053: "a card can be shelved without appearing in the collection; mechanism
+      # unidentified" (Unrated). Collection membership is derived at read time, never stored
+      # (lib/coll/remove.ts): a copy shows in a collection iff role = 'shelved', its binder_id is in
+      # collection.current_binder_ids AND its catalog_card_id is in collection.target_catalog_card_ids.
+      # So the DATA-SIDE form of the phenomenon is a shelved copy sitting in one of a collection's
+      # binders whose card is NOT on that collection's target list ("an untracked physical card
+      # occupying a real pocket", remove.ts:15). Counted per collection. Zero everywhere refutes that
+      # form on her current data and points at the read path instead; non-zero says which collections
+      # intake should look at. Two adjacent counts that would also explain "shelved but not shown":
+      # shelved copies whose binder is listed by NO collection, and binders listed by MORE THAN ONE.
+      #
+      # Collections are numbered 1..N in created_at order. No id, name, binder or card id is printed.
+      - name: "UIL-053: shelved copies outside their collection's target list"
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          rest="https://$PROJECT_REF.supabase.co/rest/v1"
+          auth=(-H "apikey: $SERVICE_KEY")
+          case "$SERVICE_KEY" in eyJ*) auth+=(-H "Authorization: Bearer $SERVICE_KEY") ;; esac
+          body_of() { curl -sS --retry 3 --retry-delay 5 "${auth[@]}" "$rest/$1"; }
+
+          cols=$(body_of "collection?select=mode,current_binder_ids,target_catalog_card_ids&order=created_at.asc")
+          shelved=$(body_of "copy?select=binder_id,catalog_card_id&role=eq.shelved&limit=1000")
+          for v in cols shelved; do
+            if ! printf '%s' "${!v}" | jq -e 'type == "array"' > /dev/null 2>&1; then
+              echo "::warning::UIL-053 read: could not fetch $v — $(printf '%s' "${!v}" | jq -rc '.message // .' 2>/dev/null | head -c 200). Undetermined."
+              exit 0
+            fi
+          done
+
+          ncols=$(printf '%s' "$cols" | jq 'length')
+          nshelved=$(printf '%s' "$shelved" | jq 'length')
+          echo "=============== UIL-053: shelved copies vs collection target lists ==============="
+          echo "collections: $ncols   shelved copies: $nshelved"
+          if [ "$nshelved" -ge 1000 ]; then
+            echo "::warning::shelved copies hit the 1000-row read cap — the counts below are on a truncated set."
+          fi
+
+          printf '%s' "$cols" | jq -r --argjson shelved "$shelved" '
+            to_entries[] | .key as $i | .value as $c
+            | ($c.current_binder_ids // []) as $b
+            | ($c.target_catalog_card_ids // []) as $t
+            | [ $shelved[] | select(.binder_id != null and (.binder_id | IN($b[]))) ] as $in
+            | [ $in[] | select(.catalog_card_id | IN($t[])) ] as $on
+            | "collection #\($i + 1) mode=\($c.mode): binders=\($b | length) targets=\($t | length) shelved-in-binders=\($in | length) on-target=\($on | length) OFF-TARGET=\(($in | length) - ($on | length))"
+          '
+
+          off_total=$(printf '%s' "$cols" | jq --argjson shelved "$shelved" '
+            [ .[] | (.current_binder_ids // []) as $b | (.target_catalog_card_ids // []) as $t
+              | [ $shelved[] | select(.binder_id != null and (.binder_id | IN($b[]))) ]
+              | map(select(.catalog_card_id | IN($t[]) | not)) | length ] | add // 0')
+          null_binder=$(printf '%s' "$shelved" | jq '[ .[] | select(.binder_id == null) ] | length')
+          orphan=$(printf '%s' "$shelved" | jq --argjson cols "$cols" '
+            [ $cols[] | .current_binder_ids // [] | .[] ] as $all
+            | [ .[] | select(.binder_id != null and (.binder_id | IN($all[]) | not)) ] | length')
+          shared=$(printf '%s' "$cols" | jq '[ .[] | .current_binder_ids // [] | .[] ] | group_by(.) | map(select(length > 1)) | length')
+          echo
+          echo "OFF-TARGET total (shelved, in a collection binder, card not on that collection's list): $off_total"
+          echo "shelved copies with NO binder_id:                                                  $null_binder"
+          echo "shelved copies whose binder is listed by NO collection:                            $orphan"
+          echo "binders listed by MORE THAN ONE collection:                                        $shared"
+          echo
+          echo "What this counts: copy rows with role = shelved, joined to collections by binder_id IN current_binder_ids, split by catalog_card_id IN target_catalog_card_ids. It does not count bulk or block copies, and it does not test the read path."
+
       # ---- PR #90's PREMISE. Its `assertReadComplete` guard assumes supabase-js's `count: "exact"`
       # reports the UNTRUNCATED total even when `data` was capped at max-rows. That is documented but was
       # never observed here: PGlite is real Postgres with no REST layer, so it has no cap and no
