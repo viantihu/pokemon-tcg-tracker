@@ -12,11 +12,15 @@
 
 import { getOwnerContext } from "@/lib/plan";
 import {
+  aliasKey,
   dismissEntry,
+  entryAliasKey,
   executeApply,
   executeUndo,
   fastPathNotification,
+  forgetSetAlias,
   manualMatch,
+  reparkCandidates,
   runSyncPipeline,
   undismissEntry,
   type SyncOverrides,
@@ -26,6 +30,7 @@ import {
 import {
   applyWriteOps,
   lastSyncSnapshotRepo,
+  setAliasRepo,
   unresolvedEntryRepo,
   type DbClient,
   type Row,
@@ -34,7 +39,13 @@ import type { AppliedSnapshot } from "@/lib/sync";
 import { errorMessage } from "@/lib/errors";
 import { lookupCatalog } from "../plan/actions";
 import type { LookupCard } from "../plan/plan-types";
-import type { ActionError, ApplyOutcome, QueueEntryView, SyncState } from "./sync-types";
+import type {
+  ActionError,
+  ApplyOutcome,
+  LearnedAliasView,
+  QueueEntryView,
+  SyncState,
+} from "./sync-types";
 
 type PreviewOk = { ok: true; preview: SyncPreview; bundle: SyncPlanBundle };
 
@@ -167,15 +178,52 @@ function toEntryView(e: Row<"unresolved_entry">): QueueEntryView {
     lastRetrySync: e.last_retry_sync,
     retryCount: e.retry_count,
     manualMatchId: e.manual_match_id,
+    aliasKey: entryAliasKey(e),
   };
 }
 
-/** Load the queue (grouped by reason + dismissed) and the undo status for the screen (A.9, B.5). */
+/**
+ * Every learned alias with what forgetting it would do (UIL-047 C3). `reparks` is computed by the same
+ * function the forget action uses to build its write set, so the number the panel warns with is the
+ * number the action will change. The Dex set name comes from any queue entry (any status) carrying the
+ * code — the alias row itself stores only the code.
+ */
+function toAliasViews(
+  aliases: Row<"set_alias">[],
+  entries: Row<"unresolved_entry">[],
+): LearnedAliasView[] {
+  const dexSetNameByKey = new Map<string, string>();
+  for (const e of entries) {
+    const k = entryAliasKey(e);
+    if (e.dex_set_name && !dexSetNameByKey.has(k)) dexSetNameByKey.set(k, e.dex_set_name);
+  }
+  const rank = (a: LearnedAliasView) => (a.source === "manual" ? 0 : 1);
+  return aliases
+    .map((a) => {
+      const alias = { locale: a.locale, dexCode: a.dex_code };
+      return {
+        locale: a.locale,
+        dexCode: a.dex_code,
+        tcgdexSetId: a.tcgdex_set_id,
+        source: a.source === "name-resolved" ? ("name-resolved" as const) : ("manual" as const),
+        createdAt: a.created_at,
+        dexSetName: dexSetNameByKey.get(aliasKey(a.locale, a.dex_code)) ?? null,
+        reparks: reparkCandidates(entries, alias).length,
+      };
+    })
+    .sort((x, y) => rank(x) - rank(y) || y.createdAt.localeCompare(x.createdAt));
+}
+
+/**
+ * Load the queue (grouped by reason + dismissed), the learned aliases, and the undo status for the
+ * screen (A.9, B.5; UIL-047 C3).
+ */
 export async function loadSyncState(): Promise<SyncState> {
   const { db } = await getOwnerContext();
-  const [entries, snapshots] = await Promise.all([
+  const [entries, snapshots, aliases] = await Promise.all([
     unresolvedEntryRepo.list(db),
     lastSyncSnapshotRepo.list(db),
+    setAliasRepo.list(db),
   ]);
 
   const waiting = entries.filter((e) => e.status === "WAITING").map(toEntryView);
@@ -194,7 +242,26 @@ export async function loadSyncState(): Promise<SyncState> {
       createdAt: snap?.createdAt ?? null,
       summary: snap?.counts ?? null,
     },
+    aliases: toAliasViews(aliases, entries),
   };
+}
+
+/**
+ * Forget a learned set alias (UIL-047 C3, second half). One transaction: the alias row goes, and the
+ * set's WAITING "needs your match" entries go back to "waiting on catalog". Re-teaching is the existing
+ * path — match any card from that set by hand.
+ */
+export async function forgetSetAliasAction(
+  locale: string,
+  dexCode: string,
+): Promise<{ ok: true; reparked: number } | ActionError> {
+  try {
+    const { db } = await getOwnerContext();
+    const r = await forgetSetAlias(db, locale, dexCode);
+    return { ok: true, reparked: r.reparked };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
 }
 
 /** Manual-match an entry to a catalog card; learns the set alias when the set was unknown (A.8). */

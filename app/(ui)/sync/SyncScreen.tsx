@@ -18,6 +18,7 @@ import { ProgressBar } from "../_components/ProgressBar";
 import {
   applySync,
   dismissEntryAction,
+  forgetSetAliasAction,
   loadSyncState,
   manualMatchEntry,
   previewSync,
@@ -26,7 +27,7 @@ import {
   undismissEntryAction,
   undoLastSync,
 } from "./actions";
-import type { QueueEntryView, SyncState } from "./sync-types";
+import type { LearnedAliasView, QueueEntryView, SyncState } from "./sync-types";
 
 type Phase = "idle" | "parsing" | "preview" | "working";
 
@@ -38,6 +39,13 @@ function waited(iso: string): string {
   if (hours >= 1) return `${hours}h`;
   return "just now";
 }
+
+/** The Dex export's own spelling for a resolver locale, so the screen speaks her language, not codes. */
+function localeLabel(locale: string): string {
+  return locale === "ja" ? "Japanese" : locale === "en" ? "English" : locale;
+}
+
+const aliasKeyOf = (a: LearnedAliasView) => `${a.locale}:${a.dexCode}`;
 
 export function SyncScreen({ initialState }: { initialState: SyncState }) {
   const [state, setState] = useState<SyncState>(initialState);
@@ -219,6 +227,23 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
         onMatch={setMatching}
         onDismiss={(id) => run("Dismissed.", () => dismissEntryAction(id))}
         onUndismiss={(id) => run("Back in the queue.", () => undismissEntryAction(id))}
+      />
+
+      <AliasPanel
+        aliases={state.aliases}
+        busy={busy}
+        onForget={(a) =>
+          run(null, async () => {
+            const r = await forgetSetAliasAction(a.locale, a.dexCode);
+            if (r.ok)
+              setToast(
+                r.reparked > 0
+                  ? `Forgot ${a.dexCode} → ${a.tcgdexSetId}. ${r.reparked} card(s) back to waiting on catalog.`
+                  : `Forgot ${a.dexCode} → ${a.tcgdexSetId}. No waiting cards were affected.`,
+              );
+            return r;
+          })
+        }
       />
 
       {matching ? (
@@ -482,6 +507,13 @@ function QueuePanel({
   if (!state) return null;
   const { waiting, dismissed, counts } = state;
   const empty = counts.waiting === 0 && counts.dismissed === 0;
+  // "Needs your match" means the set IS known. When that is only because of a learned alias, say which
+  // one — that alias is the thing to forget if the set was taught wrong (UIL-047 C3).
+  const aliasByKey = new Map(state.aliases.map((a) => [aliasKeyOf(a), a]));
+  const aliasHint = (e: QueueEntryView): string | null => {
+    const a = aliasByKey.get(e.aliasKey);
+    return a ? `set known through the learned alias ${a.dexCode} → ${a.tcgdexSetId}` : null;
+  };
   return (
     <div className="panel" style={{ padding: 16, display: "grid", gap: 14 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -511,6 +543,7 @@ function QueuePanel({
         title="Needs your match"
         entries={waiting.unknownCard}
         busy={busy}
+        hint={aliasHint}
         onMatch={onMatch}
         onDismiss={onDismiss}
       />
@@ -548,12 +581,15 @@ function QueueGroup({
   title,
   entries,
   busy,
+  hint,
   onMatch,
   onDismiss,
 }: {
   title: string;
   entries: QueueEntryView[];
   busy: boolean;
+  /** An optional one-line note under an entry (e.g. which learned alias its set came from). */
+  hint?: (e: QueueEntryView) => string | null;
   onMatch: (e: QueueEntryView) => void;
   onDismiss: (id: string) => void;
 }) {
@@ -576,6 +612,9 @@ function QueueGroup({
                   {e.dexSetName} · {e.dexVariantRaw} · ×{e.quantity} · waited{" "}
                   {waited(e.firstSeenSync)}
                 </div>
+                {hint?.(e) ? (
+                  <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 4 }}>{hint(e)}</div>
+                ) : null}
               </div>
               <button type="button" className="btn sm" disabled={busy} onClick={() => onMatch(e)}>
                 Match manually
@@ -593,6 +632,125 @@ function QueueGroup({
         ))}
       </div>
     </section>
+  );
+}
+
+/**
+ * Learned set aliases (UIL-047 C3, second half). Each row is one `(locale, code) → set` the app has been
+ * taught; every card from that Dex set resolves through it. Forgetting is two-step and inline: the first
+ * tap opens the consequences UNDER the row (how many queue entries change, what does not change, what
+ * the next import will do), the second tap forgets. Nothing is gated silently and nothing happens
+ * without the condition being named first.
+ */
+function AliasPanel({
+  aliases,
+  busy,
+  onForget,
+}: {
+  aliases: LearnedAliasView[];
+  busy: boolean;
+  onForget: (a: LearnedAliasView) => void;
+}) {
+  const [confirming, setConfirming] = useState<string | null>(null);
+  return (
+    <div className="panel" style={{ padding: 16, display: "grid", gap: 14 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="tag">LEARNED SET ALIASES</span>
+        <span style={{ fontSize: 11, color: "var(--ink-2)", flex: 1 }}>
+          {aliases.length} learned · a Dex set code the app reads as one TCGdex set. Every card from
+          that set resolves through it, so a wrong one mis-files the whole set.
+        </span>
+      </div>
+
+      {aliases.length === 0 ? (
+        <div style={{ fontSize: 11, color: "var(--ink-2)" }}>
+          Nothing learned yet. Matching a card whose set is unknown teaches one.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 8 }}>
+          {aliases.map((a) => {
+            const key = aliasKeyOf(a);
+            const open = confirming === key;
+            return (
+              <div key={key} className="plate" style={{ padding: 10 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700 }}>
+                      {a.dexCode} → {a.tcgdexSetId}{" "}
+                      <span className="tag">
+                        {a.source === "manual" ? "YOU TAUGHT IT" : "FROM THE SET NAME"}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--ink-2)" }}>
+                      {localeLabel(a.locale)}
+                      {a.dexSetName ? ` · ${a.dexSetName}` : ""} · learned {waited(a.createdAt)} ago
+                      {a.reparks > 0 ? ` · ${a.reparks} waiting card(s) resolve through it` : ""}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={busy}
+                    onClick={() => setConfirming(open ? null : key)}
+                  >
+                    {open ? "Keep it" : "Forget…"}
+                  </button>
+                </div>
+
+                {open ? (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      display: "grid",
+                      gap: 6,
+                      fontSize: 11,
+                      color: "var(--ink-2)",
+                    }}
+                  >
+                    <div>
+                      {a.reparks > 0
+                        ? `${a.reparks} card(s) under "Needs your match" go back to "Waiting on catalog" — their set will be unknown again.`
+                        : "No waiting cards are affected."}
+                    </div>
+                    <div>
+                      Cards already matched through it stay exactly where they are. Your next import
+                      re-checks every card from this set and lists anything it can no longer place
+                      as a removal, for your review.
+                    </div>
+                    <div>
+                      {a.source === "name-resolved"
+                        ? "This one was learned from the set name, so the next import learns it again if the name still matches."
+                        : "To teach a different set, match any card from this set by hand afterwards."}
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        disabled={busy}
+                        onClick={() => {
+                          setConfirming(null);
+                          onForget(a);
+                        }}
+                      >
+                        Forget alias
+                      </button>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        disabled={busy}
+                        onClick={() => setConfirming(null)}
+                      >
+                        Keep it
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
