@@ -67,6 +67,9 @@ export function toCatalogCard(row: Row<"catalog_card">): CatalogCard {
     setId: row.set_id,
     setName: row.set_name,
     localId: row.local_id,
+    // UIL-077: this was the whole defect — the column is populated on every row and the search ranking
+    // already reads it, but it stopped here and never reached anything that renders.
+    setCardCountOfficial: row.set_card_count_official,
     rarity: row.rarity,
     types: row.types ?? [],
     stage: row.stage,

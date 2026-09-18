@@ -94,3 +94,37 @@ export function parseCardQuery(raw: string): ParsedCardQuery {
 
   return { text: q, localIds: [], numberOnly: false };
 }
+
+/**
+ * The collector number as she reads it off the card: `"099/182"`, or `"099"` when the set total is not
+ * known (UIL-077).
+ *
+ * WHY THIS EXISTS AS ONE FUNCTION. She identifies a printing by the whole number, not the numerator —
+ * "099/182", never "099". The denominator has been in the database on all 23,548 rows since migration
+ * 0009 and the search ranking already uses it, but `toCatalogCard` never mapped it through, so every
+ * screen rendered the bare numerator. Choosing between compatible printings for a line slot without it
+ * is choosing blind, which is the same information gap behind UIL-010, UIL-015, UIL-026 and UIL-044 —
+ * all four fixed in SEARCH, none of them in DISPLAY until now.
+ *
+ * THE FALLBACK IS DELIBERATE, NOT INCIDENTAL. `set_card_count_official` is nullable and the mirror
+ * writes `set.cardCount?.official ?? null`, so TCGdex genuinely does not report a printed total for
+ * every set — promos and some subsets have none. When it is missing the BARE number is correct, and
+ * `"099/"` must never appear. Keeping that judgement in one function is the point: a dozen call sites
+ * each doing `${localId}/${count}` would each have to remember the null case, and one forgetting is a
+ * defect she would have to report.
+ *
+ * Returns null only when there is no number at all, so callers keep their existing
+ * `localId ? … : null` shape unchanged.
+ */
+export function formatCollectorNumber(
+  localId: string | null | undefined,
+  setCardCountOfficial: number | null | undefined,
+): string | null {
+  if (!localId) return null;
+  // `> 0` rather than just non-null: a zero total is meaningless as a denominator and would render
+  // "099/0", which is worse than the bare number it replaced.
+  if (typeof setCardCountOfficial === "number" && setCardCountOfficial > 0) {
+    return `${localId}/${setCardCountOfficial}`;
+  }
+  return localId;
+}

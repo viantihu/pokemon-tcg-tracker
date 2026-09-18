@@ -21,6 +21,7 @@ import type { Variant } from "@/lib/engine";
 // Leaf import, NOT the "@/lib/plan" barrel: this is a client component, and the barrel re-exports
 // ./session, which pulls lib/supabase/server (and `next/headers`) into the browser bundle. The
 // `import type` below is fine because types are erased; a VALUE import is not.
+import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { progressPips } from "@/lib/plan/progress";
 import type { PlanBandGroup, PlanItem, ProposedPull } from "@/lib/plan";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
@@ -740,7 +741,9 @@ function IntakePanel(props: {
                 <div className="nm">{d.card.name}</div>
                 <div style={{ fontSize: 10, color: "var(--ink-2)", marginTop: 3 }}>
                   {(d.card.setName ?? d.card.setId ?? "").toString()}
-                  {d.card.localId ? ` · ${d.card.localId}` : ""}
+                  {formatCollectorNumber(d.card.localId, d.card.setCardCountOfficial)
+                    ? ` · ${formatCollectorNumber(d.card.localId, d.card.setCardCountOfficial)}`
+                    : ""}
                 </div>
                 <div style={{ marginTop: 6 }}>
                   {d.existingCopyId ? (
@@ -1299,7 +1302,11 @@ export function PlanRow(props: {
       <div style={{ minWidth: 0 }}>
         <div className="nm">{item.name}</div>
         <div className="meta">
-          {item.localId ? <span className="no">{item.localId}</span> : null}
+          {formatCollectorNumber(item.localId, item.setCardCountOfficial) ? (
+            <span className="no">
+              {formatCollectorNumber(item.localId, item.setCardCountOfficial)}
+            </span>
+          ) : null}
           <span className="u">{disp.destination}</span>
         </div>
       </div>
@@ -1384,9 +1391,11 @@ export function Spotlight(props: {
         <CardFace name={item.name} imageUrl={item.imageUrl ?? null} size="l" />
         <div style={{ minWidth: 0 }}>
           <div className="nm">{item.name}</div>
-          {item.localId ? (
+          {formatCollectorNumber(item.localId, item.setCardCountOfficial) ? (
             <div style={{ marginTop: 6 }}>
-              <span className="no">{item.localId}</span>
+              <span className="no">
+                {formatCollectorNumber(item.localId, item.setCardCountOfficial)}
+              </span>
             </div>
           ) : null}
           <div className="sb u">

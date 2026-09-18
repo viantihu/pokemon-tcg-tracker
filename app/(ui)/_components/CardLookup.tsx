@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "./CardFace";
 import type { LookupCard } from "../plan/plan-types";
 
@@ -96,7 +97,9 @@ export function CardLookup({
                   </span>
                   <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
                     {(c.setName ?? c.setId ?? "").toString()}
-                    {c.localId ? ` · ${c.localId}` : ""}
+                    {formatCollectorNumber(c.localId, c.setCardCountOfficial)
+                      ? ` · ${formatCollectorNumber(c.localId, c.setCardCountOfficial)}`
+                      : ""}
                     {c.cardClass === "specialty" ? " · SPECIALTY" : ""}
                   </span>
                 </span>

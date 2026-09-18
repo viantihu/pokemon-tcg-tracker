@@ -25,6 +25,8 @@ export interface PlanItem {
   name: string;
   setId: string | null;
   localId: string | null;
+  /** Printed set total, for the full "099/182" form (UIL-077). Null when TCGdex reports none. */
+  setCardCountOfficial?: number | null;
   /**
    * TCGdex base image path off the catalog ROW, or null when the mirror has no artwork for the
    * printing (UIL-016). Display-only. It lives here rather than on the engine's `CatalogCard`
