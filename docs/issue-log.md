@@ -3954,7 +3954,9 @@ address post go-live. Flagged Low honestly, not "Low because busy."
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
 - **Status:** Open — **still needs clarification; her first answer ruled out two candidates but not
   the third the way it looked like it would**
-- **Priority:** Unrated — the mechanism is still unidentified
+- **Priority:** High (Karvi's own ruling, 2026-09-18, via Junior BA - 2) — the mechanism is still
+  unidentified; a Testing count of shelved copies absent from their collection's target list is running to
+  localise it
 - **Area:** Collections
 - **Env:** Testing
 
@@ -5129,7 +5131,7 @@ flake (previous update, PR #175) — re-run it; anything else red is real.
   Charizard). In her words: "This UX is too crowded, and a lot of the information here is not helpful.
   I need something simpler."
 - **Status:** Open
-- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Priority:** Medium (Karvi's own ruling, 2026-09-18, via Junior BA - 2)
 - **Area:** Lines
 - **Env:** Testing
 
@@ -5352,7 +5354,7 @@ but needs something to show her first.
 - **Reported:** 2026-09-17 (Karvi, relayed by Junior BA - 2 — a generalization of UIL-039, not a
   separate defect). In her words: "The search throughout the app should be uniform."
 - **Status:** Open
-- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Priority:** High (Karvi's own ruling, 2026-09-18, via Junior BA - 2)
 - **Area:** Plan, Lookup, Backfill, Sync, Collections
 - **Env:** Testing
 
@@ -5404,7 +5406,7 @@ Medium by default; the scope (six call sites, not one) is worth her seeing befor
   proactively avoid more issues."
 
 - **Status:** Open
-- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Priority:** High (Karvi's own ruling, 2026-09-18, via Junior BA - 2)
 - **Area:** Lines, Plan
 - **Env:** Testing
 
