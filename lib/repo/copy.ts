@@ -4,18 +4,19 @@ import { createRepo, pageFiltered, type DbClient, type Row } from "./base";
 export const copyRepo = {
   ...createRepo("copy"),
 
-  /** Shelved copies in a binder half — the duplicate check compares against shelved only. */
+  /**
+   * Shelved copies in one section of one binder — the duplicate check compares against shelved
+   * only. `half: null` is a specialty binder's single section, which stores no half at all (see
+   * migration 0002: `binder_half` is NULL for those rows, never a literal "single").
+   */
   async listShelvedInSection(
     db: DbClient,
     binderId: string,
-    half: "front" | "back",
+    half: "front" | "back" | null,
   ): Promise<Row<"copy">[]> {
-    const { data, error } = await db
-      .from("copy")
-      .select("*")
-      .eq("role", "shelved")
-      .eq("binder_id", binderId)
-      .eq("binder_half", half);
+    let q = db.from("copy").select("*").eq("role", "shelved").eq("binder_id", binderId);
+    q = half === null ? q.is("binder_half", null) : q.eq("binder_half", half);
+    const { data, error } = await q;
     if (error) throw error;
     return data ?? [];
   },

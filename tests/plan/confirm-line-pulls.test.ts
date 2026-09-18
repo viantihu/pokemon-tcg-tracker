@@ -17,9 +17,15 @@
  * that had moved (UIL-062, measured as 5 stale slots on Testing).
  *
  * Run against the REAL `apply_write_ops` RPC on real Postgres (PGlite), and seeded with
- * `seedCatalogCardsFull` — the id-only seed leaves `set_id`/`local_id`/`artwork_group_id` null, which
- * makes `buildChain` and `ownedAt` unable to match anything, so a pull could not occur at all and every
- * assertion here would pass vacuously.
+ * `seedCatalogCardsFull`.
+ *
+ * CORRECTION (QA, post-merge): that seed choice is right but the reason first given here was wrong. This
+ * file builds its `PlanContext` IN MEMORY from the engine fixtures (`makeContext`) and uses the database
+ * only for `applyOps`, so the seed is FK-only here — swapping it for the id-only seed still passes,
+ * because the engine never reads those rows. The "every assertion would pass vacuously" claim describes
+ * `spotlight-drift.test.ts`, which derives through `loadPlanContext` and so does read them. Kept full
+ * because the FK-only distinction is easy to lose, and a later test added to this file may well read the
+ * DB — but do not rely on the seed as the thing protecting these assertions; the in-memory fixtures are.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
@@ -29,6 +35,7 @@ import {
   planFromDraft,
   type DraftItem,
   type PlanContext,
+  toEvolutionLine,
 } from "@/lib/plan";
 import type { Row } from "@/lib/repo";
 import { CHARMANDER_SV03_026, CHARMELEON_SV03_027 } from "../engine/fixtures";
@@ -86,7 +93,16 @@ function ownedRow(over: Partial<Row<"copy">> = {}): Row<"copy"> {
   } as unknown as Row<"copy">;
 }
 
-function makeContext(owned: Row<"copy">[]): PlanContext {
+/**
+ * `slotRows` is not optional decoration: the release guard resolves the slot a pulled copy is vacating
+ * out of `slotRowsByLine`, and this fixture used to hardcode an empty Map while `loadPlanContext`
+ * always populates it. That made the release look unconditional in tests and guarded in production.
+ */
+function makeContext(
+  owned: Row<"copy">[],
+  slotRows: Row<"line_slot">[] = [],
+  lineRows: Row<"evolution_line">[] = [],
+): PlanContext {
   const catalogById = new Map(CATALOG.map((c) => [c.tcgdexId, c]));
   const ctx: EngineContext = {
     typeColorMap: TYPE_COLOR_MAP,
@@ -105,7 +121,25 @@ function makeContext(owned: Row<"copy">[]): PlanContext {
       { id: B1, name: "Binder 1", type: "general", isActive: true },
       { id: SPEC, name: "Specialty A", type: "specialty", isActive: false },
     ],
-    lines: [],
+    /**
+     * Built with the PRODUCTION adapter. The release guard reads a line's `status` to decide whether to
+     * demote it, so a hardcoded `lines: []` made the demote unreachable and a test asserting it would
+     * have failed for the fixture's reasons rather than the code's.
+     */
+    lines: lineRows.map((l) =>
+      toEvolutionLine(
+        l,
+        slotRows.filter((sl) => sl.line_id === l.id),
+        (slot) => {
+          const viaCopy = slot.copy_id && owned.find((c) => c.id === slot.copy_id);
+          if (viaCopy) return catalogById.get(viaCopy.catalog_card_id)?.dexId[0] ?? null;
+          if (slot.target_catalog_card_id) {
+            return catalogById.get(slot.target_catalog_card_id)?.dexId[0] ?? null;
+          }
+          return null;
+        },
+      ),
+    ),
     collections: [],
     now: "2026-09-15T00:00:00.000Z",
   };
@@ -113,7 +147,14 @@ function makeContext(owned: Row<"copy">[]): PlanContext {
     ctx,
     catalogById,
     copyRowById: new Map(owned.map((c) => [c.id, c])),
-    slotRowsByLine: new Map(),
+    slotRowsByLine: slotRows.length
+      ? new Map(
+          [...new Set(slotRows.map((sl) => sl.line_id))].map((lineId) => [
+            lineId,
+            slotRows.filter((sl) => sl.line_id === lineId),
+          ]),
+        )
+      : new Map(),
     orderedBandKeys: BANDS,
     lookups: {
       binderNameById: new Map([
@@ -128,8 +169,14 @@ function makeContext(owned: Row<"copy">[]): PlanContext {
 }
 
 /** Commit the incoming card, confirming the listed pulls (none by default). */
-async function shelveIncoming(db: PGlite, owned: Row<"copy">[], confirmedPulls: string[] = []) {
-  const pc = makeContext(owned);
+async function shelveIncoming(
+  db: PGlite,
+  owned: Row<"copy">[],
+  confirmedPulls: string[] = [],
+  slotRows: Row<"line_slot">[] = [],
+  lineRows: Row<"evolution_line">[] = [],
+) {
+  const pc = makeContext(owned, slotRows, lineRows);
   const { planned } = planFromDraft(pc, [INCOMING]);
   const built = buildHaulCommitPayload(
     pc,
@@ -306,7 +353,15 @@ describe("UIL-061 · the blast radius was wider than a front-half pull", () => {
     ]);
 
     await asOwner(db);
-    await shelveIncoming(db, [ownedRow({ binder_half: "back", line_slot_id: OLD_SLOT })], [OWNED]);
+    const slotRows = (
+      await db.query<Row<"line_slot">>(`select * from line_slot where line_id = $1`, [OLD_LINE])
+    ).rows;
+    await shelveIncoming(
+      db,
+      [ownedRow({ binder_half: "back", line_slot_id: OLD_SLOT })],
+      [OWNED],
+      slotRows,
+    );
     await asSuperuser(db);
 
     const old = await db.query<{ state: string; copy_id: string | null }>(
@@ -325,5 +380,142 @@ describe("UIL-061 · the blast radius was wider than a front-half pull", () => {
        where s.copy_id is not null and (c.line_slot_id is null or c.line_slot_id <> s.id)`,
     );
     expect(stale.rows[0].n).toBe(0);
+  });
+});
+
+/**
+ * The confirmed pull's release, routed through the SHARED emitter (UIL-062 follow-up).
+ *
+ * This path was a fourth inline `update_slot`, which is what `releaseSlotOps` was extracted to prevent —
+ * one emission path is the only thing that stops the release op lists drifting. It was also missing two
+ * things the sibling override path already had, and the second is the one that matters:
+ *
+ *   * the DEMOTE — a line that was `complete` is not complete once one of its stages empties;
+ *   * the POSITIVE-MATCH guard — releasing on "this copy has a pointer" alone EVICTS A CARD THAT NEVER
+ *     MOVED when that pointer is already crossed. Under-recording is bad; this one corrupts.
+ */
+describe("UIL-062 follow-up · the pull release behaves like the override release", () => {
+  const OLD_LINE = "11111111-0000-0000-0000-0000000000a1";
+  const OLD_SLOT = "22222222-0000-0000-0000-0000000000b1";
+
+  /**
+   * The old line is deliberately a DIFFERENT BAND from the one the incoming card will start.
+   *
+   * That is not decoration. `writeNewLine`'s confirmed-pull release only runs when the cascade CREATES
+   * a line, and if the pulled copy's current line is in the same band for the same chain, the cascade
+   * joins that line instead — `writeNewLine` never runs and the test passes while exercising nothing.
+   * (I hit exactly that: the emitted ops were insert_haul/insert_copy/insert_decision, no line ops at
+   * all.) A green line holds the Charmander copy's slot; `ownedAt` matches the pull on the CARD's band
+   * from the type map (Fire → red), not the copy's stored column, so it is still pulled into the new
+   * red line — and the green line's slot is what has to be released.
+   */
+  async function seedOldLine(status: string) {
+    await db.query(
+      `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, status)
+       values ($1,$2,99,'green',$3,$4)`,
+      [OLD_LINE, OWNER, B1, status],
+    );
+    await seedOwned({ binder_half: "back" });
+    await db.query(
+      `insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+       values ($1,$2,$3,0,'Basic','filled',$4)`,
+      [OLD_SLOT, OWNER, OLD_LINE, OWNED],
+    );
+    await db.query(`update copy set line_slot_id = $1 where id = $2`, [OLD_SLOT, OWNED]);
+    return {
+      slots: (
+        await db.query<Row<"line_slot">>(`select * from line_slot where line_id = $1`, [OLD_LINE])
+      ).rows,
+      lines: (
+        await db.query<Row<"evolution_line">>(`select * from evolution_line where id = $1`, [
+          OLD_LINE,
+        ])
+      ).rows,
+    };
+  }
+
+  it("DEMOTES a complete line the pulled copy leaves", async () => {
+    const seeded = await seedOldLine("complete");
+    await asOwner(db);
+    await shelveIncoming(
+      db,
+      [ownedRow({ binder_half: "back", line_slot_id: OLD_SLOT })],
+      [OWNED],
+      seeded.slots,
+      seeded.lines,
+    );
+    await asSuperuser(db);
+    const line = await db.query<{ status: string }>(
+      `select status from evolution_line where id = $1`,
+      [OLD_LINE],
+    );
+    // A line still claiming completion after a stage emptied is the same class of lie as a stale slot.
+    expect(line.rows[0].status).toBe("open");
+  });
+
+  it("leaves an OPEN line's status alone — demote only when it was complete", async () => {
+    const seeded = await seedOldLine("open");
+    await asOwner(db);
+    await shelveIncoming(
+      db,
+      [ownedRow({ binder_half: "back", line_slot_id: OLD_SLOT })],
+      [OWNED],
+      seeded.slots,
+      seeded.lines,
+    );
+    await asSuperuser(db);
+    const line = await db.query<{ status: string }>(
+      `select status from evolution_line where id = $1`,
+      [OLD_LINE],
+    );
+    expect(line.rows[0].status).toBe("open");
+  });
+
+  it("does NOT release a slot that names a different copy — no evicting a card that never moved", async () => {
+    const OTHER = "c0000000-0000-0000-0000-00000000aa77";
+    // Same reasoning as seedOldLine: a band the cascade will not join, so the CREATE path runs.
+    await db.query(
+      `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id)
+       values ($1,$2,99,'green',$3)`,
+      [OLD_LINE, OWNER, B1],
+    );
+    await seedOwned({ binder_half: "back" });
+    await db.query(
+      `insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band, acquired_at)
+       values ($1,$2,$3,'normal','shelved',$4,'back','red', now())`,
+      [OTHER, OWNER, CHARMANDER_SV03_026.tcgdexId, B1],
+    );
+    // The slot holds OTHER; OWNED merely claims it — a pointer that was already crossed.
+    await db.query(
+      `insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+       values ($1,$2,$3,0,'Basic','filled',$4)`,
+      [OLD_SLOT, OWNER, OLD_LINE, OTHER],
+    );
+    await db.query(`update copy set line_slot_id = $1 where id = $2`, [OLD_SLOT, OTHER]);
+    await db.query(`update copy set line_slot_id = $1 where id = $2`, [OLD_SLOT, OWNED]);
+
+    const slotRows = (
+      await db.query<Row<"line_slot">>(`select * from line_slot where line_id = $1`, [OLD_LINE])
+    ).rows;
+    await asOwner(db);
+    await shelveIncoming(
+      db,
+      [ownedRow({ binder_half: "back", line_slot_id: OLD_SLOT })],
+      [OWNED],
+      slotRows,
+      (
+        await db.query<Row<"evolution_line">>(`select * from evolution_line where id = $1`, [
+          OLD_LINE,
+        ])
+      ).rows,
+    );
+    await asSuperuser(db);
+
+    const slot = await db.query<{ state: string; copy_id: string | null }>(
+      `select state, copy_id from line_slot where id = $1`,
+      [OLD_SLOT],
+    );
+    // Still OTHER's. Releasing here would have emptied a stage holding a card nobody touched.
+    expect(slot.rows[0]).toEqual({ state: "filled", copy_id: OTHER });
   });
 });

@@ -30,6 +30,20 @@ export interface AutosaveScheduler<T> {
   flush(): Promise<void>;
 }
 
+/**
+ * Flush before navigating, never navigate first — a plain `<Link>` out of an editing session skips
+ * this ordering entirely, which is exactly how a pending debounce lost an edit here once (UIL-038
+ * follow-up, caught by QA on #155). `navigate` runs only after `flush()`'s promise settles, so this is
+ * safe to reuse for every exit path a scheduler-backed editor grows, not just the one that got missed.
+ */
+export async function flushBeforeNavigate<T>(
+  autosave: AutosaveScheduler<T>,
+  navigate: () => void,
+): Promise<void> {
+  await autosave.flush();
+  navigate();
+}
+
 export function createAutosaveScheduler<T>(
   save: (value: T) => Promise<void>,
   delayMs = 500,

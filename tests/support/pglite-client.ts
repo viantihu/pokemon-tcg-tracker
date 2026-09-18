@@ -29,6 +29,7 @@ import type { DbClient } from "@/lib/repo";
 
 type Filter =
   | { kind: "eq" | "in"; col: string; value: unknown }
+  | { kind: "is"; col: string }
   | { kind: "ilike"; col: string; pattern: string }
   | { kind: "contains" | "overlaps"; col: string; value: unknown }
   | { kind: "or"; clauses: { col: string; pattern: string }[] };
@@ -102,6 +103,14 @@ class PgQuery {
     return this;
   }
 
+  /** `IS NULL` — narrow to that one shape, the only one `listShelvedInSection`'s `half: null` needs;
+   * `= NULL` is never true in SQL, so this cannot be `eq()` with a `null` value. */
+  is(col: string, value: null): this {
+    if (value !== null) throw new Error("pglite-client: is() only supports null");
+    this.filters.push({ kind: "is", col });
+    return this;
+  }
+
   in(col: string, value: unknown[]): this {
     this.filters.push({ kind: "in", col, value });
     return this;
@@ -167,6 +176,8 @@ class PgQuery {
       if (f.kind === "eq") {
         params.push(f.value);
         where.push(`${quoteIdent(f.col)} = $${params.length}`);
+      } else if (f.kind === "is") {
+        where.push(`${quoteIdent(f.col)} is null`);
       } else if (f.kind === "in") {
         const list = f.value as unknown[];
         if (list.length === 0) {
