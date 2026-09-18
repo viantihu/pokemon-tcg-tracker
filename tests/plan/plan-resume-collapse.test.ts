@@ -161,3 +161,37 @@ describe("UIL-018 × UIL-006 · folded bands in the resume payload", () => {
     expect(html).toContain("1 / 2"); // the parked check-off came back too
   });
 });
+
+/**
+ * UIL-075's own resume symmetry: a folded SUB-GROUP restores unmounted (its rows absent from the
+ * tree, not CSS-hidden), the untouched sub-group renders in full, and folding a sub-group must
+ * NOT drop the plan (same rule as UIL-018 one level up).
+ */
+describe("UIL-075 × UIL-006 · folded sub-groups in the resume payload", () => {
+  it("restores the plan with the folded sub-group's rows unmounted and the other intact", () => {
+    // Both bands' non-basic sub-groups folded; the whole test plan is non-basics, so every row goes.
+    park({ ...base, collapsedSubgroups: ["red:nonbasic", "green:nonbasic"] });
+    const html = screen();
+    expect(html).toContain("RESUMED");
+    expect(worklist(html)).not.toContain("Redcard");
+    expect(worklist(html)).not.toContain("Greencard");
+    // Totals still come from the restored run, not a re-run — she is looking at HER plan.
+    expect(html).toContain("2 cards");
+  });
+
+  it("a plan parked before UIL-075 is treated as no sub-groups folded (no throw, no drop)", () => {
+    // `collapsedSubgroups` absent entirely — the shape a blob written by the previous deploy has.
+    park({ ...base });
+    const html = screen();
+    expect(html).toContain("RESUMED");
+    expect(worklist(html)).toContain("Redcard");
+    expect(worklist(html)).toContain("Greencard");
+  });
+
+  it("still drops the plan when the stamp moved (UIL-006 unchanged)", () => {
+    park({ ...base, collapsedSubgroups: ["red:nonbasic"] });
+    const html = screen('{"v":2,"copies":[["shelved",null,null,"red",null,1]]}');
+    expect(html).not.toContain("RESUMED");
+    expect(html).toContain("New haul");
+  });
+});

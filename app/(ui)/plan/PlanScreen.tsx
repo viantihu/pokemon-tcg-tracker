@@ -96,6 +96,18 @@ interface ResumeState {
    * cannot reach the stamp anyway: it is computed on the server.
    */
   collapsed: string[];
+  /**
+   * Sub-group ("BASICS" / "STAGE 1 · 2") keys she has folded away (UIL-075), each `${bandKey}:${kind}`.
+   * Rides here for the same reason `collapsed` does and is out of `stamp` for the same reason too.
+   * OPTIONAL: a plan parked by a build before UIL-075 has no such field, and its absence must read as
+   * "nothing folded" rather than throw — the same forward-compat `collapsed` itself already relies on.
+   */
+  collapsedSubgroups?: string[];
+}
+
+/** Stable fold key for one sub-group. A band key is `[a-z_]+`, so a `:` cannot collide with one. */
+export function subgroupKey(bandKey: string, kind: "basic" | "nonbasic"): string {
+  return `${bandKey}:${kind}`;
 }
 
 function readResume(stamp: string): ResumeState | null {
@@ -218,6 +230,11 @@ export function PlanScreen({
   // Folded band sections (UIL-018). Everything expanded is the default: a fresh plan should look like
   // the plan, and the screen is worked top-to-bottom so the first band she needs is already open.
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(resumed?.collapsed ?? []));
+  // Folded sub-groups within a band (UIL-075) — the finer level under the band fold. Same default and
+  // same resume treatment as `collapsed`; keyed by `${bandKey}:${kind}` via `subgroupKey`.
+  const [collapsedSubgroups, setCollapsedSubgroups] = useState<Set<string>>(
+    () => new Set(resumed?.collapsedSubgroups ?? []),
+  );
   // Placement overrides (M7): draft id → chosen destination, applied at commit (cascade skipped).
   const [overrides, setOverrides] = useState<Record<string, MoveDestination>>(
     resumed?.overrides ?? {},
@@ -248,8 +265,21 @@ export function PlanScreen({
       cur,
       overrides,
       collapsed: [...collapsed],
+      collapsedSubgroups: [...collapsedSubgroups],
     });
-  }, [liveStamp, haulId, source, notes, draft, plan, done, cur, overrides, collapsed]);
+  }, [
+    liveStamp,
+    haulId,
+    source,
+    notes,
+    draft,
+    plan,
+    done,
+    cur,
+    overrides,
+    collapsed,
+    collapsedSubgroups,
+  ]);
 
   // The override DESTINATION TEXT (e.g. "Binder 1 · Back · Green") needs the move options' name maps,
   // which `openMove` loads lazily. But a RESUMED plan (UIL-006) can carry overrides she set last
@@ -365,6 +395,7 @@ export function PlanScreen({
       setDone(new Set());
       // A new run is new work: nothing is finished yet, so nothing should arrive folded.
       setCollapsed(new Set());
+      setCollapsedSubgroups(new Set());
       setConfirmedPulls({});
       setBandChoice({});
     } catch (e) {
@@ -460,6 +491,7 @@ export function PlanScreen({
     setPlan(null);
     setDone(new Set());
     setCollapsed(new Set());
+    setCollapsedSubgroups(new Set());
     setNotes("");
     setCur(0);
     setError(null);
@@ -563,6 +595,20 @@ export function PlanScreen({
       return next;
     });
   }
+  /**
+   * Fold / unfold one sub-group (UIL-075). Keyed by `${bandKey}:${kind}` so BASICS in Red is not the
+   * same key as BASICS in Green — she can fold one without the other, and reopening the same band
+   * later leaves the sub-groups exactly as she left them.
+   */
+  function toggleSubgroupCollapse(bandKey: string, kind: "basic" | "nonbasic") {
+    const key = subgroupKey(bandKey, kind);
+    setCollapsedSubgroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
   /** Tick or untick one proposed pull for one card (UIL-061). */
   function onTogglePull(draftId: string, copyId: string) {
     setConfirmedPulls((prev) => {
@@ -655,6 +701,8 @@ export function PlanScreen({
           collapsed={collapsed}
           setCollapsed={setCollapsed}
           toggleCollapse={toggleCollapse}
+          collapsedSubgroups={collapsedSubgroups}
+          toggleSubgroupCollapse={toggleSubgroupCollapse}
         />
       )}
 
@@ -933,6 +981,9 @@ function PlanView(props: {
   collapsed: Set<string>;
   setCollapsed: (next: Set<string>) => void;
   toggleCollapse: (bandKey: string) => void;
+  /** Sub-group keys currently folded away (UIL-075), each `${bandKey}:${kind}`. */
+  collapsedSubgroups: Set<string>;
+  toggleSubgroupCollapse: (bandKey: string, kind: "basic" | "nonbasic") => void;
 }) {
   const {
     plan,
@@ -958,6 +1009,8 @@ function PlanView(props: {
     collapsed,
     setCollapsed,
     toggleCollapse,
+    collapsedSubgroups,
+    toggleSubgroupCollapse,
   } = props;
 
   /**
@@ -1154,6 +1207,8 @@ function PlanView(props: {
               shelving={shelving}
               overrides={overrides}
               overrideNames={overrideNames}
+              collapsedSubgroups={collapsedSubgroups}
+              onToggleSubgroupCollapse={toggleSubgroupCollapse}
             />
           ))}
         </div>
@@ -1256,6 +1311,14 @@ export function BandSection(props: {
   overrides: Record<string, MoveDestination>;
   /** Name maps for the override destination text; null until options load (UIL-037). */
   overrideNames: MoveNameLookups | null;
+  /**
+   * Sub-group keys currently folded away (UIL-075), each `${bandKey}:${kind}`. Same discipline as
+   * UIL-018 one level up: a folded sub-group renders NOTHING below its header — rows absent from the
+   * tree, not CSS-hidden — so the mount cost UIL-018 exists to remove is really removed at this level
+   * too, not just visually hidden.
+   */
+  collapsedSubgroups: Set<string>;
+  onToggleSubgroupCollapse: (bandKey: string, kind: "basic" | "nonbasic") => void;
 }) {
   const {
     group,
@@ -1271,6 +1334,8 @@ export function BandSection(props: {
     shelving,
     overrides,
     overrideNames,
+    collapsedSubgroups,
+    onToggleSubgroupCollapse,
   } = props;
   const meta = bandMeta(group.bandKey);
   return (
@@ -1305,24 +1370,53 @@ export function BandSection(props: {
           </span>
         </div>
       ) : (
-        group.subgroups.map((sub) => (
-          <div key={sub.kind}>
-            <div className="subhead u">{sub.label}</div>
-            {sub.rows.map((it) => (
-              <PlanRow
-                key={it.incomingId}
-                item={it}
-                current={flatIndex.get(it.incomingId) === cur}
-                done={done.has(it.incomingId)}
-                onSelect={() => onSelect(flatIndex.get(it.incomingId) ?? 0)}
-                onShelve={() => onShelve(it)}
-                busy={shelving === it.incomingId}
-                override={overrides[it.incomingId]}
-                overrideNames={overrideNames}
-              />
-            ))}
-          </div>
-        ))
+        group.subgroups.map((sub) => {
+          const subFolded = collapsedSubgroups.has(subgroupKey(group.bandKey, sub.kind));
+          // Per-sub-group check-off count. Folded, the header is otherwise opaque — same idea as
+          // UIL-018's per-band count. The `.subhead` walk is O(rows in the sub-group), and this
+          // BandSection is only rendered when the outer band is expanded, so the cost lands only
+          // on the band she is actively looking at.
+          let subDone = 0;
+          for (const it of sub.rows) if (done.has(it.incomingId)) subDone += 1;
+          const subHoldsCurrent = sub.rows.some((it) => flatIndex.get(it.incomingId) === cur);
+          return (
+            <div key={sub.kind}>
+              <button
+                type="button"
+                className={"subhead u" + (subFolded ? " folded" : "")}
+                aria-expanded={!subFolded}
+                onClick={() => onToggleSubgroupCollapse(group.bandKey, sub.kind)}
+                title={subFolded ? `Show ${sub.label}` : `Hide ${sub.label}`}
+              >
+                <span className="fold u" aria-hidden>
+                  {subFolded ? "▶" : "▼"}
+                </span>
+                <span className="sublabel">{sub.label}</span>
+                <span className="ct">
+                  {subDone} / {sub.rows.length} CARDS
+                  {/* Same signal as the band header: a folded sub-group with the spotlight card in
+                      it must announce that, or the worklist looks like it lost her place. */}
+                  {subFolded && subHoldsCurrent ? " · HOLDING NOW" : null}
+                </span>
+              </button>
+              {subFolded
+                ? null
+                : sub.rows.map((it) => (
+                    <PlanRow
+                      key={it.incomingId}
+                      item={it}
+                      current={flatIndex.get(it.incomingId) === cur}
+                      done={done.has(it.incomingId)}
+                      onSelect={() => onSelect(flatIndex.get(it.incomingId) ?? 0)}
+                      onShelve={() => onShelve(it)}
+                      busy={shelving === it.incomingId}
+                      override={overrides[it.incomingId]}
+                      overrideNames={overrideNames}
+                    />
+                  ))}
+            </div>
+          );
+        })
       )}
     </div>
   );
