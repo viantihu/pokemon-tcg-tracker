@@ -1,4 +1,4 @@
--- 0012_decision_persistence — a resolved line decision must stay resolved, and its audit row must
+-- 0013_decision_persistence — a resolved line decision must stay resolved, and its audit row must
 -- name the slot it was about (UIL-078).
 --
 -- Build contract: docs/dev-spec.md §4 (migrations are FORWARD-ONLY and ordered; RLS on every table).

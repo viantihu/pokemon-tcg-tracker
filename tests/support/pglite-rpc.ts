@@ -41,7 +41,7 @@ const MIGRATIONS = [
   "0012_collection_updated_at.sql",
   // UIL-078's own migration (#188): the suppression columns on line_slot / placement_decision — the
   // first migration here whose ABSENCE would break a PGlite test (tests/line/decision-persistence).
-  "0012_decision_persistence.sql",
+  "0013_decision_persistence.sql",
 ];
 
 // Supabase provides auth.uid() + the anon/authenticated/service_role roles; PGlite (vanilla PG) does
