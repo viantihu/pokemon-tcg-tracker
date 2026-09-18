@@ -3605,7 +3605,27 @@ mechanism to add; recorded here so the two reports aren't read as two separate t
 ## UIL-046 — Unresolved entries never record a retry attempt, so "self-heal when the catalog catches up" may never actually run
 
 - **Reported:** 2026-09-14 (not from Karvi — measured on Testing by the Senior BA/tech-lead)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#183](https://github.com/viantihu/pokemon-tcg-tracker/pull/183) MERGED to
+  `develop` 2026-09-18 (squash `62fa838`), QA-gated on the merged tree (701 tests, build), confirmed
+  **deployed** to Testing (Deploy and Vercel both green on `d1bfce3`, which contains it). The cause was
+  narrower than the title feared: the self-heal DID run, on the retry path and on a full import — what
+  never existed was the evidence, because `retryUnresolvedNow` returned early on `promoted === 0` and
+  wrote nothing, so `last_retry_sync` and `retry_count` (both already surfaced by the queue) were never
+  stamped. The sweep now stamps every WAITING entry it examined and did not promote, especially when
+  nothing resolved; the waiting set is read before the apply so a just-promoted row is never stamped as a
+  failed retry, and the stamp is its own `apply_write_ops` call so telemetry can neither fail nor be
+  rolled back by a genuine promotion. **QA's caveat, recorded at merge, verbatim:** "the retry-recording
+  write (`stampRetrySweep`) is NOT pinned by any behavioural test. Short-circuiting it passed all 9 tests,
+  because every test in `tests/sync/retry-telemetry-and-alias-guard.test.ts` is a source-text assertion
+  over the file, not an execution. What IS verified: the `update_unresolved_entry` op exists in
+  `write-ops.ts` and in the RPC (0006–0008) and is exercised by `tests/sync/exec-atomicity.test.ts`, and
+  `EntryPatch` already carries `retry_count` and `last_retry_sync`, so the write is well-formed. A PGlite
+  test proving waiting rows gain `last_retry_sync` and `retry_count`+1 while promoted rows don't is owed."
+  So the dev's "revert-checked" claim rests on a source-text test, and this entry does not close on it: it
+  closes on the Tech Lead's Testing read of `retry_count` / `last_retry_sync` across the 7 WAITING rows
+  after the next retry sweep (expect all 7 stamped unless one promotes), which is a behavioural check the
+  suite still lacks. The same PR carries UIL-047's C3 guard (a manual match never learns a set alias
+  across locales), recorded under UIL-047, which stays Open on C1/C2. Not Karvi's report.
 - **Priority:** Medium (Senior BA's read — explicitly provisional; verify the cause before treating the
   ranking as settled)
 - **Area:** Sync
@@ -3926,7 +3946,19 @@ path it depends on is settled.
 ## UIL-052 — Collections aren't sorted by most-recently-modified, and the schema has no signal to sort by
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#182](https://github.com/viantihu/pokemon-tcg-tracker/pull/182) MERGED to
+  `develop` 2026-09-18 (squash `4c8c3cc`), QA-gated on the merged tree (703 tests, build,
+  migration-order "added 0012 above 11"), confirmed **deployed** to Testing with migration
+  `0012_collection_updated_at.sql` applied, and **verified by row count, not by a green run** (Tech Lead's
+  before/after pair, runs `35349693892` → `35405786157`): `collection.updated_at` ABSENT → PRESENT,
+  11 rows before and after, 11 not-null, 11 distinct, **0 rows where `updated_at` differs from
+  `created_at`**, 0 rows with either NULL, min/max identical to `created_at`'s. That last figure is the
+  ruling made measurable: the backfill is from `created_at`, not a uniform `now()` and not NULL, so the
+  existing collections keep a truthful prior order instead of all jumping to the top at once. Three
+  triggers (`is distinct from` guarded) bump `updated_at` on every real modification, removals included by
+  her widened definition of "modified"; no trigger has fired yet because she has not touched a collection
+  since deploy, which is the expected reading. `loadCollHub` now actually sorts by it. Awaiting Karvi's
+  confirmation when UAT resumes: edit one collection and it should move to the top of the list.
 - **Priority:** Low (Claude's read — needs Karvi's confirmation)
 - **Area:** Collections
 - **Env:** Testing
@@ -5181,7 +5213,7 @@ inherit the "silent wrong data" High bucket the way UIL-062/063/065 did.
   reason is tracked separately (UIL-072). **Not rendered in a browser before merge** — the dev had no
   credentials for an authed screen — so her pass is the visual check. Awaiting Karvi's confirmation when
   UAT resumes.
-- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Priority:** High (Karvi's own ruling, 2026-09-18, via Junior BA - 2)
 - **Area:** Lines
 - **Env:** Testing
 
@@ -5566,7 +5598,16 @@ in a physical rhythm, this is about browsing/finding a line she already built.
 
 - **Reported:** 2026-09-17 (Karvi). In her words: "In the haul plans, the stages should also be
   collapsable" — her stated priority, Medium.
-- **Status:** Open
+- **Status:** **Fixed** — PR [#196](https://github.com/viantihu/pokemon-tcg-tracker/pull/196) MERGED to
+  `develop` 2026-09-18 (squash `517336b`), QA-gated on the merged tree (744 tests, build, `globals.css`
+  478/478, fold mutations bite), confirmed **deployed** to Testing on `7381d3c`, which contains it (Deploy
+  migrate/smoke/acceptance green on both; `517336b`'s own Vercel build reads "Canceled from the Vercel
+  Dashboard" because the next commit's build superseded it, and `7381d3c`'s Vercel status is success).
+  Each BASICS / STAGE sub-heading inside a band is now a fold button using UIL-018's exact discipline:
+  folded rows are absent from the tree, not hidden; the fold state rides in the resume payload as an
+  optional field so a plan parked before this reads as nothing folded; per-band-and-kind key. Dev's
+  mutation check: forcing sub-groups unfolded fails 6 of 10 new tests. **Not rendered in a browser before
+  merge**, so her pass is the visual check. Awaiting Karvi's confirmation when UAT resumes.
 - **Priority:** Medium (Karvi's own read)
 - **Area:** Plan
 - **Env:** Testing
@@ -5616,7 +5657,20 @@ rhythm. Worth her confirming which she means before this is built.
   full collectors number of the card must be specified" — the wishlist-alternates grid she screenshotted
   earlier (UIL-067) showing bare numbers like "1", "010", "25", "3", "14", "RC5" is exactly this case.
   Her stated priority for the first report: High.
-- **Status:** Open
+- **Status:** **Fixed** — for the Plan, Backfill and shared type-ahead sites; PR
+  [#187](https://github.com/viantihu/pokemon-tcg-tracker/pull/187) MERGED to `develop` 2026-09-18 (squash
+  `d1bfce3`), QA-gated on the merged tree (731 tests, build, `formatCollectorNumber` pinned by its tests),
+  confirmed **deployed** to Testing (Deploy and Vercel both green on `d1bfce3`). Root cause was one missing
+  line: `set_card_count_official` is populated on all 23,548 catalog rows and already drove search ranking,
+  but `toCatalogCard` never mapped it, so no screen could render it. Now mapped through and shown as
+  "099/182" by one shared formatter at seven sites — Plan (draft row, worklist row, spotlight), Backfill
+  (three sites) and the shared `CardLookup` type-ahead, which Collections' search inherits. A card whose set
+  genuinely has no printed total (some promos and subsets; TCGdex reports null) shows the bare number by
+  design, not by defect. Revert-checked: removing the adapter line fails 4 tests including her named
+  `099/182` case. **Two sites still bare, reported not reached into:** the Collections wishlist grid
+  (`CollHub.tsx` / `CardSearchGrid.tsx`, `WishlistCard` needs the same field — UX Dev's fence) and
+  `MoveOverlay.tsx` (mid-rework); each is a one-line call of the exported formatter and this entry stays
+  Fixed-not-Closed until both land. Awaiting Karvi's confirmation when UAT resumes.
 - **Priority:** High (Karvi's own read)
 - **Area:** Lines, Plan, Lookup, Backfill, Collections
 - **Env:** Testing
