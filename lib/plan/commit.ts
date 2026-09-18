@@ -28,7 +28,13 @@
  */
 
 import { effectiveType, type Role } from "@/lib/engine";
-import { applyWriteOps, type DbClient, type WriteOp, type WritePayload } from "@/lib/repo";
+import {
+  applyWriteOps,
+  type DbClient,
+  type Row,
+  type WriteOp,
+  type WritePayload,
+} from "@/lib/repo";
 // Leaf import (lib/line/move depends only on lib/line/types → lib/engine; no cycle back to lib/plan).
 import { collectionTargetJoinOp, placementForMove, releaseSlotOps } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
@@ -109,6 +115,37 @@ export interface CommitResult {
  */
 export function existingCopyIds(draft: DraftItem[]): string[] {
   return draft.map((d) => d.existingCopyId).filter((id): id is string => !!id);
+}
+
+/**
+ * Resolve WHICH slot a copy is vacating and whether its line stops being complete (UIL-062).
+ *
+ * One resolver, because there are two callers in this file — the placement override and the confirmed
+ * new-line pull — and they were resolving it differently. #151 gave the override a positive-match guard
+ * and a demote lookup; the pull path had neither, so it released on "the copy has a pointer" alone and
+ * never demoted. That is the drift `releaseSlotOps` was extracted to stop, one level up.
+ *
+ * POSITIVE MATCH, deliberately. A release fires only when the slot actually NAMES this copy. If it
+ * names someone else the pointer was already crossed, and clearing the slot would evict a card that
+ * never moved — turning a repair into a corruption. So: opt in on proof, not "release unless disproven".
+ *
+ * Resolved from the loaded context rather than from the client, the same rule `applyMove` follows.
+ * Returns a tuple shaped for `releaseSlotOps`, and `[null, null]` when nothing should be released.
+ */
+function slotReleaseFor(
+  copy: Row<"copy"> | undefined,
+  pc: PlanContext,
+): [slotId: string | null, demoteLineId: string | null] {
+  const slotId = copy?.line_slot_id ?? null;
+  if (!copy || !slotId) return [null, null];
+  for (const [lineId, slots] of pc.slotRowsByLine) {
+    const slot = slots.find((sl) => sl.id === slotId);
+    if (!slot) continue;
+    if (slot.copy_id !== copy.id) return [null, null];
+    const line = pc.ctx.lines.find((l) => l.id === lineId);
+    return [slotId, line?.status === "complete" ? lineId : null];
+  }
+  return [null, null];
 }
 
 /** A line slot as the builder tracks it, mutated in place as fills are recorded so a later card in
@@ -421,8 +458,13 @@ function writeCard(
      * had already decided "fill stage N of line L" and `emitIncomingCopy` had already written the
      * back-half placement columns with `line_slot_id: null` (`copyPlacementFromTarget` carries no slot
      * id for any target kind). Neither pointer op then ran, so the commit succeeded having shelved the
-     * card in the back half while the line still showed that stage as wanting a card — her Dragonair
-     * report: pressed Done, card is physically in the binder, Lines page says HUNTING.
+     * card in the back half while the line still showed that stage as wanting a card: Done pressed, card
+     * physically in the binder, that stage still reading as unfilled on the Lines page.
+     *
+     * Described as the PATH, deliberately, and not as the report that prompted the look. The report was
+     * a Dragonair reading HUNTING, and that turned out to be no defect at all — she owns no Dragonair
+     * and the slot was a correct placeholder. Naming it here would hand the next reader a conflation
+     * that already cost two sessions and one spurious re-check request.
      *
      * Failing loudly is right rather than harsh. The write is one `apply_write_ops` transaction, so
      * throwing leaves ZERO rows and she retries against fresh state; the alternative is a silent
@@ -491,29 +533,12 @@ function writeOverriddenCard(
    * and this one cannot drift.
    */
   const existing = p.existingCopyId ? pc.copyRowById.get(p.existingCopyId) : undefined;
-  const leavingSlotId = existing?.line_slot_id ?? null;
+  const [leavingSlotId, demoteLineId] = slotReleaseFor(existing, pc);
   if (leavingSlotId) {
-    // Release ONLY a slot that actually names this copy. If it names someone else the pointer was
-    // already stale, and clearing it would evict a card that never moved — turning a repair into a
-    // second bug. So this is opt-in on a positive match, not "release unless proven otherwise".
-    let release = false;
-    let demoteLineId: string | null = null;
-    for (const [lineId, slots] of pc.slotRowsByLine) {
-      const slot = slots.find((sl) => sl.id === leavingSlotId);
-      if (!slot) continue;
-      if (slot.copy_id === existing?.id) {
-        release = true;
-        const line = pc.ctx.lines.find((l) => l.id === lineId);
-        if (line?.status === "complete") demoteLineId = lineId;
-      }
-      break;
-    }
-    if (release) {
-      ops.push(...releaseSlotOps(leavingSlotId, demoteLineId));
-      // Keep the in-pass mirror honest, or a later card in the same sitting would think the slot is
-      // still filled and skip a stage it could now use.
-      touchSlot(slotsByLine, leavingSlotId, null);
-    }
+    ops.push(...releaseSlotOps(leavingSlotId, demoteLineId));
+    // Keep the in-pass mirror honest, or a later card in the same sitting would think the slot is
+    // still filled and skip a stage it could now use.
+    touchSlot(slotsByLine, leavingSlotId, null);
   }
   const copyId = emitIncomingCopy(
     ops,
@@ -697,18 +722,23 @@ function writeNewLine(
     if (ownedCopyId) {
       const owned = pc.copyRowById.get(ownedCopyId);
       if (owned) {
-        // Release the slot it is leaving, if it was in one (UIL-062). Overwriting `line_slot_id`
-        // without patching the vacated slot leaves that slot `filled` pointing at a copy that has
-        // moved — measured on Testing as 5 stale slots, with this exact write named as the cause. The
-        // old line then shows an occupied stage holding a card that is physically elsewhere, and
-        // nothing on screen contradicts it.
-        if (owned.line_slot_id) {
-          ops.push({
-            op: "update_slot",
-            id: owned.line_slot_id,
-            patch: { state: "placeholder", copy_id: null },
-          });
-          touchSlot(slotsByLine, owned.line_slot_id, null);
+        // Release the slot it is leaving, through the SHARED emitter (UIL-062 follow-up).
+        //
+        // This was a fourth inline `update_slot`, which defeats the point of extracting
+        // `releaseSlotOps` in the first place — one emission path is what stops the release op lists
+        // drifting apart, and a path outside it is a path that can drift. It was also missing two
+        // things the sibling `writeOverriddenCard` block has:
+        //
+        //   * the DEMOTE. A line that was `complete` is not complete once a stage empties, and leaving
+        //     the status alone is the same class of lie as the stale slot itself.
+        //   * the POSITIVE-MATCH guard. Releasing on "the copy has a pointer" alone will evict a card
+        //     that never moved, if that pointer was already crossed. I found and fixed exactly this in
+        //     `writeOverriddenCard` while building #151 and did not carry it across — so of the three
+        //     gaps here this is the only one that can CORRUPT rather than under-record.
+        const [vacating, demoting] = slotReleaseFor(owned, pc);
+        if (vacating) {
+          ops.push(...releaseSlotOps(vacating, demoting));
+          touchSlot(slotsByLine, vacating, null);
         }
         ops.push({
           op: "update_copy",

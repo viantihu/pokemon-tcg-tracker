@@ -1838,6 +1838,19 @@ that reds at random teaches everyone to re-run rather than investigate, and "a c
 reasons nobody looks at" is the exact shape that let UIL-004 hide for weeks. The gate depends on this
 suite meaning something. Still lands on Low; both readings flagged for Karvi.
 
+**Update 2026-09-18: a second, related failure mode on this same test, found during UIL-066's recovery
+— moved here rather than logged separately.** The "scale sanity" test this entry's own root cause
+quotes normally runs in 2.7–3.2s, comfortably inside its **internal** `toBeLessThan(10000)` assertion
+above but close enough to **vitest's own 5s default execution timeout** that concurrent load pushes it
+over: it timed out on 5 of 6 simultaneous reruns right after the Actions-billing recovery, passing
+unchanged on retry every time. Same underlying shape as this entry's root cause — a wall-clock bound on
+a shared, variably-loaded runner — but a different bound (vitest's own timeout, not the assertion this
+entry's suggested fix targets) and confirmed only under exactly that kind of retry burst, not in
+general. Fix: PR [#175](https://github.com/viantihu/pokemon-tcg-tracker/pull/175) (merged) sets an
+explicit, longer vitest timeout on this one test — addresses the execution timeout specifically; does
+not touch the internal `toBeLessThan(10000)` assertion this entry's own suggested fix is still open
+against.
+
 ## UIL-022 — Moving a card into a collection from the Line or Plan screen orphans it
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
@@ -2291,6 +2304,20 @@ that's a call for whoever designs this, not something to guess at here.
 purpose, not a peripheral complaint, and it changes the transaction model for every future haul. Not
 something to patch quietly — flagging as a redesign that needs its own scoped implementation, likely
 larger than any single entry above it today.
+
+**Update 2026-09-17: the dead bulk-commit entry point is being deleted, on her explicit instruction.**
+While designing UIL-069's colour-mismatch choice, the question came up of what a whole-haul bulk commit
+should do when there's no per-card screen to ask on. Verified directly: `commitHaulAction`
+([`app/(ui)/plan/actions.ts:124`](<../app/(ui)/plan/actions.ts>:124)) has **zero callers** anywhere in
+`app/` or `lib/` on `origin/develop` — this per-card rework left it unreachable since #83/#109, and it
+was never removed at the time. Asked whether to delete it or keep it in case bulk commit ever returned,
+her words: **"delete it, we're not going back to bulk commit."** So `commitHaulAction` and `commitHaul`
+come out; `buildHaulCommitPayload` and the rest of the shared write machinery **stay**, since
+`commitCardPlacement` (the per-card path this entry's fix put in place) depends on them directly
+([`lib/plan/commit.ts:132`](../lib/plan/commit.ts:132) and
+[`:216`](../lib/plan/commit.ts:216) both call it) — this removes the unreachable bulk entry point, not
+the plumbing underneath it. Also settles, by superseding it, a briefly-considered approach of refusing
+a band-mismatch card specifically in the bulk path (UIL-069) — moot once the bulk path itself is gone.
 
 ## UIL-028 — The batched catalog lookup is unpaged, so raising its chunk size would silently truncate results
 
@@ -3478,6 +3505,44 @@ two of the same card. Not blocked on anything, not caused by anything in flight.
 Karvi directly, since she is mid-placement tonight and needs to know the screen can be wrong for
 duplicates and line-mates until this lands.
 
+**Update 2026-09-18: partial fix, and this stays one entry rather than splitting — her explicit
+grouping instruction.** In her words, given directly on this exact case: "I want to track these in the
+same issue rather than different ones. As a BA, you should be grouping issues by functional
+requirements, not technical ones." The functional requirement this entry is actually about is **"the
+displayed placement must match what actually gets written"** — one requirement, two surfaces. #121
+closed it for the spotlight only; it is still open for the worklist table, for the identical
+duplicate/line-mate cases described above.
+
+**Confirmed precisely why the table still drifts, even after #121.** `runHaulPlan`
+([`app/(ui)/plan/actions.ts:97-101`](<../app/(ui)/plan/actions.ts>:97)) calls `planFromDraft` **once**,
+against pre-haul state, and its `items`/`groups` become the `plan` React state
+([`app/(ui)/plan/PlanScreen.tsx:162,343`](<../app/(ui)/plan/PlanScreen.tsx>:162)) that the worklist
+table renders row by row. `refreshSpotlightAction` ([`actions.ts:229-257`](<../app/(ui)/plan/actions.ts>:229))
+— #121's actual fix — is a **separate** call whose result lands in a **separate**, single-slot state
+variable, `fresh`, keyed to whichever card is currently the spotlight
+([`PlanScreen.tsx:480-513`](<../app/(ui)/plan/PlanScreen.tsx>:480)). Nothing ever feeds a re-derived
+placement back into `plan.groups`. So the table cell for a duplicate or line-mate keeps showing
+whatever the one-time pre-haul pass computed — "front half," say — for the entire sitting, even after
+that exact card has been correctly re-derived to "duplicate → bulk" in the spotlight and correctly
+**written** that way at commit. The write is right; the spotlight she confirms against is right; the
+table row for that same card, once she's scrolled past it, is not.
+
+**Cross-reference UIL-037 (same standard, already shipped for a different pair of surfaces).** UIL-037
+made the spotlight and worklist chip agree on an *overridden* card's destination. This is the
+cascade-placed-card version of the identical requirement, and it's the standard this fix should be
+held to: spotlight and worklist row must never disagree, for any card, overridden or not.
+
+**Reopening note for the Senior BA, not a status change I'm making myself:** the current `Fixed` status
+line describes #121 accurately for the spotlight; whether that line should now read as a partial fix,
+or whether this warrants its own transition, is a call for whoever owns status here — flagging rather
+than touching it.
+
+**Update 2026-09-18: a second, independently-worded report confirms this is the right entry for it.**
+Karvi separately asked that "the haul plan and the spotlight of the other cards should reflect what
+happened to those cards" when placing a card alongside other compatible cards in the same haul — same
+functional requirement as this entry's own title, in her own words a second time, not a new gap. No new
+mechanism to add; recorded here so the two reports aren't read as two separate things later.
+
 ## UIL-046 — Unresolved entries never record a retry attempt, so "self-heal when the catalog catches up" may never actually run
 
 - **Reported:** 2026-09-14 (not from Karvi — measured on Testing by the Senior BA/tech-lead)
@@ -4655,7 +4720,11 @@ standing confirmed defect. Flagging for Karvi's confirmation since severity call
   put to her, all four selected verbatim: "It's somewhat buggy and the icons are not aligned" / "Too
   many picks; it should ask for the line" / "Being sent away from the Haul Plan" / "The list of cards
   not in a line is unusable."
-- **Status:** **Fixed (parts 1 and 3 of 4)** — PR [#154](https://github.com/viantihu/pokemon-tcg-tracker/pull/154)
+- **Status:** **Closed on Karvi's explicit instruction** — she was told plainly that two of the four
+  parts were **not** fixed and chose to close the entry anyway, so this is an informed acceptance of parts
+  1 and 3 as sufficient rather than a confirmation that all four are done. The two remaining parts are
+  carried in their own entry (see the end of this entry) so they are not lost with the closure, per her
+  standing rule that a report keeps its own number. **Fixed (parts 1 and 3 of 4)** — PR [#154](https://github.com/viantihu/pokemon-tcg-tracker/pull/154)
   MERGED to `develop` 2026-09-16 (squash `218ac0a`), QA-gated on the merged tree, confirmed **deployed** to
   Testing (all four conditions green on that SHA). **Part 1, too many picks:** the panel now leads with
   "join a line" — candidates flat and sorted nearest-complete, each showing its own band — and picking one
@@ -4867,6 +4936,38 @@ already self-limiting once billing is resolved, not a product defect — but Hig
 while it lasts, since it silently removed the one automated check standing between a merge and a
 schema mismatch.
 
+**Update 2026-09-18: resolved, and the two cause descriptions reconcile into one event, not two.**
+Karvi confirmed the root cause: the account's Free-plan monthly Actions minutes were exhausted — a
+private repo on Free gets 2,000 minutes/month, and measurement over 200 runs (Sep 14–17) put usage
+around 990 billed minutes across 397 runs, roughly 5 minutes each, with `verify` alone accounting for
+about three quarters of it. Three days of UAT activity used a month's allotment. **Precisely why that
+produced the payment/spending-limit annotation rather than an "included minutes exhausted" one:**
+GitHub Actions on a Free plan carries a spending limit that **defaults to $0**. Once the included
+2,000 minutes run out, every further job is billable usage, and a $0 limit is exactly what refuses to
+start a billable job — the annotation's wording ("payments have failed or your spending limit needs to
+be increased") describes that refusal accurately; it was never describing a card-on-file failure.
+Raising the spending limit with a card on file would have cleared it the same way making the repo
+public did.
+
+**Fix: the repository was made public**, 2026-09-17 23:52Z — confirmed directly
+(`GET /repos/viantihu/pokemon-tcg-tracker` reports `private: false`) — which moves the account onto
+unlimited standard-runner minutes for public repos, no payment or spending-limit change needed. A
+full-history secret scan run beforehand as a precaution found only placeholder values, no real keys or
+personal emails (taken as reported; not independently re-run).
+
+**Recovery verified directly on develop's tip `1a86505`**, all conditions green:
+`Vercel: success`, `verify: success`, `migrate: success` (all 10 migrations, 0001–0010, applied on
+Testing), `smoke: success`, `acceptance: success`. No migration merged during the lockout (confirmed
+earlier in this entry), so Testing's schema never diverged — the freeze held. **Re-confirmed on the
+current tip `8028771`**, all six checks green again — the recovery held through further merges, not
+just the first post-fix commit.
+
+**The scale-sanity flake discovered during recovery is recorded under UIL-021, not here — moved on
+review.** It's the same test UIL-021 already covers (`tests/catalog/artwork.test.ts`'s wall-clock
+assertion), a second failure mode on that one test rather than a new, independent CI-billing
+consequence, so it belongs with the existing entry. See UIL-021 for the detail; PR
+[#175](https://github.com/viantihu/pokemon-tcg-tracker/pull/175) (merged) is its fix.
+
 ## UIL-067 — The decision card is too crowded and shows information that isn't helpful for making the actual call
 
 - **Reported:** 2026-09-17 (Karvi, screenshot of a live "COLLECTION CLAIM VS LINE SLOT" decision for
@@ -4933,7 +5034,14 @@ picks; it should ask for the line" — #154 fixed that by making the line questi
 everything else. Her new report is that the collapse went further than she wanted: manual placement
 should be a direct option alongside joining a line, not one step behind it.
 
-**Cross-reference UIL-064 (the rework this is direct feedback on).**
+**Cross-reference UIL-064 (the rework this is direct feedback on) and UIL-070 (its item 1, "being sent
+away from the Haul Plan," is largely this same complaint from a different screen).** Once this fix
+ships — dropping the `<details>` wrapper so front half, collection, and bulk sit directly alongside the
+line-join options rather than behind a toggle — that resolves the front-half/bulk/collection part of the
+"sent away" complaint everywhere the panel mounts, including the Haul Plan. It does **not** resolve the
+back-half-specific case there: UIL-056's server-side invariant still requires a line pick for any
+back-half placement, correctly, and the Haul Plan has no line picker at all today — that residual is
+UIL-070's item 1, not this entry's.
 
 **Priority rationale.** Flagging for Claude's read and Karvi's confirmation — feedback on a screen that
 shipped days ago, not a data-correctness defect.
@@ -4944,7 +5052,8 @@ shipped days ago, not a data-correctness defect.
   In her words: "This is an incorrect suggestion. This is a purple card but is being asked to fill an
   orange line."
 - **Status:** Open
-- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Priority:** High (Senior BA's read; Karvi to confirm) — she's ruled on the shape of the fix, not yet
+  explicitly on severity
 - **Area:** Plan, Lines
 - **Env:** Testing
 
@@ -4976,9 +5085,387 @@ different fixes:
 
 This entry doesn't guess which; that's hers to rule on, the same way UIL-064's four problems were.
 
-**Cross-reference UIL-064 (where "the line's band wins" was ruled) and UIL-065 (the fix that shipped
-it, #154, merged `218ac0a`).**
+**Update 2026-09-17: her ruling is in, and it's option 3 of the two this entry raised — reversal.**
+Asked directly with three shapes to choose from, verbatim: **when a card's own band differs from the
+band of the line it would join, the app must ASK rather than decide.** Her chosen screen, verbatim:
 
-**Priority rationale.** Flagging for Claude's read and Karvi's confirmation — this could be a High if
-the ruling itself reverses (a design defect on the core placement flow), or a Low/wording fix if it's
-purely how the mismatch is explained. Her answer decides which.
+```
+NOW HANDLING  Annihilape
+  COLOUR MISMATCH - choose:
+  ( ) Join PRIMEAPE line      Binder 1 - Back - Orange
+  ( ) File by its own colour  Binder 1 - Front - Purple
+            [ Done ]
+```
+
+**Rejected, recorded so neither gets re-proposed:** keeping the line's band and only wording the
+mismatch better (this entry's option 1 above); making the card's own band win outright and no longer
+offering a mismatched line at all (a stronger version of option 2). Neither of her two surviving
+choices may be pre-selected as a default — she's rejecting a silent default, not picking a better one.
+
+**What this does to UIL-065, precisely.** The cross-band **lookup** stands and UIL-065 stays Fixed for
+it — a line living in another band still has to be found, and that was the real defect UIL-065 named.
+What's reversed is the automatic **consequence** that followed the lookup: "a joining card takes the
+line's band" was the Senior BA's own ruling under UIL-064's derive-from-the-line principle, made before
+anyone had seen it play out on a real card. Seeing it concretely, she's rejected the silent part of
+it. **This entry supersedes that placement-precedence half of UIL-065; UIL-065 itself is not being
+reopened or corrected — the two entries now divide the behavior between them.**
+
+**Cross-reference UIL-064 (where "the line's band wins" was originally ruled), UIL-065 (the fix that
+shipped it, #154, merged `218ac0a`, and whose lookup half still stands), and UIL-061 (the same
+offer-don't-decide shape: surface the choice, never silently pick for her).**
+
+**Priority rationale.** High, per the Senior BA: it produces a suggestion she's called incorrect on the
+flow she uses constantly, and the current behavior is live in her app now. Not yet built — assigned to
+the dev already in `cascade.ts` and the panel from UIL-068/070, ahead of those two.
+
+## UIL-070 — UIL-064's two unfixed parts, carried forward per her own "every report gets a number" rule after she chose to close the parent
+
+- **Reported:** 2026-09-17 (not from Karvi directly — she ruled to close UIL-064 after being told
+  plainly that two of its four selected problems were still unfixed; relayed by the Senior BA, who is
+  recording that closure on her explicit instruction)
+- **Status:** Open
+- **Priority:** Not yet rated (see rationale)
+- **Area:** Plan, Lines
+- **Env:** Testing
+
+Two of UIL-064's four originally-selected problems (both in her own words, from that entry's ruling)
+remain open. UIL-064 itself is being marked Closed on her explicit instruction, having been told what
+remained — this entry exists only because her standing rule is that every report gets its own number,
+not to quietly drop the two leftovers with the parent.
+
+**1. "Being sent away from the Haul Plan" — narrowed to what survives UIL-068's fix: back-half
+placement specifically, from the Haul Plan.** UIL-068 (once shipped) resolves the front-half, bulk, and
+collection part of this everywhere the panel mounts, including here — see the cross-reference added to
+that entry. What UIL-068 does **not** touch is the back half: UIL-056's server-side invariant correctly
+still requires a line pick for any back-half placement, and the Haul Plan has no line picker at all.
+Confirmed in two layers. `PlanScreen.openMove`
+([`app/(ui)/plan/PlanScreen.tsx:296-318`](../app/(ui)/plan/PlanScreen.tsx:296)) builds its
+`MoveTargetCard` with no `joinCandidates`, `existingLineByBand`, or `naturalBandKey`, and its
+`<MoveOverlay>` call site ([`PlanScreen.tsx:597-602`](../app/(ui)/plan/PlanScreen.tsx:597)) passes no
+`allowLineJoin` — so choosing the back half from the Plan spotlight still shows `MovePanel`'s
+plain-move fallback text, "Back-half moves choose a line. Do this from the Lines page." Even if that
+read half were wired up, the write half would silently drop the choice: `writeOverriddenCard`
+([`lib/plan/commit.ts`](../lib/plan/commit.ts), confirmed repeatedly elsewhere in this log this week)
+has no line side effects at all — the UIL-045 shape, a screen showing one thing and the write doing
+another. This is a two-layer job, not a UX tweak. Fix direction on record: this should land as an
+**extraction** of the one derivation `lib/line/load.ts`'s `buildScreenModel` already performs for the
+Line screen, not a second implementation, and it should land together with whatever consumes it.
+
+**2. "It's somewhat buggy and the icons are not aligned."** Still unaddressed — no specifics from her
+by design, and no session has been able to open an authed screen to look. A layout-measurement pass on
+the Move panel (static render against `globals.css`, no server/auth needed) is owed and is the only
+verification available without one.
+
+**Cross-reference.** UIL-064 (the closed parent), UIL-045 (the display/write divergence shape #1
+repeats), UIL-056 (the manual line-creation UI all of this sits on top of), UIL-068 (resolves the
+front-half/bulk/collection part of #1; back-half is what's left here).
+
+**Priority rationale.** Deliberately left unrated rather than guessed. She chose to close the parent
+knowing #1 was open, which may mean she doesn't want it at all — rating it myself would assert an
+intent she hasn't stated. #2 is a defect she personally observed and should not sit unrated forever,
+but needs something to show her first.
+
+## UIL-071 — She wants the grid-style search UIL-039 built for Collections used everywhere the app searches the catalog
+
+- **Reported:** 2026-09-17 (Karvi, relayed by Junior BA - 2 — a generalization of UIL-039, not a
+  separate defect). In her words: "The search throughout the app should be uniform."
+- **Status:** Open
+- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Area:** Plan, Lookup, Backfill, Sync, Collections
+- **Env:** Testing
+
+**Confirmed footprint, found by searching the whole app rather than trusting a partial list.** One
+shared component, `CardLookup` ([`app/(ui)/_components/CardLookup.tsx`](../app/(ui)/_components/CardLookup.tsx))
+— a single debounced text field against the local catalog mirror, one result list, one `onPick` — is
+used at **six call sites across five screens**, unchanged since UIL-039 confirmed the same pattern
+there:
+
+1. **Lookup** ([`app/(ui)/look/LookupScreen.tsx:43`](../app/(ui)/look/LookupScreen.tsx:43)) —
+   "Where is my…", the standalone Lookup tab.
+2. **Backfill**, front-half intake
+   ([`app/(ui)/backfill/BackfillScreen.tsx:227`](../app/(ui)/backfill/BackfillScreen.tsx:227)) —
+   "Set + number or name…".
+3. **Backfill**, picking an owned printing during back-line resolution
+   ([`BackfillScreen.tsx:476`](../app/(ui)/backfill/BackfillScreen.tsx:476)).
+4. **Sync**, pinning an unresolved entry to a real catalog card
+   ([`app/(ui)/sync/SyncScreen.tsx:631`](../app/(ui)/sync/SyncScreen.tsx:631)).
+5. **Collections' "Log a card" modal** ([`app/(ui)/coll/CollHub.tsx:1075`](../app/(ui)/coll/CollHub.tsx:1075))
+   — "Search the catalog…". This is the ONE case UIL-039 didn't touch: that fix replaced the
+   collection-*builder* grid search entirely, but this separate, still-inline "log a single card into
+   this collection" modal is a distinct `CardLookup` call site UIL-039 left alone.
+6. **Haul Plan's own add-card intake**
+   ([`app/(ui)/plan/PlanScreen.tsx:727`](../app/(ui)/plan/PlanScreen.tsx:727)) — not named in the
+   relay, but the same component, found by grepping every usage rather than working from the
+   relayed list alone.
+
+**Not scoping a fix here — just the footprint, so whoever does isn't guessing at it.** Six call sites,
+five screens, each with a different `placeholder` and a different downstream action after `onPick`
+(add to a haul draft, log into a collection, pin a sync entry, fill a backfill slot) — a uniform
+front end would need to keep those six different "what happens next" behaviors distinct even if the
+search-and-pick experience itself becomes one shared grid component, the way UIL-039 built it for
+Collections' builder.
+
+**Cross-reference UIL-039** (the grid-search page this generalizes from, `/coll/search`, PR #155).
+
+**Priority rationale.** Flagging for Claude's read and Karvi's confirmation — this is a consistency
+request across five screens that already work, not a defect, so it doesn't inherit UIL-039's own
+Medium by default; the scope (six call sites, not one) is worth her seeing before a priority is set.
+
+## UIL-072 — Cards stranded in the back half by the new automatic line flow should always be movable, and she wants this stated as a standing product principle, not just fixed case by case
+
+- **Reported:** 2026-09-17 (Karvi, screenshot of the Lines screen's "STRANDED IN THE BACK HALF · 4"
+  list — Blaziken, Torchic, Ponyta, Pikachu). In her words: "I should be able to move these two cards.
+  These came in from the new automatic line flow from the Haul Plan." Separately, as a standing
+  instruction rather than part of the report itself: "The user should ALWAYS have the ability to move
+  cards. The whole point of this app is for users to have the ability to easily view their collections.
+  Convey this to the Senior BA and ensure the team is aware of this product ethos so that we can
+  proactively avoid more issues."
+
+- **Status:** Open
+- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Area:** Lines, Plan
+- **Env:** Testing
+
+**Confirmed mechanism, but which two of the four isn't resolvable from the screenshot alone — flagging
+the ambiguity rather than guessing.** All four stranded cards in the list get a MOVE button
+([`app/(ui)/line/LineScreen.tsx:445`](<../app/(ui)/line/LineScreen.tsx>:445)), and every one of them
+opens `MovePanel` through `openMoveForUnlined`
+([`LineScreen.tsx:142-154`](<../app/(ui)/line/LineScreen.tsx>:142)) with `joinCandidates` set —
+`allowLineJoin={Boolean(move.joinCandidates)}` ([`LineScreen.tsx:195`](<../app/(ui)/line/LineScreen.tsx>:195))
+is `true` for all of them, since `joinCandidates` is always an array (possibly empty), never
+`undefined`, off `lib/line/load.ts`'s `unlinedCards` construction. So for **all four**, not just two,
+moving to anywhere other than a line requires opening the collapsed "Not this — place it manually"
+toggle — **this is UIL-068's exact, already-logged mechanism**, not a new one. What isn't confirmable
+from here is whether she means that friction specifically, or something stronger for two particular
+cards (a move that outright fails, rather than one extra click to reach). Torchic and Blaziken are the
+same evolutionary chain (Torchic → Combusken → Blaziken) and both stranded together, which may be what
+"these two" refers to, but that's a guess, not a finding — needs her word on which two and what
+actually happens when she tries.
+
+**Cross-reference UIL-068** (manual placement collapsed behind a toggle — the confirmed mechanism
+above) **and UIL-070** (the same flow's back-half-from-Haul-Plan gap). If her experience turns out to
+be stronger than UIL-068's friction — an actual failure, not extra clicks — that would be a new,
+distinct defect this entry should be corrected to describe once she confirms.
+
+**The product ethos statement, relayed to the Senior BA directly and recorded here as her own words
+verbatim (see above), not paraphrased:** she wants "the user should always be able to move a card" held
+as a standing principle the team designs against — not something re-litigated fix by fix. This bears
+directly on UIL-064/065/068/069's whole thread: every one of those entries is, in some form, about a
+line-first flow narrowing or gating her access to a plain, unconditional move. Worth reading as the one
+principle underneath four separate reports rather than four unrelated complaints.
+
+**Priority rationale.** Flagging for Claude's read and Karvi's confirmation on the specific report; the
+product-ethos statement itself isn't a priority-rated bug, it's a standing constraint the team should
+carry into every future design in this area.
+
+## UIL-073 — There is no component-render test harness, so every UI failure state in this repo is verified by reading code, not by a test that can fail
+
+- **Reported:** 2026-09-17 (not from Karvi — a recurring gap independently re-flagged by multiple dev
+  sessions across four separate PRs; relayed by the Senior BA as worth tracking once rather than
+  rediscovering repeatedly)
+- **Status:** Open
+- **Priority:** Low (Senior BA's read) — nothing is known broken by this gap, and the fix touches
+  shared config that would conflict with every open PR during the current freeze
+- **Area:** all (test infrastructure)
+- **Env:** n/a — in the repo, not a running environment
+
+**Confirmed directly.** `vitest.config.mts` runs with `environment: "node"` and globs only
+`tests/**/*.test.ts` — no `.tsx`, so a component test file wouldn't even be collected unless misnamed
+into the `.ts` glob. `package.json` has no `jsdom`, `happy-dom`, or `@testing-library/*` dependency.
+What component-adjacent tests exist use `renderToStaticMarkup` (confirmed across six files —
+[`tests/coll/collection-fold.test.ts`](../tests/coll/collection-fold.test.ts),
+[`tests/plan/band-collapse.test.ts`](../tests/plan/band-collapse.test.ts),
+[`tests/plan/override-display.test.ts`](../tests/plan/override-display.test.ts),
+[`tests/plan/plan-artwork.test.ts`](../tests/plan/plan-artwork.test.ts),
+[`tests/plan/plan-resume-collapse.test.ts`](../tests/plan/plan-resume-collapse.test.ts),
+[`tests/plan/pull-disclosure.test.ts`](../tests/plan/pull-disclosure.test.ts)) — which produces a
+static HTML string and cannot dispatch a click or keypress, run an effect, or drive an async
+rejection. Every failure state, hover behavior, or event handler in this app's UI is therefore
+**verified by reading the component**, not by a test that can go red.
+
+**Concrete instances, per the Senior BA, from mutation testing rather than assertion — worth recording
+even though I haven't re-run the mutations myself:**
+
+- **PR #168 (UIL-035)** — confirmed to exist and on-topic (a failed catalog search should say so). Per
+  the relay: removing the `catch` that sets `CardLookup`'s `failed` state still passes its suite 5/5 —
+  the failure message she'd actually see is untested.
+- **PR #154 (UIL-064)** — every manual control that clears a stale `lineJoin` is verified by reading;
+  QA said so explicitly in review.
+- **PR #126 (UIL-038)** — the click/type/close wiring is covered only at the server and scheduler
+  layers; the dev flagged this gap themselves in the PR.
+- **#161** — the ordering is pinned only because the scheduler was extracted into a plain, testable
+  module; the button that triggers it is never exercised.
+
+**Distinct from UIL-029, on purpose.** UIL-029 is about a hand-written `DbClient` test double
+*actively certifying wrong behaviour* — a test that passes and shouldn't. This entry is about the
+*absence* of any DOM at all — there's no test to write in the first place for anything that requires a
+real render, an event, or a browser API, regardless of how carefully a double is written.
+
+**Why this is worth logging at Low rather than fixing now.** Nothing is known broken by the gap itself
+— it's a blind spot, not a bug. Adding a harness touches `package.json` and the vitest config, which
+would conflict with every currently-open PR (seven queued during the CI freeze) and can't sensibly land
+until that clears. The devs have consistently compensated the better way already: extracting logic into
+plain, `environment: "node"`-testable modules (the scheduler extraction behind #161's ordering test is
+the pattern) rather than reaching for a DOM they don't have. **Why log it at all:** it's the reason
+several of Karvi's UI fixes this week carry a "not visually verified" caveat, and the alternative this
+repo already has — the static-layout measurement technique (render the real component to static markup
+against `globals.css`, measure in a browser) — proves layout, not behaviour. Recording both options so
+whoever eventually picks this up chooses with the tradeoff stated, not rediscovers it.
+
+**Cross-reference UIL-029** (wrong-behaviour-certified, the opposite failure mode) **and UIL-021** (the
+other standing Low in test infrastructure, with its own recorded counter-argument).
+
+**Priority rationale.** Low, per the Senior BA: no known live defect traces to this gap specifically,
+and the cost of fixing it now (touching shared config mid-freeze, against seven open PRs) outweighs
+the benefit of fixing it immediately rather than logging it for later.
+
+## UIL-074 — Lines have no sort or grouping options; they render in whatever order the database happens to return
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "Lines must be sorted by binder. I want a UX where I
+  can either view lines grouped by binder or in color + alphabetical order" — her stated priority,
+  Medium.
+- **Status:** Open
+- **Priority:** Medium (Karvi's own read)
+- **Area:** Lines
+- **Env:** Testing
+
+**Confirmed: no sort or grouping exists at all today.** `buildScreenModel`'s line-building loop
+([`lib/line/load.ts:251`](../lib/line/load.ts:251)) is `for (const line of lineRows)`, where `lineRows`
+comes straight from [`evolutionLineRepo.listAll(db)`](../lib/line/load.ts:113) — an unordered `listAll`,
+unlike `colorBandRepo.listOrdered` two lines below it in the same call, whose name itself signals the
+difference. Lines render in whatever order Postgres happens to return an unordered `SELECT`, which in
+practice tracks creation order — not alphabetical, not by binder, not by colour. The screenshot she sent
+shows exactly this: Cubone, Charcadet, Pawmi, Mankey, Ponyta, Timburr… no visible pattern.
+
+**Not scoping the fix here — two view modes, both named by her, need a decision on where the toggle
+lives and whether "grouped by binder" also needs a within-binder secondary sort (color + alphabetical,
+presumably, mirroring the other mode) rather than being a separate, unrelated axis.**
+
+**Distinct from UIL-073, kept separate rather than folded in.** UIL-073 is about the Haul Plan's
+row order within a haul session; this is about the Lines screen's own standing organization. Different
+screens, different functional requirements — the Haul Plan's order is about working through a sitting
+in a physical rhythm, this is about browsing/finding a line she already built.
+
+**Priority rationale.** Medium, Karvi's own call.
+
+## UIL-075 — The Haul Plan's "BASICS" / "STAGE 1 · 2" subheadings inside each band have no collapse control
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "In the haul plans, the stages should also be
+  collapsable" — her stated priority, Medium.
+- **Status:** Open
+- **Priority:** Medium (Karvi's own read)
+- **Area:** Plan
+- **Env:** Testing
+
+**Confirmed: UIL-018 shipped band-level fold only; this finer level was never built.**
+`groupPlan` ([`lib/plan/group.ts:19-38`](../lib/plan/group.ts:19)) splits every band into up to two
+subgroups labeled "BASICS" and "STAGE 1 · 2" (or "TRAINERS · ITEMS" in White) — these are the "stages"
+she means. `BandSection`'s render ([`app/(ui)/plan/PlanScreen.tsx:1156-1246`](<../app/(ui)/plan/PlanScreen.tsx>:1156))
+has one `collapsed` boolean per **band**, toggled by `onToggleCollapse`; once a band is expanded, its
+`group.subgroups.map(...)` always renders every row in every subgroup with no per-subgroup toggle at
+all — the same "always renders everything" shape UIL-018 fixed at the band level, one level down.
+
+**Cross-reference UIL-018** (the band-level version of this same request, already shipped) **and
+UIL-073** (a different axis on the same screen — this is progressive disclosure, UIL-073 is ordering).
+
+**Priority rationale.** Medium, Karvi's own call.
+
+## UIL-076 — The Haul Plan's worklist is not sorted alphabetically, and it needs to be
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "In the haul plan, the cards must be in alphabetical
+  order" — her stated priority, High.
+- **Status:** Open
+- **Priority:** High (Karvi's own read)
+- **Area:** Plan
+- **Env:** Testing
+
+**Confirmed: rows are ordered by cascade action, not name.** Inside each subgroup,
+`subgroupsFor` ([`lib/plan/group.ts:28-38`](../lib/plan/group.ts:28)) sorts on
+`actionOrder(a.it.action) - actionOrder(b.it.action)`, falling back only to original input order (`i`)
+as a tiebreak — never on `it.name`. So two cards with the same action land in whatever order they were
+typed or synced in, and cards with different actions never sort by name against each other at all.
+
+**Open question this entry doesn't resolve: does "alphabetical" replace the action-based sort, or sit
+inside it (alphabetical WITHIN each action group, action order preserved as the outer sort)?** The
+current grouping — basics vs. non-basics, then by action — is described in `group.ts`'s own header as
+FUNCTIONAL, mirroring how she physically works a haul; a flat alphabetical re-sort could undo that
+rhythm. Worth her confirming which she means before this is built.
+
+**Priority rationale.** High, Karvi's own call.
+
+## UIL-077 — The full printed collector number (the /denominator) is captured from TCGdex and used for search, but never shown anywhere in the app
+
+- **Reported:** 2026-09-17 (Karvi, two reports folded into one — same functional requirement). First:
+  "I need to see the FULL collectors number EVERYWHERE a specific card is referenced. There are either
+  no collector numbers or it is just the digits before the /." Second, from the same session: "When
+  choosing to place a stage card into the back half alongside other compatible cards in the haul, the
+  full collectors number of the card must be specified" — the wishlist-alternates grid she screenshotted
+  earlier (UIL-067) showing bare numbers like "1", "010", "25", "3", "14", "RC5" is exactly this case.
+  Her stated priority for the first report: High.
+- **Status:** Open
+- **Priority:** High (Karvi's own read)
+- **Area:** Lines, Plan, Lookup, Backfill, Collections
+- **Env:** Testing
+
+**Confirmed: the denominator is captured and even used for search ranking, but one mapping function
+silently drops it before it reaches any screen.** `catalog_card.set_card_count_official`
+([`supabase/migrations/0009_set_metadata.sql:39`](../supabase/migrations/0009_set_metadata.sql:39))
+is populated correctly from TCGdex's `cardCount.official`
+([`lib/catalog/mirror.ts:183`](../lib/catalog/mirror.ts:183)) and used to rank collector-number search
+matches ([`lib/catalog/collector-number.ts`](../lib/catalog/collector-number.ts), UIL-026). But
+`toCatalogCard` ([`lib/plan/adapt.ts:60-83`](../lib/plan/adapt.ts:60)) — the ONE function that turns a
+DB row into the engine's `CatalogCard`, which every display component reads from — maps every other
+column and never touches `set_card_count_official`. `CatalogCard`
+([`lib/engine/types.ts`](../lib/engine/types.ts)) has no field for it at all. So the data exists,
+correctly, in the database, and is provably usable (search already proves it), but no UI surface —
+`CardFace`, the Haul Plan worklist, the decision card's wishlist grid, the Lines screen, Lookup — can
+show it, because the one function standing between the row and every screen never carries it forward.
+
+**One fix point, many consumers.** Adding `setTotal` (or similar) to `CatalogCard` and to
+`toCatalogCard`'s return makes the data available everywhere at once; formatting it as "NNN/TTT" is
+then a display-layer choice at each of the several call sites, not a data problem to solve per screen.
+
+**Cross-reference UIL-026** (the search-side use of this same column) **and UIL-067** (her earlier
+screenshot of the wishlist grid, which shows the exact symptom of this gap).
+
+**Priority rationale.** High, Karvi's own call — this touches how she identifies which physical card is
+which, everywhere the app shows one.
+
+## UIL-078 — A Lines-screen decision she resolves does not stay resolved; the same decision resurfaces
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "Line decisions do not stick" — her stated priority,
+  High.
+- **Status:** Open
+- **Priority:** High (Karvi's own read)
+- **Area:** Lines
+- **Env:** Testing
+
+**Confirmed mechanism for at least one decision kind — "Collection wins," the RECOMMENDED default
+choice on the collection-claim-vs-line decision card (UIL-067's screenshot).** Resolving a decision is
+genuinely a server round-trip: `resolveDecisionAction` → `applyDecision` → a real write, then a fresh
+`loadLineScreen` reload ([`app/(ui)/line/actions.ts:60-73`](<../app/(ui)/line/actions.ts>:60)) — so this
+isn't a client-only illusion of saving. The problem is **what** gets written for this specific choice.
+`resolveDecisionWrites`'s `"collection-wins"` branch
+([`lib/line/decisions.ts:516-524`](../lib/line/decisions.ts:516)) writes a `wishlistUpserts` entry and
+an audit `decision` row — and nothing else. **No `slotPatches` at all.** The slot's `state` stays
+`"placeholder"`, unchanged, by design (the card legitimately stays a hunt).
+
+**Why that makes the decision reappear.** `deriveAllDecisions`'s trigger for this exact decision kind
+([`lib/line/decisions.ts:254`](../lib/line/decisions.ts:254)) is `slot.state === "placeholder" &&
+claimed` — a running collection still claims this species, and the slot is still a placeholder, both
+true again on the very next load, for the identical reason they were true the first time. Decision
+`id`s are deterministic, derived from `${lineId}:${kind}:${stageIndex}`
+([`decisions.ts:259`](../lib/line/decisions.ts:259)) — not a persisted row with its own "resolved" flag
+— so the ONLY thing suppressing a re-shown decision is client-local React state
+([`app/(ui)/line/LineScreen.tsx:50`](<../app/(ui)/line/LineScreen.tsx>:50), `resolved`, never
+persisted). A fresh page load starts that map empty, and the identical trigger condition fires again:
+the same decision, indistinguishable from a new one.
+
+**Not yet checked against the other decision kinds** (`ex-only-cap`, `root-block`, `line-existing`
+terminations) — this entry confirms the mechanism for one, the most common one on her screenshot; the
+same "nothing changes the trigger condition" shape may or may not repeat for the others and would need
+its own check before assuming it does.
+
+**Priority rationale.** High, Karvi's own call — a decision she's already made keeps asking her again,
+which both wastes her time and risks her picking a different answer the second time without noticing
+it's the same question.
