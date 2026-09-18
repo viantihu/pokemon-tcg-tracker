@@ -115,7 +115,14 @@ export async function loadCollHub(): Promise<CollHubData> {
     if (w.chosen_catalog_card_id) wishedCatalogIds.add(w.chosen_catalog_card_id);
   }
 
-  const collectionViews: CollectionView[] = collections.map((col) => {
+  // Most-recently-modified first (UIL-052) — `updated_at` is bumped by trigger (migration 0011) on
+  // every write that actually changes what's in the collection, so this is a straight sort, not a
+  // derived join.
+  const sortedCollections = [...collections].sort(
+    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+  );
+
+  const collectionViews: CollectionView[] = sortedCollections.map((col) => {
     const targets = col.target_catalog_card_ids ?? [];
     const cardsView: CollectionCardView[] = targets
       .map((id) => cardById.get(id))
