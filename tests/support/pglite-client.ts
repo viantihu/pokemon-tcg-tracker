@@ -42,6 +42,16 @@ function quoteIdent(name: string): string {
 type Row = Record<string, unknown>;
 
 /**
+ * PostgREST (and so supabase-js in production) serializes `numeric` columns as JSON numbers, but the
+ * raw pg wire protocol — what PGlite hands back here — returns them as strings by default, to avoid
+ * silent precision loss for values a JS `number` cannot represent exactly. Left unparsed, that string
+ * reaches application code expecting the production shape (e.g. `fmtPrice`'s `p.toFixed(2)` in
+ * lib/line/view.ts) and throws. OID 1700 is `numeric`; parsing it here — the one place every read in
+ * this shim funnels through — keeps the fidelity this file exists for without widening it further.
+ */
+const NUMERIC_PARSERS = { 1700: (v: string) => Number(v) };
+
+/**
  * A thenable query builder that compiles to one SELECT, INSERT, or UPDATE. Mirrors the repo layer's
  * usage only — `createRepo`'s five shapes (`insert(values).select().single()`,
  * `insertMany` the same without `.single()`, `update(patch).eq(pk, v).select().single()`, plus the
@@ -225,7 +235,7 @@ class PgQuery {
 
   private async rows(): Promise<Row[]> {
     const [sql, params] = this.compile();
-    const res = await this.db.query<Row>(sql, params);
+    const res = await this.db.query<Row>(sql, params, { parsers: NUMERIC_PARSERS });
     return res.rows;
   }
 
@@ -266,7 +276,7 @@ class PgQuery {
     const sql =
       `insert into ${quoteIdent(this.table)} (${cols.map(quoteIdent).join(", ")})` +
       ` values ${valueRows.join(", ")} returning *`;
-    const res = await this.db.query<Row>(sql, params);
+    const res = await this.db.query<Row>(sql, params, { parsers: NUMERIC_PARSERS });
     return res.rows;
   }
 
@@ -281,7 +291,7 @@ class PgQuery {
       `update ${quoteIdent(this.table)} set ${setClause}` +
       this.whereClause(params) +
       ` returning *`;
-    const res = await this.db.query<Row>(sql, params);
+    const res = await this.db.query<Row>(sql, params, { parsers: NUMERIC_PARSERS });
     return res.rows;
   }
 

@@ -36,7 +36,7 @@ current as of its last write; only the Status field itself can lag.
 ## UIL-001 — "Back half from page" gives no indication of what it means
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
+- **Status:** **Closed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check. **Confirmed resolved by Karvi on Testing.**
 - **Priority:** Low
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -59,7 +59,7 @@ step she can be walked through. Copy-only fix, safe to ship after go-live.
 ## UIL-002 — No definition of what counts as a "page"
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
+- **Status:** **Closed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check. **Confirmed resolved by Karvi on Testing.**
 - **Priority:** Medium
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -637,11 +637,11 @@ Plan.
 ## UIL-008 — No progress indication during long operations
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#64](https://github.com/viantihu/pokemon-tcg-tracker/pull/64) MERGED to
+- **Status:** **Closed** — PR [#64](https://github.com/viantihu/pokemon-tcg-tracker/pull/64) MERGED to
   `develop` (squash `88a546c`), QA-reviewed, confirmed **deployed** to Testing. Shipped **option (1)
   only**, an indeterminate activity bar, and the PR argues *against* the determinate bar this entry
   recommended — see the resolution note. Awaiting Karvi's confirmation, including the question of whether
-  the bar still earns its place now that UIL-020 has made the sync much faster.
+  the bar still earns its place now that UIL-020 has made the sync much faster. **Confirmed resolved by Karvi on Testing.**
 - **Priority:** Medium (Claude's read — could argue Low)
 - **Area:** Sync, Plan
 - **Env:** Testing
@@ -675,10 +675,10 @@ three, though — nothing is broken, so Low is defensible if she would rather th
 ## UIL-009 — Clicking outside the collection popup discards everything typed
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56) MERGED to
+- **Status:** **Closed** — PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56) MERGED to
   `develop` 2026-09-14 (squash `0f16007`), QA-reviewed, and confirmed **deployed** to Testing on
   `258db13` (`Vercel`/`migrate`/`smoke`/`acceptance` all green). Awaiting Karvi's confirmation — the
-  behaviour is interaction-only and was never exercised in a browser.
+  behaviour is interaction-only and was never exercised in a browser. **Confirmed resolved by Karvi on Testing.** Note her later ruling: the confirm-on-dismiss dialog this added was subsequently REMOVED by UIL-038's autosave, and she confirmed that removal too — so this entry is closed on the behaviour that shipped here, not on a dialog that still exists.
 - **Priority:** High (Karvi's call)
 - **Area:** Collections
 - **Env:** Testing
@@ -1854,11 +1854,11 @@ against.
 ## UIL-022 — Moving a card into a collection from the Line or Plan screen orphans it
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
-- **Status:** **Fixed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
+- **Status:** **Closed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
   `develop` (squash `e0773e2`), QA-reviewed, confirmed deployed. **No migration needed** — every op
   already existed (`union_collection_targets` shipped in 0007). Awaiting Karvi's confirmation, and note
   the Haul Plan path is the one to test: it is a **separate** code path from the Line screen, so fixing
-  only `applyMove` would have left half of this live. See the corrections below.
+  only `applyMove` would have left half of this live. See the corrections below. **Confirmed resolved by Karvi on Testing 2026-09-18.**
 - **Priority:** High (Senior BA's read)
 - **Area:** Line, Plan, Collections
 - **Env:** Testing
@@ -1931,11 +1931,11 @@ wrong too. Fixed now; both corrected here rather than left standing.**
 ## UIL-023 — `applyMove` is a fourth write path and it is not atomic
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
-- **Status:** **Fixed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
+- **Status:** **Closed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
   `develop` (squash `e0773e2`), QA-reviewed, confirmed deployed. `applyMove` is now **one**
   `apply_write_ops` call, verified by QA at `write.ts:87` with only reads preceding it. `applyDecision`
   remains un-transacted **deliberately** — converting it needs a migration, since `wishlist_item` can
-  only be INSERTed through the RPC, and this entry's root cause was scoped to `applyMove`.
+  only be INSERTed through the RPC, and this entry's root cause was scoped to `applyMove`. **Confirmed resolved by Karvi on Testing 2026-09-18.**
 - **Priority:** Medium (Senior BA's read)
 - **Area:** Line
 - **Env:** Testing
@@ -2530,6 +2530,25 @@ failure shape this entry is about, one layer over in test *data* rather than a t
 follow-up rather than its own UIL: audit what else in the suite leans on the id-only seed for a property
 it can't actually exercise.
 
+**A fourth instance, in the same mitigation-pattern file, found building PR #182 (open) — confirmed on
+`origin/develop` `5f0715e`.** `tests/support/pglite-rpc.ts`'s own `MIGRATIONS` array
+([`:17-26`](../tests/support/pglite-rpc.ts:17)) stops at `0008_collection_removal_ops.sql` — 0009
+(set metadata) and 0010 (the UIL-062 slot-release repair) were never added, so **every PGlite-backed
+test in the repo has been running against a schema two versions behind `develop`**, not the one version
+the earlier findings above already flagged this file for. #182 restores them (plus 0011). The
+implication is the same shape as the other three, one level up: any PGlite test that passed while
+depending on a column or behaviour added in 0009 or 0010 was passing for the wrong reason, and any test
+that *should* have failed against the real, current schema had no way to.
+
+**Four distinct harness-fidelity faults now, found across two days, in the file this entry's own
+suggested fix recommends moving everyone onto.** `count` returning the page size as the total under a
+`.range()` (would have re-armed UIL-031's truncation hazard silently); `order()` ignoring `{ ascending:
+false }`; `seedCatalogCards` writing only `id`/`name`, making every cascade duplicate assertion built on
+it vacuous; and now the migrations array running two versions behind. **Every one of the four was found
+by a developer checking, not by a test failing** — which is this entry's own thesis, restated by its own
+mitigation pattern needing the same kind of check applied to itself four separate times. Staying Open
+on that basis, not closed by any one of the four fixes.
+
 ## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
 
 - **Reported:** 2026-09-14 (not from Karvi — found by the Senior Dev session while fixing UIL-017)
@@ -2980,11 +2999,11 @@ verbatim) rather than a new idea to evaluate, and it's on the screen she uses mo
 ## UIL-037 — After overriding a card's placement, both the spotlight panel and the worklist row still show the original suggestion
 
 - **Reported:** 2026-09-14
-- **Status:** **Fixed** — PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to
+- **Status:** **Closed** — PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to
   `develop` 2026-09-14 (squash `e911c8c`), QA-reviewed, confirmed **deployed** to Testing (all four
   conditions green on `7cb1a36`). The spotlight panel and the worklist row now name the override
   destination instead of the original suggestion. Awaiting Karvi's confirmation — she confirmed UIL-027
-  from the same PR but has not spoken to this one, so it is not claimed on her behalf.
+  from the same PR but has not spoken to this one, so it is not claimed on her behalf. **Confirmed resolved by Karvi on Testing** — the override destination is named on both the spotlight panel and the worklist row.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Plan
 - **Env:** Testing
@@ -3055,7 +3074,7 @@ the one screen built for verifying them. Flagging for her confirmation since sev
 ## UIL-038 — No concept of a draft collection; saving is immediately live
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009, not the same defect — see note below)
-- **Status:** **Fixed** — PR [#126](https://github.com/viantihu/pokemon-tcg-tracker/pull/126) MERGED to
+- **Status:** **Closed** — PR [#126](https://github.com/viantihu/pokemon-tcg-tracker/pull/126) MERGED to
   `develop` 2026-09-16 (squash `e1f6a45`), QA-gated on the merged tree with the guards mutation-verified,
   confirmed **deployed** to Testing (Vercel / migrate / smoke / acceptance all green on `075f170`).
   **Scoped from Karvi's own answer to what "draft" protects against — losing in-progress work, not hiding
@@ -3071,7 +3090,7 @@ the one screen built for verifying them. Flagging for her confirmation since sev
   lose its binder if she opened "+ New binder" and then edited any other field before naming it — the
   server now falls back to the collection's current binder when the pick is unresolved. No component-render
   test infrastructure exists in this repo, so the click/type/close wiring is covered at the server and
-  scheduler layers rather than through the DOM. Awaiting Karvi's confirmation.
+  scheduler layers rather than through the DOM. Awaiting Karvi's confirmation. **Confirmed resolved by Karvi on Testing 2026-09-18** — including the removal of UIL-009's "discard changes?" dialog, which was a visible behaviour change on a screen she had already signed off, so her confirmation covers that too.
 - **Priority:** Unscoped — needs Karvi's clarification before a priority means anything
 - **Area:** Collections
 - **Env:** Testing
@@ -3195,7 +3214,13 @@ inconvenient. Karvi's own priority read wasn't given for this one specifically; 
 ## UIL-040 — Rebinding a collection to a different specialty binder changes the record but silently orphans the cards already shelved in the old one
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009)
-- **Status:** **Fixed (step 1 of 2)** — PR [#102](https://github.com/viantihu/pokemon-tcg-tracker/pull/102)
+- **Status:** **Fixed** — step 1 of 2, and **step 1 confirmed by Karvi on Testing 2026-09-18**: the
+  refusal fires and names what would be stranded. Step 2 (moving the copies so the rebind can succeed) is
+  **not built** and must land with UIL-032, so this entry stays open on step 2 rather than closing.
+  Worth recording because it bounds her always-movable ethos (UIL-072): she has explicitly endorsed a
+  **refusal** here, so that ethos is about never gating a card **move** behind another question — it is not
+  a blanket rule that the app may never refuse an action. A refusal that names the consequence, on an
+  operation that is not itself a move, is acceptable to her. — PR [#102](https://github.com/viantihu/pokemon-tcg-tracker/pull/102)
   MERGED to `develop` 2026-09-14 (squash `9497c6c`), QA-reviewed, confirmed **deployed** to Testing (all
   four conditions green on `7cb1a36`). **Step 1** closes the hazard: a rebind that would strand shelved
   copies is now *refused*, with a message naming what would be orphaned. **Step 2** — moving the copies
@@ -5010,6 +5035,18 @@ review.** It's the same test UIL-021 already covers (`tests/catalog/artwork.test
 assertion), a second failure mode on that one test rather than a new, independent CI-billing
 consequence, so it belongs with the existing entry. See UIL-021 for the detail; PR
 [#175](https://github.com/viantihu/pokemon-tcg-tracker/pull/175) (merged) is its fix.
+
+**Update 2026-09-18: a lasting consequence of making the repo public — branch protection on `develop`,
+Karvi-approved, confirmed live directly against the API.** `GET
+/repos/viantihu/pokemon-tcg-tracker/branches/develop/protection` reports required status checks
+`verify`, `migration-order`, and `Vercel` (strict mode off) — this option simply wasn't available on
+the private Free-plan repo before the visibility change this entry made. Effective immediately for
+every PR into `develop`, docs-only issue-log PRs included: GitHub now blocks the merge
+(`mergeStateStatus: BLOCKED`) until all three report `SUCCESS` on the PR's head commit, typically a
+few minutes after the last push, and direct pushes to `develop` are refused outright. Confirmed
+directly on this session's own PR #189: sat `BLOCKED` on `verify` for roughly two minutes, then merged
+cleanly once it passed. If a PR shows only the artwork "scale sanity" test failing, that is the UIL-021
+flake (previous update, PR #175) — re-run it; anything else red is real.
 
 ## UIL-067 — The decision card is too crowded and shows information that isn't helpful for making the actual call
 
