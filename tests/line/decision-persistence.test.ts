@@ -29,13 +29,15 @@ afterEach(async () => {
   await db.close();
 });
 
-async function seedCatalog(rows: {
-  id: string;
-  name: string;
-  dexId: number;
-  types?: string[];
-  cardClass?: "standard" | "specialty";
-}[]): Promise<void> {
+async function seedCatalog(
+  rows: {
+    id: string;
+    name: string;
+    dexId: number;
+    types?: string[];
+    cardClass?: "standard" | "specialty";
+  }[],
+): Promise<void> {
   // price_market deliberately left NULL: PGlite's wire-protocol client returns a Postgres `numeric`
   // as a string, not a number (unlike production's PostgREST, which serialises it as JSON), and
   // `fmtPrice` calls `.toFixed()` unconditionally on a non-null value — a pre-existing mismatch this

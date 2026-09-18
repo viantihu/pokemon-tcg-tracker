@@ -473,7 +473,14 @@ export function resolveDecisionWrites(
         ...base,
         linePatch: { status: "capped" },
         slotPatches: res.slotId
-          ? [{ slotId: res.slotId, state: "placeholder", targetCatalogCardId: null, ...resolvedMark }]
+          ? [
+              {
+                slotId: res.slotId,
+                state: "placeholder",
+                targetCatalogCardId: null,
+                ...resolvedMark,
+              },
+            ]
           : [],
         wishlistResolveSlotIds: res.slotId ? [res.slotId] : [],
         decision: {
@@ -513,7 +520,15 @@ export function resolveDecisionWrites(
         ...base,
         linePatch: { status: "open" },
         slotPatches: res.slotId
-          ? [{ slotId: res.slotId, state: "block", copyId: null, targetCatalogCardId: null, ...resolvedMark }]
+          ? [
+              {
+                slotId: res.slotId,
+                state: "block",
+                copyId: null,
+                targetCatalogCardId: null,
+                ...resolvedMark,
+              },
+            ]
           : [],
         decision: {
           decision: "root-block-confirmed",
@@ -595,7 +610,14 @@ export function resolveDecisionWrites(
       return {
         ...base,
         slotPatches: res.slotId
-          ? [{ slotId: res.slotId, state: "placeholder", targetCatalogCardId: null, ...resolvedMark }]
+          ? [
+              {
+                slotId: res.slotId,
+                state: "placeholder",
+                targetCatalogCardId: null,
+                ...resolvedMark,
+              },
+            ]
           : [],
         wishlistResolveSlotIds: res.slotId ? [res.slotId] : [],
         decision: {
