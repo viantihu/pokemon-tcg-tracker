@@ -5030,6 +5030,18 @@ assertion), a second failure mode on that one test rather than a new, independen
 consequence, so it belongs with the existing entry. See UIL-021 for the detail; PR
 [#175](https://github.com/viantihu/pokemon-tcg-tracker/pull/175) (merged) is its fix.
 
+**Update 2026-09-18: a lasting consequence of making the repo public — branch protection on `develop`,
+Karvi-approved, confirmed live directly against the API.** `GET
+/repos/viantihu/pokemon-tcg-tracker/branches/develop/protection` reports required status checks
+`verify`, `migration-order`, and `Vercel` (strict mode off) — this option simply wasn't available on
+the private Free-plan repo before the visibility change this entry made. Effective immediately for
+every PR into `develop`, docs-only issue-log PRs included: GitHub now blocks the merge
+(`mergeStateStatus: BLOCKED`) until all three report `SUCCESS` on the PR's head commit, typically a
+few minutes after the last push, and direct pushes to `develop` are refused outright. Confirmed
+directly on this session's own PR #189: sat `BLOCKED` on `verify` for roughly two minutes, then merged
+cleanly once it passed. If a PR shows only the artwork "scale sanity" test failing, that is the UIL-021
+flake (previous update, PR #175) — re-run it; anything else red is real.
+
 ## UIL-067 — The decision card is too crowded and shows information that isn't helpful for making the actual call
 
 - **Reported:** 2026-09-17 (Karvi, screenshot of a live "COLLECTION CLAIM VS LINE SLOT" decision for
