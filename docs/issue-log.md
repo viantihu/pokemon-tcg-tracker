@@ -3524,6 +3524,12 @@ line describes #121 accurately for the spotlight; whether that line should now r
 or whether this warrants its own transition, is a call for whoever owns status here — flagging rather
 than touching it.
 
+**Update 2026-09-18: a second, independently-worded report confirms this is the right entry for it.**
+Karvi separately asked that "the haul plan and the spotlight of the other cards should reflect what
+happened to those cards" when placing a card alongside other compatible cards in the same haul — same
+functional requirement as this entry's own title, in her own words a second time, not a new gap. No new
+mechanism to add; recorded here so the two reports aren't read as two separate things later.
+
 ## UIL-046 — Unresolved entries never record a retry attempt, so "self-heal when the catalog catches up" may never actually run
 
 - **Reported:** 2026-09-14 (not from Karvi — measured on Testing by the Senior BA/tech-lead)
@@ -5296,3 +5302,154 @@ other standing Low in test infrastructure, with its own recorded counter-argumen
 **Priority rationale.** Low, per the Senior BA: no known live defect traces to this gap specifically,
 and the cost of fixing it now (touching shared config mid-freeze, against seven open PRs) outweighs
 the benefit of fixing it immediately rather than logging it for later.
+
+## UIL-074 — Lines have no sort or grouping options; they render in whatever order the database happens to return
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "Lines must be sorted by binder. I want a UX where I
+  can either view lines grouped by binder or in color + alphabetical order" — her stated priority,
+  Medium.
+- **Status:** Open
+- **Priority:** Medium (Karvi's own read)
+- **Area:** Lines
+- **Env:** Testing
+
+**Confirmed: no sort or grouping exists at all today.** `buildScreenModel`'s line-building loop
+([`lib/line/load.ts:251`](../lib/line/load.ts:251)) is `for (const line of lineRows)`, where `lineRows`
+comes straight from [`evolutionLineRepo.listAll(db)`](../lib/line/load.ts:113) — an unordered `listAll`,
+unlike `colorBandRepo.listOrdered` two lines below it in the same call, whose name itself signals the
+difference. Lines render in whatever order Postgres happens to return an unordered `SELECT`, which in
+practice tracks creation order — not alphabetical, not by binder, not by colour. The screenshot she sent
+shows exactly this: Cubone, Charcadet, Pawmi, Mankey, Ponyta, Timburr… no visible pattern.
+
+**Not scoping the fix here — two view modes, both named by her, need a decision on where the toggle
+lives and whether "grouped by binder" also needs a within-binder secondary sort (color + alphabetical,
+presumably, mirroring the other mode) rather than being a separate, unrelated axis.**
+
+**Distinct from UIL-073, kept separate rather than folded in.** UIL-073 is about the Haul Plan's
+row order within a haul session; this is about the Lines screen's own standing organization. Different
+screens, different functional requirements — the Haul Plan's order is about working through a sitting
+in a physical rhythm, this is about browsing/finding a line she already built.
+
+**Priority rationale.** Medium, Karvi's own call.
+
+## UIL-075 — The Haul Plan's "BASICS" / "STAGE 1 · 2" subheadings inside each band have no collapse control
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "In the haul plans, the stages should also be
+  collapsable" — her stated priority, Medium.
+- **Status:** Open
+- **Priority:** Medium (Karvi's own read)
+- **Area:** Plan
+- **Env:** Testing
+
+**Confirmed: UIL-018 shipped band-level fold only; this finer level was never built.**
+`groupPlan` ([`lib/plan/group.ts:19-38`](../lib/plan/group.ts:19)) splits every band into up to two
+subgroups labeled "BASICS" and "STAGE 1 · 2" (or "TRAINERS · ITEMS" in White) — these are the "stages"
+she means. `BandSection`'s render ([`app/(ui)/plan/PlanScreen.tsx:1156-1246`](<../app/(ui)/plan/PlanScreen.tsx>:1156))
+has one `collapsed` boolean per **band**, toggled by `onToggleCollapse`; once a band is expanded, its
+`group.subgroups.map(...)` always renders every row in every subgroup with no per-subgroup toggle at
+all — the same "always renders everything" shape UIL-018 fixed at the band level, one level down.
+
+**Cross-reference UIL-018** (the band-level version of this same request, already shipped) **and
+UIL-073** (a different axis on the same screen — this is progressive disclosure, UIL-073 is ordering).
+
+**Priority rationale.** Medium, Karvi's own call.
+
+## UIL-076 — The Haul Plan's worklist is not sorted alphabetically, and it needs to be
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "In the haul plan, the cards must be in alphabetical
+  order" — her stated priority, High.
+- **Status:** Open
+- **Priority:** High (Karvi's own read)
+- **Area:** Plan
+- **Env:** Testing
+
+**Confirmed: rows are ordered by cascade action, not name.** Inside each subgroup,
+`subgroupsFor` ([`lib/plan/group.ts:28-38`](../lib/plan/group.ts:28)) sorts on
+`actionOrder(a.it.action) - actionOrder(b.it.action)`, falling back only to original input order (`i`)
+as a tiebreak — never on `it.name`. So two cards with the same action land in whatever order they were
+typed or synced in, and cards with different actions never sort by name against each other at all.
+
+**Open question this entry doesn't resolve: does "alphabetical" replace the action-based sort, or sit
+inside it (alphabetical WITHIN each action group, action order preserved as the outer sort)?** The
+current grouping — basics vs. non-basics, then by action — is described in `group.ts`'s own header as
+FUNCTIONAL, mirroring how she physically works a haul; a flat alphabetical re-sort could undo that
+rhythm. Worth her confirming which she means before this is built.
+
+**Priority rationale.** High, Karvi's own call.
+
+## UIL-077 — The full printed collector number (the /denominator) is captured from TCGdex and used for search, but never shown anywhere in the app
+
+- **Reported:** 2026-09-17 (Karvi, two reports folded into one — same functional requirement). First:
+  "I need to see the FULL collectors number EVERYWHERE a specific card is referenced. There are either
+  no collector numbers or it is just the digits before the /." Second, from the same session: "When
+  choosing to place a stage card into the back half alongside other compatible cards in the haul, the
+  full collectors number of the card must be specified" — the wishlist-alternates grid she screenshotted
+  earlier (UIL-067) showing bare numbers like "1", "010", "25", "3", "14", "RC5" is exactly this case.
+  Her stated priority for the first report: High.
+- **Status:** Open
+- **Priority:** High (Karvi's own read)
+- **Area:** Lines, Plan, Lookup, Backfill, Collections
+- **Env:** Testing
+
+**Confirmed: the denominator is captured and even used for search ranking, but one mapping function
+silently drops it before it reaches any screen.** `catalog_card.set_card_count_official`
+([`supabase/migrations/0009_set_metadata.sql:39`](../supabase/migrations/0009_set_metadata.sql:39))
+is populated correctly from TCGdex's `cardCount.official`
+([`lib/catalog/mirror.ts:183`](../lib/catalog/mirror.ts:183)) and used to rank collector-number search
+matches ([`lib/catalog/collector-number.ts`](../lib/catalog/collector-number.ts), UIL-026). But
+`toCatalogCard` ([`lib/plan/adapt.ts:60-83`](../lib/plan/adapt.ts:60)) — the ONE function that turns a
+DB row into the engine's `CatalogCard`, which every display component reads from — maps every other
+column and never touches `set_card_count_official`. `CatalogCard`
+([`lib/engine/types.ts`](../lib/engine/types.ts)) has no field for it at all. So the data exists,
+correctly, in the database, and is provably usable (search already proves it), but no UI surface —
+`CardFace`, the Haul Plan worklist, the decision card's wishlist grid, the Lines screen, Lookup — can
+show it, because the one function standing between the row and every screen never carries it forward.
+
+**One fix point, many consumers.** Adding `setTotal` (or similar) to `CatalogCard` and to
+`toCatalogCard`'s return makes the data available everywhere at once; formatting it as "NNN/TTT" is
+then a display-layer choice at each of the several call sites, not a data problem to solve per screen.
+
+**Cross-reference UIL-026** (the search-side use of this same column) **and UIL-067** (her earlier
+screenshot of the wishlist grid, which shows the exact symptom of this gap).
+
+**Priority rationale.** High, Karvi's own call — this touches how she identifies which physical card is
+which, everywhere the app shows one.
+
+## UIL-078 — A Lines-screen decision she resolves does not stay resolved; the same decision resurfaces
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "Line decisions do not stick" — her stated priority,
+  High.
+- **Status:** Open
+- **Priority:** High (Karvi's own read)
+- **Area:** Lines
+- **Env:** Testing
+
+**Confirmed mechanism for at least one decision kind — "Collection wins," the RECOMMENDED default
+choice on the collection-claim-vs-line decision card (UIL-067's screenshot).** Resolving a decision is
+genuinely a server round-trip: `resolveDecisionAction` → `applyDecision` → a real write, then a fresh
+`loadLineScreen` reload ([`app/(ui)/line/actions.ts:60-73`](<../app/(ui)/line/actions.ts>:60)) — so this
+isn't a client-only illusion of saving. The problem is **what** gets written for this specific choice.
+`resolveDecisionWrites`'s `"collection-wins"` branch
+([`lib/line/decisions.ts:516-524`](../lib/line/decisions.ts:516)) writes a `wishlistUpserts` entry and
+an audit `decision` row — and nothing else. **No `slotPatches` at all.** The slot's `state` stays
+`"placeholder"`, unchanged, by design (the card legitimately stays a hunt).
+
+**Why that makes the decision reappear.** `deriveAllDecisions`'s trigger for this exact decision kind
+([`lib/line/decisions.ts:254`](../lib/line/decisions.ts:254)) is `slot.state === "placeholder" &&
+claimed` — a running collection still claims this species, and the slot is still a placeholder, both
+true again on the very next load, for the identical reason they were true the first time. Decision
+`id`s are deterministic, derived from `${lineId}:${kind}:${stageIndex}`
+([`decisions.ts:259`](../lib/line/decisions.ts:259)) — not a persisted row with its own "resolved" flag
+— so the ONLY thing suppressing a re-shown decision is client-local React state
+([`app/(ui)/line/LineScreen.tsx:50`](<../app/(ui)/line/LineScreen.tsx>:50), `resolved`, never
+persisted). A fresh page load starts that map empty, and the identical trigger condition fires again:
+the same decision, indistinguishable from a new one.
+
+**Not yet checked against the other decision kinds** (`ex-only-cap`, `root-block`, `line-existing`
+terminations) — this entry confirms the mechanism for one, the most common one on her screenshot; the
+same "nothing changes the trigger condition" shape may or may not repeat for the others and would need
+its own check before assuming it does.
+
+**Priority rationale.** High, Karvi's own call — a decision she's already made keeps asking her again,
+which both wastes her time and risks her picking a different answer the second time without noticing
+it's the same question.
