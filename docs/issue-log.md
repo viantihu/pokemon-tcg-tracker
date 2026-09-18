@@ -2929,6 +2929,25 @@ render "couldn't search just now" separately from "no match." Type-ahead's non-b
 preserved either way; what changes is that a failure says so. #39's error-message work already produces
 a legible message to show, rather than needing new plumbing.
 
+**Update 2026-09-18: two of the three sites fixed, one deliberately left — confirmed against PR
+[#168](https://github.com/viantihu/pokemon-tcg-tracker/pull/168) (squash `9d36796`, merged).** Sites
+one and two now throw instead of swallowing: `app/(ui)/plan/actions.ts`'s `lookupCatalog` and
+`app/(ui)/backfill/actions.ts`'s search. `CardLookup.tsx` (the shared component both feed into) now
+separates the two cases for every caller, including the ones this PR didn't touch — an injected
+`search` that throws gets a legible message ("Could not search the catalog … the card may well exist;
+the catalog just did not answer") instead of a blank or a false miss, and **last good results stay on
+screen** rather than being cleared by a transient failure mid-typing. Chose a throw over the
+discriminated-result shape this entry originally suggested, and for a stated reason: `CardLookup`'s
+`search` prop type is shared across five screens under three different owners, and a throw keeps that
+signature byte-identical rather than forcing edits into files this fix had no business touching.
+
+**The third site — `app/(ui)/look/LookupScreen.tsx`'s own `catch` setting `notFound` — was deliberately
+NOT touched**, per the fix's own commit message: that file is a different session's fence. It benefits
+*partially* anyway, since its injected `searchCatalog` now flows through the same shared component and
+gets the honest message for a search-side failure — but its own separate `onPick` catch (the one quoted
+above, at the top of this entry) is untouched and still needs that session's attention. **Not closing
+this entry on a two-thirds fix** — the third site is exactly why.
+
 **Priority rationale (Senior BA's read): Medium.** Not High: nothing is corrupted, no data is at risk,
 and all three paths work correctly when the database does. Not Low: it makes a real failure
 indistinguishable from a normal answer on the surfaces she uses most, it has already contributed to one
@@ -3794,6 +3813,28 @@ subtlety worth recording: `resolveDuplicate` matches on `artwork_group_id` (perc
 same `(set_id, local_id)`, and a full-art specialty usually has *different* art from the standard print,
 so this only fires for a second copy of the same specialty printing — which is precisely the case she
 described.
+
+**Correction 2026-09-18: the "interactions checked" note above was wrong about holo-swap, and PR
+[#164](https://github.com/viantihu/pokemon-tcg-tracker/pull/164) (squash `b5d0690`, merged) is what
+caught it.** The claim that holo-swap "still fires correctly" after the block swap was written from
+reasoning, not a test — and when #164 actually implemented the reorder and tested it, the assertion was
+false. The reason is precise: moving duplicate detection ahead of card class **exposes specialty cards
+to the holo-swap branch for the first time** — before the reorder, a specialty card returned at the
+card-class step and never reached the swap at all. The holo-swap branch builds its target from the
+*displaced* copy's placement, and a specialty copy has no binder half and no colour band, so the naive
+reorder emitted `{ kind: "front-half", binderId: <the specialty binder> }` — **a target the write layer
+cannot express**, since `placementForMove` clears half and band for a collection/specialty destination.
+That would have been a malformed target reaching the commit, not the clean displace-to-bulk the note
+claimed.
+
+**What shipped.** #164 fixes it by inheriting a `specialty` target (not a front-half one) when the
+displaced copy has no binder half — preserving holo-swap's meaning exactly (the holo takes the normal's
+place, the normal goes to bulk) while emitting a placement that can actually be written. Revert-checked
+each half against its own test: putting card class back above duplicate fails the bulk test; dropping
+the no-binder-half inheritance fails the holo-swap test. The lesson for this log: an "interactions
+checked" note written from reading rather than from a failing-then-passing test is exactly the kind of
+claim that reads as verified while being wrong — the same shape UIL-029 is about, one level up in a
+log entry rather than a test double.
 
 **Priority rationale.** Medium: nothing is broken or mis-recorded today — the current routing is a
 defensible default, just not her stated policy. It's a deliberate behavior change she's requesting, so it
