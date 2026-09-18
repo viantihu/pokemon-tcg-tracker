@@ -5258,6 +5258,36 @@ principle underneath four separate reports rather than four unrelated complaints
 product-ethos statement itself isn't a priority-rated bug, it's a standing constraint the team should
 carry into every future design in this area.
 
+**Update 2026-09-18: her ruling bounds the ethos, and it's narrower than "always allow the move"
+alone.** Once UIL-068 ships, back half sits directly alongside front half, collection and bulk as a
+peer choice — except back half is the one of the four that refuses unless a line is picked first,
+because UIL-056's `applyMove` invariant throws otherwise. Put to her as three options — allow the move
+and warn instead of refusing; keep refusing but stop presenting back half as if it were an enabled
+peer; leave it as-is — **she chose to keep the refusal and remove the false affordance**: the back-half
+chip greys out while no line is selected, with the reason stated inline, her words: "The back half
+holds lines. Pick a line above to enable."
+
+**What this means for applying the ethos going forward, stated precisely so it isn't over-read as
+"never refuse a move":** her objection is to a **dead end that looks alive** — a control that appears
+enabled but silently does nothing or drops the choice — not to the app declining something it
+genuinely cannot honour. "Make the impossible visibly impossible, and name the enabling action" is a
+legitimate answer to a movability complaint, not a violation of it. This reads consistently with her
+earlier endorsement of **UIL-040**'s rebind refusal (a rebind that would orphan shelved cards is
+refused, with a message naming what would be orphaned — the same shape: refuse, name the condition, no
+silent drop). The principle going forward: **never gate a move behind a hidden or unexplained
+condition; refusing with the condition named and the remedy visible in the same control is fine.**
+
+**Consequences for two entries already carrying this thread, recorded here rather than editing their
+own status:** **UIL-056's invariant stands** — no relaxation, confirmed not needed. **UIL-070's
+back-half-from-the-Haul-Plan residual (its item 1) is unchanged by this** — that entry already framed
+the gap as "the Haul Plan has no line picker at all," never as "the gate should be removed," so this
+ruling confirms rather than corrects it; the fix there is still to offer the line picker, not to bypass
+the invariant. The back-half-chip affordance fix itself (grey + inline reason) is assigned as a
+follow-up after UIL-078.
+
+**Cross-reference UIL-056, UIL-068, UIL-070, and UIL-040** (the precedent this ruling reads
+consistently with).
+
 ## UIL-073 — There is no component-render test harness, so every UI failure state in this repo is verified by reading code, not by a test that can fail
 
 - **Reported:** 2026-09-17 (not from Karvi — a recurring gap independently re-flagged by multiple dev
