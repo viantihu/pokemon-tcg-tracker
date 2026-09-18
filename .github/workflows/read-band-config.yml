@@ -860,9 +860,12 @@ jobs:
           IFS=',' read -r -a specs <<< "$tables"
           for spec in "${specs[@]}"; do
             spec="${spec// /}"; [ -n "$spec" ] || continue
+            # A spec may carry its own select= (needed for embedded-resource filters such as
+            # `copy?select=id,binder!inner(type)&role=eq.shelved&binder.type=eq.general`).
             case "$spec" in
-              *\?*) q="$spec&select=*" ;;
-              *)    q="$spec?select=*" ;;
+              *select=*) q="$spec" ;;
+              *\?*)      q="$spec&select=*" ;;
+              *)         q="$spec?select=*" ;;
             esac
             echo "$spec: $(count_of "$q")"
           done
