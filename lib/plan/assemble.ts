@@ -29,9 +29,13 @@ const binderName = (id: string | null, l: AssembleLookups) =>
   (id && l.binderNameById.get(id)) || "Binder";
 const bandName = (key: string, l: AssembleLookups) => l.bandDisplayByKey.get(key) ?? key;
 
-/** Human "where does it go" string for a target, e.g. "Binder 1 · Back · Red". */
-export function describeDestination(result: CascadeResult, l: AssembleLookups): string {
-  const t: PlacementTarget = result.target;
+/**
+ * Human "where does it go" string for a bare target, e.g. "Binder 1 · Back · Red". Takes a
+ * `PlacementTarget` rather than a whole `CascadeResult` so a caller with a SECOND, alternate target
+ * — UIL-069's colour-mismatch options are the first case — can describe it the same way, not a
+ * hand-rolled second copy of this switch.
+ */
+export function describeTarget(t: PlacementTarget, l: AssembleLookups): string {
   switch (t.kind) {
     case "bulk":
       return "Bulk box";
@@ -129,7 +133,7 @@ export function toPlanItem(
     isBasic: incoming.card.stage === "Basic",
     bandKey,
     action: actionForResult(result),
-    destination: describeDestination(result, l),
+    destination: describeTarget(result.target, l),
     reason: describeReason(incoming, result, l),
     needsDecision: resultNeedsDecision(result),
   };

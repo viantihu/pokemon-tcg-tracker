@@ -12,7 +12,6 @@
 import { availableVariants, toCardVariants } from "@/lib/plan";
 import {
   commitCardPlacement,
-  commitHaul,
   deriveSpotlightPlacement,
   existingCopyIds,
   getOwnerContext,
@@ -22,6 +21,7 @@ import {
   loadPlanFingerprint,
   PlacementChangedError,
   planFromDraft,
+  type BandMismatchChoice,
   type DraftItem,
   type PlanItem,
   type ProposedPull,
@@ -131,32 +131,6 @@ export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
 }
 
 /**
- * Commit the haul: write all records + audit trail in one transaction (M10).
- *
- * `haulId` is null when the pass only routed existing copies — no cards were acquired, so no haul
- * event is recorded (see lib/plan/commit.ts).
- */
-export async function commitHaulAction(
-  input: CommitActionInput,
-): Promise<
-  { ok: true; haulId: string | null; counts: CommitCounts } | { ok: false; error: string }
-> {
-  if (input.draft.length === 0) return { ok: false, error: "No cards in the haul." };
-  try {
-    const { db } = await getOwnerContext();
-    const res = await commitHaul(db, {
-      source: input.source,
-      notes: input.notes ?? null,
-      draft: input.draft,
-      overrides: input.overrides,
-    });
-    return { ok: true, haulId: res.haulId, counts: res.counts };
-  } catch (err) {
-    return { ok: false, error: errorMessage(err) };
-  }
-}
-
-/**
  * Shelve ONE card, the moment she clicks Done (UIL-027).
  *
  * Replaces the model where "Done" was a client-side tick and nothing persisted until a single
@@ -189,6 +163,8 @@ export async function shelveCardAction(input: {
   expectedDigest?: string | null;
   /** Copy ids she ticked to move into the line this card starts (UIL-061). Absent ⇒ move nothing. */
   confirmedPulls?: string[];
+  /** Her resolution of a colour mismatch, when the spotlight showed one (UIL-069). Absent ⇒ unresolved. */
+  bandChoice?: "line" | "own-color" | null;
 }): Promise<
   | { ok: true; haulId: string | null; counts: CommitCounts; stamp: string }
   /**
@@ -214,6 +190,7 @@ export async function shelveCardAction(input: {
       haulId: input.haulId ?? null,
       expectedDigest: input.expectedDigest ?? null,
       confirmedPulls: input.confirmedPulls ?? [],
+      bandChoice: input.bandChoice ?? null,
     });
     const stamp = await loadPlanFingerprint(db, input.pendingCopyIds ?? []);
     return { ok: true, haulId: res.haulId, counts: res.counts, stamp };
@@ -241,10 +218,14 @@ export async function shelveCardAction(input: {
  * estimate, because re-planning the whole tail would cost eight uncached reads per Done across a
  * 685-card sitting.
  */
-export async function refreshSpotlightAction(input: {
-  card: DraftPayloadItem;
-}): Promise<
-  | { ok: true; item: PlanItem | null; digest: string | null; proposedPulls: ProposedPull[] }
+export async function refreshSpotlightAction(input: { card: DraftPayloadItem }): Promise<
+  | {
+      ok: true;
+      item: PlanItem | null;
+      digest: string | null;
+      proposedPulls: ProposedPull[];
+      bandMismatch: BandMismatchChoice | null;
+    }
   | { ok: false; error: string }
 > {
   try {
@@ -268,6 +249,7 @@ export async function refreshSpotlightAction(input: {
       item: res?.item ?? null,
       digest: res?.digest ?? null,
       proposedPulls: res?.proposedPulls ?? [],
+      bandMismatch: res?.bandMismatch ?? null,
     };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };

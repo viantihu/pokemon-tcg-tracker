@@ -122,10 +122,16 @@ describe("UIL-065 — an existing line is matched by species alone, never band",
       stageIndex: 0,
     });
     expect(res.filledExistingSlot).toEqual({ lineId: "line-dratini-red", stageIndex: 0 });
-    // The reason must name the line's REAL band — "olive" here would be actively wrong, not just
-    // imprecise, since the line the copy is about to join does not live there.
+    // The reason must name the line's REAL band, never a wrong one, and — since red/olive disagree —
+    // must ALSO name the card's own colour: this is UIL-069's mismatch case, surfaced, not decided.
     expect(res.reason).toMatch(/red/i);
-    expect(res.reason).not.toMatch(/olive/i);
+    expect(res.reason).toMatch(/olive/i);
+    // UIL-069: a disagreement is never resolved silently — the other option rides along for whoever
+    // presents the choice, and the line target above is NOT treated as a decided default.
+    expect(res.bandMismatch).toMatchObject({
+      ownColorTarget: { kind: "front-half", band: "olive" },
+      lineRootDexId: DRATINI_DEX,
+    });
   });
 
   it("also finds it for an incoming Stage1 — the bug was not Basic-specific", () => {
@@ -139,6 +145,11 @@ describe("UIL-065 — an existing line is matched by species alone, never band",
       stageIndex: 1,
     });
     expect(res.reason).toMatch(/red/i);
+    // UIL-069: the mismatch ask is not Basic-specific either — a Stage1 joining a cross-band line
+    // gets the same two-option offer.
+    expect(res.bandMismatch).toMatchObject({
+      ownColorTarget: { kind: "front-half", band: "olive" },
+    });
   });
 
   it("a duplicate of an already-filled cross-band stage falls to the front half in its OWN natural band, not the line's", () => {
@@ -157,6 +168,9 @@ describe("UIL-065 — an existing line is matched by species alone, never band",
     expect(res.target).toMatchObject({ kind: "front-half", band: "olive" });
     expect(res.reason).toMatch(/red/i); // still names the correct line in the explanation
     expect(res.reason).toMatch(/already holds/i);
+    // UIL-069 is scoped to an OPEN slot — she cannot join a slot someone else already filled, so
+    // there is nothing to ask about here regardless of the band mismatch.
+    expect(res.bandMismatch).toBeFalsy();
   });
 
   it("STEP 1: a collection claim still sees a cross-band line's unmet need and ranks alternates in the LINE's band", () => {
@@ -180,5 +194,8 @@ describe("UIL-065 — an existing line is matched by species alone, never band",
     expect(res.proposals?.[0].reason).toMatch(/red/i);
     expect(res.proposals?.[0].reason).not.toMatch(/olive/i);
     expect(res.wishlist).toHaveLength(1);
+    // UIL-069 is scoped to STEP 4's placement choice — collection membership always wins here
+    // regardless of band, so there is no destination to ask her about.
+    expect(res.bandMismatch).toBeFalsy();
   });
 });

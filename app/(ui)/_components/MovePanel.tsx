@@ -11,15 +11,18 @@
  * (later) lookup — anywhere a card shows. Presentational + local state only; the write is a server
  * action the host passes down.
  *
- * `allowLineJoin` (UIL-056, opt-in, default off; UIL-064 reshaped the flow): the back half IS the
- * lines area, so a back-half destination resolves to a line — an existing one's open slot, or a new
- * one. Off by default so the plan spotlight and Collections' existing usage are untouched; only the
- * Line screen turns it on. When it is on, "JOIN A LINE" is the FIRST thing offered — flat across
- * every band (`joinCandidates`, computed server-side from lines already loaded), each candidate
- * carrying its own binder + band, so picking one derives the whole destination instead of asking her
- * to supply binder/half/band before a line ever appears (her UIL-064 complaint: "too many picks; it
- * should ask for the line"). Binder/half/band stay reachable behind "place it manually" for the
- * front-half / bulk / collection cases, or a genuine forced override.
+ * `allowLineJoin` (UIL-056, opt-in, default off; UIL-064 reshaped the flow; UIL-068 un-nested it): the
+ * back half IS the lines area, so a back-half destination resolves to a line — an existing one's open
+ * slot, or a new one. Off by default so the plan spotlight and Collections' existing usage are
+ * untouched; only the Line screen turns it on. When it is on, "JOIN A LINE" (flat across every band,
+ * `joinCandidates` computed server-side, each candidate carrying its own binder + band so picking one
+ * derives the whole destination) and the plain binder/half/band/collection/bulk controls are BOTH
+ * always on screen — UIL-064 fixed "too many picks; it should ask for the line" by making the line
+ * question first; UIL-068 is her follow-up that the manual controls it then hid behind a
+ * click-to-reveal went too far the other way ("I should have the option to move the card anywhere").
+ * Order, not visibility, is what varies: the line section leads when there's a candidate or an open
+ * "start new" to offer, and drops behind the manual controls when there is nothing to join — leading
+ * with an unanswerable line question is the same friction from the other direction.
  */
 
 import { useState } from "react";
@@ -232,6 +235,9 @@ export function MovePanel({
               })}
             </div>
           </div>
+          {/* UIL-068: back-half-needs-a-line stays a real requirement (UIL-056's server-side
+              invariant, unchanged here) — but it is no longer the reason the rest of this section is
+              hard to reach. Both hints below just point at the line section; they never gate it. */}
           {half === "back" && !allowLineJoin ? (
             <div className="orow">
               <div className="ol" />
@@ -259,6 +265,94 @@ export function MovePanel({
     </>
   );
 
+  const hasCandidates = (joinCandidates ?? []).length > 0;
+
+  /** "JOIN A LINE" — the candidate list + "start a new line", unchanged content (UIL-068 only
+   *  changes WHERE this renders relative to `manualBody`, never gates it behind a click). */
+  const joinLineSection = (
+    <>
+      <div className="orow">
+        <div className="ol">JOIN A LINE</div>
+        <div className="ochips">
+          {(joinCandidates ?? []).map((c) => {
+            const on =
+              lineJoin?.mode === "existing" &&
+              lineJoin.lineId === c.lineId &&
+              lineJoin.slotId === c.slotId;
+            const m = bandMeta(c.bandKey);
+            return (
+              <button
+                key={c.slotId}
+                type="button"
+                className={"ochip" + (on ? " on" : "")}
+                aria-pressed={on}
+                onClick={() => {
+                  setLineJoin({ mode: "existing", lineId: c.lineId, slotId: c.slotId });
+                  setBinderId(c.binderId ?? firstGeneral?.id ?? options.binders[0]?.id ?? BULK);
+                  setHalf("back");
+                  setBand(c.bandKey);
+                }}
+              >
+                <span
+                  className={"sw" + (m.dither ? " dither" : "")}
+                  style={{ background: m.color }}
+                />
+                {c.speciesLabel} · {m.display} · {c.filledCount}/{c.totalCount} FILLED ·{" "}
+                {c.stage.toUpperCase()} SLOT
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            className={"ochip" + (lineJoin?.mode === "new" ? " on" : "")}
+            aria-pressed={lineJoin?.mode === "new"}
+            onClick={() => {
+              setLineJoin({ mode: "new" });
+              setHalf("back");
+              setBand(naturalBandKey ?? options.bands[0]?.key ?? null);
+            }}
+          >
+            + Start a new line
+          </button>
+        </div>
+      </div>
+
+      {lineJoin?.mode === "new" ? (
+        <div className="orow">
+          <div className="ol">COLOR BAND · RAINBOW ORDER</div>
+          <div className="ochips">
+            {options.bands.map((b) => {
+              const m = bandMeta(b.key);
+              return (
+                <button
+                  key={b.key}
+                  type="button"
+                  className={"ochip" + (band === b.key ? " on" : "")}
+                  aria-pressed={band === b.key}
+                  onClick={() => setBand(b.key)}
+                >
+                  <span
+                    className={"sw" + (m.dither ? " dither" : "")}
+                    style={{ background: m.color }}
+                  />
+                  {b.display}
+                  {b.key === "pink" ? <span className="rt">RSV</span> : null}
+                </button>
+              );
+            })}
+          </div>
+          {blockingLine ? (
+            <div className="oskip" style={{ marginTop: 6 }}>
+              {blockingLine.speciesLabel} already exists here ({blockingLine.filledCount}/
+              {blockingLine.totalCount} filled), but this card&apos;s own stage is already filled by
+              another copy — lines are tracked once, so this one starts its own line instead.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <div className="ovr">
       <div className="ohead">
@@ -266,98 +360,34 @@ export function MovePanel({
         <span className="yc">NO RULE</span>
       </div>
       <div className="obody">
+        {/*
+          UIL-068, her report on the shipped UIL-064 rework: collapsing binder/half/band/collection/
+          bulk behind "place it manually" made the plain "put this card where I say" case harder to
+          reach than joining a line, not just secondary to it — with no candidates (her Pikachu case)
+          "+ Start a new line" was the ONLY visible action. Both are now always on screen; nothing here
+          is a click-to-reveal. Order is the one thing that still varies: when there IS a line to join
+          or start toward, that's the likely intent and leads; when there is nothing to join, leading
+          with a line question she cannot usefully answer is exactly the friction she reported, so the
+          manual controls come first instead and the line section becomes the quieter, second option.
+        */}
         {allowLineJoin ? (
-          <>
-            <div className="orow">
-              <div className="ol">JOIN A LINE</div>
-              <div className="ochips">
-                {(joinCandidates ?? []).map((c) => {
-                  const on =
-                    lineJoin?.mode === "existing" &&
-                    lineJoin.lineId === c.lineId &&
-                    lineJoin.slotId === c.slotId;
-                  const m = bandMeta(c.bandKey);
-                  return (
-                    <button
-                      key={c.slotId}
-                      type="button"
-                      className={"ochip" + (on ? " on" : "")}
-                      aria-pressed={on}
-                      onClick={() => {
-                        setLineJoin({ mode: "existing", lineId: c.lineId, slotId: c.slotId });
-                        setBinderId(
-                          c.binderId ?? firstGeneral?.id ?? options.binders[0]?.id ?? BULK,
-                        );
-                        setHalf("back");
-                        setBand(c.bandKey);
-                      }}
-                    >
-                      <span
-                        className={"sw" + (m.dither ? " dither" : "")}
-                        style={{ background: m.color }}
-                      />
-                      {c.speciesLabel} · {m.display} · {c.filledCount}/{c.totalCount} FILLED ·{" "}
-                      {c.stage.toUpperCase()} SLOT
-                    </button>
-                  );
-                })}
-                <button
-                  type="button"
-                  className={"ochip" + (lineJoin?.mode === "new" ? " on" : "")}
-                  aria-pressed={lineJoin?.mode === "new"}
-                  onClick={() => {
-                    setLineJoin({ mode: "new" });
-                    setHalf("back");
-                    setBand(naturalBandKey ?? options.bands[0]?.key ?? null);
-                  }}
-                >
-                  + Start a new line
-                </button>
+          hasCandidates ? (
+            <>
+              {joinLineSection}
+              <div className="orow" style={{ marginTop: 4 }}>
+                <div className="ol">OR PLACE IT MANUALLY</div>
               </div>
-            </div>
-
-            {lineJoin?.mode === "new" ? (
-              <div className="orow">
-                <div className="ol">COLOR BAND · RAINBOW ORDER</div>
-                <div className="ochips">
-                  {options.bands.map((b) => {
-                    const m = bandMeta(b.key);
-                    return (
-                      <button
-                        key={b.key}
-                        type="button"
-                        className={"ochip" + (band === b.key ? " on" : "")}
-                        aria-pressed={band === b.key}
-                        onClick={() => setBand(b.key)}
-                      >
-                        <span
-                          className={"sw" + (m.dither ? " dither" : "")}
-                          style={{ background: m.color }}
-                        />
-                        {b.display}
-                        {b.key === "pink" ? <span className="rt">RSV</span> : null}
-                      </button>
-                    );
-                  })}
-                </div>
-                {blockingLine ? (
-                  <div className="oskip" style={{ marginTop: 6 }}>
-                    {blockingLine.speciesLabel} already exists here ({blockingLine.filledCount}/
-                    {blockingLine.totalCount} filled), but this card&apos;s own stage is already
-                    filled by another copy — lines are tracked once, so this one starts its own line
-                    instead.
-                  </div>
-                ) : null}
+              {manualBody}
+            </>
+          ) : (
+            <>
+              {manualBody}
+              <div className="orow" style={{ marginTop: 4 }}>
+                <div className="ol">OR JOIN A LINE</div>
               </div>
-            ) : null}
-
-            <details className="orow" style={{ display: "block" }}>
-              <summary className="ol" style={{ cursor: "pointer" }}>
-                Not this — place it manually
-              </summary>
-              <div style={{ marginTop: 8 }}>{manualBody}</div>
-            </details>
-          </>
+              {joinLineSection}
+            </>
+          )
         ) : (
           manualBody
         )}

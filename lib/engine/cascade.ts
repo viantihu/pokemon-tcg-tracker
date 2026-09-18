@@ -122,6 +122,16 @@ export interface CascadeResult {
   newLine?: NewLinePlan | null;
   /** An existing line slot the incoming fills (step 4a). */
   filledExistingSlot?: { lineId: string; stageIndex: number } | null;
+  /**
+   * Set when `target` (the existing line's own band) differs from the incoming card's own natural
+   * band (UIL-069). Karvi ruled that "the line's band wins" (UIL-065) must not be a SILENT default
+   * when the two disagree — she is asked, every time, with neither option pre-selected. `target`
+   * still names the line option (unchanged from UIL-065, so nothing downstream that already reads
+   * `target` needs to change); this carries the OTHER option plus the line's own species root, so a
+   * caller that presents the choice does not have to re-derive it. `lineRootDexId` is a bare number
+   * rather than a display label on purpose — naming it is a display concern, not an engine one.
+   */
+  bandMismatch?: { ownColorTarget: PlacementTarget; lineRootDexId: number } | null;
   /** Owned copies to pull from front halves into a new line's slots. */
   pullActions?: PullAction[];
   /** Wishlist proposals for open placeholders / a stolen-line stage. */
@@ -348,10 +358,18 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
       // display-space `Band` union.
       const lineBand = existing.line.colorBand as Band;
       if (existing.slot.state === "placeholder" || existing.slot.state === "block") {
+        // A colour mismatch is surfaced, never silently decided (UIL-069 — Karvi's ruling reverses
+        // UIL-065's own "the line's band wins" default). `target` still names the line option so
+        // nothing that already reads it needs to change; `bandMismatch` carries the other option for
+        // a caller that presents both, and its ABSENCE (the common case: the two bands agree) means
+        // there is nothing to ask.
+        const mismatch = lineBand !== b;
         return {
           ...head,
           step: "line-existing",
-          reason: `Fills the open ${existing.slot.stage} slot of the existing ${lineBand} line, in the back half.`,
+          reason: mismatch
+            ? `Fills the open ${existing.slot.stage} slot of the existing ${lineBand} line, in the back half — but this card's own colour is ${b}, so which one wins is her call (UIL-069).`
+            : `Fills the open ${existing.slot.stage} slot of the existing ${lineBand} line, in the back half.`,
           target: {
             kind: "back-half-line",
             binderId: existing.line.binderId,
@@ -363,6 +381,16 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
             lineId: existing.line.id,
             stageIndex: existing.slot.stageIndex,
           },
+          bandMismatch: mismatch
+            ? {
+                ownColorTarget: {
+                  kind: "front-half",
+                  binderId: frontHalfBinderId(ctx, b),
+                  band: b,
+                },
+                lineRootDexId: existing.line.rootDexId,
+              }
+            : null,
         };
       }
       // Slot already filled → this stage is tracked once; the extra copy goes to the front half,
