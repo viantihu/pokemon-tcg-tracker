@@ -286,7 +286,9 @@ describe('UIL-069 · picking "file by its own colour"', () => {
   });
 });
 
-// No coverage for commitHaul/the whole-haul bulk path here, deliberately: it has zero callers today
+// No coverage for the whole-haul bulk path here, deliberately: `commitHaul`/`commitHaulAction` had
+// zero callers and are now removed entirely (a separate commit in this PR, on Karvi's explicit
+// instruction) — there is nothing left to guard or test.
 // and is being deleted on Karvi's explicit instruction ("delete it, we're not going back to bulk
 // commit" — docs/issue-log.md's UIL-027 update). A refusal guard there was considered and dropped as
 // moot for the same reason.

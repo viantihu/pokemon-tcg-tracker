@@ -12,7 +12,6 @@
 import { availableVariants, toCardVariants } from "@/lib/plan";
 import {
   commitCardPlacement,
-  commitHaul,
   deriveSpotlightPlacement,
   existingCopyIds,
   getOwnerContext,
@@ -114,32 +113,6 @@ export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
       byAction,
     },
   };
-}
-
-/**
- * Commit the haul: write all records + audit trail in one transaction (M10).
- *
- * `haulId` is null when the pass only routed existing copies — no cards were acquired, so no haul
- * event is recorded (see lib/plan/commit.ts).
- */
-export async function commitHaulAction(
-  input: CommitActionInput,
-): Promise<
-  { ok: true; haulId: string | null; counts: CommitCounts } | { ok: false; error: string }
-> {
-  if (input.draft.length === 0) return { ok: false, error: "No cards in the haul." };
-  try {
-    const { db } = await getOwnerContext();
-    const res = await commitHaul(db, {
-      source: input.source,
-      notes: input.notes ?? null,
-      draft: input.draft,
-      overrides: input.overrides,
-    });
-    return { ok: true, haulId: res.haulId, counts: res.counts };
-  } catch (err) {
-    return { ok: false, error: errorMessage(err) };
-  }
 }
 
 /**

@@ -158,27 +158,6 @@ interface MutableSlot {
 }
 
 /**
- * Commit a whole haul atomically. Loads context, re-runs the cascade, builds the ordered write set,
- * and applies it in one transaction via the RPC. Returns the new haul id and per-table counts.
- *
- * UIL-069 note: a colour-mismatch card is NOT guarded here. This entry point has zero callers
- * (`commitHaulAction` was superseded by per-card commit — UIL-027) and is being deleted on Karvi's
- * explicit instruction ("delete it, we're not going back to bulk commit") — see docs/issue-log.md's
- * UIL-027 update. Refusing a mismatch specifically in this path was considered and dropped as moot
- * for the same reason: there will be no bulk path left to refuse from.
- */
-export async function commitHaul(db: DbClient, input: CommitInput): Promise<CommitResult> {
-  const pc = await loadPlanContext(db, {
-    excludeOwnedCopyIds: existingCopyIds(input.draft),
-  });
-  const { planned } = planFromDraft(pc, input.draft);
-  const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, input);
-  assertPlacementBandsConfigured(payload, pc);
-  await applyWriteOps(db, payload);
-  return { haulId, counts };
-}
-
-/**
  * Commit ONE card's placement, atomically, the moment she decides it (UIL-027).
  *
  * WHY THIS EXISTS, and what it changes. "Done, next card" was a pure client-side checkbox: it moved the
@@ -391,10 +370,11 @@ export function buildHaulCommitPayload(
     // A routed copy belongs to no haul, even when the same pass also takes in new cards.
     const decisionHaulId = p.existingCopyId ? null : haulId;
     const override = input.overrides?.[p.incomingId];
-    // UIL-069: by this point a mismatch has already been resolved one way or the other (both
-    // `commitCardPlacement` and `commitHaul` refuse before reaching here) — this only picks the
-    // HONEST audit text for whichever way it went, so the trail says what she actually chose rather
-    // than reusing `p.result.reason`, which always describes the LINE option regardless of her pick.
+    // UIL-069: by this point a mismatch has already been resolved one way or the other —
+    // `commitCardPlacement` refuses before reaching here (its only caller now that the whole-haul
+    // `commitHaul` entry point is gone) — this only picks the HONEST audit text for whichever way it
+    // went, so the trail says what she actually chose rather than reusing `p.result.reason`, which
+    // always describes the LINE option regardless of her pick.
     const mismatch = p.result.bandMismatch;
     if (override) {
       // Manual placement wins: place the copy where she said, skip all cascade side effects.

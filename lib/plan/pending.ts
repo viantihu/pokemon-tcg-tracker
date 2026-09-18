@@ -6,8 +6,9 @@
  * cascade"; lib/sync/exec.ts step 3), and sync-ui-spec §B.6 requires a "Place-now handoff … so
  * 'added' doesn't dead-end in a list". The Haul Plan is that destination, but it had no way to read
  * existing copies — it only ever built new ones from typed entry. This module is the read half; the
- * write half is `commitHaul`'s existing-copy branch, which ROUTES those copy rows instead of
- * inserting duplicates of them.
+ * write half is `commitCardPlacement`'s existing-copy branch (shared with `buildHaulCommitPayload`,
+ * which both the per-card and — formerly — the whole-haul commit built on), which ROUTES those copy
+ * rows instead of inserting duplicates of them.
  *
  * WHAT COUNTS AS PENDING. A copy with no placement at all (`role: 'bulk'`, no binder, no line slot)
  * AND no `placement_decision` row. The decision row is the discriminator, and it has to be: the
