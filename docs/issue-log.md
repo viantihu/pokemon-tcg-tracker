@@ -5163,7 +5163,16 @@ inherit the "silent wrong data" High bucket the way UIL-062/063/065 did.
 
 - **Reported:** 2026-09-17 (Karvi, screenshot of the "MOVE A SHELVED CARD" panel for a Pikachu with no
   existing line candidates). In her words: "I should have the option to move the card anywhere."
-- **Status:** Open
+- **Status:** **Fixed** — PR [#176](https://github.com/viantihu/pokemon-tcg-tracker/pull/176) MERGED to
+  `develop` 2026-09-18 (squash `4655145`, commit 2 of its three), QA-gated on the merged tree (699 tests,
+  build), confirmed **deployed** to Testing (Deploy and Vercel both green on `c6ef4c4`, which contains it).
+  Manual placement (binder / half / band / collection / bulk) is no longer collapsed behind a "place it
+  manually" disclosure in the MOVE A SHELVED CARD panel; it is a direct option at the same level as joining
+  a line, so a card with no line candidates has somewhere to go without the extra step. `lib/line` is
+  untouched, so UIL-056's named back-half refusal still stands per her ruling; greying that option with its
+  reason is tracked separately (UIL-072). **Not rendered in a browser before merge** — the dev had no
+  credentials for an authed screen — so her pass is the visual check. Awaiting Karvi's confirmation when
+  UAT resumes.
 - **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
 - **Area:** Lines
 - **Env:** Testing
@@ -5200,7 +5209,18 @@ shipped days ago, not a data-correctness defect.
 - **Reported:** 2026-09-17 (Karvi, screenshot of the Haul Plan spotlight for Annihilape, card 441/600).
   In her words: "This is an incorrect suggestion. This is a purple card but is being asked to fill an
   orange line."
-- **Status:** Open
+- **Status:** **Fixed** — PR [#176](https://github.com/viantihu/pokemon-tcg-tracker/pull/176) MERGED to
+  `develop` 2026-09-18 (squash `4655145`, commit 1 of its three), QA-gated on the merged tree (699 tests,
+  build; mutations bite: mismatch detection off → 8 tests fail, commit refusal off → 3 fail, `bandChoice`
+  accepted without a digest → 1 fails), confirmed **deployed** to Testing (Deploy and Vercel both green on
+  `c6ef4c4`, which contains it). Per her ruling the app now **asks, never decides**: when a card's own
+  colour differs from the open line slot it would fill, the Haul Plan spotlight shows both options as
+  radios — join the line, or go to the card's own-colour destination — with **neither pre-selected**, and
+  Done stays disabled until she picks. The write path refuses an unresolved mismatch (no override,
+  digest-alone and `bandChoice`-alone are all refused), so the choice cannot be skipped by a stale client.
+  The cross-band lookup itself (UIL-065) is unchanged. The same PR's third commit deleted the whole-haul
+  bulk-commit path on her instruction (UIL-027 follow-up). **Not rendered in a browser before merge** — so
+  her pass on the Annihilape-style case is the visual check. Awaiting Karvi's confirmation when UAT resumes.
 - **Priority:** High (Senior BA's read; Karvi to confirm) — she's ruled on the shape of the fix, not yet
   explicitly on severity
 - **Area:** Plan, Lines
