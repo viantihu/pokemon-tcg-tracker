@@ -63,6 +63,7 @@ const slot = (
   alternates: [],
   facts: facts(),
   requiredType: "Fire",
+  resolvedDecisionKind: null,
   ...over,
 });
 

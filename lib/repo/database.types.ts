@@ -399,6 +399,8 @@ export type Database = {
           copy_id: string | null;
           target_catalog_card_id: string | null;
           note: string | null;
+          resolved_decision_kind: string | null;
+          resolved_decision_choice: string | null;
         };
         Insert: {
           id?: string;
@@ -410,6 +412,8 @@ export type Database = {
           copy_id?: string | null;
           target_catalog_card_id?: string | null;
           note?: string | null;
+          resolved_decision_kind?: string | null;
+          resolved_decision_choice?: string | null;
         };
         Update: {
           id?: string;
@@ -421,6 +425,8 @@ export type Database = {
           copy_id?: string | null;
           target_catalog_card_id?: string | null;
           note?: string | null;
+          resolved_decision_kind?: string | null;
+          resolved_decision_choice?: string | null;
         };
         Relationships: [
           {
@@ -575,6 +581,8 @@ export type Database = {
           reason: string;
           resolved_by: string;
           created_at: string;
+          line_id: string | null;
+          line_slot_id: string | null;
         };
         Insert: {
           id?: string;
@@ -585,6 +593,8 @@ export type Database = {
           reason: string;
           resolved_by: string;
           created_at?: string;
+          line_id?: string | null;
+          line_slot_id?: string | null;
         };
         Update: {
           id?: string;
@@ -595,6 +605,8 @@ export type Database = {
           reason?: string;
           resolved_by?: string;
           created_at?: string;
+          line_id?: string | null;
+          line_slot_id?: string | null;
         };
         Relationships: [
           {
@@ -607,6 +619,18 @@ export type Database = {
             foreignKeyName: "placement_decision_copy_id_fkey";
             columns: ["copy_id"];
             referencedRelation: "copy";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "placement_decision_line_id_fkey";
+            columns: ["line_id"];
+            referencedRelation: "evolution_line";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "placement_decision_line_slot_id_fkey";
+            columns: ["line_slot_id"];
+            referencedRelation: "line_slot";
             referencedColumns: ["id"];
           },
         ];

@@ -171,6 +171,17 @@ export interface SlotPatch {
   copyId?: string | null;
   targetCatalogCardId?: string | null;
   note?: string | null;
+  /**
+   * The behavioural "she already answered this" marker (UIL-078) — set together, on the branches
+   * that resolve a decision by accepting/adjusting its recommendation rather than handing off to a
+   * different one. `deriveDecisions` checks `resolvedDecisionKind` against its own kind before
+   * re-deriving; `resolvedDecisionChoice` rides along for the same precision but is not itself
+   * checked. Lives on the slot deliberately, not on the `PlacementDecision` audit row — see
+   * `lib/line/decisions.ts`'s header for why (UIL-042: an audit table must never be load-bearing for
+   * behaviour a second time).
+   */
+  resolvedDecisionKind?: string | null;
+  resolvedDecisionChoice?: string | null;
 }
 
 /** A wishlist upsert keyed by slot: create/refresh the hunt for a stage. */

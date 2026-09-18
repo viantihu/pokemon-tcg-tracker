@@ -72,6 +72,8 @@ interface ResolvedSlot {
   requiredType: string | null;
   facts: StageFacts;
   wedgeLabel: string | null;
+  /** Straight off `line_slot.resolved_decision_kind` (UIL-078) — see decisions.ts's header. */
+  resolvedDecisionKind: string | null;
 }
 
 const EMPTY_FACTS: StageFacts = {
@@ -359,6 +361,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
         requiredType,
         facts,
         wedgeLabel,
+        resolvedDecisionKind: s.resolved_decision_kind,
       };
     });
 
@@ -416,6 +419,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
         alternates: r.alternates,
         facts: r.facts,
         requiredType: r.requiredType,
+        resolvedDecisionKind: r.resolvedDecisionKind,
       })),
     });
   }
