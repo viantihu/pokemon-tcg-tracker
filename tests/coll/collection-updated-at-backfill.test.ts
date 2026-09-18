@@ -1,5 +1,7 @@
 /**
- * UIL-052 — migration 0011's backfill, checked in isolation from the trigger tests.
+ * UIL-052 — migration 0012's backfill, checked in isolation from the trigger tests. (Originally
+ * authored as 0011; renumbered once `0011_relink_unambiguous_line_slots.sql`, a different migration
+ * developed in parallel, landed on develop first and claimed that number.)
  *
  * `add column updated_at ... default now()` alone would give EVERY pre-existing collection the SAME
  * single timestamp: a volatile default like `now()` is evaluated once per statement, not once per
@@ -7,10 +9,10 @@
  * ships — a lie she'd see immediately on the sorted list. So the migration backfills from `created_at`
  * instead (see its own comment) before setting the default/not-null for future rows.
  *
- * This needs rows that exist BEFORE 0011 runs, which `freshRpcDb()` can't produce — it applies the
- * whole fixed migration list up front. So this applies 0001–0010 itself, seeds collections with
+ * This needs rows that exist BEFORE 0012 runs, which `freshRpcDb()` can't produce — it applies the
+ * whole fixed migration list up front. So this applies 0001–0011 itself, seeds collections with
  * DELIBERATELY staggered `created_at` values (so a bug that backfills a uniform value, rather than
- * each row's own prior, would be caught), then applies 0011 and asserts the exact falsifiable
+ * each row's own prior, would be caught), then applies 0012 and asserts the exact falsifiable
  * expectations the Tech Lead's baseline read against Testing also checks: column present, zero NULLs,
  * every pre-existing row's `updated_at` equal to ITS OWN `created_at`, row count unchanged.
  */
@@ -22,7 +24,7 @@ import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 
 const OWNER = "00000000-0000-0000-0000-000000000001";
 
-const PRE_0011_MIGRATIONS = [
+const PRE_0012_MIGRATIONS = [
   "0001_init.sql",
   "0002_domain.sql",
   "0003_config.sql",
@@ -33,6 +35,7 @@ const PRE_0011_MIGRATIONS = [
   "0008_collection_removal_ops.sql",
   "0009_set_metadata.sql",
   "0010_release_stale_line_slots.sql",
+  "0011_relink_unambiguous_line_slots.sql",
 ];
 
 function migrationSql(file: string): string {
@@ -55,13 +58,13 @@ let db: PGlite;
 beforeEach(async () => {
   db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(SUPABASE_SHIMS);
-  for (const f of PRE_0011_MIGRATIONS) await db.exec(migrationSql(f));
+  for (const f of PRE_0012_MIGRATIONS) await db.exec(migrationSql(f));
 });
 afterEach(async () => {
   await db.close();
 });
 
-describe("migration 0011 backfills updated_at from created_at, not a uniform now()", () => {
+describe("migration 0012 backfills updated_at from created_at, not a uniform now()", () => {
   it("preserves each pre-existing row's OWN created_at, leaves none NULL, changes no row count", async () => {
     const A = "a0000000-0000-0000-0000-0000000000d1";
     const B = "a0000000-0000-0000-0000-0000000000d2";
@@ -77,8 +80,8 @@ describe("migration 0011 backfills updated_at from created_at, not a uniform now
     const before = (await db.query<{ n: number }>(`select count(*)::int n from collection`)).rows[0]
       .n;
 
-    // Migration 0011 itself — the exact file that will ship.
-    await db.exec(migrationSql("0011_collection_updated_at.sql"));
+    // Migration 0012 itself — the exact file that will ship.
+    await db.exec(migrationSql("0012_collection_updated_at.sql"));
 
     const rows = (
       await db.query<{ id: string; created_at: string; updated_at: string | null }>(
@@ -98,8 +101,8 @@ describe("migration 0011 backfills updated_at from created_at, not a uniform now
     expect(distinctUpdatedAt.size).toBe(3);
   });
 
-  it("a NEW row after 0011 still defaults updated_at to insert time, not created_at's old rule", async () => {
-    await db.exec(migrationSql("0011_collection_updated_at.sql"));
+  it("a NEW row after 0012 still defaults updated_at to insert time, not created_at's old rule", async () => {
+    await db.exec(migrationSql("0012_collection_updated_at.sql"));
     const id = "a0000000-0000-0000-0000-0000000000d4";
     await db.query(`insert into collection (id, owner_id, name) values ($1, $2, 'Fresh')`, [
       id,

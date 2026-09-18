@@ -25,11 +25,18 @@ const MIGRATIONS = [
   "0008_collection_removal_ops.sql",
   // 0009/0010 were missing from this list (a pre-existing gap, not from this PR) — every PGlite test
   // was silently running one schema version behind whatever actually ships. Restored here so this harness
-  // reflects the real migration history rather than a snapshot frozen at 0008, and so UIL-052's own
-  // 0011 (which depends on nothing from either) has an accurate base to apply on top of.
+  // reflects the real migration history rather than a snapshot frozen at 0008.
   "0009_set_metadata.sql",
   "0010_release_stale_line_slots.sql",
-  "0011_collection_updated_at.sql",
+  // 0011 (relink) is a one-time data repair, same shape as 0010 — a no-op on a fresh/empty test DB,
+  // included so the harness's schema stays in sync with what actually ships rather than needing every
+  // future migration remembered here by hand one at a time.
+  "0011_relink_unambiguous_line_slots.sql",
+  // UIL-052's own migration. Originally authored as 0011 before 0011_relink_unambiguous_line_slots.sql
+  // (a different, independently-developed migration) landed on develop first and claimed that number —
+  // renumbered to 0012 to resolve the collision; two files sharing one prefix is not a git conflict
+  // (different filenames), so nothing else would have caught this without checking file-by-file.
+  "0012_collection_updated_at.sql",
 ];
 
 // Supabase provides auth.uid() + the anon/authenticated/service_role roles; PGlite (vanilla PG) does
