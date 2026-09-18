@@ -2530,6 +2530,25 @@ failure shape this entry is about, one layer over in test *data* rather than a t
 follow-up rather than its own UIL: audit what else in the suite leans on the id-only seed for a property
 it can't actually exercise.
 
+**A fourth instance, in the same mitigation-pattern file, found building PR #182 (open) — confirmed on
+`origin/develop` `5f0715e`.** `tests/support/pglite-rpc.ts`'s own `MIGRATIONS` array
+([`:17-26`](../tests/support/pglite-rpc.ts:17)) stops at `0008_collection_removal_ops.sql` — 0009
+(set metadata) and 0010 (the UIL-062 slot-release repair) were never added, so **every PGlite-backed
+test in the repo has been running against a schema two versions behind `develop`**, not the one version
+the earlier findings above already flagged this file for. #182 restores them (plus 0011). The
+implication is the same shape as the other three, one level up: any PGlite test that passed while
+depending on a column or behaviour added in 0009 or 0010 was passing for the wrong reason, and any test
+that *should* have failed against the real, current schema had no way to.
+
+**Four distinct harness-fidelity faults now, found across two days, in the file this entry's own
+suggested fix recommends moving everyone onto.** `count` returning the page size as the total under a
+`.range()` (would have re-armed UIL-031's truncation hazard silently); `order()` ignoring `{ ascending:
+false }`; `seedCatalogCards` writing only `id`/`name`, making every cascade duplicate assertion built on
+it vacuous; and now the migrations array running two versions behind. **Every one of the four was found
+by a developer checking, not by a test failing** — which is this entry's own thesis, restated by its own
+mitigation pattern needing the same kind of check applied to itself four separate times. Staying Open
+on that basis, not closed by any one of the four fixes.
+
 ## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
 
 - **Reported:** 2026-09-14 (not from Karvi — found by the Senior Dev session while fixing UIL-017)

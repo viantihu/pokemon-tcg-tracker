@@ -24,6 +24,19 @@ export function CardLookup({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<LookupCard[]>([]);
   const [loading, setLoading] = useState(false);
+  /**
+   * The search FAILED, as distinct from finding nothing (UIL-035).
+   *
+   * Without this the dropdown reported "No match in the local mirror" for a Supabase outage, an expired
+   * session and a genuinely unknown card alike — telling her a card does not exist when the truth was
+   * that nothing was asked. `search` now throws on failure and an empty array means only "asked, and
+   * there was nothing", so the two states are finally separable here.
+   *
+   * Lives in this shared component rather than in each caller: five screens inject their own `search`,
+   * and doing it once means every one of them gains the distinction, including the screens this change
+   * does not touch.
+   */
+  const [failed, setFailed] = useState<string | null>(null);
   const latest = useRef(0);
 
   useEffect(() => {
@@ -43,7 +56,16 @@ export function CardLookup({
         if (token === latest.current) setLoading(true);
         try {
           const found = await search(q);
-          if (token === latest.current) setResults(found);
+          if (token === latest.current) {
+            setResults(found);
+            setFailed(null);
+          }
+        } catch (err) {
+          // Keep the last good results on screen rather than blanking them — a transient failure
+          // mid-typing should not also erase what she could already see.
+          if (token === latest.current) {
+            setFailed(err instanceof Error ? err.message : "Could not search the catalog.");
+          }
         } finally {
           if (token === latest.current) setLoading(false);
         }
@@ -57,6 +79,7 @@ export function CardLookup({
     onPick(card);
     setQuery("");
     setResults([]);
+    setFailed(null);
   }
 
   return (
@@ -72,7 +95,17 @@ export function CardLookup({
       />
       {query.trim().length >= 2 && (
         <div className="sugg" role="listbox">
-          {loading && results.length === 0 ? (
+          {failed ? (
+            /* A failure, said as one. Never "no match" — that would be a claim about her collection
+               that the app is in no position to make (UIL-035). */
+            <button
+              type="button"
+              disabled
+              style={{ cursor: "default", color: "var(--ink)", background: "var(--note)" }}
+            >
+              {failed} — the card may well exist; the catalog just did not answer. Try again.
+            </button>
+          ) : loading && results.length === 0 ? (
             <button type="button" disabled style={{ cursor: "default", color: "var(--ink-2)" }}>
               Searching the mirror…
             </button>
