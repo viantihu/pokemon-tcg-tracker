@@ -97,6 +97,63 @@ export interface BinderSplit {
  *
  * Specialty binders are a single section (`pages * pockets_per_page`) with no halves.
  */
+/* --------------------- would this edit strand what's already shelved? --------------------- */
+
+/** A section where the edit's new capacity is smaller than what is already shelved there. */
+export interface SectionStrand {
+  half: "front" | "back" | "single";
+  shelvedCount: number;
+  newCapacity: number;
+}
+
+/**
+ * Which of a binder edit's sections would end up with fewer pockets than cards already shelved
+ * there (UIL-050 — "shelved is greater than capacity. This is physically impossible."). Capacity is
+ * derived purely from pages/pockets/divider (`binder_section` view); shelved count is a straight
+ * count of `copy` rows, and nothing previously checked the two against each other before a save.
+ * Shrinking pages, moving the divider forward, or clearing `back_half_start_page` (UIL-001's "NO BACK
+ * HALF" trap, where back capacity collapses to 0 while `binder_half='back'` copies still count) can
+ * all produce it.
+ *
+ * Checked against whichever bucket actually has shelved cards rather than branching on the binder's
+ * (possibly just-changed) type: a general binder's `single` count is always 0 and a specialty
+ * binder's `front`/`back` counts are always 0, so the inapplicable rows are harmless no-ops for the
+ * ordinary case, and a rare type change while cards are shelved still gets a real, if conservative,
+ * check instead of silently comparing the wrong bucket.
+ */
+export function strandedSections(
+  split: BinderSplit,
+  shelved: { front: number; back: number; single: number },
+): SectionStrand[] {
+  const rows: SectionStrand[] = [
+    { half: "front", shelvedCount: shelved.front, newCapacity: split.frontPockets },
+    { half: "back", shelvedCount: shelved.back, newCapacity: split.backPockets },
+    { half: "single", shelvedCount: shelved.single, newCapacity: split.totalPockets },
+  ];
+  return rows.filter((r) => r.shelvedCount > r.newCapacity);
+}
+
+const STRAND_HALF_LABEL: Record<SectionStrand["half"], string> = {
+  front: "The front half",
+  back: "The back half",
+  single: "It",
+};
+
+/** The refusal shown when a binder edit would leave fewer pockets than cards already shelved. */
+export function strandedSectionsMessage(blocked: SectionStrand[]): string {
+  const parts = blocked.map((b) => {
+    const cards = `${b.shelvedCount} card${b.shelvedCount === 1 ? "" : "s"}`;
+    const pockets = `${b.newCapacity} pocket${b.newCapacity === 1 ? "" : "s"}`;
+    return `${STRAND_HALF_LABEL[b.half]} would hold ${pockets}, but ${cards} ${b.shelvedCount === 1 ? "is" : "are"} already shelved there`;
+  });
+  return (
+    `That change would leave fewer pockets than cards already shelved: ${parts.join("; ")}. ` +
+    `This can't move the physical cards for you, so the save is refused rather than silently ` +
+    `rebalancing pages or the divider. Add more pages, move the divider back, or move those cards to ` +
+    `another binder first.`
+  );
+}
+
 export function binderSplit(input: {
   type: "general" | "specialty";
   pages: number;
