@@ -12,8 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { MoveDestination } from "@/lib/line/types";
 import {
   buildWishlistCopyText,
@@ -27,7 +26,7 @@ import { CardFace } from "../_components/CardFace";
 import { CardLookup } from "../_components/CardLookup";
 import { MoveOverlay } from "../_components/MoveOverlay";
 import type { LookupCard } from "../plan/plan-types";
-import { createAutosaveScheduler } from "./autosave";
+import { createAutosaveScheduler, flushBeforeNavigate } from "./autosave";
 import {
   deleteCollection,
   loadCollHub,
@@ -782,6 +781,8 @@ function CollectionEditor(props: {
 }) {
   const { state, binders, busy, onChange, onClose, onSubmit } = props;
   const isNew = state.isNewDraft;
+  const router = useRouter();
+  const [searchNavigating, setSearchNavigating] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
 
   // Captured once per mount (the editor remounts fresh each time it opens) — the baseline "untouched"
@@ -834,6 +835,18 @@ function CollectionEditor(props: {
       state.binderId === initialBinderId;
     onClose(empty);
   }, [autosave, state, initialBinderId, onClose]);
+
+  /**
+   * UIL-038 follow-up (QA on #155): a plain `<Link>` here navigated straight through any pending
+   * debounce, so a name edit made in the last 600ms before the click was lost — a data-loss path
+   * inside the very feature meant to prevent data loss. Flush-and-await, not flush-and-navigate: the
+   * search page reopens the editor from server state, so an unresolved write racing that reload risks
+   * the same loss again; a beat of latency is cheaper than reopening the window it exists to close.
+   */
+  async function goSearchAndAdd() {
+    setSearchNavigating(true);
+    await flushBeforeNavigate(autosave, () => router.push(`/coll/search?collectionId=${state.id}`));
+  }
 
   // Escape is the only keyboard way out of a modal; it routes through the same close path.
   useEffect(() => {
@@ -976,9 +989,14 @@ function CollectionEditor(props: {
               <div className="cerow-h u">
                 Set list — the cards you chase. Owned status is derived from your shelf.
               </div>
-              <Link href={`/coll/search?collectionId=${state.id}`} className="btn u">
-                Search &amp; add cards →
-              </Link>
+              <button
+                type="button"
+                className="btn u"
+                onClick={goSearchAndAdd}
+                disabled={searchNavigating}
+              >
+                {searchNavigating ? "Saving…" : "Search & add cards →"}
+              </button>
               <div className="celist">
                 {state.targets.map((t) => (
                   <div key={t.tcgdexId} className={"cerow" + (t.owned ? " own" : "")}>
