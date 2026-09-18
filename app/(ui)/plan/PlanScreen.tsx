@@ -22,7 +22,7 @@ import type { Variant } from "@/lib/engine";
 // ./session, which pulls lib/supabase/server (and `next/headers`) into the browser bundle. The
 // `import type` below is fine because types are erased; a VALUE import is not.
 import { progressPips } from "@/lib/plan/progress";
-import type { PlanBandGroup, PlanItem, ProposedPull } from "@/lib/plan";
+import type { BandMismatchChoice, PlanBandGroup, PlanItem, ProposedPull } from "@/lib/plan";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
 // Leaf import of the pure move module (its only dependency is ./types; the `WriteOp` it names is a
 // type-only import), so bringing `describeMove` into the browser bundle drags in no server code.
@@ -191,6 +191,7 @@ export function PlanScreen({
     item: PlanItem | null;
     digest: string | null;
     proposedPulls: ProposedPull[];
+    bandMismatch: BandMismatchChoice | null;
   } | null>(null);
   /**
    * Pulls she has ticked, per draft id (UIL-061). Starts EMPTY for every card and is never
@@ -198,6 +199,13 @@ export function PlanScreen({
    * pre-checked box is not agreement. Cleared with the plan, like the overrides map.
    */
   const [confirmedPulls, setConfirmedPulls] = useState<Record<string, string[]>>({});
+  /**
+   * Her resolution of a colour mismatch, per draft id (UIL-069). Starts unset for every card —
+   * neither option is a default, so there is nothing to pre-populate. "own-color" also sets
+   * `overrides` in the same click (that IS the resolution); this only has to carry "line", the one
+   * choice with no override to prove it happened.
+   */
+  const [bandChoice, setBandChoice] = useState<Record<string, "line" | "own-color">>({});
   const [error, setError] = useState<string | null>(null);
   const [cur, setCur] = useState(resumed?.cur ?? 0);
   /**
@@ -286,6 +294,8 @@ export function PlanScreen({
     setOverrides({});
     // Consent was given against a plan that no longer exists (UIL-061).
     setConfirmedPulls({});
+    // Any colour-mismatch pick was against a plan that no longer exists too (UIL-069).
+    setBandChoice({});
   }
 
   function flashToast(msg: string) {
@@ -322,6 +332,12 @@ export function PlanScreen({
   function onMoveConfirm(dest: MoveDestination) {
     if (!moveTarget) return;
     setOverrides((prev) => ({ ...prev, [moveTarget.copyId]: dest }));
+    // A manual Move is her OWN third choice, superseding whatever the mismatch radios held (UIL-069).
+    setBandChoice((prev) => {
+      const next = { ...prev };
+      delete next[moveTarget.copyId];
+      return next;
+    });
     flashToast(`Placement override set · ${moveTarget.name}`);
     setMoveTarget(null);
   }
@@ -349,6 +365,7 @@ export function PlanScreen({
       // A new run is new work: nothing is finished yet, so nothing should arrive folded.
       setCollapsed(new Set());
       setConfirmedPulls({});
+      setBandChoice({});
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not run the plan.");
     } finally {
@@ -395,20 +412,29 @@ export function PlanScreen({
         // still the current one — consent is specific to a placement, not to a card (UIL-061).
         confirmedPulls:
           fresh?.id === item.incomingId ? (confirmedPulls[item.incomingId] ?? []) : [],
+        // Only her pick FOR THIS CARD's current derivation, same rule as confirmedPulls (UIL-069).
+        bandChoice: fresh?.id === item.incomingId ? (bandChoice[item.incomingId] ?? null) : null,
       });
       if (!res.ok) {
         // The placement moved under her. Nothing was written; show the new one and let her look
         // again rather than reporting a failure for something that is working correctly.
         if (res.changed) {
-          // A conflict re-derives server-side, so its pull proposal may differ too; drop the stale
-          // tick list rather than carrying consent across a placement that changed underneath it.
+          // A conflict re-derives server-side, so its pull proposal (and any colour mismatch) may
+          // differ too; drop the stale tick list and pick rather than carrying consent across a
+          // placement that changed underneath it.
           setFresh({
             id: item.incomingId,
             item: res.fresh,
             digest: res.freshDigest,
             proposedPulls: [],
+            bandMismatch: null,
           });
           setConfirmedPulls((prev) => ({ ...prev, [item.incomingId]: [] }));
+          setBandChoice((prev) => {
+            const next = { ...prev };
+            delete next[item.incomingId];
+            return next;
+          });
           setError(res.error);
           return false;
         }
@@ -438,6 +464,7 @@ export function PlanScreen({
     setError(null);
     setOverrides({});
     setConfirmedPulls({});
+    setBandChoice({});
     setMoveTarget(null);
     setPlanIsResumed(false);
     setHaulId(null);
@@ -504,10 +531,19 @@ export function PlanScreen({
           item: res.ok ? res.item : null,
           digest: res.ok ? res.digest : null,
           proposedPulls: res.ok ? res.proposedPulls : [],
+          bandMismatch: res.ok ? res.bandMismatch : null,
         });
       })
       .catch(() => {
-        if (live) setFresh({ id: spotlightId, item: null, digest: null, proposedPulls: [] });
+        if (live) {
+          setFresh({
+            id: spotlightId,
+            item: null,
+            digest: null,
+            proposedPulls: [],
+            bandMismatch: null,
+          });
+        }
       });
     return () => {
       live = false;
@@ -535,6 +571,31 @@ export function PlanScreen({
         [draftId]: cur.includes(copyId) ? cur.filter((c) => c !== copyId) : [...cur, copyId],
       };
     });
+  }
+
+  /**
+   * Her resolution of a colour mismatch (UIL-069). "Own colour" also sets `overrides` in the same
+   * click — that IS the resolution, reusing the manual-override write path verbatim (drift-proof by
+   * construction) rather than a second write mechanism. "Line" sets no override: it is the cascade's
+   * own placement, confirmed instead by sending `bandChoice: "line"` at Done alongside the digest.
+   */
+  function onPickBandChoice(draftId: string, choice: "line" | "own-color") {
+    setBandChoice((prev) => ({ ...prev, [draftId]: choice }));
+    if (choice === "own-color" && fresh?.id === draftId && fresh.bandMismatch) {
+      setOverrides((prev) => ({
+        ...prev,
+        [draftId]: fresh.bandMismatch!.ownColorMoveDestination,
+      }));
+    } else if (choice === "line") {
+      // Switching back from a previously-picked "own colour" must drop that override, or Done would
+      // still send it and silently win over her new pick.
+      setOverrides((prev) => {
+        if (!(draftId in prev)) return prev;
+        const next = { ...prev };
+        delete next[draftId];
+        return next;
+      });
+    }
   }
 
   function advance() {
@@ -581,6 +642,8 @@ export function PlanScreen({
           fresh={fresh}
           confirmedPulls={confirmedPulls}
           onTogglePull={onTogglePull}
+          bandChoice={bandChoice}
+          onPickBandChoice={onPickBandChoice}
           advance={advance}
           onBack={() => setPlan(null)}
           onReset={resetAll}
@@ -846,10 +909,14 @@ function PlanView(props: {
     item: PlanItem | null;
     digest: string | null;
     proposedPulls: ProposedPull[];
+    bandMismatch: BandMismatchChoice | null;
   } | null;
   /** Pulls she has ticked, by draft id (UIL-061). */
   confirmedPulls: Record<string, string[]>;
   onTogglePull: (draftId: string, copyId: string) => void;
+  /** Her colour-mismatch pick, by draft id (UIL-069). */
+  bandChoice: Record<string, "line" | "own-color">;
+  onPickBandChoice: (draftId: string, choice: "line" | "own-color") => void;
   advance: () => void;
   onBack: () => void;
   onReset: () => void;
@@ -876,6 +943,8 @@ function PlanView(props: {
     fresh,
     confirmedPulls,
     onTogglePull,
+    bandChoice,
+    onPickBandChoice,
     advance,
     onBack,
     onReset,
@@ -1124,6 +1193,17 @@ function PlanView(props: {
                 const id = flatItems[cur]?.incomingId;
                 if (id) onTogglePull(id, copyId);
               }}
+              // Same rule as proposedPulls (UIL-069): only when the reply belongs to the spotlight card.
+              bandMismatch={
+                flatItems[cur] && fresh?.id === flatItems[cur].incomingId
+                  ? fresh.bandMismatch
+                  : null
+              }
+              bandChoice={flatItems[cur] ? (bandChoice[flatItems[cur].incomingId] ?? null) : null}
+              onPickBandChoice={(choice) => {
+                const id = flatItems[cur]?.incomingId;
+                if (id) onPickBandChoice(id, choice);
+              }}
               refreshing={
                 !!flatItems[cur] &&
                 doneCount > 0 &&
@@ -1345,6 +1425,11 @@ export function Spotlight(props: {
   /** Which of them she has ticked. */
   confirmedPulls?: string[];
   onTogglePull?: (copyId: string) => void;
+  /** Present only when this card's own colour differs from the line it would join (UIL-069). */
+  bandMismatch?: BandMismatchChoice | null;
+  /** Her pick, if any. Neither is a default — `null` means genuinely unresolved, not "line". */
+  bandChoice?: "line" | "own-color" | null;
+  onPickBandChoice?: (choice: "line" | "own-color") => void;
 }) {
   const {
     item: forecast,
@@ -1361,6 +1446,9 @@ export function Spotlight(props: {
     proposedPulls = [],
     confirmedPulls = [],
     onTogglePull,
+    bandMismatch,
+    bandChoice,
+    onPickBandChoice,
   } = props;
   if (!forecast) return <p style={{ fontSize: 11, color: "var(--ink-2)" }}>No cards to handle.</p>;
   /**
@@ -1369,6 +1457,14 @@ export function Spotlight(props: {
    * not use — and she reads this panel to decide which pocket to physically use.
    */
   const item = freshItem ?? forecast;
+  /**
+   * A mismatch with no pick yet and no override (UIL-069) — the moment `bandChoice` becomes "line" or
+   * she picks "own colour" (which sets `override` in the same click), this goes false and the ordinary
+   * destination display below is already correct for whichever she chose. Neither option is shown as
+   * decided until then: `item.destination` alone would read as "line wins", which is the silent
+   * default her ruling rejects.
+   */
+  const pendingBandChoice = !!bandMismatch && !override && bandChoice == null;
   // Only worth telling her when the pocket actually moved; a reworded reason is not news.
   const movedFrom =
     freshItem && !override && freshItem.destination !== forecast.destination
@@ -1401,9 +1497,57 @@ export function Spotlight(props: {
       </div>
 
       <div className="doit">
-        <b>{disp.big}</b>
-        <span className="sg u">{disp.destination}</span>
+        <b>{pendingBandChoice ? "Colour mismatch — pick one below" : disp.big}</b>
+        <span className="sg u">{pendingBandChoice ? "" : disp.destination}</span>
       </div>
+
+      {/* UIL-069 — her ruling reverses UIL-065's "the line's band wins" default: neither option is
+          shown as decided, and Done stays disabled until she picks one. Reuses the `.pullrow` row
+          styling (a labelled control + name + location) rather than a new shape for one radio pair. */}
+      {bandMismatch ? (
+        <div
+          className="pulls"
+          role="radiogroup"
+          aria-label="Colour mismatch — choose a destination"
+        >
+          <div className="pullhead u">
+            <b>Colour mismatch — choose</b>
+            <span>
+              This card&apos;s own colour differs from the line it would join. Neither wins by
+              default.
+            </span>
+          </div>
+          {(
+            [
+              {
+                value: "line" as const,
+                label: `Join ${bandMismatch.lineSpeciesLabel}`,
+                where: bandMismatch.lineDestination,
+              },
+              {
+                value: "own-color" as const,
+                label: "File by its own colour",
+                where: bandMismatch.ownColorDestination,
+              },
+            ] as const
+          ).map((opt) => {
+            const on = bandChoice === opt.value;
+            return (
+              <label key={opt.value} className={"pullrow" + (on ? " on" : "")}>
+                <input
+                  type="radio"
+                  name={`bandmismatch-${item.incomingId}`}
+                  checked={on}
+                  onChange={() => onPickBandChoice?.(opt.value)}
+                  disabled={done || busy}
+                />
+                <span className="pullnm">{opt.label}</span>
+                <span className="pullfrom u">{opt.where}</span>
+              </label>
+            );
+          })}
+        </div>
+      ) : null}
 
       {/* UIL-061 — every card of HERS this would move, named, each an explicit opt-in.
           Unticked by default and never pre-checked: "the user must validate each and every single
@@ -1490,14 +1634,25 @@ export function Spotlight(props: {
             showing the FORECAST, and the forecast carries no digest — so a Done clicked here would go
             unguarded and could write a pocket other than the one she just read off the screen and put
             the card into. Sub-second, but it is the whole wrong-shelf hazard in miniature, so the
-            correct answer is to not accept the click rather than to accept it unguarded. */}
+            correct answer is to not accept the click rather than to accept it unguarded.
+
+            Also disabled while a colour mismatch is unresolved (UIL-069): a default here is exactly
+            what her ruling rejects, so the button simply will not fire until she has picked one. */}
         <button
           type="button"
           className="btn btn-primary go"
           onClick={onShelve}
-          disabled={done || busy || refreshing}
+          disabled={done || busy || refreshing || pendingBandChoice}
         >
-          {done ? "Shelved ✓" : busy ? "Shelving…" : refreshing ? "Checking…" : "Done, next card"}
+          {done
+            ? "Shelved ✓"
+            : busy
+              ? "Shelving…"
+              : refreshing
+                ? "Checking…"
+                : pendingBandChoice
+                  ? "Pick one above"
+                  : "Done, next card"}
         </button>
         <button type="button" className="btn" onClick={onBackCard}>
           ◀ Back

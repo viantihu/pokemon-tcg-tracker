@@ -160,6 +160,12 @@ interface MutableSlot {
 /**
  * Commit a whole haul atomically. Loads context, re-runs the cascade, builds the ordered write set,
  * and applies it in one transaction via the RPC. Returns the new haul id and per-table counts.
+ *
+ * UIL-069 note: a colour-mismatch card is NOT guarded here. This entry point has zero callers
+ * (`commitHaulAction` was superseded by per-card commit — UIL-027) and is being deleted on Karvi's
+ * explicit instruction ("delete it, we're not going back to bulk commit") — see docs/issue-log.md's
+ * UIL-027 update. Refusing a mismatch specifically in this path was considered and dropped as moot
+ * for the same reason: there will be no bulk path left to refuse from.
  */
 export async function commitHaul(db: DbClient, input: CommitInput): Promise<CommitResult> {
   const pc = await loadPlanContext(db, {
@@ -230,6 +236,16 @@ export async function commitCardPlacement(
      * verbatim, so display and write already share one source.
      */
     expectedDigest?: string | null;
+    /**
+     * Her explicit resolution of a colour mismatch (UIL-069), when the spotlight showed one.
+     * `"own-color"` is redundant with `override` being set (that IS the resolution) and is accepted
+     * only for symmetry; the load-bearing value is `"line"` — the one case with no override to prove
+     * she chose it. Required ALONGSIDE a matching `expectedDigest`, not instead of one: the flag alone
+     * would be an unbacked client assertion (a careless caller could send `"line"` on every card
+     * whether she was asked or not), while the digest is what proves this specific derivation — with
+     * this specific mismatch — is the one she actually looked at. Absent/null ⇒ unresolved.
+     */
+    bandChoice?: "line" | "own-color" | null;
   },
 ): Promise<CommitResult> {
   const draft = [input.card];
@@ -237,6 +253,23 @@ export async function commitCardPlacement(
   const { planned } = planFromDraft(pc, draft);
   // Consent rides on the planned card, so `writeNewLine` never has to guess (UIL-061).
   const withConsent = planned.map((pl) => ({ ...pl, confirmedPulls: input.confirmedPulls ?? [] }));
+
+  // A colour mismatch (UIL-069) is never a silent default. "File by its own colour" arrives as
+  // `override` below and is drift-proof by construction; nothing further to check. "Join the line"
+  // has no override to carry — it IS the cascade's own placement — so it is refused unless she
+  // explicitly confirmed it via `bandChoice` AND that confirmation is backed by a matching
+  // `expectedDigest`. `bandChoice` alone would be an unbacked client assertion: a stale or careless
+  // caller could send `"line"` on every card regardless of whether she was ever actually asked, which
+  // is the exact silent default this whole check exists to prevent.
+  if (
+    planned[0]?.result.bandMismatch &&
+    !input.override &&
+    (input.bandChoice !== "line" || !input.expectedDigest)
+  ) {
+    throw new Error(
+      "This card's own colour differs from the line it would join — pick which one wins before confirming.",
+    );
+  }
 
   // Compare BEFORE building the payload, so a conflict costs nothing and writes nothing.
   if (input.expectedDigest && !input.override && planned[0]) {
@@ -358,28 +391,41 @@ export function buildHaulCommitPayload(
     // A routed copy belongs to no haul, even when the same pass also takes in new cards.
     const decisionHaulId = p.existingCopyId ? null : haulId;
     const override = input.overrides?.[p.incomingId];
+    // UIL-069: by this point a mismatch has already been resolved one way or the other (both
+    // `commitCardPlacement` and `commitHaul` refuse before reaching here) — this only picks the
+    // HONEST audit text for whichever way it went, so the trail says what she actually chose rather
+    // than reusing `p.result.reason`, which always describes the LINE option regardless of her pick.
+    const mismatch = p.result.bandMismatch;
     if (override) {
       // Manual placement wins: place the copy where she said, skip all cascade side effects.
       const copyId = writeOverriddenCard(ops, haulId, p, override, pc, slotsByLine, now, counts);
+      const reason = mismatch
+        ? "Colour mismatch resolved at intake (her call, UIL-069): filed by its own colour rather " +
+          "than joining the existing line."
+        : `Manual placement override at intake (your call, cascade skipped): ${p.result.reason}`;
       ops.push({
         op: "insert_decision",
         haul_id: decisionHaulId,
         copy_id: copyId,
-        decision: "placement-override",
-        reason: `Manual placement override at intake (your call, cascade skipped): ${p.result.reason}`,
+        decision: mismatch ? "colour-mismatch-own-color" : "placement-override",
+        reason,
         resolved_by: "user",
       });
       counts.decisions += 1;
       continue;
     }
     const copyId = writeCard(ops, haulId, p, pc, slotsByLine, passLines, now, counts);
+    const reason = mismatch
+      ? "Colour mismatch resolved at intake (her call, UIL-069): joined the existing line over " +
+        "filing by its own colour."
+      : p.result.reason;
     ops.push({
       op: "insert_decision",
       haul_id: decisionHaulId,
       copy_id: copyId,
-      decision: p.result.step,
-      reason: p.result.reason,
-      resolved_by: "auto",
+      decision: mismatch ? "colour-mismatch-join-line" : p.result.step,
+      reason,
+      resolved_by: mismatch ? "user" : "auto",
     });
     counts.decisions += 1;
   }

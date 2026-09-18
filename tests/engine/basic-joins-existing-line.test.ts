@@ -138,6 +138,9 @@ describe("UIL-063 — a Basic checks for an existing line before falling to the 
     // second half of the report).
     expect(res.reason).not.toMatch(/no line/i);
     expect(res.reason).toMatch(/existing/i);
+    // UIL-069: the line's band (olive) and Dratini's own natural band (olive) agree here, so there
+    // is nothing to ask her about — the common case must stay silent, not offer a pointless choice.
+    expect(res.bandMismatch).toBeFalsy();
   });
 
   it("does NOT create a new line for a Basic with no existing one — manual creation stays her call (UIL-056)", () => {
