@@ -36,7 +36,7 @@ current as of its last write; only the Status field itself can lag.
 ## UIL-001 — "Back half from page" gives no indication of what it means
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
+- **Status:** **Closed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check. **Confirmed resolved by Karvi on Testing.**
 - **Priority:** Low
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -59,7 +59,7 @@ step she can be walked through. Copy-only fix, safe to ship after go-live.
 ## UIL-002 — No definition of what counts as a "page"
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
+- **Status:** **Closed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check. **Confirmed resolved by Karvi on Testing.**
 - **Priority:** Medium
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -637,11 +637,11 @@ Plan.
 ## UIL-008 — No progress indication during long operations
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#64](https://github.com/viantihu/pokemon-tcg-tracker/pull/64) MERGED to
+- **Status:** **Closed** — PR [#64](https://github.com/viantihu/pokemon-tcg-tracker/pull/64) MERGED to
   `develop` (squash `88a546c`), QA-reviewed, confirmed **deployed** to Testing. Shipped **option (1)
   only**, an indeterminate activity bar, and the PR argues *against* the determinate bar this entry
   recommended — see the resolution note. Awaiting Karvi's confirmation, including the question of whether
-  the bar still earns its place now that UIL-020 has made the sync much faster.
+  the bar still earns its place now that UIL-020 has made the sync much faster. **Confirmed resolved by Karvi on Testing.**
 - **Priority:** Medium (Claude's read — could argue Low)
 - **Area:** Sync, Plan
 - **Env:** Testing
@@ -675,10 +675,10 @@ three, though — nothing is broken, so Low is defensible if she would rather th
 ## UIL-009 — Clicking outside the collection popup discards everything typed
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56) MERGED to
+- **Status:** **Closed** — PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56) MERGED to
   `develop` 2026-09-14 (squash `0f16007`), QA-reviewed, and confirmed **deployed** to Testing on
   `258db13` (`Vercel`/`migrate`/`smoke`/`acceptance` all green). Awaiting Karvi's confirmation — the
-  behaviour is interaction-only and was never exercised in a browser.
+  behaviour is interaction-only and was never exercised in a browser. **Confirmed resolved by Karvi on Testing.** Note her later ruling: the confirm-on-dismiss dialog this added was subsequently REMOVED by UIL-038's autosave, and she confirmed that removal too — so this entry is closed on the behaviour that shipped here, not on a dialog that still exists.
 - **Priority:** High (Karvi's call)
 - **Area:** Collections
 - **Env:** Testing
@@ -2999,11 +2999,11 @@ verbatim) rather than a new idea to evaluate, and it's on the screen she uses mo
 ## UIL-037 — After overriding a card's placement, both the spotlight panel and the worklist row still show the original suggestion
 
 - **Reported:** 2026-09-14
-- **Status:** **Fixed** — PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to
+- **Status:** **Closed** — PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to
   `develop` 2026-09-14 (squash `e911c8c`), QA-reviewed, confirmed **deployed** to Testing (all four
   conditions green on `7cb1a36`). The spotlight panel and the worklist row now name the override
   destination instead of the original suggestion. Awaiting Karvi's confirmation — she confirmed UIL-027
-  from the same PR but has not spoken to this one, so it is not claimed on her behalf.
+  from the same PR but has not spoken to this one, so it is not claimed on her behalf. **Confirmed resolved by Karvi on Testing** — the override destination is named on both the spotlight panel and the worklist row.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Plan
 - **Env:** Testing
