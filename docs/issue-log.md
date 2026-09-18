@@ -4596,6 +4596,49 @@ that they stay untouched.
 class the log has repeatedly treated as High, on the screen whose whole job is showing her what she
 physically owns and where. Flagging for Karvi's confirmation since severity calls are hers.
 
+**Update 2026-09-18: final verification, run `35347026092` from the tech lead — measured, not
+inferred, and reconciled against the migration's own pre-flight comment rather than taken at face
+value.** Final state: unattached back-half copies **3**, `line_slot` filled **34**, placeholder **12**,
+`copy` **706**, `presence_group` **681**, and all three drift checks **0** (filled slot whose copy
+doesn't point back; filled with a null `copy_id`; copy claiming a slot that doesn't hold it).
+
+**Why the 3 is not a failed guard, stated in the terms that prove it rather than the bare number.**
+Migration `0011`'s own pre-flight comment
+([`supabase/migrations/0011_relink_unambiguous_line_slots.sql`](../supabase/migrations/0011_relink_unambiguous_line_slots.sql)) —
+verified directly — measured, against 8 unattached copies at the time it was written, 3 strictly-1:1
+pairs (safe to relink), 2 one-slot/several-copies pairs (ambiguous, deliberately skipped, no
+tie-break), and 3 with no candidate slot at all. Its own predicate requires the pairing to be
+unambiguous **in both directions** — `having count(*) = 1` on both the slot side and the copy side —
+and explicitly does not tie-break on `created_at`, because `target_catalog_card_id` says nothing about
+`variant`, and guessing which of two owned printings belongs in the line would invent a decision that
+is hers to make. **But by the time `0011` actually ran, she had already attached 4 of the 8 herself**
+from the Lines page's "not in a line yet" list — the true baseline at run time was 4 unattached, not 8
+— and the measured delta (`line_slot` filled 33 → 34, placeholder 13 → 12, unattached 4 → 3) shows
+**exactly one relink**, the one strictly-1:1 pair that still existed at that point. A three-relink
+tie-break would have produced filled 36 and placeholder 10; it didn't. The guard held, on real data,
+under real concurrent activity, not just at pre-flight measurement time.
+
+**Three things closed, not deferred.** Prevention held at scale: the drift count stayed at 0 across 15
+additional filled slots since the earlier post-repair read (filled 19 → 34), not just immediately after
+the fix. The variant question the migration's own comment raised is moot — zero one-slot/many-copies
+groups remain, so there is nothing left to tie-break and no decision outstanding from her. And the
+remaining 3 have no candidate slot at all, so no future migration can help them — they are permanently
+hers to attach via the same "not in a line yet" list, and she has been told that directly, so this
+should read as settled rather than as an open repair.
+
+**`copy` (706) and `presence_group` (681) are unchanged from every read since 2026-09-15** — `0011`
+created and deleted no rows; the only copy-side change it makes is the `line_slot_id` pointer, by
+design, matching its own migration comment's "both sides, one statement set" framing.
+
+**Two corrections to earlier commentary, both caught by `0011`'s own header comment and worth
+repeating here so they don't resurface:** (1) 0010's line naming "the Dragonair report, UIL-063" as
+roughly 4 of the 8 was already retracted in this entry's own 2026-09-17 update, and 0011's comment
+independently reaches the same correction from the DB side — two routes to the same fix, consistent.
+(2) The "about 4 render as HUNTING" phrasing in 0010 described a state that couldn't have existed when
+0010 was written — none of the 8 had a placeholder naming their card yet, since 0010 hadn't run;
+"about 4" was an estimate of 0010's own downstream effect, written as though it were a pre-existing
+measurement. Trust the zero 0010 also stated, not the "about 4."
+
 ## UIL-063 — A Basic card's spotlight says "no line yet" even when a line for that exact species already exists on the Lines page, and a Dragonair she says she committed still shows as un-owned
 
 - **Reported:** 2026-09-16 (Karvi, relayed precisely by Junior BA - 2 — not her diagnosis, a careful
