@@ -24,14 +24,29 @@ name: Read band config (Testing)
 # So the question this answers is narrow: are all ten bands and all fourteen mappings present, in
 # key form? A missing mapping names the card class that crashes.
 #
-# TRIGGER. Push to `ops/read-band-config`. `workflow_dispatch` is declared too, but on its own it
-# is a DEAD BUTTON: GitHub only renders the Run button for workflows on the DEFAULT branch, and
-# `main` deliberately lags `develop` until the production cutover — no workflow file is on `main`
-# yet. Same reason catalog-mirror.yml triggers on a branch push. The button starts working for
-# free after the cutover.
+# TRIGGER. Prefer `gh workflow run read-band-config.yml --ref ops/read-band-config` — the
+# `workflow_dispatch` **API** works even though the file is not on the default branch (only the UI
+# *button* needs that, and `main` lags `develop` until the cutover). Dispatch also costs no Vercel
+# build, whereas a push to this branch does. Push still works as a trigger.
 #
-# READ-ONLY. Two GETs, no writes, no card data — ten band rows and fourteen mappings. The repo is
-# private, so the log is not public; even so, nothing here is sensitive.
+# READ-ONLY: GETs only, no writes.
+#
+# !! THIS LOG IS PUBLIC. Karvi made the repo public on 2026-09-17 to lift the Actions minutes cap,
+# which VOIDED this file's original premise ("the repo is private, so the log is not public"). Every
+# run's output is now world-readable. Consequences, and they are load-bearing for what this prints:
+#
+#   - Credentials are still safe: `secrets.*` are masked by GitHub, and every value derived from one
+#     is `::add-mask::`ed before it can reach a line. Verified no real secret exists anywhere in the
+#     315-commit history — `.env*` is gitignored (`!.env.example`), and the only matches are the
+#     placeholders in `.env.example` plus `${enc_password}` shell interpolations.
+#   - What IS exposed is Karvi's collection: row counts, and the `dex_set_name` values of her
+#     unresolved queue (i.e. which products she owns cards from). That is hers, not ours, and she did
+#     not publish the repo in order to publish it.
+#   - So the rule changed: **card-level identity must not be printed.** A one-off step that dumped
+#     card names, tcgdex ids, local ids and line/binder UUIDs for the Dragonair report was REMOVED
+#     for this reason once its question was answered. Set-level metadata is retained because it is
+#     what actually solved UIL-047, but a future read should prefer counts over names by default and
+#     ask before widening.
 #
 # DELETE ME once UIL-012 closes and any corrective migration is verified. Kept as a separate file
 # precisely so it can go without touching the deploy path, and so a diagnostic can never wedge a
@@ -743,64 +758,6 @@ jobs:
           if [ "$over" -eq 0 ]; then
             echo "VERDICT: both under the cap — loadCurrentGroups sees her whole collection today. Latent."
             [ "$copies" = "unknown" ] || echo "Headroom on copy: $((1000 - copies)) more physical cards before the reconciler starts lying."
-          fi
-
-      # ONE-OFF: the Dragonair HUNTING report (UIL-062). Delete this step once answered.
-      #
-      # CARD IDENTITY IS IN BOUNDS HERE, unusually, because Karvi named these cards herself in the
-      # report (Dratini, Dragonair, Dragonite). Scoped to that one evolution line — nothing else.
-      #
-      # NOTE ON THE NUMBER: the request said "Dragonair #151". Dragonair's National Dex id is **148**
-      # (147 Dratini, 148 Dragonair, 149 Dragonite); **151 is Mew**. So "#151" is almost certainly the
-      # printed COLLECTOR number in Ascended Heroes, not a dex id. Queried on dex 148, and the
-      # catalog dump below prints local_id so the 151 can be reconciled either way.
-      - name: "One-off: the Dragonair HUNTING report"
-        env:
-          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
-        run: |
-          set -euo pipefail
-          rest="https://$PROJECT_REF.supabase.co/rest/v1"
-          g() {
-            case "$SERVICE_KEY" in
-              eyJ*) curl -sS --retry 3 -H "apikey: $SERVICE_KEY" -H "Authorization: Bearer $SERVICE_KEY" "$rest/$1" ;;
-              *)    curl -sS --retry 3 -H "apikey: $SERVICE_KEY" "$rest/$1" ;;
-            esac
-          }
-
-          echo "=== the Dratini line(s) (root_dex_id = 147) ==="
-          lines=$(g "evolution_line?select=id,root_dex_id,color_band,binder_id,half,status,created_at&root_dex_id=eq.147")
-          printf '%s' "$lines" | jq -r 'if type=="array" then (if length==0 then "  none" else (.[] | "  line \(.id)  band=\(.color_band)  binder=\(.binder_id)  half=\(.half)  status=\(.status)  created=\(.created_at)") end) else "  read failed" end'
-          line_ids=$(printf '%s' "$lines" | jq -r 'if type=="array" then ([.[].id] | join(",")) else "" end')
-
-          if [ -n "$line_ids" ]; then
-            echo "=== its slots ==="
-            g "line_slot?select=id,line_id,stage_index,stage,state,copy_id,target_catalog_card_id&line_id=in.($line_ids)&order=stage_index.asc" \
-              | jq -r '.[] | "  stage \(.stage_index) \(.stage)\t state=\(.state)\t copy=\(.copy_id // "-")\t wants=\(.target_catalog_card_id // "-")"'
-          fi
-
-          echo "=== catalog printings for the three species ==="
-          for dex in 147 148 149; do
-            echo "  dex $dex:"
-            g "catalog_card?select=tcgdex_id,name,local_id,set_id&dex_id=cs.%7B$dex%7D&limit=400" \
-              | jq -r --arg d "$dex" 'if type=="array" then "    \(length) printing(s)" else "    read failed" end'
-          done
-          dragonair_ids=$(g "catalog_card?select=tcgdex_id&dex_id=cs.%7B148%7D&limit=400" | jq -r 'if type=="array" then ([.[].tcgdex_id] | join(",")) else "" end')
-
-          echo "=== does she own a Dragonair copy at all? ==="
-          if [ -n "$dragonair_ids" ]; then
-            dcopies=$(g "copy?select=id,catalog_card_id,role,binder_id,binder_half,color_band,line_slot_id,created_at&catalog_card_id=in.($dragonair_ids)")
-            n=$(printf '%s' "$dcopies" | jq 'if type=="array" then length else -1 end')
-            echo "  Dragonair copies owned: $n"
-            if [ "$n" -gt 0 ]; then
-              printf '%s' "$dcopies" | jq -r '.[] | "  copy \(.id)\n    card=\(.catalog_card_id) role=\(.role) binder=\(.binder_id // "-") half=\(.binder_half // "-") band=\(.color_band // "-") line_slot=\(.line_slot_id // "NULL") created=\(.created_at)"'
-              dcopy_ids=$(printf '%s' "$dcopies" | jq -r '[.[].id] | join(",")')
-              echo "  their placement_decisions:"
-              g "placement_decision?select=copy_id,decision,resolved_by,haul_id,created_at&copy_id=in.($dcopy_ids)&order=created_at.asc" \
-                | jq -r 'if type=="array" then (if length==0 then "    NONE — never committed" else (.[] | "    \(.created_at)  \(.decision) / \(.resolved_by)  haul=\(.haul_id // "null")") end) else "    read failed" end'
-              echo "  which set/number are they:"
-              printf '%s' "$dcopies" | jq -r '[.[].catalog_card_id] | join(",")' | { read -r ids; [ -n "$ids" ] && g "catalog_card?select=tcgdex_id,name,local_id,set_id,set_name&tcgdex_id=in.($ids)" | jq -r '.[] | "    \(.tcgdex_id)  \(.name)  #\(.local_id)  \(.set_id) (\(.set_name))"'; }
-            fi
           fi
 
       # ---- PR #90's PREMISE. Its `assertReadComplete` guard assumes supabase-js's `count: "exact"`
