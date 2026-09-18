@@ -2,14 +2,17 @@
  * Cascade result → worklist action (dev-spec §5 M6; system-design §5, §7B).
  *
  * The action a row shows is derived purely from the cascade's `step` and `target`; the plan never
- * invents an action the engine didn't produce. `ACTION_ORDER` is the within-band-subgroup sort,
- * matching the prototype's `actOrder` (design/prototype.html).
+ * invents an action the engine didn't produce.
  */
 
 import type { CascadeResult } from "@/lib/engine";
 import type { PlanActionKind } from "./types";
 
-/** The physical work order inside a band sub-group. First is done first. */
+/**
+ * The seven worklist actions in physical work order (first is done first), matching the prototype's
+ * `actOrder` (design/prototype.html). This was the within-sub-group sort key until UIL-076 made rows
+ * sort by name instead; it remains the canonical ordered list of the action kinds.
+ */
 export const ACTION_ORDER: readonly PlanActionKind[] = [
   "PULL",
   "FILL",
@@ -19,12 +22,6 @@ export const ACTION_ORDER: readonly PlanActionKind[] = [
   "FRONT",
   "BULK",
 ];
-
-/** Sort index of an action; unknown actions sort last (defensive, should not happen). */
-export function actionOrder(a: PlanActionKind): number {
-  const i = ACTION_ORDER.indexOf(a);
-  return i === -1 ? ACTION_ORDER.length : i;
-}
 
 /** Map a cascade result to the single worklist action the row displays. Total: every step maps. */
 export function actionForResult(result: CascadeResult): PlanActionKind {

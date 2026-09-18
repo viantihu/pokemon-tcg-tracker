@@ -4,16 +4,26 @@
  * This is the heart of M6's own logic and it is FUNCTIONAL, not cosmetic: the plan is worked
  * top-to-bottom in exactly this order, mirroring the physical sort the collector already does —
  *
- *   colour band, in rainbow order  →  basics vs non-basics inside the band  →  action.
+ *   colour band, in rainbow order  →  basics vs non-basics inside the band  →  name, A to Z.
  *
  * The rainbow order is supplied by the caller (the `color_band.position` column), so re-ordering
  * bands in Settings (M8) reshapes the plan without a code change. EVERY band appears in the output
  * even at zero cards, so its rainbow slot stays reserved (system-design §4 — the empty Pink band
  * must never be hidden). Pure: no I/O, deterministic for a given input.
+ *
+ * Rows inside a sub-group used to sort by cascade action (`ACTION_ORDER`), with input order as the
+ * only tiebreak. UIL-076 (Karvi, High: "the cards must be in alphabetical order") replaces that with
+ * the card's name. The action is still on every row as its chip; it just no longer decides where in
+ * the list the row sits, because with no per-action headers that ordering read as no ordering at all.
  */
 
-import { actionOrder } from "./action";
 import type { PlanBandGroup, PlanItem, PlanSubgroup } from "./types";
+
+/**
+ * Case- and accent-insensitive, digit-aware: "charizard" and "Charizard" are the same name, Flabébé
+ * files under F next to its unaccented spelling, and collector number "9" comes before "10".
+ */
+const byName = new Intl.Collator("en", { sensitivity: "base", numeric: true });
 
 /**
  * Sub-group label, matching the prototype (design/prototype.html): basics read "BASICS"; the
@@ -25,15 +35,21 @@ function subgroupLabel(kind: "basic" | "nonbasic", bandKey: string): string {
   return bandKey === "white" ? "TRAINERS · ITEMS" : "STAGE 1 · 2";
 }
 
-/** Stable sort a band's rows into a basics / non-basics run, each ordered by action. */
+/** Stable sort a band's rows into a basics / non-basics run, each A to Z by name. */
 function subgroupsFor(items: PlanItem[], bandKey: string): PlanSubgroup[] {
   const out: PlanSubgroup[] = [];
   for (const kind of ["basic", "nonbasic"] as const) {
     const rows = items
       .filter((it) => (kind === "basic" ? it.isBasic : !it.isBasic))
-      // Stable ordering: action first, then the caller's input order (index) as the tiebreak.
+      // Name, then collector number for two printings of the same card, then the caller's input
+      // order (index) so identical duplicates keep the order she typed or synced them in.
       .map((it, i) => ({ it, i }))
-      .sort((a, b) => actionOrder(a.it.action) - actionOrder(b.it.action) || a.i - b.i)
+      .sort(
+        (a, b) =>
+          byName.compare(a.it.name, b.it.name) ||
+          byName.compare(a.it.localId ?? "", b.it.localId ?? "") ||
+          a.i - b.i,
+      )
       .map(({ it }) => it);
     if (rows.length > 0) out.push({ kind, label: subgroupLabel(kind, bandKey), rows });
   }

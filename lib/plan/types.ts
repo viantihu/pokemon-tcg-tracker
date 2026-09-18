@@ -2,9 +2,9 @@
  * M6 haul-intake + placement-plan types (dev-spec §5 M6; system-design §5, §7B).
  *
  * The plan is the deliverable: the M3 cascade run over a whole haul, then GROUPED to mirror the
- * physical sort — colour band in rainbow order, basics vs non-basics within the band, then action.
- * That grouping is functional (worked top-to-bottom in the same order the cards are stacked), not
- * cosmetic, so it lives in pure, unit-tested code (`group.ts`) alongside these shapes.
+ * physical sort — colour band in rainbow order, basics vs non-basics within the band, then name A–Z
+ * (UIL-076). That grouping is functional (worked top-to-bottom in the same order the cards are
+ * stacked), not cosmetic, so it lives in pure, unit-tested code (`group.ts`) alongside these shapes.
  *
  * These types are I/O-free and shared between the server actions, the client screen, and the tests.
  */
@@ -12,8 +12,8 @@
 import type { CascadeResult, Variant } from "@/lib/engine";
 
 /**
- * The seven worklist actions, mirroring the prototype's `ACT` set (design/prototype.html). The row
- * order inside a band sub-group is this array's order (`ACTION_ORDER`).
+ * The seven worklist actions, mirroring the prototype's `ACT` set (design/prototype.html). Listed in
+ * physical work order by `ACTION_ORDER`; shown on each row as its chip.
  */
 export type PlanActionKind = "PULL" | "FILL" | "NEWLINE" | "SWAP" | "SPEC" | "FRONT" | "BULK";
 
@@ -72,7 +72,7 @@ export interface PlannedCard {
   confirmedPulls?: string[];
 }
 
-/** A basics or non-basics run inside a band, rows already action-ordered. */
+/** A basics or non-basics run inside a band, rows already A–Z by name. */
 export interface PlanSubgroup {
   kind: "basic" | "nonbasic";
   label: string;
