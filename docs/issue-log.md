@@ -2860,7 +2860,16 @@ identical Haul Plan case High, so this read shouldn't be treated as settled if s
 ## UIL-035 — Search and lookup swallow every error and report "not found," so an outage looks like a missing card
 
 - **Reported:** 2026-09-14 (not from Karvi — found proactively)
-- **Status:** Open
+- **Status:** **Fixed** — two of the three sites; PR [#168](https://github.com/viantihu/pokemon-tcg-tracker/pull/168)
+  MERGED to `develop` 2026-09-18 (squash `9d36796`), QA-gated on the merged tree, confirmed **deployed** to
+  Testing (Deploy green on `04dea51`, which contains it). `lookupCatalog` and backfill's search now **throw**
+  instead of returning `[]`, and the shared `CardLookup` separates the two cases for every screen that
+  injects a search: a failure reads "Could not search the catalog: … — the card may well exist; the catalog
+  just did not answer. Try again." and the last good results stay on screen. An empty list now means the
+  mirror was asked and had nothing, and nothing else. **The third site — `LookupScreen.tsx`'s own
+  `catch` → `notFound` — was deliberately left** (another session's fence); it benefits only partially via
+  the shared component and stays open under this entry, which closes when it ships. Not Karvi's report, so
+  no confirmation step is owed from her.
 - **Priority:** Medium (Senior BA's read)
 - **Area:** Lookup, Plan, Backfill
 - **Env:** Testing
@@ -3792,7 +3801,17 @@ prevent. Same severity reasoning Karvi accepted for UIL-014/UIL-022.
 ## UIL-049 — A duplicate that is also a specialty card routes to the specialty binder instead of bulk
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#164](https://github.com/viantihu/pokemon-tcg-tracker/pull/164) MERGED to
+  `develop` 2026-09-18 (squash `b5d0690`), QA-gated on the merged tree, confirmed **deployed** to Testing
+  (Deploy green on `04dea51`, which contains it). The cascade now checks **duplicate before card class**, so
+  a second copy of the same specialty printing routes to bulk, exactly her rule; a specialty card that is
+  _not_ a duplicate still goes to the specialty binder. The reorder exposed specialty cards to the holo-swap
+  branch for the first time, and that branch built a `front-half` target on the specialty binder — a
+  placement the write layer cannot express. The same PR fixes it by inheriting a `specialty` target when
+  the displaced copy had no binder half, so holo-swap keeps its meaning (holo takes the normal's place, the
+  normal goes to bulk). **This entry's earlier "holo-swap still fires correctly" note was tested and found
+  false** — the test written to check it failed on the first run; body correction routed to intake.
+  Awaiting Karvi's confirmation when UAT resumes.
 - **Priority:** Medium (Claude's read — a routing-policy change, not a malfunction; needs Karvi's confirmation)
 - **Area:** Plan
 - **Env:** Testing
@@ -3999,7 +4018,16 @@ functional, and the cause is external data rather than a defect in the app. Fine
 ## UIL-055 — There is no way to browse a binder's actual cards, and the binder card's capacity stats read awkwardly
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#159](https://github.com/viantihu/pokemon-tcg-tracker/pull/159) MERGED to
+  `develop` 2026-09-18 (squash `5f0715e`), QA-gated on the merged tree (QA's hold on the unpaged
+  whole-collection read was resolved before merge), confirmed **deployed** to Testing (Deploy green on
+  `04dea51`, which contains it). Capacity now renders **one card per binder** with front and back as
+  labelled sections inside it, not a card per half; clicking a binder expands an **image-first grid of every
+  card shelved there** (collapsed by default, mounts nothing until opened — UIL-034's fold discipline, and
+  the visual-search principle from card lookup); the capacity stats read as horizontal `label … value` rows.
+  Two things for her pass specifically: the stat orientation is the dev's reading of "fix the orientation",
+  not a layout she specified, and the UI was verified by reading the component, not in a browser — so her
+  look is the visual check. Awaiting Karvi's confirmation when UAT resumes.
 - **Priority:** Medium (Claude's read — needs Karvi's confirmation)
 - **Area:** Binders
 - **Env:** Testing
