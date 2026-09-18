@@ -3214,7 +3214,13 @@ inconvenient. Karvi's own priority read wasn't given for this one specifically; 
 ## UIL-040 — Rebinding a collection to a different specialty binder changes the record but silently orphans the cards already shelved in the old one
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009)
-- **Status:** **Fixed (step 1 of 2)** — PR [#102](https://github.com/viantihu/pokemon-tcg-tracker/pull/102)
+- **Status:** **Fixed** — step 1 of 2, and **step 1 confirmed by Karvi on Testing 2026-09-18**: the
+  refusal fires and names what would be stranded. Step 2 (moving the copies so the rebind can succeed) is
+  **not built** and must land with UIL-032, so this entry stays open on step 2 rather than closing.
+  Worth recording because it bounds her always-movable ethos (UIL-072): she has explicitly endorsed a
+  **refusal** here, so that ethos is about never gating a card **move** behind another question — it is not
+  a blanket rule that the app may never refuse an action. A refusal that names the consequence, on an
+  operation that is not itself a move, is acceptable to her. — PR [#102](https://github.com/viantihu/pokemon-tcg-tracker/pull/102)
   MERGED to `develop` 2026-09-14 (squash `9497c6c`), QA-reviewed, confirmed **deployed** to Testing (all
   four conditions green on `7cb1a36`). **Step 1** closes the hazard: a rebind that would strand shelved
   copies is now *refused*, with a message naming what would be orphaned. **Step 2** — moving the copies
