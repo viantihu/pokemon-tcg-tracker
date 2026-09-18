@@ -7,7 +7,7 @@
  * in for a real network round trip whose timing we don't control.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createAutosaveScheduler } from "@/app/(ui)/coll/autosave";
+import { createAutosaveScheduler, flushBeforeNavigate } from "@/app/(ui)/coll/autosave";
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -99,5 +99,41 @@ describe("createAutosaveScheduler", () => {
     inFlight.resolve();
     await flushPromise;
     expect(flushed).toBe(true);
+  });
+});
+
+describe("flushBeforeNavigate", () => {
+  it("never navigates before the flush's save has resolved — the bug a bare <Link> reintroduced", async () => {
+    const order: string[] = [];
+    const inFlight = deferred<void>();
+    const save = vi.fn(() => {
+      order.push("save:start");
+      return inFlight.promise.then(() => {
+        order.push("save:done");
+      });
+    });
+    const s = createAutosaveScheduler(save, 600);
+    s.schedule("edited name");
+
+    const navigate = vi.fn(() => order.push("navigate"));
+    const done = flushBeforeNavigate(s, navigate);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual(["save:start"]);
+    expect(navigate).not.toHaveBeenCalled();
+
+    inFlight.resolve();
+    await done;
+    expect(order).toEqual(["save:start", "save:done", "navigate"]);
+  });
+
+  it("still navigates when there was nothing pending to flush", async () => {
+    const save = vi.fn(async () => {});
+    const s = createAutosaveScheduler(save, 600);
+    const navigate = vi.fn();
+
+    await flushBeforeNavigate(s, navigate);
+    expect(navigate).toHaveBeenCalledTimes(1);
   });
 });

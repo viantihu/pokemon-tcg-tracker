@@ -103,8 +103,8 @@ class PgQuery {
     return this;
   }
 
-  /** `IS NULL` — narrow to that one shape; `= NULL` is never true in SQL, so this cannot be `eq()`
-   * with a `null` value. */
+  /** `IS NULL` — narrow to that one shape, the only one `listShelvedInSection`'s `half: null` needs;
+   * `= NULL` is never true in SQL, so this cannot be `eq()` with a `null` value. */
   is(col: string, value: null): this {
     if (value !== null) throw new Error("pglite-client: is() only supports null");
     this.filters.push({ kind: "is", col });

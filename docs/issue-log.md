@@ -1838,6 +1838,19 @@ that reds at random teaches everyone to re-run rather than investigate, and "a c
 reasons nobody looks at" is the exact shape that let UIL-004 hide for weeks. The gate depends on this
 suite meaning something. Still lands on Low; both readings flagged for Karvi.
 
+**Update 2026-09-18: a second, related failure mode on this same test, found during UIL-066's recovery
+— moved here rather than logged separately.** The "scale sanity" test this entry's own root cause
+quotes normally runs in 2.7–3.2s, comfortably inside its **internal** `toBeLessThan(10000)` assertion
+above but close enough to **vitest's own 5s default execution timeout** that concurrent load pushes it
+over: it timed out on 5 of 6 simultaneous reruns right after the Actions-billing recovery, passing
+unchanged on retry every time. Same underlying shape as this entry's root cause — a wall-clock bound on
+a shared, variably-loaded runner — but a different bound (vitest's own timeout, not the assertion this
+entry's suggested fix targets) and confirmed only under exactly that kind of retry burst, not in
+general. Fix: PR [#175](https://github.com/viantihu/pokemon-tcg-tracker/pull/175) (merged) sets an
+explicit, longer vitest timeout on this one test — addresses the execution timeout specifically; does
+not touch the internal `toBeLessThan(10000)` assertion this entry's own suggested fix is still open
+against.
+
 ## UIL-022 — Moving a card into a collection from the Line or Plan screen orphans it
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
@@ -3492,6 +3505,44 @@ two of the same card. Not blocked on anything, not caused by anything in flight.
 Karvi directly, since she is mid-placement tonight and needs to know the screen can be wrong for
 duplicates and line-mates until this lands.
 
+**Update 2026-09-18: partial fix, and this stays one entry rather than splitting — her explicit
+grouping instruction.** In her words, given directly on this exact case: "I want to track these in the
+same issue rather than different ones. As a BA, you should be grouping issues by functional
+requirements, not technical ones." The functional requirement this entry is actually about is **"the
+displayed placement must match what actually gets written"** — one requirement, two surfaces. #121
+closed it for the spotlight only; it is still open for the worklist table, for the identical
+duplicate/line-mate cases described above.
+
+**Confirmed precisely why the table still drifts, even after #121.** `runHaulPlan`
+([`app/(ui)/plan/actions.ts:97-101`](<../app/(ui)/plan/actions.ts>:97)) calls `planFromDraft` **once**,
+against pre-haul state, and its `items`/`groups` become the `plan` React state
+([`app/(ui)/plan/PlanScreen.tsx:162,343`](<../app/(ui)/plan/PlanScreen.tsx>:162)) that the worklist
+table renders row by row. `refreshSpotlightAction` ([`actions.ts:229-257`](<../app/(ui)/plan/actions.ts>:229))
+— #121's actual fix — is a **separate** call whose result lands in a **separate**, single-slot state
+variable, `fresh`, keyed to whichever card is currently the spotlight
+([`PlanScreen.tsx:480-513`](<../app/(ui)/plan/PlanScreen.tsx>:480)). Nothing ever feeds a re-derived
+placement back into `plan.groups`. So the table cell for a duplicate or line-mate keeps showing
+whatever the one-time pre-haul pass computed — "front half," say — for the entire sitting, even after
+that exact card has been correctly re-derived to "duplicate → bulk" in the spotlight and correctly
+**written** that way at commit. The write is right; the spotlight she confirms against is right; the
+table row for that same card, once she's scrolled past it, is not.
+
+**Cross-reference UIL-037 (same standard, already shipped for a different pair of surfaces).** UIL-037
+made the spotlight and worklist chip agree on an *overridden* card's destination. This is the
+cascade-placed-card version of the identical requirement, and it's the standard this fix should be
+held to: spotlight and worklist row must never disagree, for any card, overridden or not.
+
+**Reopening note for the Senior BA, not a status change I'm making myself:** the current `Fixed` status
+line describes #121 accurately for the spotlight; whether that line should now read as a partial fix,
+or whether this warrants its own transition, is a call for whoever owns status here — flagging rather
+than touching it.
+
+**Update 2026-09-18: a second, independently-worded report confirms this is the right entry for it.**
+Karvi separately asked that "the haul plan and the spotlight of the other cards should reflect what
+happened to those cards" when placing a card alongside other compatible cards in the same haul — same
+functional requirement as this entry's own title, in her own words a second time, not a new gap. No new
+mechanism to add; recorded here so the two reports aren't read as two separate things later.
+
 ## UIL-046 — Unresolved entries never record a retry attempt, so "self-heal when the catalog catches up" may never actually run
 
 - **Reported:** 2026-09-14 (not from Karvi — measured on Testing by the Senior BA/tech-lead)
@@ -4545,6 +4596,49 @@ that they stay untouched.
 class the log has repeatedly treated as High, on the screen whose whole job is showing her what she
 physically owns and where. Flagging for Karvi's confirmation since severity calls are hers.
 
+**Update 2026-09-18: final verification, run `35347026092` from the tech lead — measured, not
+inferred, and reconciled against the migration's own pre-flight comment rather than taken at face
+value.** Final state: unattached back-half copies **3**, `line_slot` filled **34**, placeholder **12**,
+`copy` **706**, `presence_group` **681**, and all three drift checks **0** (filled slot whose copy
+doesn't point back; filled with a null `copy_id`; copy claiming a slot that doesn't hold it).
+
+**Why the 3 is not a failed guard, stated in the terms that prove it rather than the bare number.**
+Migration `0011`'s own pre-flight comment
+([`supabase/migrations/0011_relink_unambiguous_line_slots.sql`](../supabase/migrations/0011_relink_unambiguous_line_slots.sql)) —
+verified directly — measured, against 8 unattached copies at the time it was written, 3 strictly-1:1
+pairs (safe to relink), 2 one-slot/several-copies pairs (ambiguous, deliberately skipped, no
+tie-break), and 3 with no candidate slot at all. Its own predicate requires the pairing to be
+unambiguous **in both directions** — `having count(*) = 1` on both the slot side and the copy side —
+and explicitly does not tie-break on `created_at`, because `target_catalog_card_id` says nothing about
+`variant`, and guessing which of two owned printings belongs in the line would invent a decision that
+is hers to make. **But by the time `0011` actually ran, she had already attached 4 of the 8 herself**
+from the Lines page's "not in a line yet" list — the true baseline at run time was 4 unattached, not 8
+— and the measured delta (`line_slot` filled 33 → 34, placeholder 13 → 12, unattached 4 → 3) shows
+**exactly one relink**, the one strictly-1:1 pair that still existed at that point. A three-relink
+tie-break would have produced filled 36 and placeholder 10; it didn't. The guard held, on real data,
+under real concurrent activity, not just at pre-flight measurement time.
+
+**Three things closed, not deferred.** Prevention held at scale: the drift count stayed at 0 across 15
+additional filled slots since the earlier post-repair read (filled 19 → 34), not just immediately after
+the fix. The variant question the migration's own comment raised is moot — zero one-slot/many-copies
+groups remain, so there is nothing left to tie-break and no decision outstanding from her. And the
+remaining 3 have no candidate slot at all, so no future migration can help them — they are permanently
+hers to attach via the same "not in a line yet" list, and she has been told that directly, so this
+should read as settled rather than as an open repair.
+
+**`copy` (706) and `presence_group` (681) are unchanged from every read since 2026-09-15** — `0011`
+created and deleted no rows; the only copy-side change it makes is the `line_slot_id` pointer, by
+design, matching its own migration comment's "both sides, one statement set" framing.
+
+**Two corrections to earlier commentary, both caught by `0011`'s own header comment and worth
+repeating here so they don't resurface:** (1) 0010's line naming "the Dragonair report, UIL-063" as
+roughly 4 of the 8 was already retracted in this entry's own 2026-09-17 update, and 0011's comment
+independently reaches the same correction from the DB side — two routes to the same fix, consistent.
+(2) The "about 4 render as HUNTING" phrasing in 0010 described a state that couldn't have existed when
+0010 was written — none of the 8 had a placeholder naming their card yet, since 0010 hadn't run;
+"about 4" was an estimate of 0010's own downstream effect, written as though it were a pre-existing
+measurement. Trust the zero 0010 also stated, not the "about 4."
+
 ## UIL-063 — A Basic card's spotlight says "no line yet" even when a line for that exact species already exists on the Lines page, and a Dragonair she says she committed still shows as un-owned
 
 - **Reported:** 2026-09-16 (Karvi, relayed precisely by Junior BA - 2 — not her diagnosis, a careful
@@ -4885,6 +4979,38 @@ already self-limiting once billing is resolved, not a product defect — but Hig
 while it lasts, since it silently removed the one automated check standing between a merge and a
 schema mismatch.
 
+**Update 2026-09-18: resolved, and the two cause descriptions reconcile into one event, not two.**
+Karvi confirmed the root cause: the account's Free-plan monthly Actions minutes were exhausted — a
+private repo on Free gets 2,000 minutes/month, and measurement over 200 runs (Sep 14–17) put usage
+around 990 billed minutes across 397 runs, roughly 5 minutes each, with `verify` alone accounting for
+about three quarters of it. Three days of UAT activity used a month's allotment. **Precisely why that
+produced the payment/spending-limit annotation rather than an "included minutes exhausted" one:**
+GitHub Actions on a Free plan carries a spending limit that **defaults to $0**. Once the included
+2,000 minutes run out, every further job is billable usage, and a $0 limit is exactly what refuses to
+start a billable job — the annotation's wording ("payments have failed or your spending limit needs to
+be increased") describes that refusal accurately; it was never describing a card-on-file failure.
+Raising the spending limit with a card on file would have cleared it the same way making the repo
+public did.
+
+**Fix: the repository was made public**, 2026-09-17 23:52Z — confirmed directly
+(`GET /repos/viantihu/pokemon-tcg-tracker` reports `private: false`) — which moves the account onto
+unlimited standard-runner minutes for public repos, no payment or spending-limit change needed. A
+full-history secret scan run beforehand as a precaution found only placeholder values, no real keys or
+personal emails (taken as reported; not independently re-run).
+
+**Recovery verified directly on develop's tip `1a86505`**, all conditions green:
+`Vercel: success`, `verify: success`, `migrate: success` (all 10 migrations, 0001–0010, applied on
+Testing), `smoke: success`, `acceptance: success`. No migration merged during the lockout (confirmed
+earlier in this entry), so Testing's schema never diverged — the freeze held. **Re-confirmed on the
+current tip `8028771`**, all six checks green again — the recovery held through further merges, not
+just the first post-fix commit.
+
+**The scale-sanity flake discovered during recovery is recorded under UIL-021, not here — moved on
+review.** It's the same test UIL-021 already covers (`tests/catalog/artwork.test.ts`'s wall-clock
+assertion), a second failure mode on that one test rather than a new, independent CI-billing
+consequence, so it belongs with the existing entry. See UIL-021 for the detail; PR
+[#175](https://github.com/viantihu/pokemon-tcg-tracker/pull/175) (merged) is its fix.
+
 ## UIL-067 — The decision card is too crowded and shows information that isn't helpful for making the actual call
 
 - **Reported:** 2026-09-17 (Karvi, screenshot of a live "COLLECTION CLAIM VS LINE SLOT" decision for
@@ -5174,3 +5300,245 @@ principle underneath four separate reports rather than four unrelated complaints
 **Priority rationale.** Flagging for Claude's read and Karvi's confirmation on the specific report; the
 product-ethos statement itself isn't a priority-rated bug, it's a standing constraint the team should
 carry into every future design in this area.
+
+**Update 2026-09-18: her ruling bounds the ethos, and it's narrower than "always allow the move"
+alone.** Once UIL-068 ships, back half sits directly alongside front half, collection and bulk as a
+peer choice — except back half is the one of the four that refuses unless a line is picked first,
+because UIL-056's `applyMove` invariant throws otherwise. Put to her as three options — allow the move
+and warn instead of refusing; keep refusing but stop presenting back half as if it were an enabled
+peer; leave it as-is — **she chose to keep the refusal and remove the false affordance**: the back-half
+chip greys out while no line is selected, with the reason stated inline, her words: "The back half
+holds lines. Pick a line above to enable."
+
+**What this means for applying the ethos going forward, stated precisely so it isn't over-read as
+"never refuse a move":** her objection is to a **dead end that looks alive** — a control that appears
+enabled but silently does nothing or drops the choice — not to the app declining something it
+genuinely cannot honour. "Make the impossible visibly impossible, and name the enabling action" is a
+legitimate answer to a movability complaint, not a violation of it. This reads consistently with her
+earlier endorsement of **UIL-040**'s rebind refusal (a rebind that would orphan shelved cards is
+refused, with a message naming what would be orphaned — the same shape: refuse, name the condition, no
+silent drop). The principle going forward: **never gate a move behind a hidden or unexplained
+condition; refusing with the condition named and the remedy visible in the same control is fine.**
+
+**Consequences for two entries already carrying this thread, recorded here rather than editing their
+own status:** **UIL-056's invariant stands** — no relaxation, confirmed not needed. **UIL-070's
+back-half-from-the-Haul-Plan residual (its item 1) is unchanged by this** — that entry already framed
+the gap as "the Haul Plan has no line picker at all," never as "the gate should be removed," so this
+ruling confirms rather than corrects it; the fix there is still to offer the line picker, not to bypass
+the invariant. The back-half-chip affordance fix itself (grey + inline reason) is assigned as a
+follow-up after UIL-078.
+
+**Cross-reference UIL-056, UIL-068, UIL-070, and UIL-040** (the precedent this ruling reads
+consistently with).
+
+## UIL-073 — There is no component-render test harness, so every UI failure state in this repo is verified by reading code, not by a test that can fail
+
+- **Reported:** 2026-09-17 (not from Karvi — a recurring gap independently re-flagged by multiple dev
+  sessions across four separate PRs; relayed by the Senior BA as worth tracking once rather than
+  rediscovering repeatedly)
+- **Status:** Open
+- **Priority:** Low (Senior BA's read) — nothing is known broken by this gap, and the fix touches
+  shared config that would conflict with every open PR during the current freeze
+- **Area:** all (test infrastructure)
+- **Env:** n/a — in the repo, not a running environment
+
+**Confirmed directly.** `vitest.config.mts` runs with `environment: "node"` and globs only
+`tests/**/*.test.ts` — no `.tsx`, so a component test file wouldn't even be collected unless misnamed
+into the `.ts` glob. `package.json` has no `jsdom`, `happy-dom`, or `@testing-library/*` dependency.
+What component-adjacent tests exist use `renderToStaticMarkup` (confirmed across six files —
+[`tests/coll/collection-fold.test.ts`](../tests/coll/collection-fold.test.ts),
+[`tests/plan/band-collapse.test.ts`](../tests/plan/band-collapse.test.ts),
+[`tests/plan/override-display.test.ts`](../tests/plan/override-display.test.ts),
+[`tests/plan/plan-artwork.test.ts`](../tests/plan/plan-artwork.test.ts),
+[`tests/plan/plan-resume-collapse.test.ts`](../tests/plan/plan-resume-collapse.test.ts),
+[`tests/plan/pull-disclosure.test.ts`](../tests/plan/pull-disclosure.test.ts)) — which produces a
+static HTML string and cannot dispatch a click or keypress, run an effect, or drive an async
+rejection. Every failure state, hover behavior, or event handler in this app's UI is therefore
+**verified by reading the component**, not by a test that can go red.
+
+**Concrete instances, per the Senior BA, from mutation testing rather than assertion — worth recording
+even though I haven't re-run the mutations myself:**
+
+- **PR #168 (UIL-035)** — confirmed to exist and on-topic (a failed catalog search should say so). Per
+  the relay: removing the `catch` that sets `CardLookup`'s `failed` state still passes its suite 5/5 —
+  the failure message she'd actually see is untested.
+- **PR #154 (UIL-064)** — every manual control that clears a stale `lineJoin` is verified by reading;
+  QA said so explicitly in review.
+- **PR #126 (UIL-038)** — the click/type/close wiring is covered only at the server and scheduler
+  layers; the dev flagged this gap themselves in the PR.
+- **#161** — the ordering is pinned only because the scheduler was extracted into a plain, testable
+  module; the button that triggers it is never exercised.
+
+**Distinct from UIL-029, on purpose.** UIL-029 is about a hand-written `DbClient` test double
+*actively certifying wrong behaviour* — a test that passes and shouldn't. This entry is about the
+*absence* of any DOM at all — there's no test to write in the first place for anything that requires a
+real render, an event, or a browser API, regardless of how carefully a double is written.
+
+**Why this is worth logging at Low rather than fixing now.** Nothing is known broken by the gap itself
+— it's a blind spot, not a bug. Adding a harness touches `package.json` and the vitest config, which
+would conflict with every currently-open PR (seven queued during the CI freeze) and can't sensibly land
+until that clears. The devs have consistently compensated the better way already: extracting logic into
+plain, `environment: "node"`-testable modules (the scheduler extraction behind #161's ordering test is
+the pattern) rather than reaching for a DOM they don't have. **Why log it at all:** it's the reason
+several of Karvi's UI fixes this week carry a "not visually verified" caveat, and the alternative this
+repo already has — the static-layout measurement technique (render the real component to static markup
+against `globals.css`, measure in a browser) — proves layout, not behaviour. Recording both options so
+whoever eventually picks this up chooses with the tradeoff stated, not rediscovers it.
+
+**Cross-reference UIL-029** (wrong-behaviour-certified, the opposite failure mode) **and UIL-021** (the
+other standing Low in test infrastructure, with its own recorded counter-argument).
+
+**Priority rationale.** Low, per the Senior BA: no known live defect traces to this gap specifically,
+and the cost of fixing it now (touching shared config mid-freeze, against seven open PRs) outweighs
+the benefit of fixing it immediately rather than logging it for later.
+
+## UIL-074 — Lines have no sort or grouping options; they render in whatever order the database happens to return
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "Lines must be sorted by binder. I want a UX where I
+  can either view lines grouped by binder or in color + alphabetical order" — her stated priority,
+  Medium.
+- **Status:** Open
+- **Priority:** Medium (Karvi's own read)
+- **Area:** Lines
+- **Env:** Testing
+
+**Confirmed: no sort or grouping exists at all today.** `buildScreenModel`'s line-building loop
+([`lib/line/load.ts:251`](../lib/line/load.ts:251)) is `for (const line of lineRows)`, where `lineRows`
+comes straight from [`evolutionLineRepo.listAll(db)`](../lib/line/load.ts:113) — an unordered `listAll`,
+unlike `colorBandRepo.listOrdered` two lines below it in the same call, whose name itself signals the
+difference. Lines render in whatever order Postgres happens to return an unordered `SELECT`, which in
+practice tracks creation order — not alphabetical, not by binder, not by colour. The screenshot she sent
+shows exactly this: Cubone, Charcadet, Pawmi, Mankey, Ponyta, Timburr… no visible pattern.
+
+**Not scoping the fix here — two view modes, both named by her, need a decision on where the toggle
+lives and whether "grouped by binder" also needs a within-binder secondary sort (color + alphabetical,
+presumably, mirroring the other mode) rather than being a separate, unrelated axis.**
+
+**Distinct from UIL-073, kept separate rather than folded in.** UIL-073 is about the Haul Plan's
+row order within a haul session; this is about the Lines screen's own standing organization. Different
+screens, different functional requirements — the Haul Plan's order is about working through a sitting
+in a physical rhythm, this is about browsing/finding a line she already built.
+
+**Priority rationale.** Medium, Karvi's own call.
+
+## UIL-075 — The Haul Plan's "BASICS" / "STAGE 1 · 2" subheadings inside each band have no collapse control
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "In the haul plans, the stages should also be
+  collapsable" — her stated priority, Medium.
+- **Status:** Open
+- **Priority:** Medium (Karvi's own read)
+- **Area:** Plan
+- **Env:** Testing
+
+**Confirmed: UIL-018 shipped band-level fold only; this finer level was never built.**
+`groupPlan` ([`lib/plan/group.ts:19-38`](../lib/plan/group.ts:19)) splits every band into up to two
+subgroups labeled "BASICS" and "STAGE 1 · 2" (or "TRAINERS · ITEMS" in White) — these are the "stages"
+she means. `BandSection`'s render ([`app/(ui)/plan/PlanScreen.tsx:1156-1246`](<../app/(ui)/plan/PlanScreen.tsx>:1156))
+has one `collapsed` boolean per **band**, toggled by `onToggleCollapse`; once a band is expanded, its
+`group.subgroups.map(...)` always renders every row in every subgroup with no per-subgroup toggle at
+all — the same "always renders everything" shape UIL-018 fixed at the band level, one level down.
+
+**Cross-reference UIL-018** (the band-level version of this same request, already shipped) **and
+UIL-073** (a different axis on the same screen — this is progressive disclosure, UIL-073 is ordering).
+
+**Priority rationale.** Medium, Karvi's own call.
+
+## UIL-076 — The Haul Plan's worklist is not sorted alphabetically, and it needs to be
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "In the haul plan, the cards must be in alphabetical
+  order" — her stated priority, High.
+- **Status:** Open
+- **Priority:** High (Karvi's own read)
+- **Area:** Plan
+- **Env:** Testing
+
+**Confirmed: rows are ordered by cascade action, not name.** Inside each subgroup,
+`subgroupsFor` ([`lib/plan/group.ts:28-38`](../lib/plan/group.ts:28)) sorts on
+`actionOrder(a.it.action) - actionOrder(b.it.action)`, falling back only to original input order (`i`)
+as a tiebreak — never on `it.name`. So two cards with the same action land in whatever order they were
+typed or synced in, and cards with different actions never sort by name against each other at all.
+
+**Open question this entry doesn't resolve: does "alphabetical" replace the action-based sort, or sit
+inside it (alphabetical WITHIN each action group, action order preserved as the outer sort)?** The
+current grouping — basics vs. non-basics, then by action — is described in `group.ts`'s own header as
+FUNCTIONAL, mirroring how she physically works a haul; a flat alphabetical re-sort could undo that
+rhythm. Worth her confirming which she means before this is built.
+
+**Priority rationale.** High, Karvi's own call.
+
+## UIL-077 — The full printed collector number (the /denominator) is captured from TCGdex and used for search, but never shown anywhere in the app
+
+- **Reported:** 2026-09-17 (Karvi, two reports folded into one — same functional requirement). First:
+  "I need to see the FULL collectors number EVERYWHERE a specific card is referenced. There are either
+  no collector numbers or it is just the digits before the /." Second, from the same session: "When
+  choosing to place a stage card into the back half alongside other compatible cards in the haul, the
+  full collectors number of the card must be specified" — the wishlist-alternates grid she screenshotted
+  earlier (UIL-067) showing bare numbers like "1", "010", "25", "3", "14", "RC5" is exactly this case.
+  Her stated priority for the first report: High.
+- **Status:** Open
+- **Priority:** High (Karvi's own read)
+- **Area:** Lines, Plan, Lookup, Backfill, Collections
+- **Env:** Testing
+
+**Confirmed: the denominator is captured and even used for search ranking, but one mapping function
+silently drops it before it reaches any screen.** `catalog_card.set_card_count_official`
+([`supabase/migrations/0009_set_metadata.sql:39`](../supabase/migrations/0009_set_metadata.sql:39))
+is populated correctly from TCGdex's `cardCount.official`
+([`lib/catalog/mirror.ts:183`](../lib/catalog/mirror.ts:183)) and used to rank collector-number search
+matches ([`lib/catalog/collector-number.ts`](../lib/catalog/collector-number.ts), UIL-026). But
+`toCatalogCard` ([`lib/plan/adapt.ts:60-83`](../lib/plan/adapt.ts:60)) — the ONE function that turns a
+DB row into the engine's `CatalogCard`, which every display component reads from — maps every other
+column and never touches `set_card_count_official`. `CatalogCard`
+([`lib/engine/types.ts`](../lib/engine/types.ts)) has no field for it at all. So the data exists,
+correctly, in the database, and is provably usable (search already proves it), but no UI surface —
+`CardFace`, the Haul Plan worklist, the decision card's wishlist grid, the Lines screen, Lookup — can
+show it, because the one function standing between the row and every screen never carries it forward.
+
+**One fix point, many consumers.** Adding `setTotal` (or similar) to `CatalogCard` and to
+`toCatalogCard`'s return makes the data available everywhere at once; formatting it as "NNN/TTT" is
+then a display-layer choice at each of the several call sites, not a data problem to solve per screen.
+
+**Cross-reference UIL-026** (the search-side use of this same column) **and UIL-067** (her earlier
+screenshot of the wishlist grid, which shows the exact symptom of this gap).
+
+**Priority rationale.** High, Karvi's own call — this touches how she identifies which physical card is
+which, everywhere the app shows one.
+
+## UIL-078 — A Lines-screen decision she resolves does not stay resolved; the same decision resurfaces
+
+- **Reported:** 2026-09-17 (Karvi). In her words: "Line decisions do not stick" — her stated priority,
+  High.
+- **Status:** Open
+- **Priority:** High (Karvi's own read)
+- **Area:** Lines
+- **Env:** Testing
+
+**Confirmed mechanism for at least one decision kind — "Collection wins," the RECOMMENDED default
+choice on the collection-claim-vs-line decision card (UIL-067's screenshot).** Resolving a decision is
+genuinely a server round-trip: `resolveDecisionAction` → `applyDecision` → a real write, then a fresh
+`loadLineScreen` reload ([`app/(ui)/line/actions.ts:60-73`](<../app/(ui)/line/actions.ts>:60)) — so this
+isn't a client-only illusion of saving. The problem is **what** gets written for this specific choice.
+`resolveDecisionWrites`'s `"collection-wins"` branch
+([`lib/line/decisions.ts:516-524`](../lib/line/decisions.ts:516)) writes a `wishlistUpserts` entry and
+an audit `decision` row — and nothing else. **No `slotPatches` at all.** The slot's `state` stays
+`"placeholder"`, unchanged, by design (the card legitimately stays a hunt).
+
+**Why that makes the decision reappear.** `deriveAllDecisions`'s trigger for this exact decision kind
+([`lib/line/decisions.ts:254`](../lib/line/decisions.ts:254)) is `slot.state === "placeholder" &&
+claimed` — a running collection still claims this species, and the slot is still a placeholder, both
+true again on the very next load, for the identical reason they were true the first time. Decision
+`id`s are deterministic, derived from `${lineId}:${kind}:${stageIndex}`
+([`decisions.ts:259`](../lib/line/decisions.ts:259)) — not a persisted row with its own "resolved" flag
+— so the ONLY thing suppressing a re-shown decision is client-local React state
+([`app/(ui)/line/LineScreen.tsx:50`](<../app/(ui)/line/LineScreen.tsx>:50), `resolved`, never
+persisted). A fresh page load starts that map empty, and the identical trigger condition fires again:
+the same decision, indistinguishable from a new one.
+
+**Not yet checked against the other decision kinds** (`ex-only-cap`, `root-block`, `line-existing`
+terminations) — this entry confirms the mechanism for one, the most common one on her screenshot; the
+same "nothing changes the trigger condition" shape may or may not repeat for the others and would need
+its own check before assuming it does.
+
+**Priority rationale.** High, Karvi's own call — a decision she's already made keeps asking her again,
+which both wastes her time and risks her picking a different answer the second time without noticing
+it's the same question.
