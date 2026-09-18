@@ -54,6 +54,11 @@ export interface CatalogCard {
   setId: string | null;
   setName?: string | null;
   localId: string | null;
+  /**
+   * The printed set total — the `/182` in "099/182" (UIL-077). Nullable because TCGdex does not report
+   * an official count for every set; `formatCollectorNumber` renders the bare number when it is absent.
+   */
+  setCardCountOfficial?: number | null;
   rarity: string | null;
   /** Pokémon energy types (usually one). Trainers/Energy: empty. */
   types: string[];

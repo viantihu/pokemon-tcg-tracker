@@ -16,6 +16,8 @@ export interface LookupCard {
   setId: string | null;
   setName: string | null;
   localId: string | null;
+  /** Printed set total, for the full "099/182" form (UIL-077). Null when TCGdex reports none. */
+  setCardCountOfficial: number | null;
   stage: string | null;
   types: string[];
   cardClass: "standard" | "specialty";

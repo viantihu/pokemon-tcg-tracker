@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import type { LineStatus, SlotState, Variant } from "@/lib/engine";
 import type { BackLineStageInfo, BackLineStageInput, ResolvedBackLine } from "@/lib/backfill";
 import { BandChip } from "../_components/BandChip";
+import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
 import { CardLookup } from "../_components/CardLookup";
 import { VariantSelector } from "../_components/VariantSelector";
@@ -242,7 +243,11 @@ function FrontHalfPanel({
                   <CardFace name={r.card.name} imageUrl={r.card.imageUrl} size="s" />
                   <span className="tx">
                     <span className="nm">{r.card.name}</span>
-                    {r.card.localId ? <span className="no">{r.card.localId}</span> : null}
+                    {formatCollectorNumber(r.card.localId, r.card.setCardCountOfficial) ? (
+                      <span className="no">
+                        {formatCollectorNumber(r.card.localId, r.card.setCardCountOfficial)}
+                      </span>
+                    ) : null}
                   </span>
                   <button
                     type="button"
@@ -614,7 +619,12 @@ function StageRow({
                 />
                 <span className="nm" style={{ fontSize: 12 }}>
                   {entry.filledCard.name}
-                  {entry.filledCard.localId ? ` · ${entry.filledCard.localId}` : ""}
+                  {formatCollectorNumber(
+                    entry.filledCard.localId,
+                    entry.filledCard.setCardCountOfficial,
+                  )
+                    ? ` · ${formatCollectorNumber(entry.filledCard.localId, entry.filledCard.setCardCountOfficial)}`
+                    : ""}
                 </span>
               </div>
             ) : (
@@ -820,7 +830,9 @@ function SpecialtyPanel({
                 </div>
                 <div style={{ fontSize: 10, color: "var(--ink-2)", marginTop: 3 }}>
                   {(r.card.setName ?? r.card.setId ?? "").toString()}
-                  {r.card.localId ? ` · ${r.card.localId}` : ""}
+                  {formatCollectorNumber(r.card.localId, r.card.setCardCountOfficial)
+                    ? ` · ${formatCollectorNumber(r.card.localId, r.card.setCardCountOfficial)}`
+                    : ""}
                 </div>
                 <div style={{ marginTop: 6 }}>
                   <VariantSelector

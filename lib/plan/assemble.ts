@@ -126,6 +126,7 @@ export function toPlanItem(
     name: incoming.card.name,
     setId: incoming.card.setId,
     localId: incoming.card.localId,
+    setCardCountOfficial: incoming.card.setCardCountOfficial ?? null,
     // Off the catalog row, not `incoming.card` — the engine's CatalogCard has no image (UIL-016).
     imageUrl: l.imageUrlByTcgdexId.get(incoming.card.tcgdexId) ?? null,
     variant: incoming.variant,

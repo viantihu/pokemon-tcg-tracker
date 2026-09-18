@@ -41,6 +41,7 @@ function toLookupCard(r: Row<"catalog_card">): LookupCard {
     setId: r.set_id,
     setName: r.set_name,
     localId: r.local_id,
+    setCardCountOfficial: r.set_card_count_official,
     stage: r.stage,
     types: r.types ?? [],
     cardClass: r.card_class === "specialty" ? "specialty" : "standard",
