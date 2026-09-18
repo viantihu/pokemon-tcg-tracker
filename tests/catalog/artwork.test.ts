@@ -275,31 +275,41 @@ describe("clusterArtwork — optimized (LSH banding) matches the naive all-pairs
     }
   });
 
-  it("scale sanity: clusters ~23.5k hashes and still groups planted reprints correctly", () => {
-    const rand = mulberry32(511);
-    const entries: ArtworkEntry[] = [];
-    const expectedPairs: [string, string][] = [];
-    for (let g = 0; g < 23500; g++) {
-      const id = `c-${String(g).padStart(5, "0")}`;
-      const base = randomHash(rand);
-      entries.push({ id, hash: base });
-      // Every 50th card gets one near-identical reprint we expect to co-group.
-      if (g % 50 === 0) {
-        const repId = `${id}-rev`;
-        entries.push({ id: repId, hash: perturb(base, 3, rand) });
-        expectedPairs.push([id, repId]);
+  // Explicit vitest timeout, because the DEFAULT (5 s) is below this test's own 10 s
+  // bound on `elapsedMs` below — so on a loaded runner vitest killed the test before the
+  // assertion the author actually wrote could run. Measured on GitHub-hosted runners: the
+  // whole test takes 2.7–3.2 s when green (generating 23.5k hashes is part of that), and on
+  // 2026-09-17 it hit the 5 s wall on five of six simultaneous runs, then passed unchanged
+  // on re-run. 20 s leaves the in-test 10 s assertion as the operative performance bound.
+  it(
+    "scale sanity: clusters ~23.5k hashes and still groups planted reprints correctly",
+    { timeout: 20_000 },
+    () => {
+      const rand = mulberry32(511);
+      const entries: ArtworkEntry[] = [];
+      const expectedPairs: [string, string][] = [];
+      for (let g = 0; g < 23500; g++) {
+        const id = `c-${String(g).padStart(5, "0")}`;
+        const base = randomHash(rand);
+        entries.push({ id, hash: base });
+        // Every 50th card gets one near-identical reprint we expect to co-group.
+        if (g % 50 === 0) {
+          const repId = `${id}-rev`;
+          entries.push({ id: repId, hash: perturb(base, 3, rand) });
+          expectedPairs.push([id, repId]);
+        }
       }
-    }
-    const started = Date.now();
-    const groups = clusterArtwork(entries, { threshold: 10 });
-    const elapsedMs = Date.now() - started;
+      const started = Date.now();
+      const groups = clusterArtwork(entries, { threshold: 10 });
+      const elapsedMs = Date.now() - started;
 
-    expect(groups.size).toBe(entries.length);
-    // Planted reprints land in the same group as their base…
-    for (const [a, b] of expectedPairs) expect(groups.get(a)).toBe(groups.get(b));
-    // …and random unrelated hashes stay in their own singleton group (id === group).
-    expect(groups.get("c-00001")).toBe("c-00001");
-    // Banding must avoid the ~276M-pair all-vs-all scan; comfortably under a generous CI bound.
-    expect(elapsedMs).toBeLessThan(10000);
-  });
+      expect(groups.size).toBe(entries.length);
+      // Planted reprints land in the same group as their base…
+      for (const [a, b] of expectedPairs) expect(groups.get(a)).toBe(groups.get(b));
+      // …and random unrelated hashes stay in their own singleton group (id === group).
+      expect(groups.get("c-00001")).toBe("c-00001");
+      // Banding must avoid the ~276M-pair all-vs-all scan; comfortably under a generous CI bound.
+      expect(elapsedMs).toBeLessThan(10000);
+    },
+  );
 });
