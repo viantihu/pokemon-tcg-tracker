@@ -2319,6 +2319,12 @@ come out; `buildHaulCommitPayload` and the rest of the shared write machinery **
 the plumbing underneath it. Also settles, by superseding it, a briefly-considered approach of refusing
 a band-mismatch card specifically in the bulk path (UIL-069) — moot once the bulk path itself is gone.
 
+**Update 2026-09-18: done, not just planned.** PR [#176](https://github.com/viantihu/pokemon-tcg-tracker/pull/176)
+(squash `4655145`, deployed on `c6ef4c4`) deleted `commitHaulAction` and `commitHaul` — zero callers
+re-verified before removal, matching the earlier check above. `buildHaulCommitPayload` and the shared
+write machinery are unchanged, confirmed by grep: no remaining reference to either deleted function
+anywhere in `app/` or `lib/`.
+
 ## UIL-028 — The batched catalog lookup is unpaged, so raising its chunk size would silently truncate results
 
 - **Reported:** 2026-09-13 (not from Karvi — found by QA reviewing #70's sync batching, corroborated
@@ -5284,8 +5290,15 @@ shipped it, #154, merged `218ac0a`, and whose lookup half still stands), and UIL
 offer-don't-decide shape: surface the choice, never silently pick for her).**
 
 **Priority rationale.** High, per the Senior BA: it produces a suggestion she's called incorrect on the
-flow she uses constantly, and the current behavior is live in her app now. Not yet built — assigned to
-the dev already in `cascade.ts` and the panel from UIL-068/070, ahead of those two.
+flow she uses constantly, and the current behavior is live in her app now.
+
+**Update 2026-09-18: built, verified against the merged diff.** PR
+[#176](https://github.com/viantihu/pokemon-tcg-tracker/pull/176) (squash `4655145`, deployed on
+`c6ef4c4`) ships exactly the screen quoted above: `placeCard`'s STEP 4 gains a `bandMismatch` result,
+set only when an open slot's line band disagrees with the card's own natural band (the already-filled
+and collection-claim paths have no destination choice to offer, so neither sets it); the Haul Plan
+spotlight renders both options as radio choices with **neither pre-selected**, Done disabled until she
+picks one — matching her rejection of a default exactly. Status line lands separately.
 
 ## UIL-070 — UIL-064's two unfixed parts, carried forward per her own "every report gets a number" rule after she chose to close the parent
 
