@@ -5174,3 +5174,64 @@ principle underneath four separate reports rather than four unrelated complaints
 **Priority rationale.** Flagging for Claude's read and Karvi's confirmation on the specific report; the
 product-ethos statement itself isn't a priority-rated bug, it's a standing constraint the team should
 carry into every future design in this area.
+
+## UIL-073 — There is no component-render test harness, so every UI failure state in this repo is verified by reading code, not by a test that can fail
+
+- **Reported:** 2026-09-17 (not from Karvi — a recurring gap independently re-flagged by multiple dev
+  sessions across four separate PRs; relayed by the Senior BA as worth tracking once rather than
+  rediscovering repeatedly)
+- **Status:** Open
+- **Priority:** Low (Senior BA's read) — nothing is known broken by this gap, and the fix touches
+  shared config that would conflict with every open PR during the current freeze
+- **Area:** all (test infrastructure)
+- **Env:** n/a — in the repo, not a running environment
+
+**Confirmed directly.** `vitest.config.mts` runs with `environment: "node"` and globs only
+`tests/**/*.test.ts` — no `.tsx`, so a component test file wouldn't even be collected unless misnamed
+into the `.ts` glob. `package.json` has no `jsdom`, `happy-dom`, or `@testing-library/*` dependency.
+What component-adjacent tests exist use `renderToStaticMarkup` (confirmed across six files —
+[`tests/coll/collection-fold.test.ts`](../tests/coll/collection-fold.test.ts),
+[`tests/plan/band-collapse.test.ts`](../tests/plan/band-collapse.test.ts),
+[`tests/plan/override-display.test.ts`](../tests/plan/override-display.test.ts),
+[`tests/plan/plan-artwork.test.ts`](../tests/plan/plan-artwork.test.ts),
+[`tests/plan/plan-resume-collapse.test.ts`](../tests/plan/plan-resume-collapse.test.ts),
+[`tests/plan/pull-disclosure.test.ts`](../tests/plan/pull-disclosure.test.ts)) — which produces a
+static HTML string and cannot dispatch a click or keypress, run an effect, or drive an async
+rejection. Every failure state, hover behavior, or event handler in this app's UI is therefore
+**verified by reading the component**, not by a test that can go red.
+
+**Concrete instances, per the Senior BA, from mutation testing rather than assertion — worth recording
+even though I haven't re-run the mutations myself:**
+
+- **PR #168 (UIL-035)** — confirmed to exist and on-topic (a failed catalog search should say so). Per
+  the relay: removing the `catch` that sets `CardLookup`'s `failed` state still passes its suite 5/5 —
+  the failure message she'd actually see is untested.
+- **PR #154 (UIL-064)** — every manual control that clears a stale `lineJoin` is verified by reading;
+  QA said so explicitly in review.
+- **PR #126 (UIL-038)** — the click/type/close wiring is covered only at the server and scheduler
+  layers; the dev flagged this gap themselves in the PR.
+- **#161** — the ordering is pinned only because the scheduler was extracted into a plain, testable
+  module; the button that triggers it is never exercised.
+
+**Distinct from UIL-029, on purpose.** UIL-029 is about a hand-written `DbClient` test double
+*actively certifying wrong behaviour* — a test that passes and shouldn't. This entry is about the
+*absence* of any DOM at all — there's no test to write in the first place for anything that requires a
+real render, an event, or a browser API, regardless of how carefully a double is written.
+
+**Why this is worth logging at Low rather than fixing now.** Nothing is known broken by the gap itself
+— it's a blind spot, not a bug. Adding a harness touches `package.json` and the vitest config, which
+would conflict with every currently-open PR (seven queued during the CI freeze) and can't sensibly land
+until that clears. The devs have consistently compensated the better way already: extracting logic into
+plain, `environment: "node"`-testable modules (the scheduler extraction behind #161's ordering test is
+the pattern) rather than reaching for a DOM they don't have. **Why log it at all:** it's the reason
+several of Karvi's UI fixes this week carry a "not visually verified" caveat, and the alternative this
+repo already has — the static-layout measurement technique (render the real component to static markup
+against `globals.css`, measure in a browser) — proves layout, not behaviour. Recording both options so
+whoever eventually picks this up chooses with the tradeoff stated, not rediscovers it.
+
+**Cross-reference UIL-029** (wrong-behaviour-certified, the opposite failure mode) **and UIL-021** (the
+other standing Low in test infrastructure, with its own recorded counter-argument).
+
+**Priority rationale.** Low, per the Senior BA: no known live defect traces to this gap specifically,
+and the cost of fixing it now (touching shared config mid-freeze, against seven open PRs) outweighs
+the benefit of fixing it immediately rather than logging it for later.
