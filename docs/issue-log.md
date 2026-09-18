@@ -1838,6 +1838,19 @@ that reds at random teaches everyone to re-run rather than investigate, and "a c
 reasons nobody looks at" is the exact shape that let UIL-004 hide for weeks. The gate depends on this
 suite meaning something. Still lands on Low; both readings flagged for Karvi.
 
+**Update 2026-09-18: a second, related failure mode on this same test, found during UIL-066's recovery
+— moved here rather than logged separately.** The "scale sanity" test this entry's own root cause
+quotes normally runs in 2.7–3.2s, comfortably inside its **internal** `toBeLessThan(10000)` assertion
+above but close enough to **vitest's own 5s default execution timeout** that concurrent load pushes it
+over: it timed out on 5 of 6 simultaneous reruns right after the Actions-billing recovery, passing
+unchanged on retry every time. Same underlying shape as this entry's root cause — a wall-clock bound on
+a shared, variably-loaded runner — but a different bound (vitest's own timeout, not the assertion this
+entry's suggested fix targets) and confirmed only under exactly that kind of retry burst, not in
+general. Fix: PR [#175](https://github.com/viantihu/pokemon-tcg-tracker/pull/175) (merged) sets an
+explicit, longer vitest timeout on this one test — addresses the execution timeout specifically; does
+not touch the internal `toBeLessThan(10000)` assertion this entry's own suggested fix is still open
+against.
+
 ## UIL-022 — Moving a card into a collection from the Line or Plan screen orphans it
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
@@ -4923,16 +4936,18 @@ already self-limiting once billing is resolved, not a product defect — but Hig
 while it lasts, since it silently removed the one automated check standing between a merge and a
 schema mismatch.
 
-**Update 2026-09-18: resolved, and the two cause descriptions reconcile.** Karvi confirmed the root
-cause: the account's Free-plan monthly Actions minutes were exhausted, not a card-on-file payment
-failure — a private repo on Free gets 2,000 minutes/month, and measurement over 200 runs (Sep 14–17)
-put usage around 990 billed minutes across 397 runs, roughly 5 minutes each, with `verify` alone
-accounting for about three quarters of it. Three days of UAT activity used a month's allotment. That
-reconciles with the annotation text captured earlier in this entry ("recent account payments have
-failed or your spending limit needs to be increased"): on a Free plan with no payment method on file,
-running out of included minutes has nowhere to fall back to, so it surfaces as the same
-payment/spending-limit message a real billing failure would — one underlying condition, one message,
-not two different causes.
+**Update 2026-09-18: resolved, and the two cause descriptions reconcile into one event, not two.**
+Karvi confirmed the root cause: the account's Free-plan monthly Actions minutes were exhausted — a
+private repo on Free gets 2,000 minutes/month, and measurement over 200 runs (Sep 14–17) put usage
+around 990 billed minutes across 397 runs, roughly 5 minutes each, with `verify` alone accounting for
+about three quarters of it. Three days of UAT activity used a month's allotment. **Precisely why that
+produced the payment/spending-limit annotation rather than an "included minutes exhausted" one:**
+GitHub Actions on a Free plan carries a spending limit that **defaults to $0**. Once the included
+2,000 minutes run out, every further job is billable usage, and a $0 limit is exactly what refuses to
+start a billable job — the annotation's wording ("payments have failed or your spending limit needs to
+be increased") describes that refusal accurately; it was never describing a card-on-file failure.
+Raising the spending limit with a card on file would have cleared it the same way making the repo
+public did.
 
 **Fix: the repository was made public**, 2026-09-17 23:52Z — confirmed directly
 (`GET /repos/viantihu/pokemon-tcg-tracker` reports `private: false`) — which moves the account onto
@@ -4943,14 +4958,15 @@ personal emails (taken as reported; not independently re-run).
 **Recovery verified directly on develop's tip `1a86505`**, all conditions green:
 `Vercel: success`, `verify: success`, `migrate: success` (all 10 migrations, 0001–0010, applied on
 Testing), `smoke: success`, `acceptance: success`. No migration merged during the lockout (confirmed
-earlier in this entry), so Testing's schema never diverged — the freeze held.
+earlier in this entry), so Testing's schema never diverged — the freeze held. **Re-confirmed on the
+current tip `8028771`**, all six checks green again — the recovery held through further merges, not
+just the first post-fix commit.
 
-**Side finding, recorded here rather than as its own entry since it's a symptom of the same load
-spike, not a new independent cause:** `tests/catalog/artwork.test.ts`'s "scale sanity" test
-(confirmed present) is load-sensitive — it runs close to vitest's 5s default timeout normally (2.7–3.2s)
-and timed out on 5 of 6 simultaneous reruns during the recovery burst, passing unchanged on retry each
-time. An explicit, longer timeout on that one test is the fix in progress; not itself a CI-billing
-issue, just discovered while confirming the billing recovery.
+**The scale-sanity flake discovered during recovery is recorded under UIL-021, not here — moved on
+review.** It's the same test UIL-021 already covers (`tests/catalog/artwork.test.ts`'s wall-clock
+assertion), a second failure mode on that one test rather than a new, independent CI-billing
+consequence, so it belongs with the existing entry. See UIL-021 for the detail; PR
+[#175](https://github.com/viantihu/pokemon-tcg-tracker/pull/175) (merged) is its fix.
 
 ## UIL-067 — The decision card is too crowded and shows information that isn't helpful for making the actual call
 
