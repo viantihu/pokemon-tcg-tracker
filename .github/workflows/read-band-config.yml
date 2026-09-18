@@ -957,10 +957,34 @@ jobs:
             [ $cols[] | .current_binder_ids // [] | .[] ] as $all
             | [ .[] | select(.binder_id != null and (.binder_id | IN($all[]) | not)) ] | length')
           shared=$(printf '%s' "$cols" | jq '[ .[] | .current_binder_ids // [] | .[] ] | group_by(.) | map(select(length > 1)) | length')
+          # When several collections list the SAME binder, a copy that is on collection B's list is
+          # "off-target" for collection A by construction, so the per-collection figure overstates the
+          # phenomenon. The union view below is the one that isolates it: for each shelved copy in a
+          # collection-listed binder, how many collections (that list that binder) have its card on
+          # their target list. 0 = an untracked physical card; >=2 = shown in more than one collection.
+          union=$(printf '%s' "$shelved" | jq -c --argjson cols "$cols" '
+            [ .[] | select(.binder_id != null) | . as $s
+              | [ $cols[] | . as $c | select($s.binder_id | IN(($c.current_binder_ids // [])[])) ] as $listing
+              | select(($listing | length) > 0)
+              | [ $listing[] | . as $c | select($s.catalog_card_id | IN(($c.target_catalog_card_ids // [])[])) ] | length ]
+            | { in_listed_binders: length,
+                on_no_list: (map(select(. == 0)) | length),
+                on_one_list: (map(select(. == 1)) | length),
+                on_many_lists: (map(select(. >= 2)) | length) }')
+          binders_shelved=$(printf '%s' "$shelved" | jq '[ .[].binder_id | select(. != null) ] | unique | length')
+          binders_listed=$(printf '%s' "$cols" | jq '[ .[] | .current_binder_ids // [] | .[] ] | unique | length')
+          binders_unlisted_used=$(printf '%s' "$shelved" | jq --argjson cols "$cols" '
+            [ $cols[] | .current_binder_ids // [] | .[] ] as $all
+            | [ .[].binder_id | select(. != null and (IN($all[]) | not)) ] | unique | length')
           echo
-          echo "OFF-TARGET total (shelved, in a collection binder, card not on that collection's list): $off_total"
+          echo "OFF-TARGET total (per-collection view, overstated when binders are shared):          $off_total"
+          echo "shelved copies in a collection-listed binder:                                      $(printf '%s' "$union" | jq .in_listed_binders)"
+          echo "  of which on NO listing collection's target list (untracked physical card):        $(printf '%s' "$union" | jq .on_no_list)"
+          echo "  of which on exactly ONE listing collection's target list:                         $(printf '%s' "$union" | jq .on_one_list)"
+          echo "  of which on TWO OR MORE listing collections' target lists:                        $(printf '%s' "$union" | jq .on_many_lists)"
           echo "shelved copies with NO binder_id:                                                  $null_binder"
           echo "shelved copies whose binder is listed by NO collection:                            $orphan"
+          echo "distinct binders holding shelved copies / listed by a collection / used but unlisted: $binders_shelved / $binders_listed / $binders_unlisted_used"
           echo "binders listed by MORE THAN ONE collection:                                        $shared"
           echo
           echo "What this counts: copy rows with role = shelved, joined to collections by binder_id IN current_binder_ids, split by catalog_card_id IN target_catalog_card_ids. It does not count bulk or block copies, and it does not test the read path."
