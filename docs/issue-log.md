@@ -1841,11 +1841,11 @@ suite meaning something. Still lands on Low; both readings flagged for Karvi.
 ## UIL-022 — Moving a card into a collection from the Line or Plan screen orphans it
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
-- **Status:** **Fixed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
+- **Status:** **Closed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
   `develop` (squash `e0773e2`), QA-reviewed, confirmed deployed. **No migration needed** — every op
   already existed (`union_collection_targets` shipped in 0007). Awaiting Karvi's confirmation, and note
   the Haul Plan path is the one to test: it is a **separate** code path from the Line screen, so fixing
-  only `applyMove` would have left half of this live. See the corrections below.
+  only `applyMove` would have left half of this live. See the corrections below. **Confirmed resolved by Karvi on Testing 2026-09-18.**
 - **Priority:** High (Senior BA's read)
 - **Area:** Line, Plan, Collections
 - **Env:** Testing
@@ -1918,11 +1918,11 @@ wrong too. Fixed now; both corrected here rather than left standing.**
 ## UIL-023 — `applyMove` is a fourth write path and it is not atomic
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
-- **Status:** **Fixed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
+- **Status:** **Closed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
   `develop` (squash `e0773e2`), QA-reviewed, confirmed deployed. `applyMove` is now **one**
   `apply_write_ops` call, verified by QA at `write.ts:87` with only reads preceding it. `applyDecision`
   remains un-transacted **deliberately** — converting it needs a migration, since `wishlist_item` can
-  only be INSERTed through the RPC, and this entry's root cause was scoped to `applyMove`.
+  only be INSERTed through the RPC, and this entry's root cause was scoped to `applyMove`. **Confirmed resolved by Karvi on Testing 2026-09-18.**
 - **Priority:** Medium (Senior BA's read)
 - **Area:** Line
 - **Env:** Testing
@@ -3042,7 +3042,7 @@ the one screen built for verifying them. Flagging for her confirmation since sev
 ## UIL-038 — No concept of a draft collection; saving is immediately live
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009, not the same defect — see note below)
-- **Status:** **Fixed** — PR [#126](https://github.com/viantihu/pokemon-tcg-tracker/pull/126) MERGED to
+- **Status:** **Closed** — PR [#126](https://github.com/viantihu/pokemon-tcg-tracker/pull/126) MERGED to
   `develop` 2026-09-16 (squash `e1f6a45`), QA-gated on the merged tree with the guards mutation-verified,
   confirmed **deployed** to Testing (Vercel / migrate / smoke / acceptance all green on `075f170`).
   **Scoped from Karvi's own answer to what "draft" protects against — losing in-progress work, not hiding
@@ -3058,7 +3058,7 @@ the one screen built for verifying them. Flagging for her confirmation since sev
   lose its binder if she opened "+ New binder" and then edited any other field before naming it — the
   server now falls back to the collection's current binder when the pick is unresolved. No component-render
   test infrastructure exists in this repo, so the click/type/close wiring is covered at the server and
-  scheduler layers rather than through the DOM. Awaiting Karvi's confirmation.
+  scheduler layers rather than through the DOM. Awaiting Karvi's confirmation. **Confirmed resolved by Karvi on Testing 2026-09-18** — including the removal of UIL-009's "discard changes?" dialog, which was a visible behaviour change on a screen she had already signed off, so her confirmation covers that too.
 - **Priority:** Unscoped — needs Karvi's clarification before a priority means anything
 - **Area:** Collections
 - **Env:** Testing
