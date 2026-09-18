@@ -78,6 +78,11 @@ function render(
       shelving: null,
       overrides: {},
       overrideNames: null,
+      // UIL-075 added a sub-group fold one level under UIL-018's. Nothing folded here — this file's
+      // tests exercise the BAND fold, not the sub-group fold, and folding a sub-group inside a folded
+      // band would only muddy the assertion.
+      collapsedSubgroups: new Set<string>(),
+      onToggleSubgroupCollapse: () => {},
       ...over,
     }),
   );

@@ -2969,3 +2969,62 @@ nav.menu .tab .n {
   background: var(--mint);
   box-shadow: inset 0 0 0 3px var(--ink);
 }
+
+/* ---- Foldable sub-groups within a band (UIL-075) -----------------------------
+   The finer level under UIL-018's band fold. Same discipline as that block: one
+   contiguous appended chunk rather than edits merged into the `.subhead` rule up
+   at line ~321, and every selector here scopes with `button.subhead` so the
+   Collections page's `<div class="subhead">` (a non-interactive label) is not
+   dragged along with it. The label itself is now inside `.sublabel` so this rule
+   set can style the header row without fighting `.subhead`'s existing padding.
+   Left indent 44px is preserved so the marker sits UNDER the `.bandhead`'s own
+   marker, giving a visible hierarchy at a glance. */
+button.subhead {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 44px;
+  border: 0;
+  border-bottom: 2px solid var(--lo);
+  background: var(--panel-2);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+button.subhead:hover {
+  background: var(--hi);
+}
+button.subhead:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: -3px;
+}
+button.subhead .fold {
+  flex: 0 0 auto;
+  width: 13px;
+  font-size: 9px;
+  color: var(--ink-2);
+}
+button.subhead .sublabel {
+  flex: 0 1 auto;
+}
+button.subhead .ct {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--ink-2);
+  letter-spacing: 0.13em;
+}
+/* Same visual as `.bandhead.folded` one level up — reads as a closed drawer, not
+   a lifted header. Folded rows are absent from the tree entirely (see BandSection),
+   so this is only decoration; the mount saving is real. */
+button.subhead.folded {
+  background: var(--panel);
+}
+button.subhead.folded:hover {
+  background: var(--hi);
+}
