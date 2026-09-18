@@ -29,6 +29,13 @@ name: Read band config (Testing)
 # *button* needs that, and `main` lags `develop` until the cutover). Dispatch also costs no Vercel
 # build, whereas a push to this branch does. Push still works as a trigger.
 #
+# PARAMETERISED (2026-09-18): the final "Schema probe" step takes two dispatch inputs so a migration
+# before/after read needs NO new push:
+#   gh workflow run read-band-config.yml --ref ops/read-band-config \
+#     -f probe_columns=collection.updated_at,placement_decision.some_marker \
+#     -f count_tables=collection,copy,placement_decision
+# On a push (no inputs) it falls back to the defaults declared under `workflow_dispatch`.
+#
 # READ-ONLY: GETs only, no writes.
 #
 # !! THIS LOG IS PUBLIC. Karvi made the repo public on 2026-09-17 to lift the Actions minutes cap,
@@ -56,6 +63,15 @@ on:
   push:
     branches: [ops/read-band-config]
   workflow_dispatch:
+    inputs:
+      probe_columns:
+        description: "table.column pairs to probe for presence, comma-separated (counts and shape only, never values)"
+        required: false
+        default: "collection.updated_at"
+      count_tables:
+        description: "tables to row-count, comma-separated; a PostgREST filter is allowed (copy?role=eq.shelved)"
+        required: false
+        default: "collection,copy,wishlist_item,placement_decision,line_slot"
 
 concurrency:
   group: read-band-config
@@ -759,6 +775,91 @@ jobs:
             echo "VERDICT: both under the cap — loadCurrentGroups sees her whole collection today. Latent."
             [ "$copies" = "unknown" ] || echo "Headroom on copy: $((1000 - copies)) more physical cards before the reconciler starts lying."
           fi
+
+      # ---- SCHEMA PROBE: before/after figures for a migration, without a new push per question.
+      #
+      # For each `table.column` in `probe_columns`: PRESENT or ABSENT (PostgREST 42703), and when
+      # present: total rows, rows NOT NULL, the number of DISTINCT values (tables of <= 500 rows only,
+      # and the values themselves are never printed), plus min/max for `*_at` timestamp columns. For
+      # each entry in `count_tables` (optionally carrying a PostgREST filter, `copy?role=eq.shelved`):
+      # the exact row count. COUNTS AND SHAPE ONLY — no row value reaches this public log.
+      #
+      # Why: a migration that adds a `default now()` column with triggers (UIL-052) or marker columns
+      # (UIL-078) needs a falsifiable pair. Before Deploy applies it: column ABSENT, N rows. Right
+      # after: PRESENT, N rows, N not-null, and ONE distinct timestamp (a single ALTER stamps every row
+      # with the same now()). Then, once one of Karvi's writes fires the trigger: >1 distinct and a
+      # newer max. Each figure is printed separately so the reader forms the verdict, not this script.
+      - name: Schema probe (column presence + row counts)
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          PROBE_COLUMNS: ${{ inputs.probe_columns }}
+          COUNT_TABLES: ${{ inputs.count_tables }}
+        run: |
+          set -euo pipefail
+          rest="https://$PROJECT_REF.supabase.co/rest/v1"
+          probe="${PROBE_COLUMNS:-collection.updated_at}"
+          tables="${COUNT_TABLES:-collection,copy,wishlist_item,placement_decision,line_slot}"
+
+          auth=(-H "apikey: $SERVICE_KEY")
+          case "$SERVICE_KEY" in eyJ*) auth+=(-H "Authorization: Bearer $SERVICE_KEY") ;; esac
+
+          count_of() {
+            local headers total
+            headers=$(curl -sS -D - -o /dev/null --retry 3 --retry-delay 5 "${auth[@]}" \
+                        -H "Prefer: count=exact" -H "Range: 0-0" "$rest/$1")
+            total=$(printf '%s' "$headers" | tr -d '\r' \
+              | awk 'tolower($1) == "content-range:" { split($2, a, "/"); print a[2] }')
+            printf '%s' "${total:-unknown}"
+          }
+          body_of() { curl -sS --retry 3 --retry-delay 5 "${auth[@]}" "$rest/$1"; }
+
+          echo "=============== schema probe: columns ==============="
+          IFS=',' read -r -a pairs <<< "$probe"
+          for pair in "${pairs[@]}"; do
+            pair="${pair// /}"; [ -n "$pair" ] || continue
+            table="${pair%%.*}"; col="${pair#*.}"
+            if [ "$table" = "$pair" ]; then
+              echo "::warning::'$pair' is not table.column — skipped"
+              continue
+            fi
+            out=$(body_of "$table?select=$col&limit=1")
+            if printf '%s' "$out" | jq -e 'type == "array"' > /dev/null 2>&1; then
+              total=$(count_of "$table?select=$col")
+              nonnull=$(count_of "$table?select=$col&$col=not.is.null")
+              echo "$table.$col: PRESENT   rows=$total   not-null=$nonnull"
+              if [ "$total" != "unknown" ] && [ "$total" -le 500 ]; then
+                vals=$(body_of "$table?select=$col&limit=500")
+                distinct=$(printf '%s' "$vals" | jq --arg c "$col" '[.[][$c]] | unique | length')
+                echo "  distinct values: $distinct"
+                case "$col" in
+                  *_at)
+                    lo=$(printf '%s' "$vals" | jq -r --arg c "$col" '[.[][$c] | select(. != null)] | min // "n/a"')
+                    hi=$(printf '%s' "$vals" | jq -r --arg c "$col" '[.[][$c] | select(. != null)] | max // "n/a"')
+                    echo "  min: $lo   max: $hi" ;;
+                esac
+              fi
+            else
+              code=$(printf '%s' "$out" | jq -r '.code // "?"' 2>/dev/null || echo "?")
+              if [ "$code" = "42703" ]; then
+                echo "$table.$col: ABSENT    (42703: column does not exist)"
+              else
+                echo "$table.$col: UNREADABLE  code=$code $(printf '%s' "$out" | jq -rc '.message // .' 2>/dev/null | head -c 200)"
+              fi
+            fi
+          done
+
+          echo
+          echo "=============== schema probe: row counts ==============="
+          IFS=',' read -r -a specs <<< "$tables"
+          for spec in "${specs[@]}"; do
+            spec="${spec// /}"; [ -n "$spec" ] || continue
+            case "$spec" in
+              *\?*) q="$spec&select=*" ;;
+              *)    q="$spec?select=*" ;;
+            esac
+            echo "$spec: $(count_of "$q")"
+          done
 
       # ---- PR #90's PREMISE. Its `assertReadComplete` guard assumes supabase-js's `count: "exact"`
       # reports the UNTRUNCATED total even when `data` was capped at max-rows. That is documented but was
