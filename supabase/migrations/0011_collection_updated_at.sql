@@ -17,7 +17,19 @@
 -- card LEAVING a collection (a removal) is unambiguously touching it. The `copy` trigger below fires
 -- on both directions of a shelve — recorded here as a visible decision, not a silent liberty, so it is
 -- a one-line change if she disagrees.
-alter table collection add column updated_at timestamptz not null default now();
+--
+-- Backfilled from `created_at`, NOT a blanket `now()`: a plain `add column ... default now()` would
+-- have every existing collection's `updated_at` evaluate to the SAME single timestamp (the default
+-- expression for a volatile function like `now()` is computed once per statement, not once per row),
+-- which would falsely claim all eleven of her collections were "just modified" — a lie she'd see
+-- immediately on the sorted list. `created_at` is the truthful prior: it orders existing collections by
+-- when she made them until real activity bumps them, same as a NULL never would (every existing row
+-- would sort into one indistinguishable block, or last, behind anything she touches next). New rows
+-- still default to `now()` at insert time.
+alter table collection add column updated_at timestamptz;
+update collection set updated_at = created_at;
+alter table collection alter column updated_at set default now();
+alter table collection alter column updated_at set not null;
 
 -- ---------------------------------------------------------------------------------------------
 -- Trigger 1: a collection's OWN curated lists changing is a modification by definition.
