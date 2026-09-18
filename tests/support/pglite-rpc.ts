@@ -1,7 +1,7 @@
 /**
  * Shared PGlite harness for the M10 `apply_write_ops` atomicity tests (dev-spec §4 DoD: migrations
  * apply to a fresh DB; §5 M10: commits are truly atomic). Runs REAL Postgres/plpgsql in WASM (no
- * Docker), applying the frozen 0001–0007 + the new 0008, then replicating the platform grants and
+ * Docker), applying the migrations listed below in order, then replicating the platform grants and
  * `auth.uid()` shim Supabase provides so the SECURITY INVOKER function runs under the authenticated
  * owner's RLS — exactly as production does. Never edits a migration file.
  */
@@ -42,6 +42,9 @@ const MIGRATIONS = [
   // UIL-078's own migration (#188): the suppression columns on line_slot / placement_decision — the
   // first migration here whose ABSENCE would break a PGlite test (tests/line/decision-persistence).
   "0013_decision_persistence.sql",
+  // UIL-047 C3's own migration (#194): replaces apply_write_ops AGAIN — 0013's body + `delete_set_alias` —
+  // so the composed function under test here is 0014's. Whichever of 0013/0014 runs last is the function.
+  "0014_forget_set_alias.sql",
 ];
 
 // Supabase provides auth.uid() + the anon/authenticated/service_role roles; PGlite (vanilla PG) does
@@ -62,7 +65,7 @@ function migrationSql(file: string): string {
   return readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8");
 }
 
-/** Fresh DB with 0001→0008 applied, platform grants replicated. Ends as the bootstrap superuser. */
+/** Fresh DB with `MIGRATIONS` applied, platform grants replicated. Ends as the bootstrap superuser. */
 export async function freshRpcDb(): Promise<PGlite> {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(SUPABASE_SHIMS);
