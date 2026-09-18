@@ -1,12 +1,15 @@
 /**
- * UIL-059 — "If the user left the collections page expanded, it must stay expanded."
+ * UIL-059 — "If the user left the collections page expanded, it must stay expanded" — across visits
+ * on different days, per her issue-log entry, not just within one tab's lifetime.
  *
- * The collapsed-ids Set is restored from sessionStorage in `CollectionsView`'s `useState` lazy
+ * The collapsed-ids Set is restored from localStorage in `CollectionsView`'s `useState` lazy
  * initializer (UIL-034's fold, now persisted). Exercised through the real component, against a
- * `sessionStorage` stub, exactly as `plan-resume-collapse.test.ts` does for the Plan screen's resume:
- * `useEffect` never runs under `renderToStaticMarkup`, so this only proves the READ side (restoring
- * on mount). The write side is a plain `JSON.stringify` + `setItem`, symmetric with the untouched,
- * equally-unexercised-in-isolation `writeResume` this mirrors.
+ * `localStorage` stub, exactly as `plan-resume-collapse.test.ts` does for the Plan screen's resume
+ * against `sessionStorage` (a plan is a working session at the binder, so a month-old one resurfacing
+ * would be noise — the opposite reasoning from this page, which is exactly why the two use different
+ * storages): `useEffect` never runs under `renderToStaticMarkup`, so this only proves the READ side
+ * (restoring on mount). The write side is a plain `JSON.stringify` + `setItem`, symmetric with the
+ * untouched, equally-unexercised-in-isolation `writeResume` this mirrors.
  */
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -20,7 +23,7 @@ const store = new Map<string, string>();
 beforeEach(() => {
   store.clear();
   (globalThis as unknown as { window: unknown }).window = {
-    sessionStorage: {
+    localStorage: {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: (k: string, v: string) => void store.set(k, v),
       removeItem: (k: string) => void store.delete(k),
@@ -71,7 +74,7 @@ function render(d: CollHubData): string {
   );
 }
 
-describe("UIL-059 · collapsed collections resume from sessionStorage", () => {
+describe("UIL-059 · collapsed collections resume from localStorage", () => {
   it("first-ever visit (nothing stored) still folds every collection, unchanged from before", () => {
     const html = render(data(collection("col-1", "Matsuno"), collection("col-2", "Kagemaru")));
     expect(html).toContain('aria-expanded="false"');
@@ -105,6 +108,17 @@ describe("UIL-059 · collapsed collections resume from sessionStorage", () => {
 
   it("a corrupt stored value falls back to the old all-collapsed default, not a crash", () => {
     store.set(KEY, "{not json");
+    const html = render(data(collection("col-1", "Matsuno")));
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  // QA on #172: the corrupt-value case above throws inside JSON.parse itself, so it never reaches
+  // the array-of-strings shape check — that guard could be deleted and no test here would notice
+  // (an object, e.g., would ALSO fall back via the same catch, for the wrong reason: `new Set()` on
+  // a non-iterable throws before the guard is ever consulted). An array of the wrong element type IS
+  // iterable, so it reaches — and needs — the `.every(typeof v === "string")` check specifically.
+  it("valid JSON, an array of the wrong element type, still falls back rather than a Set of numbers", () => {
+    store.set(KEY, JSON.stringify([1, 2, 3])); // parses fine; iterable; just not strings
     const html = render(data(collection("col-1", "Matsuno")));
     expect(html).toContain('aria-expanded="false"');
   });

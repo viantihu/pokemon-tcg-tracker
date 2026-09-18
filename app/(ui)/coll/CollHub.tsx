@@ -358,19 +358,21 @@ export function CollHub() {
 /* ------------------------------- collections ------------------------------ */
 
 /**
- * UIL-059: "If the user left the collections page expanded, it must stay expanded." No resume
- * concept for this page (per the comment below this used to sit above) — just the one Set, read back
- * as-is rather than validated against a stamp. A stale id (a deleted collection) is harmless: it
- * simply never matches anything in `data.collections`, the same way a brand-new collection's id is
- * harmlessly ABSENT from an old stored set and so opens expanded, exactly as it does today with no
- * persistence at all.
+ * UIL-059: "If the user left the collections page expanded, it must stay expanded" — her issue-log
+ * entry says "across visits", and she uses the app across days, not one sitting. localStorage, not
+ * sessionStorage: a sessionStorage entry clears the moment the tab closes, which would silently
+ * un-fix this the next time she opens the app. No resume concept for this page otherwise — just the
+ * one Set, read back as-is rather than validated against a stamp. A stale id (a deleted collection) is
+ * harmless: it simply never matches anything in `data.collections`, the same way a brand-new
+ * collection's id is harmlessly ABSENT from an old stored set and so opens expanded, exactly as it
+ * does today with no persistence at all.
  */
 const COLLAPSED_KEY = "binderops.coll-collapsed.v1";
 
 function readStoredCollapsed(): Set<string> | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.sessionStorage.getItem(COLLAPSED_KEY);
+    const raw = window.localStorage.getItem(COLLAPSED_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || !parsed.every((v) => typeof v === "string")) return null;
@@ -383,7 +385,7 @@ function readStoredCollapsed(): Set<string> | null {
 function writeStoredCollapsed(collapsed: Set<string>): void {
   if (typeof window === "undefined") return;
   try {
-    window.sessionStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
+    window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
   } catch {
     // Full or unavailable storage just means it won't resume next time; the page itself is unaffected.
   }
@@ -406,8 +408,8 @@ export function CollectionsView(props: {
   // a finite set list is 200-300+ CardFace tiles, the same "fine at three cards, wrong at real scale"
   // shape #78 fixed for the worklist. Lazy initializer runs once, so a collection created later (via
   // "+ New collection") is not in this Set and opens expanded, which is what you want right after
-  // creating one. Restored from sessionStorage when she has one from earlier this session (UIL-059) —
-  // first-ever visit (nothing stored yet) still falls back to all-current-ids-collapsed.
+  // creating one. Restored from localStorage when she has a stored set from a previous visit
+  // (UIL-059) — first-ever visit (nothing stored yet) still falls back to all-current-ids-collapsed.
   const [collapsed, setCollapsed] = useState<Set<string>>(
     () => readStoredCollapsed() ?? new Set(data.collections.map((c) => c.id)),
   );
