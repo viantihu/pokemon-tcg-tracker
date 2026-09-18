@@ -67,11 +67,15 @@ on:
       probe_columns:
         description: "table.column pairs to probe for presence, comma-separated (counts and shape only, never values)"
         required: false
-        default: "collection.updated_at"
+        default: "collection.updated_at,line_slot.resolved_decision_kind,line_slot.resolved_decision_choice,placement_decision.line_id,placement_decision.line_slot_id"
       count_tables:
         description: "tables to row-count, comma-separated; a PostgREST filter is allowed (copy?role=eq.shelved)"
         required: false
         default: "collection,copy,wishlist_item,placement_decision,line_slot"
+      compare_columns:
+        description: "table.colA=colB pairs, comma-separated: counts rows where colA <> colB (tables of <= 500 rows; values never printed)"
+        required: false
+        default: "collection.updated_at=created_at"
 
 concurrency:
   group: read-band-config
@@ -795,11 +799,13 @@ jobs:
           PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
           PROBE_COLUMNS: ${{ inputs.probe_columns }}
           COUNT_TABLES: ${{ inputs.count_tables }}
+          COMPARE_COLUMNS: ${{ inputs.compare_columns }}
         run: |
           set -euo pipefail
           rest="https://$PROJECT_REF.supabase.co/rest/v1"
-          probe="${PROBE_COLUMNS:-collection.updated_at}"
+          probe="${PROBE_COLUMNS:-collection.updated_at,line_slot.resolved_decision_kind,line_slot.resolved_decision_choice,placement_decision.line_id,placement_decision.line_slot_id}"
           tables="${COUNT_TABLES:-collection,copy,wishlist_item,placement_decision,line_slot}"
+          compare="${COMPARE_COLUMNS:-collection.updated_at=created_at}"
 
           auth=(-H "apikey: $SERVICE_KEY")
           case "$SERVICE_KEY" in eyJ*) auth+=(-H "Authorization: Bearer $SERVICE_KEY") ;; esac
@@ -859,6 +865,38 @@ jobs:
               *)    q="$spec?select=*" ;;
             esac
             echo "$spec: $(count_of "$q")"
+          done
+
+          # ---- Column-vs-column: "zero rows where updated_at <> created_at" is the falsifier for a
+          # backfill, and PostgREST cannot filter one column against another, so fetch both columns
+          # (small tables only) and count the mismatches in jq. Values are never printed.
+          echo
+          echo "=============== schema probe: column comparisons ==============="
+          IFS=',' read -r -a cmps <<< "$compare"
+          for cmp in "${cmps[@]}"; do
+            cmp="${cmp// /}"; [ -n "$cmp" ] || continue
+            table="${cmp%%.*}"; rest_of="${cmp#*.}"; a="${rest_of%%=*}"; b="${rest_of#*=}"
+            if [ "$table" = "$cmp" ] || [ "$a" = "$rest_of" ]; then
+              echo "::warning::'$cmp' is not table.colA=colB — skipped"
+              continue
+            fi
+            total=$(count_of "$table?select=$a")
+            if [ "$total" = "unknown" ]; then
+              echo "$table.$a vs $b: UNREADABLE (count failed — column or table absent?)"
+              continue
+            fi
+            if [ "$total" -gt 500 ]; then
+              echo "$table.$a vs $b: SKIPPED ($total rows > 500)"
+              continue
+            fi
+            rows=$(body_of "$table?select=$a,$b&limit=500")
+            if ! printf '%s' "$rows" | jq -e 'type == "array"' > /dev/null 2>&1; then
+              echo "$table.$a vs $b: UNREADABLE  $(printf '%s' "$rows" | jq -rc '.message // .' 2>/dev/null | head -c 200)"
+              continue
+            fi
+            differ=$(printf '%s' "$rows" | jq --arg a "$a" --arg b "$b" '[.[] | select(.[$a] != .[$b])] | length')
+            either_null=$(printf '%s' "$rows" | jq --arg a "$a" --arg b "$b" '[.[] | select(.[$a] == null or .[$b] == null)] | length')
+            echo "$table.$a vs $b: rows=$total   differ=$differ   either-null=$either_null"
           done
 
       # ---- PR #90's PREMISE. Its `assertReadComplete` guard assumes supabase-js's `count: "exact"`
