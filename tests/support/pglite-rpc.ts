@@ -32,10 +32,12 @@ const MIGRATIONS = [
   // included so the harness's schema stays in sync with what actually ships rather than needing every
   // future migration remembered here by hand one at a time.
   "0011_relink_unambiguous_line_slots.sql",
-  // UIL-052's own migration. Originally authored as 0011 before 0011_relink_unambiguous_line_slots.sql
-  // (a different, independently-developed migration) landed on develop first and claimed that number —
-  // renumbered to 0012 to resolve the collision; two files sharing one prefix is not a git conflict
-  // (different filenames), so nothing else would have caught this without checking file-by-file.
+  // UIL-052's own migration (this PR). Numbered 0012 per the Senior BA's allocation — originally
+  // authored as 0011, renumbered once 0011_relink_unambiguous_line_slots.sql (a different,
+  // independently-developed migration) landed on develop first and claimed that number. UIL-078's
+  // #188 ships 0013, not 0012, so 0012 is this PR's. Two files sharing one prefix is not a git
+  // conflict (different filenames), so a numbering collision is only caught by checking file-by-file
+  // against develop — do that on every rebase, not just this once.
   "0012_collection_updated_at.sql",
 ];
 

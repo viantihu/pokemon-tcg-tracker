@@ -1,5 +1,5 @@
 /**
- * UIL-052 — sort collections by most-recently-modified, via the three triggers migration 0011 adds
+ * UIL-052 — sort collections by most-recently-modified, via the three triggers migration 0012 adds
  * (`collection_touch_trg`, `copy_bumps_collection_trg`, `wishlist_bumps_collection_trg`). No single
  * TypeScript choke point exists across the nine write paths that can change what is "in" a
  * collection — see the migration's own comment — so this is verified against every REAL write path

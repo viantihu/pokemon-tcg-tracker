@@ -1,7 +1,7 @@
 /**
- * UIL-052 — migration 0012's backfill, checked in isolation from the trigger tests. (Originally
- * authored as 0011; renumbered once `0011_relink_unambiguous_line_slots.sql`, a different migration
- * developed in parallel, landed on develop first and claimed that number.)
+ * UIL-052 — migration 0012's backfill, checked in isolation from the trigger tests. (Renumbered from
+ * 0011 once `0011_relink_unambiguous_line_slots.sql`, a different migration developed in parallel,
+ * landed on develop first and claimed that number.)
  *
  * `add column updated_at ... default now()` alone would give EVERY pre-existing collection the SAME
  * single timestamp: a volatile default like `now()` is evaluated once per statement, not once per
