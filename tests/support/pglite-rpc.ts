@@ -23,6 +23,13 @@ const MIGRATIONS = [
   "0006_commit_rpc.sql",
   "0007_backfill_ops.sql",
   "0008_collection_removal_ops.sql",
+  // 0009/0010 were missing from this list (a pre-existing gap, not from this PR) — every PGlite test
+  // was silently running one schema version behind whatever actually ships. Restored here so this harness
+  // reflects the real migration history rather than a snapshot frozen at 0008, and so UIL-052's own
+  // 0011 (which depends on nothing from either) has an accurate base to apply on top of.
+  "0009_set_metadata.sql",
+  "0010_release_stale_line_slots.sql",
+  "0011_collection_updated_at.sql",
 ];
 
 // Supabase provides auth.uid() + the anon/authenticated/service_role roles; PGlite (vanilla PG) does
