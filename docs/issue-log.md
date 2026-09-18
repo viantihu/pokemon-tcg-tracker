@@ -5127,3 +5127,50 @@ Collections' builder.
 **Priority rationale.** Flagging for Claude's read and Karvi's confirmation — this is a consistency
 request across five screens that already work, not a defect, so it doesn't inherit UIL-039's own
 Medium by default; the scope (six call sites, not one) is worth her seeing before a priority is set.
+
+## UIL-072 — Cards stranded in the back half by the new automatic line flow should always be movable, and she wants this stated as a standing product principle, not just fixed case by case
+
+- **Reported:** 2026-09-17 (Karvi, screenshot of the Lines screen's "STRANDED IN THE BACK HALF · 4"
+  list — Blaziken, Torchic, Ponyta, Pikachu). In her words: "I should be able to move these two cards.
+  These came in from the new automatic line flow from the Haul Plan." Separately, as a standing
+  instruction rather than part of the report itself: "The user should ALWAYS have the ability to move
+  cards. The whole point of this app is for users to have the ability to easily view their collections.
+  Convey this to the Senior BA and ensure the team is aware of this product ethos so that we can
+  proactively avoid more issues."
+
+- **Status:** Open
+- **Priority:** (Not yet set — needs Claude's read and Karvi's confirmation)
+- **Area:** Lines, Plan
+- **Env:** Testing
+
+**Confirmed mechanism, but which two of the four isn't resolvable from the screenshot alone — flagging
+the ambiguity rather than guessing.** All four stranded cards in the list get a MOVE button
+([`app/(ui)/line/LineScreen.tsx:445`](<../app/(ui)/line/LineScreen.tsx>:445)), and every one of them
+opens `MovePanel` through `openMoveForUnlined`
+([`LineScreen.tsx:142-154`](<../app/(ui)/line/LineScreen.tsx>:142)) with `joinCandidates` set —
+`allowLineJoin={Boolean(move.joinCandidates)}` ([`LineScreen.tsx:195`](<../app/(ui)/line/LineScreen.tsx>:195))
+is `true` for all of them, since `joinCandidates` is always an array (possibly empty), never
+`undefined`, off `lib/line/load.ts`'s `unlinedCards` construction. So for **all four**, not just two,
+moving to anywhere other than a line requires opening the collapsed "Not this — place it manually"
+toggle — **this is UIL-068's exact, already-logged mechanism**, not a new one. What isn't confirmable
+from here is whether she means that friction specifically, or something stronger for two particular
+cards (a move that outright fails, rather than one extra click to reach). Torchic and Blaziken are the
+same evolutionary chain (Torchic → Combusken → Blaziken) and both stranded together, which may be what
+"these two" refers to, but that's a guess, not a finding — needs her word on which two and what
+actually happens when she tries.
+
+**Cross-reference UIL-068** (manual placement collapsed behind a toggle — the confirmed mechanism
+above) **and UIL-070** (the same flow's back-half-from-Haul-Plan gap). If her experience turns out to
+be stronger than UIL-068's friction — an actual failure, not extra clicks — that would be a new,
+distinct defect this entry should be corrected to describe once she confirms.
+
+**The product ethos statement, relayed to the Senior BA directly and recorded here as her own words
+verbatim (see above), not paraphrased:** she wants "the user should always be able to move a card" held
+as a standing principle the team designs against — not something re-litigated fix by fix. This bears
+directly on UIL-064/065/068/069's whole thread: every one of those entries is, in some form, about a
+line-first flow narrowing or gating her access to a plain, unconditional move. Worth reading as the one
+principle underneath four separate reports rather than four unrelated complaints.
+
+**Priority rationale.** Flagging for Claude's read and Karvi's confirmation on the specific report; the
+product-ethos statement itself isn't a priority-rated bug, it's a standing constraint the team should
+carry into every future design in this area.
