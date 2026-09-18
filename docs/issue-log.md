@@ -36,7 +36,7 @@ current as of its last write; only the Status field itself can lag.
 ## UIL-001 — "Back half from page" gives no indication of what it means
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
+- **Status:** **Closed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check. **Confirmed resolved by Karvi on Testing.**
 - **Priority:** Low
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -59,7 +59,7 @@ step she can be walked through. Copy-only fix, safe to ship after go-live.
 ## UIL-002 — No definition of what counts as a "page"
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check.
+- **Status:** **Closed** — PR [#42](https://github.com/viantihu/pokemon-tcg-tracker/pull/42) MERGED to `develop`, QA-reviewed, deployed to Testing. Awaiting Karvi's confirmation; the binder-form layout was proven against the real DB view but not rendered in a browser, so her pass is the visual check. **Confirmed resolved by Karvi on Testing.**
 - **Priority:** Medium
 - **Area:** Settings › Binders
 - **Env:** Testing
@@ -637,11 +637,11 @@ Plan.
 ## UIL-008 — No progress indication during long operations
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#64](https://github.com/viantihu/pokemon-tcg-tracker/pull/64) MERGED to
+- **Status:** **Closed** — PR [#64](https://github.com/viantihu/pokemon-tcg-tracker/pull/64) MERGED to
   `develop` (squash `88a546c`), QA-reviewed, confirmed **deployed** to Testing. Shipped **option (1)
   only**, an indeterminate activity bar, and the PR argues *against* the determinate bar this entry
   recommended — see the resolution note. Awaiting Karvi's confirmation, including the question of whether
-  the bar still earns its place now that UIL-020 has made the sync much faster.
+  the bar still earns its place now that UIL-020 has made the sync much faster. **Confirmed resolved by Karvi on Testing.**
 - **Priority:** Medium (Claude's read — could argue Low)
 - **Area:** Sync, Plan
 - **Env:** Testing
@@ -675,10 +675,10 @@ three, though — nothing is broken, so Low is defensible if she would rather th
 ## UIL-009 — Clicking outside the collection popup discards everything typed
 
 - **Reported:** 2026-09-13
-- **Status:** **Fixed** — PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56) MERGED to
+- **Status:** **Closed** — PR [#56](https://github.com/viantihu/pokemon-tcg-tracker/pull/56) MERGED to
   `develop` 2026-09-14 (squash `0f16007`), QA-reviewed, and confirmed **deployed** to Testing on
   `258db13` (`Vercel`/`migrate`/`smoke`/`acceptance` all green). Awaiting Karvi's confirmation — the
-  behaviour is interaction-only and was never exercised in a browser.
+  behaviour is interaction-only and was never exercised in a browser. **Confirmed resolved by Karvi on Testing.** Note her later ruling: the confirm-on-dismiss dialog this added was subsequently REMOVED by UIL-038's autosave, and she confirmed that removal too — so this entry is closed on the behaviour that shipped here, not on a dialog that still exists.
 - **Priority:** High (Karvi's call)
 - **Area:** Collections
 - **Env:** Testing
@@ -1854,11 +1854,11 @@ against.
 ## UIL-022 — Moving a card into a collection from the Line or Plan screen orphans it
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
-- **Status:** **Fixed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
+- **Status:** **Closed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
   `develop` (squash `e0773e2`), QA-reviewed, confirmed deployed. **No migration needed** — every op
   already existed (`union_collection_targets` shipped in 0007). Awaiting Karvi's confirmation, and note
   the Haul Plan path is the one to test: it is a **separate** code path from the Line screen, so fixing
-  only `applyMove` would have left half of this live. See the corrections below.
+  only `applyMove` would have left half of this live. See the corrections below. **Confirmed resolved by Karvi on Testing 2026-09-18.**
 - **Priority:** High (Senior BA's read)
 - **Area:** Line, Plan, Collections
 - **Env:** Testing
@@ -1931,11 +1931,11 @@ wrong too. Fixed now; both corrected here rather than left standing.**
 ## UIL-023 — `applyMove` is a fourth write path and it is not atomic
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-014's fix)
-- **Status:** **Fixed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
+- **Status:** **Closed** — PR [#82](https://github.com/viantihu/pokemon-tcg-tracker/pull/82) MERGED to
   `develop` (squash `e0773e2`), QA-reviewed, confirmed deployed. `applyMove` is now **one**
   `apply_write_ops` call, verified by QA at `write.ts:87` with only reads preceding it. `applyDecision`
   remains un-transacted **deliberately** — converting it needs a migration, since `wishlist_item` can
-  only be INSERTed through the RPC, and this entry's root cause was scoped to `applyMove`.
+  only be INSERTed through the RPC, and this entry's root cause was scoped to `applyMove`. **Confirmed resolved by Karvi on Testing 2026-09-18.**
 - **Priority:** Medium (Senior BA's read)
 - **Area:** Line
 - **Env:** Testing
@@ -2530,6 +2530,25 @@ failure shape this entry is about, one layer over in test *data* rather than a t
 follow-up rather than its own UIL: audit what else in the suite leans on the id-only seed for a property
 it can't actually exercise.
 
+**A fourth instance, in the same mitigation-pattern file, found building PR #182 (open) — confirmed on
+`origin/develop` `5f0715e`.** `tests/support/pglite-rpc.ts`'s own `MIGRATIONS` array
+([`:17-26`](../tests/support/pglite-rpc.ts:17)) stops at `0008_collection_removal_ops.sql` — 0009
+(set metadata) and 0010 (the UIL-062 slot-release repair) were never added, so **every PGlite-backed
+test in the repo has been running against a schema two versions behind `develop`**, not the one version
+the earlier findings above already flagged this file for. #182 restores them (plus 0011). The
+implication is the same shape as the other three, one level up: any PGlite test that passed while
+depending on a column or behaviour added in 0009 or 0010 was passing for the wrong reason, and any test
+that *should* have failed against the real, current schema had no way to.
+
+**Four distinct harness-fidelity faults now, found across two days, in the file this entry's own
+suggested fix recommends moving everyone onto.** `count` returning the page size as the total under a
+`.range()` (would have re-armed UIL-031's truncation hazard silently); `order()` ignoring `{ ascending:
+false }`; `seedCatalogCards` writing only `id`/`name`, making every cascade duplicate assertion built on
+it vacuous; and now the migrations array running two versions behind. **Every one of the four was found
+by a developer checking, not by a test failing** — which is this entry's own thesis, restated by its own
+mitigation pattern needing the same kind of check applied to itself four separate times. Staying Open
+on that basis, not closed by any one of the four fixes.
+
 ## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
 
 - **Reported:** 2026-09-14 (not from Karvi — found by the Senior Dev session while fixing UIL-017)
@@ -2841,7 +2860,16 @@ identical Haul Plan case High, so this read shouldn't be treated as settled if s
 ## UIL-035 — Search and lookup swallow every error and report "not found," so an outage looks like a missing card
 
 - **Reported:** 2026-09-14 (not from Karvi — found proactively)
-- **Status:** Open
+- **Status:** **Fixed** — two of the three sites; PR [#168](https://github.com/viantihu/pokemon-tcg-tracker/pull/168)
+  MERGED to `develop` 2026-09-18 (squash `9d36796`), QA-gated on the merged tree, confirmed **deployed** to
+  Testing (Deploy green on `04dea51`, which contains it). `lookupCatalog` and backfill's search now **throw**
+  instead of returning `[]`, and the shared `CardLookup` separates the two cases for every screen that
+  injects a search: a failure reads "Could not search the catalog: … — the card may well exist; the catalog
+  just did not answer. Try again." and the last good results stay on screen. An empty list now means the
+  mirror was asked and had nothing, and nothing else. **The third site — `LookupScreen.tsx`'s own
+  `catch` → `notFound` — was deliberately left** (another session's fence); it benefits only partially via
+  the shared component and stays open under this entry, which closes when it ships. Not Karvi's report, so
+  no confirmation step is owed from her.
 - **Priority:** Medium (Senior BA's read)
 - **Area:** Lookup, Plan, Backfill
 - **Env:** Testing
@@ -2909,6 +2937,25 @@ not-found copy. Recording the constraint here since it's the entry a UIL-011 imp
 render "couldn't search just now" separately from "no match." Type-ahead's non-breaking behaviour is
 preserved either way; what changes is that a failure says so. #39's error-message work already produces
 a legible message to show, rather than needing new plumbing.
+
+**Update 2026-09-18: two of the three sites fixed, one deliberately left — confirmed against PR
+[#168](https://github.com/viantihu/pokemon-tcg-tracker/pull/168) (squash `9d36796`, merged).** Sites
+one and two now throw instead of swallowing: `app/(ui)/plan/actions.ts`'s `lookupCatalog` and
+`app/(ui)/backfill/actions.ts`'s search. `CardLookup.tsx` (the shared component both feed into) now
+separates the two cases for every caller, including the ones this PR didn't touch — an injected
+`search` that throws gets a legible message ("Could not search the catalog … the card may well exist;
+the catalog just did not answer") instead of a blank or a false miss, and **last good results stay on
+screen** rather than being cleared by a transient failure mid-typing. Chose a throw over the
+discriminated-result shape this entry originally suggested, and for a stated reason: `CardLookup`'s
+`search` prop type is shared across five screens under three different owners, and a throw keeps that
+signature byte-identical rather than forcing edits into files this fix had no business touching.
+
+**The third site — `app/(ui)/look/LookupScreen.tsx`'s own `catch` setting `notFound` — was deliberately
+NOT touched**, per the fix's own commit message: that file is a different session's fence. It benefits
+*partially* anyway, since its injected `searchCatalog` now flows through the same shared component and
+gets the honest message for a search-side failure — but its own separate `onPick` catch (the one quoted
+above, at the top of this entry) is untouched and still needs that session's attention. **Not closing
+this entry on a two-thirds fix** — the third site is exactly why.
 
 **Priority rationale (Senior BA's read): Medium.** Not High: nothing is corrupted, no data is at risk,
 and all three paths work correctly when the database does. Not Low: it makes a real failure
@@ -2980,11 +3027,11 @@ verbatim) rather than a new idea to evaluate, and it's on the screen she uses mo
 ## UIL-037 — After overriding a card's placement, both the spotlight panel and the worklist row still show the original suggestion
 
 - **Reported:** 2026-09-14
-- **Status:** **Fixed** — PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to
+- **Status:** **Closed** — PR [#109](https://github.com/viantihu/pokemon-tcg-tracker/pull/109) MERGED to
   `develop` 2026-09-14 (squash `e911c8c`), QA-reviewed, confirmed **deployed** to Testing (all four
   conditions green on `7cb1a36`). The spotlight panel and the worklist row now name the override
   destination instead of the original suggestion. Awaiting Karvi's confirmation — she confirmed UIL-027
-  from the same PR but has not spoken to this one, so it is not claimed on her behalf.
+  from the same PR but has not spoken to this one, so it is not claimed on her behalf. **Confirmed resolved by Karvi on Testing** — the override destination is named on both the spotlight panel and the worklist row.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Plan
 - **Env:** Testing
@@ -3055,7 +3102,7 @@ the one screen built for verifying them. Flagging for her confirmation since sev
 ## UIL-038 — No concept of a draft collection; saving is immediately live
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009, not the same defect — see note below)
-- **Status:** **Fixed** — PR [#126](https://github.com/viantihu/pokemon-tcg-tracker/pull/126) MERGED to
+- **Status:** **Closed** — PR [#126](https://github.com/viantihu/pokemon-tcg-tracker/pull/126) MERGED to
   `develop` 2026-09-16 (squash `e1f6a45`), QA-gated on the merged tree with the guards mutation-verified,
   confirmed **deployed** to Testing (Vercel / migrate / smoke / acceptance all green on `075f170`).
   **Scoped from Karvi's own answer to what "draft" protects against — losing in-progress work, not hiding
@@ -3071,7 +3118,7 @@ the one screen built for verifying them. Flagging for her confirmation since sev
   lose its binder if she opened "+ New binder" and then edited any other field before naming it — the
   server now falls back to the collection's current binder when the pick is unresolved. No component-render
   test infrastructure exists in this repo, so the click/type/close wiring is covered at the server and
-  scheduler layers rather than through the DOM. Awaiting Karvi's confirmation.
+  scheduler layers rather than through the DOM. Awaiting Karvi's confirmation. **Confirmed resolved by Karvi on Testing 2026-09-18** — including the removal of UIL-009's "discard changes?" dialog, which was a visible behaviour change on a screen she had already signed off, so her confirmation covers that too.
 - **Priority:** Unscoped — needs Karvi's clarification before a priority means anything
 - **Area:** Collections
 - **Env:** Testing
@@ -3195,7 +3242,13 @@ inconvenient. Karvi's own priority read wasn't given for this one specifically; 
 ## UIL-040 — Rebinding a collection to a different specialty binder changes the record but silently orphans the cards already shelved in the old one
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009)
-- **Status:** **Fixed (step 1 of 2)** — PR [#102](https://github.com/viantihu/pokemon-tcg-tracker/pull/102)
+- **Status:** **Fixed** — step 1 of 2, and **step 1 confirmed by Karvi on Testing 2026-09-18**: the
+  refusal fires and names what would be stranded. Step 2 (moving the copies so the rebind can succeed) is
+  **not built** and must land with UIL-032, so this entry stays open on step 2 rather than closing.
+  Worth recording because it bounds her always-movable ethos (UIL-072): she has explicitly endorsed a
+  **refusal** here, so that ethos is about never gating a card **move** behind another question — it is not
+  a blanket rule that the app may never refuse an action. A refusal that names the consequence, on an
+  operation that is not itself a move, is acceptable to her. — PR [#102](https://github.com/viantihu/pokemon-tcg-tracker/pull/102)
   MERGED to `develop` 2026-09-14 (squash `9497c6c`), QA-reviewed, confirmed **deployed** to Testing (all
   four conditions green on `7cb1a36`). **Step 1** closes the hazard: a rebind that would strand shelved
   copies is now *refused*, with a message naming what would be orphaned. **Step 2** — moving the copies
@@ -3748,7 +3801,17 @@ prevent. Same severity reasoning Karvi accepted for UIL-014/UIL-022.
 ## UIL-049 — A duplicate that is also a specialty card routes to the specialty binder instead of bulk
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#164](https://github.com/viantihu/pokemon-tcg-tracker/pull/164) MERGED to
+  `develop` 2026-09-18 (squash `b5d0690`), QA-gated on the merged tree, confirmed **deployed** to Testing
+  (Deploy green on `04dea51`, which contains it). The cascade now checks **duplicate before card class**, so
+  a second copy of the same specialty printing routes to bulk, exactly her rule; a specialty card that is
+  _not_ a duplicate still goes to the specialty binder. The reorder exposed specialty cards to the holo-swap
+  branch for the first time, and that branch built a `front-half` target on the specialty binder — a
+  placement the write layer cannot express. The same PR fixes it by inheriting a `specialty` target when
+  the displaced copy had no binder half, so holo-swap keeps its meaning (holo takes the normal's place, the
+  normal goes to bulk). **This entry's earlier "holo-swap still fires correctly" note was tested and found
+  false** — the test written to check it failed on the first run; body correction routed to intake.
+  Awaiting Karvi's confirmation when UAT resumes.
 - **Priority:** Medium (Claude's read — a routing-policy change, not a malfunction; needs Karvi's confirmation)
 - **Area:** Plan
 - **Env:** Testing
@@ -3769,6 +3832,28 @@ subtlety worth recording: `resolveDuplicate` matches on `artwork_group_id` (perc
 same `(set_id, local_id)`, and a full-art specialty usually has *different* art from the standard print,
 so this only fires for a second copy of the same specialty printing — which is precisely the case she
 described.
+
+**Correction 2026-09-18: the "interactions checked" note above was wrong about holo-swap, and PR
+[#164](https://github.com/viantihu/pokemon-tcg-tracker/pull/164) (squash `b5d0690`, merged) is what
+caught it.** The claim that holo-swap "still fires correctly" after the block swap was written from
+reasoning, not a test — and when #164 actually implemented the reorder and tested it, the assertion was
+false. The reason is precise: moving duplicate detection ahead of card class **exposes specialty cards
+to the holo-swap branch for the first time** — before the reorder, a specialty card returned at the
+card-class step and never reached the swap at all. The holo-swap branch builds its target from the
+*displaced* copy's placement, and a specialty copy has no binder half and no colour band, so the naive
+reorder emitted `{ kind: "front-half", binderId: <the specialty binder> }` — **a target the write layer
+cannot express**, since `placementForMove` clears half and band for a collection/specialty destination.
+That would have been a malformed target reaching the commit, not the clean displace-to-bulk the note
+claimed.
+
+**What shipped.** #164 fixes it by inheriting a `specialty` target (not a front-half one) when the
+displaced copy has no binder half — preserving holo-swap's meaning exactly (the holo takes the normal's
+place, the normal goes to bulk) while emitting a placement that can actually be written. Revert-checked
+each half against its own test: putting card class back above duplicate fails the bulk test; dropping
+the no-binder-half inheritance fails the holo-swap test. The lesson for this log: an "interactions
+checked" note written from reading rather than from a failing-then-passing test is exactly the kind of
+claim that reads as verified while being wrong — the same shape UIL-029 is about, one level up in a
+log entry rather than a test double.
 
 **Priority rationale.** Medium: nothing is broken or mis-recorded today — the current routing is a
 defensible default, just not her stated policy. It's a deliberate behavior change she's requesting, so it
@@ -3933,7 +4018,16 @@ functional, and the cause is external data rather than a defect in the app. Fine
 ## UIL-055 — There is no way to browse a binder's actual cards, and the binder card's capacity stats read awkwardly
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#159](https://github.com/viantihu/pokemon-tcg-tracker/pull/159) MERGED to
+  `develop` 2026-09-18 (squash `5f0715e`), QA-gated on the merged tree (QA's hold on the unpaged
+  whole-collection read was resolved before merge), confirmed **deployed** to Testing (Deploy green on
+  `04dea51`, which contains it). Capacity now renders **one card per binder** with front and back as
+  labelled sections inside it, not a card per half; clicking a binder expands an **image-first grid of every
+  card shelved there** (collapsed by default, mounts nothing until opened — UIL-034's fold discipline, and
+  the visual-search principle from card lookup); the capacity stats read as horizontal `label … value` rows.
+  Two things for her pass specifically: the stat orientation is the dev's reading of "fix the orientation",
+  not a layout she specified, and the UI was verified by reading the component, not in a browser — so her
+  look is the visual check. Awaiting Karvi's confirmation when UAT resumes.
 - **Priority:** Medium (Claude's read — needs Karvi's confirmation)
 - **Area:** Binders
 - **Env:** Testing
@@ -5010,6 +5104,18 @@ review.** It's the same test UIL-021 already covers (`tests/catalog/artwork.test
 assertion), a second failure mode on that one test rather than a new, independent CI-billing
 consequence, so it belongs with the existing entry. See UIL-021 for the detail; PR
 [#175](https://github.com/viantihu/pokemon-tcg-tracker/pull/175) (merged) is its fix.
+
+**Update 2026-09-18: a lasting consequence of making the repo public — branch protection on `develop`,
+Karvi-approved, confirmed live directly against the API.** `GET
+/repos/viantihu/pokemon-tcg-tracker/branches/develop/protection` reports required status checks
+`verify`, `migration-order`, and `Vercel` (strict mode off) — this option simply wasn't available on
+the private Free-plan repo before the visibility change this entry made. Effective immediately for
+every PR into `develop`, docs-only issue-log PRs included: GitHub now blocks the merge
+(`mergeStateStatus: BLOCKED`) until all three report `SUCCESS` on the PR's head commit, typically a
+few minutes after the last push, and direct pushes to `develop` are refused outright. Confirmed
+directly on this session's own PR #189: sat `BLOCKED` on `verify` for roughly two minutes, then merged
+cleanly once it passed. If a PR shows only the artwork "scale sanity" test failing, that is the UIL-021
+flake (previous update, PR #175) — re-run it; anything else red is real.
 
 ## UIL-067 — The decision card is too crowded and shows information that isn't helpful for making the actual call
 

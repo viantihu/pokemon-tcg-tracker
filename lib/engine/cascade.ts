@@ -122,6 +122,16 @@ export interface CascadeResult {
   newLine?: NewLinePlan | null;
   /** An existing line slot the incoming fills (step 4a). */
   filledExistingSlot?: { lineId: string; stageIndex: number } | null;
+  /**
+   * Set when `target` (the existing line's own band) differs from the incoming card's own natural
+   * band (UIL-069). Karvi ruled that "the line's band wins" (UIL-065) must not be a SILENT default
+   * when the two disagree — she is asked, every time, with neither option pre-selected. `target`
+   * still names the line option (unchanged from UIL-065, so nothing downstream that already reads
+   * `target` needs to change); this carries the OTHER option plus the line's own species root, so a
+   * caller that presents the choice does not have to re-derive it. `lineRootDexId` is a bare number
+   * rather than a display label on purpose — naming it is a display concern, not an engine one.
+   */
+  bandMismatch?: { ownColorTarget: PlacementTarget; lineRootDexId: number } | null;
   /** Owned copies to pull from front halves into a new line's slots. */
   pullActions?: PullAction[];
   /** Wishlist proposals for open placeholders / a stolen-line stage. */
@@ -250,31 +260,47 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
     return result;
   }
 
-  // STEP 2 — CARD CLASS. Specialty class → specialty binder.
-  if (incoming.card.cardClass === "specialty") {
-    return {
-      ...head,
-      step: "card-class",
-      reason: `cardClass = specialty (${incoming.card.rarity ?? "specialty"}); routes to the specialty binder.`,
-      target: { kind: "specialty", binderId: specialtyBinderId(ctx), collectionId: null },
-    };
-  }
-
-  // STEP 3 — DUPLICATE, vs SHELVED copies only. Holo-swap, else bulk.
+  /**
+   * STEP 2 — DUPLICATE, vs SHELVED copies only. Holo-swap, else bulk.
+   *
+   * BEFORE the card-class check, deliberately (UIL-049). Her rule: "All cards, regardless of whether
+   * they are specialty or not, must be suggested as 'Bulk' if they are duplicates." Card class used to
+   * return first, so a specialty printing that duplicated something already shelved went to the
+   * specialty binder — the opposite of that. A reordering, not a removal: a specialty card that is NOT a
+   * duplicate still routes to the specialty binder in the step below.
+   *
+   * Narrow by construction: `resolveDuplicate` keys on `artworkGroupId` or the same `(setId, localId)`,
+   * and a full-art specialty usually has different art from the standard print — so this fires for a
+   * second copy of the SAME specialty printing, which is the case she described.
+   */
   const dup = resolveDuplicate(incoming.card, incoming.variant, ctx.owned, ctx.openBlockNeeds ?? 0);
   if (dup.kind === "holo-swap") {
     const inherit = dup.swap.incomingInherits;
     const inheritedBand = (inherit.colorBand as Band) ?? b;
+    /**
+     * A displaced copy with NO binder half was in a specialty binder, which has neither halves nor
+     * colour bands (system-design §4). Inheriting its place therefore means a `specialty` target, not a
+     * front half.
+     *
+     * This branch only became reachable when UIL-049 moved the duplicate check above the card-class
+     * check: before that a specialty card returned at card-class and never reached the swap. Without it
+     * the swap emitted `{kind: "front-half", binderId: <the specialty binder>}` — a combination the write
+     * layer cannot express, since `placementForMove` clears half and band for a collection destination.
+     * The issue entry recorded this interaction as already safe; it was not, and the test above is what
+     * caught it.
+     */
     const target: PlacementTarget =
-      inherit.binderHalf === "back" && inherit.lineSlotId
-        ? {
-            kind: "back-half-line",
-            binderId: inherit.binderId,
-            band: inheritedBand,
-            lineId: "inherited",
-            stageIndex: -1,
-          }
-        : { kind: "front-half", binderId: inherit.binderId, band: inheritedBand };
+      inherit.binderHalf === null
+        ? { kind: "specialty", binderId: inherit.binderId, collectionId: null }
+        : inherit.binderHalf === "back" && inherit.lineSlotId
+          ? {
+              kind: "back-half-line",
+              binderId: inherit.binderId,
+              band: inheritedBand,
+              lineId: "inherited",
+              stageIndex: -1,
+            }
+          : { kind: "front-half", binderId: inherit.binderId, band: inheritedBand };
     return {
       ...head,
       step: "duplicate",
@@ -302,6 +328,19 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
     };
   }
 
+  // STEP 3 — CARD CLASS. Specialty class → specialty binder.
+  //
+  // Now AFTER the duplicate check (UIL-049), so a duplicate specialty printing is bulked rather than
+  // shelved a second time. Unchanged for every non-duplicate specialty card.
+  if (incoming.card.cardClass === "specialty") {
+    return {
+      ...head,
+      step: "card-class",
+      reason: `cardClass = specialty (${incoming.card.rarity ?? "specialty"}); routes to the specialty binder.`,
+      target: { kind: "specialty", binderId: specialtyBinderId(ctx), collectionId: null },
+    };
+  }
+
   // STEP 4 — LINE PARTICIPATION. Stage 1/2 can JOIN an existing line or (viable) CREATE one; a Basic
   // can only JOIN — never create, since manual creation from a single card is her call, not the
   // cascade's (UIL-056: she approves every new line). A Basic with no existing line to join falls
@@ -319,10 +358,18 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
       // display-space `Band` union.
       const lineBand = existing.line.colorBand as Band;
       if (existing.slot.state === "placeholder" || existing.slot.state === "block") {
+        // A colour mismatch is surfaced, never silently decided (UIL-069 — Karvi's ruling reverses
+        // UIL-065's own "the line's band wins" default). `target` still names the line option so
+        // nothing that already reads it needs to change; `bandMismatch` carries the other option for
+        // a caller that presents both, and its ABSENCE (the common case: the two bands agree) means
+        // there is nothing to ask.
+        const mismatch = lineBand !== b;
         return {
           ...head,
           step: "line-existing",
-          reason: `Fills the open ${existing.slot.stage} slot of the existing ${lineBand} line, in the back half.`,
+          reason: mismatch
+            ? `Fills the open ${existing.slot.stage} slot of the existing ${lineBand} line, in the back half — but this card's own colour is ${b}, so which one wins is her call (UIL-069).`
+            : `Fills the open ${existing.slot.stage} slot of the existing ${lineBand} line, in the back half.`,
           target: {
             kind: "back-half-line",
             binderId: existing.line.binderId,
@@ -334,6 +381,16 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
             lineId: existing.line.id,
             stageIndex: existing.slot.stageIndex,
           },
+          bandMismatch: mismatch
+            ? {
+                ownColorTarget: {
+                  kind: "front-half",
+                  binderId: frontHalfBinderId(ctx, b),
+                  band: b,
+                },
+                lineRootDexId: existing.line.rootDexId,
+              }
+            : null,
         };
       }
       // Slot already filled → this stage is tracked once; the extra copy goes to the front half,

@@ -12,7 +12,6 @@
 import { availableVariants, toCardVariants } from "@/lib/plan";
 import {
   commitCardPlacement,
-  commitHaul,
   deriveSpotlightPlacement,
   existingCopyIds,
   getOwnerContext,
@@ -22,6 +21,7 @@ import {
   loadPlanFingerprint,
   PlacementChangedError,
   planFromDraft,
+  type BandMismatchChoice,
   type DraftItem,
   type PlanItem,
   type ProposedPull,
@@ -49,7 +49,22 @@ function toLookupCard(r: Row<"catalog_card">): LookupCard {
   };
 }
 
-/** Type-ahead against the local mirror. Returns [] on error so typing never breaks. */
+/**
+ * Type-ahead against the local mirror.
+ *
+ * THROWS on failure rather than returning `[]` (UIL-035). It used to swallow everything, so a Supabase
+ * outage, an expired session and a genuinely unknown card all produced the same empty dropdown reading
+ * "No match in the local mirror" — telling her the card does not exist when the truth was that nothing
+ * was asked. During an outage that is the single most misleading thing the app could say.
+ *
+ * Deliberately a throw and not a result union: `CardLookup`'s `search` prop is
+ * `(q) => Promise<LookupCard[]>` and five screens across three different owners pass their own
+ * implementation into it. Widening that type would force edits in files this change has no business
+ * touching, whereas throwing keeps the signature identical and lets the shared component distinguish
+ * the two cases for every caller at once — including the ones I am not editing.
+ *
+ * An empty array now means exactly one thing: the mirror was asked and had nothing.
+ */
 export async function lookupCatalog(query: string): Promise<LookupCard[]> {
   const q = query.trim();
   if (q.length < 2) return [];
@@ -57,8 +72,8 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
     const { db } = await getOwnerContext();
     const rows = await catalogCardRepo.search(db, q, 12);
     return rows.map(toLookupCard);
-  } catch {
-    return [];
+  } catch (err) {
+    throw new Error(`Could not search the catalog: ${errorMessage(err)}`);
   }
 }
 
@@ -116,32 +131,6 @@ export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
 }
 
 /**
- * Commit the haul: write all records + audit trail in one transaction (M10).
- *
- * `haulId` is null when the pass only routed existing copies — no cards were acquired, so no haul
- * event is recorded (see lib/plan/commit.ts).
- */
-export async function commitHaulAction(
-  input: CommitActionInput,
-): Promise<
-  { ok: true; haulId: string | null; counts: CommitCounts } | { ok: false; error: string }
-> {
-  if (input.draft.length === 0) return { ok: false, error: "No cards in the haul." };
-  try {
-    const { db } = await getOwnerContext();
-    const res = await commitHaul(db, {
-      source: input.source,
-      notes: input.notes ?? null,
-      draft: input.draft,
-      overrides: input.overrides,
-    });
-    return { ok: true, haulId: res.haulId, counts: res.counts };
-  } catch (err) {
-    return { ok: false, error: errorMessage(err) };
-  }
-}
-
-/**
  * Shelve ONE card, the moment she clicks Done (UIL-027).
  *
  * Replaces the model where "Done" was a client-side tick and nothing persisted until a single
@@ -174,6 +163,8 @@ export async function shelveCardAction(input: {
   expectedDigest?: string | null;
   /** Copy ids she ticked to move into the line this card starts (UIL-061). Absent ⇒ move nothing. */
   confirmedPulls?: string[];
+  /** Her resolution of a colour mismatch, when the spotlight showed one (UIL-069). Absent ⇒ unresolved. */
+  bandChoice?: "line" | "own-color" | null;
 }): Promise<
   | { ok: true; haulId: string | null; counts: CommitCounts; stamp: string }
   /**
@@ -199,6 +190,7 @@ export async function shelveCardAction(input: {
       haulId: input.haulId ?? null,
       expectedDigest: input.expectedDigest ?? null,
       confirmedPulls: input.confirmedPulls ?? [],
+      bandChoice: input.bandChoice ?? null,
     });
     const stamp = await loadPlanFingerprint(db, input.pendingCopyIds ?? []);
     return { ok: true, haulId: res.haulId, counts: res.counts, stamp };
@@ -226,10 +218,14 @@ export async function shelveCardAction(input: {
  * estimate, because re-planning the whole tail would cost eight uncached reads per Done across a
  * 685-card sitting.
  */
-export async function refreshSpotlightAction(input: {
-  card: DraftPayloadItem;
-}): Promise<
-  | { ok: true; item: PlanItem | null; digest: string | null; proposedPulls: ProposedPull[] }
+export async function refreshSpotlightAction(input: { card: DraftPayloadItem }): Promise<
+  | {
+      ok: true;
+      item: PlanItem | null;
+      digest: string | null;
+      proposedPulls: ProposedPull[];
+      bandMismatch: BandMismatchChoice | null;
+    }
   | { ok: false; error: string }
 > {
   try {
@@ -253,6 +249,7 @@ export async function refreshSpotlightAction(input: {
       item: res?.item ?? null,
       digest: res?.digest ?? null,
       proposedPulls: res?.proposedPulls ?? [],
+      bandMismatch: res?.bandMismatch ?? null,
     };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };

@@ -48,10 +48,18 @@
  * the property (b) was reaching for.
  */
 
-import { band, placeCard, type CascadeResult, type PlacementTarget } from "@/lib/engine";
+import {
+  band,
+  buildChain,
+  placeCard,
+  type CascadeResult,
+  type IncomingCard,
+  type PlacementTarget,
+} from "@/lib/engine";
+import type { MoveDestination } from "@/lib/line/types";
 import type { DbClient, Row } from "@/lib/repo";
 import { buildIncoming, loadPlanContext, type DraftItem, type PlanContext } from "./context";
-import { toPlanItem } from "./assemble";
+import { describeTarget, toPlanItem } from "./assemble";
 import type { PlanItem } from "./types";
 
 /**
@@ -107,6 +115,29 @@ export interface ProposedPull {
   fromLine: boolean;
 }
 
+/**
+ * The two-way ask when a card's own colour differs from the line it would join (UIL-069) — Karvi's
+ * ruling reverses UIL-065's own "the line's band wins" default. Both options are real, "no rule"
+ * placements; neither is a recommendation, so a caller must not pre-select one.
+ */
+export interface BandMismatchChoice {
+  /** e.g. "PRIMEAPE LINE" — a label she recognizes, not just "the line". */
+  lineSpeciesLabel: string;
+  /** "Binder 1 · Back · Orange" — the destination if she joins the line. */
+  lineDestination: string;
+  /** "Binder 1 · Front · Purple" — the destination if she files it by its own colour instead. */
+  ownColorDestination: string;
+  /**
+   * Ready to send back verbatim as `override` if she picks "file by its own colour" — translated
+   * here so the client never has to know `PlacementTarget`'s shape, the same reason `lib/line/move.ts`
+   * keeps `describeMove`/`moveNameLookups` server-side. There is deliberately no equivalent for the
+   * LINE option: joining it is the cascade's own default (no override), confirmed by `bandChoice:
+   * "line"` plus the ordinary digest check instead — carrying an override for it would route through
+   * `writeOverriddenCard`, which skips the slot-fill side effect this option actually needs.
+   */
+  ownColorMoveDestination: MoveDestination;
+}
+
 export interface SpotlightPlacement {
   /** The row to display — freshly derived, so it names the pocket the write will actually use. */
   item: PlanItem;
@@ -117,6 +148,8 @@ export interface SpotlightPlacement {
    * members. Nothing here moves unless its `copyId` comes back in `confirmedPulls`.
    */
   proposedPulls: ProposedPull[];
+  /** Present only for a colour mismatch on an existing line's open slot (UIL-069); null otherwise. */
+  bandMismatch: BandMismatchChoice | null;
 }
 
 /**
@@ -148,6 +181,42 @@ export function derivePlacementFrom(pc: PlanContext, card: DraftItem): Spotlight
     item: toPlanItem(incoming, result, bandKey, pc.lookups),
     digest: placementDigest(result),
     proposedPulls: proposedPullsFor(result, pc, card.id),
+    bandMismatch: bandMismatchChoiceFor(result, pc),
+  };
+}
+
+/**
+ * The two-option ask when the line's band and the card's own band disagree (UIL-069). `target`
+ * already names the line option (UIL-065 unchanged); this only has to describe it and its
+ * alternative for display — the species label needs its own chain-walk because a `line_slot` names
+ * no species (system-design §6), the same reason `lib/line/load.ts` walks from `root_dex_id` too.
+ */
+function bandMismatchChoiceFor(result: CascadeResult, pc: PlanContext): BandMismatchChoice | null {
+  const mismatch = result.bandMismatch;
+  if (!mismatch) return null;
+  const seed = pc.ctx.catalog.find(
+    (c) => !c.isDigitalOnly && c.dexId.includes(mismatch.lineRootDexId),
+  );
+  const chain = seed
+    ? buildChain({ id: "r", card: seed, variant: "normal" } as IncomingCard, pc.ctx.catalog)
+    : [];
+  const rootName = chain[0]?.name;
+  // The engine only ever sets a front-half own-colour target (see cascade.ts STEP 4) — the fallback
+  // is defensive, not a supported second shape.
+  const ownColorMoveDestination: MoveDestination =
+    mismatch.ownColorTarget.kind === "front-half"
+      ? {
+          kind: "shelf",
+          binderId: mismatch.ownColorTarget.binderId ?? "",
+          half: "front",
+          band: mismatch.ownColorTarget.band,
+        }
+      : { kind: "bulk" };
+  return {
+    lineSpeciesLabel: rootName ? `${rootName.toUpperCase()} LINE` : "EVOLUTION LINE",
+    lineDestination: describeTarget(result.target, pc.lookups),
+    ownColorDestination: describeTarget(mismatch.ownColorTarget, pc.lookups),
+    ownColorMoveDestination,
   };
 }
 

@@ -45,8 +45,11 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
       imageUrl: r.image_url,
       variants: availableVariants(toCardVariants(r.variants)),
     }));
-  } catch {
-    return [];
+  } catch (err) {
+    // Throws rather than returning [] (UIL-035): an empty result must mean "the mirror had nothing",
+    // not "the request failed". See lookupCatalog in ../plan/actions.ts for why a throw and not a
+    // result union.
+    throw new Error(`Could not search the catalog: ${errorMessage(err)}`);
   }
 }
 
