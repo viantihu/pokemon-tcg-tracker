@@ -23,7 +23,13 @@ import {
   type SyncPlanBundle,
   type SyncPreview,
 } from "@/lib/sync";
-import { lastSyncSnapshotRepo, unresolvedEntryRepo, type Row } from "@/lib/repo";
+import {
+  applyWriteOps,
+  lastSyncSnapshotRepo,
+  unresolvedEntryRepo,
+  type DbClient,
+  type Row,
+} from "@/lib/repo";
 import type { AppliedSnapshot } from "@/lib/sync";
 import { errorMessage } from "@/lib/errors";
 import { lookupCatalog } from "../plan/actions";
@@ -85,21 +91,62 @@ export async function undoLastSync(): Promise<{ ok: true } | ActionError> {
 
 /**
  * Retry the unresolved queue against the refreshed catalog + learned aliases (A.5). Promotes every
- * WAITING entry that now resolves as an ADDED (fast-path) and applies. A no-op when nothing resolves.
+ * WAITING entry that now resolves as an ADDED (fast-path) and applies.
+ *
+ * ALSO STAMPS THE ATTEMPT ON THE ENTRIES THAT DID NOT RESOLVE (UIL-046). The self-heal itself always
+ * worked — an entry that becomes resolvable is promoted on this path and on a full import — but nothing
+ * ever recorded a retry against a row that stayed waiting. So the queue told her "self-heals when the
+ * catalog catches up" while showing every waiting row as never retried, forever. The promise was kept
+ * and the evidence of it was missing, which from her side is indistinguishable from a dead feature.
+ *
+ * `last_retry_sync` and `retry_count` already existed on the table and were already surfaced by
+ * `toEntryView` — they were simply never written on this path. No migration.
+ *
+ * Stamped even when `promoted === 0`, which is the whole point: that is exactly the case that used to
+ * return without recording anything. One `apply_write_ops` call, so the sweep is atomic with itself.
  */
 export async function retryUnresolvedNow(): Promise<
-  { ok: true; promoted: number; applied: boolean } | ActionError
+  { ok: true; promoted: number; applied: boolean; stamped: number } | ActionError
 > {
   try {
     const { db } = await getOwnerContext();
     const { bundle } = await runSyncPipeline(db, null);
     const promoted = bundle.queue.archiveEntryIds.length;
-    if (promoted === 0) return { ok: true, promoted: 0, applied: false };
-    await executeApply(db, bundle);
-    return { ok: true, promoted, applied: true };
+
+    // Every WAITING row this sweep looked at and did NOT promote. Read before the apply, because
+    // applying archives the promoted ones and would leave nothing to distinguish them by.
+    const promotedIds = new Set(bundle.queue.archiveEntryIds);
+    const stillWaiting = (await unresolvedEntryRepo.listWaiting(db)).filter(
+      (e) => !promotedIds.has(e.id),
+    );
+
+    if (promoted > 0) await executeApply(db, bundle);
+
+    const stamped = await stampRetrySweep(db, stillWaiting);
+    return { ok: true, promoted, applied: promoted > 0, stamped };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }
+}
+
+/**
+ * Record that a retry sweep examined these entries and none of them resolved (UIL-046).
+ *
+ * Deliberately a separate write from the apply above rather than folded into its payload: a stamp is
+ * telemetry, and it must not be able to fail a promotion that genuinely succeeded, nor be rolled back by
+ * one. The reverse also holds — if the stamp fails, the promotion still stands.
+ */
+async function stampRetrySweep(db: DbClient, entries: Row<"unresolved_entry">[]): Promise<number> {
+  if (entries.length === 0) return 0;
+  const now = new Date().toISOString();
+  await applyWriteOps(db, {
+    ops: entries.map((e) => ({
+      op: "update_unresolved_entry" as const,
+      id: e.id,
+      patch: { last_retry_sync: now, retry_count: e.retry_count + 1 },
+    })),
+  });
+  return entries.length;
 }
 
 function toEntryView(e: Row<"unresolved_entry">): QueueEntryView {

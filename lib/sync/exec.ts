@@ -411,6 +411,12 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
 
 export interface ManualMatchResult {
   learnedAlias: { locale: string; dexCode: string; tcgdexSetId: string } | null;
+  /**
+   * Set when the match was pinned but NO alias was learned because it would have crossed locales
+   * (UIL-047 C3). Non-null is not a failure — the card is matched — but she needs telling, or "one match
+   * drains the set" silently does not happen and looks like the retry being broken.
+   */
+  aliasSkippedReason?: string | null;
   created: number;
 }
 
@@ -433,12 +439,40 @@ export async function manualMatch(
   const now = nowIso();
   const ops: WriteOp[] = [];
 
-  // Learn the set alias when the set itself was unknown.
+  /**
+   * Learn the set alias when the set itself was unknown — BUT NEVER ACROSS LOCALES (UIL-047 C3).
+   *
+   * The manual match itself is her explicit decision about ONE row and is always honoured. The alias is
+   * the app GENERALISING that decision to every future row of the same set, and generalising it across
+   * languages is what turns one uncertain match into a permanent stream of confident wrong ones.
+   *
+   * Why a non-English entry can never learn a correct alias today: `catalog_card` has no `locale`
+   * column and the mirror is English-only, so every card she is offered in the picker IS an English
+   * printing. Learning `ja:<jp code> → <english set>` therefore points a Japanese set code at an English
+   * set by construction, and every later Japanese row of that set then resolves to whichever English
+   * card happens to share the collector number — a wrong MATCH, not a miss, which is far worse because
+   * nothing flags it.
+   *
+   * This has already happened on her data: `ja:m6 → swshp` is live, taught because TCGdex has no Battle
+   * Academy set to point at. It fails safe only by luck — `swshp` does not happen to contain that card
+   * number. And with no delete path for `set_alias` anywhere, one uncertain match is permanent.
+   *
+   * Correct under BOTH open answers to the product question this issue is blocked on. If a Japanese
+   * printing is a distinct card, the alias is simply wrong. If it is the same card in another language,
+   * a set-code alias is still the wrong mechanism — matching would go through locale-aware lookup, not
+   * by pointing one locale's set code at another's set id. So the guard needs no decision from her.
+   */
   let learnedAlias: ManualMatchResult["learnedAlias"] = null;
+  let aliasSkippedReason: string | null = null;
   if (entry.reason === "UNKNOWN_SET") {
     const locale = entry.locale === "ja" || entry.locale === "Japanese" ? "ja" : "en";
     const { rawCode } = parseDexId(entry.dex_id);
-    if (rawCode && card.set_id) {
+    if (locale !== "en") {
+      aliasSkippedReason =
+        `This card is pinned, but the set was not learned: the entry is ${locale} and the catalog ` +
+        `holds only English printings, so remembering this set would make every other ${locale} card ` +
+        `from it match an English card with the same number. Those rows stay in the queue instead.`;
+    } else if (rawCode && card.set_id) {
       ops.push({
         op: "upsert_set_alias",
         locale,
@@ -493,7 +527,7 @@ export async function manualMatch(
 
   await applyWriteOps(db, { ops, resyncGroupIds: [groupId] });
 
-  return { learnedAlias, created: qty };
+  return { learnedAlias, aliasSkippedReason, created: qty };
 }
 
 /** Dismiss a WAITING entry — excluded from auto-retry, kept so a re-export doesn't re-park it (A.4). */
