@@ -3,7 +3,7 @@
  *
  * The grouping is FUNCTIONAL: the plan is worked top-to-bottom in this exact order, mirroring the
  * physical sort. These tests pin the order down —
- *   colour band in rainbow order → basics before non-basics → action order within a sub-group —
+ *   colour band in rainbow order → basics before non-basics → name A–Z within a sub-group (UIL-076) —
  * plus the structural invariants (every band present even at zero cards, empty Pink reserved,
  * unknown bands never dropped, stable tiebreak).
  */
@@ -33,7 +33,7 @@ function item(over: Partial<PlanItem> & { bandKey: string; action: PlanActionKin
     name: over.name ?? `Card ${seq}`,
     setId: null,
     localId: null,
-    // Display-only (UIL-016); grouping is by band/basic/action and never reads it.
+    // Display-only (UIL-016); grouping is by band/basic/name and never reads it.
     imageUrl: null,
     variant: "normal",
     stage: over.isBasic ? "Basic" : "Stage1",
@@ -82,21 +82,101 @@ describe("groupPlan", () => {
     expect(red.subgroups[0].rows[0].name).toBe("Basic");
   });
 
-  it("orders rows inside a sub-group by ACTION_ORDER", () => {
-    // Feed every action in reverse, expect the canonical work order back.
-    const reversed = [...ACTION_ORDER].reverse();
-    const rows = reversed.map((action) => item({ bandKey: "red", action, isBasic: false }));
-    const groups = groupPlan(rows, BANDS);
-    const red = groups.find((g) => g.bandKey === "red")!;
-    const nonbasic = red.subgroups.find((s) => s.kind === "nonbasic")!;
-    expect(nonbasic.rows.map((r) => r.action)).toEqual([...ACTION_ORDER]);
+  /* UIL-076 — "the cards must be in alphabetical order." Rows inside a sub-group sort by name; the
+   * cascade action is still on every row as its chip but no longer decides where the row sits. */
+  describe("orders rows inside a sub-group A–Z by name (UIL-076)", () => {
+    it("sorts by name even when that contradicts the action order the rows used to follow", () => {
+      // Every action in canonical work order, each given a name that runs the OTHER way (Zubat is a
+      // PULL, Abra is a BULK). Pre-fix this came back in ACTION_ORDER, i.e. Z→A.
+      const namesZtoA = ["Zubat", "Vulpix", "Onix", "Mew", "Growlithe", "Eevee", "Abra"];
+      const rows = ACTION_ORDER.map((action, i) =>
+        item({ bandKey: "red", action, isBasic: false, name: namesZtoA[i] }),
+      );
+      const groups = groupPlan(rows, BANDS);
+      const red = groups.find((g) => g.bandKey === "red")!;
+      const nonbasic = red.subgroups.find((s) => s.kind === "nonbasic")!;
+      expect(nonbasic.rows.map((r) => r.name)).toEqual([...namesZtoA].reverse());
+      // And the actions came along for the ride, in reverse — proof the sort key really changed.
+      expect(nonbasic.rows.map((r) => r.action)).toEqual([...ACTION_ORDER].reverse());
+    });
+
+    it("is case- and accent-insensitive, so Flabébé and a lower-cased name file where they belong", () => {
+      const rows = [
+        item({ bandKey: "green", action: "FRONT", isBasic: true, name: "zubat" }),
+        item({ bandKey: "green", action: "FRONT", isBasic: true, name: "Flabébé" }),
+        item({ bandKey: "green", action: "FRONT", isBasic: true, name: "Abra" }),
+        item({ bandKey: "green", action: "FRONT", isBasic: true, name: "farfetch'd" }),
+      ];
+      const groups = groupPlan(rows, BANDS);
+      const green = groups.find((g) => g.bandKey === "green")!;
+      expect(green.subgroups[0].rows.map((r) => r.name)).toEqual([
+        "Abra",
+        "farfetch'd",
+        "Flabébé",
+        "zubat",
+      ]);
+    });
+
+    it("puts a base name before its suffixed form (Charizard, then Charizard ex)", () => {
+      const rows = [
+        item({ bandKey: "red", action: "SPEC", isBasic: false, name: "Charizard ex" }),
+        item({ bandKey: "red", action: "FRONT", isBasic: false, name: "Charmeleon" }),
+        item({ bandKey: "red", action: "FRONT", isBasic: false, name: "Charizard" }),
+      ];
+      const groups = groupPlan(rows, BANDS);
+      const red = groups.find((g) => g.bandKey === "red")!;
+      expect(red.subgroups[0].rows.map((r) => r.name)).toEqual([
+        "Charizard",
+        "Charizard ex",
+        "Charmeleon",
+      ]);
+    });
+
+    it("breaks a same-name tie on collector number, numerically (9 before 10, not '10' before '9')", () => {
+      const rows = [
+        item({ bandKey: "yellow", action: "FRONT", isBasic: true, name: "Pikachu", localId: "10" }),
+        item({ bandKey: "yellow", action: "FRONT", isBasic: true, name: "Pikachu", localId: "9" }),
+        item({
+          bandKey: "yellow",
+          action: "FRONT",
+          isBasic: true,
+          name: "Pikachu",
+          localId: "025",
+        }),
+      ];
+      const groups = groupPlan(rows, BANDS);
+      const yellow = groups.find((g) => g.bandKey === "yellow")!;
+      expect(yellow.subgroups[0].rows.map((r) => r.localId)).toEqual(["9", "10", "025"]);
+    });
   });
 
-  it("is a stable sort: equal actions keep input order", () => {
+  it("is a stable sort: identical name and number keep input order", () => {
+    // Three copies of the same printing — the order she typed or synced them in is the only signal.
     const rows = [
-      item({ bandKey: "green", action: "FRONT", incomingId: "first", isBasic: true }),
-      item({ bandKey: "green", action: "FRONT", incomingId: "second", isBasic: true }),
-      item({ bandKey: "green", action: "FRONT", incomingId: "third", isBasic: true }),
+      item({
+        bandKey: "green",
+        action: "FRONT",
+        incomingId: "first",
+        isBasic: true,
+        name: "Scyther",
+        localId: "123",
+      }),
+      item({
+        bandKey: "green",
+        action: "FRONT",
+        incomingId: "second",
+        isBasic: true,
+        name: "Scyther",
+        localId: "123",
+      }),
+      item({
+        bandKey: "green",
+        action: "FRONT",
+        incomingId: "third",
+        isBasic: true,
+        name: "Scyther",
+        localId: "123",
+      }),
     ];
     const groups = groupPlan(rows, BANDS);
     const green = groups.find((g) => g.bandKey === "green")!;

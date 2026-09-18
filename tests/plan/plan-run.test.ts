@@ -159,10 +159,13 @@ describe("planFromDraft + groupPlan (mixed haul)", () => {
     expect(occupied).toEqual(["red", "green", "light_blue", "white"]);
   });
 
-  it("within Red, the Stage-1 new line precedes the specialty card (NEWLINE before SPEC)", () => {
+  it("within Red, non-basics run A–Z by name regardless of action (UIL-076)", () => {
+    // Charizard ex (SPEC) files before Charmeleon (NEWLINE): "Chari…" < "Charm…". Pre-UIL-076 this
+    // came back NEWLINE-then-SPEC because the sort key was the cascade action, not the name.
     const red = groups.find((g) => g.bandKey === "red")!;
     const nonbasic = red.subgroups.find((s) => s.kind === "nonbasic")!;
-    expect(nonbasic.rows.map((r) => r.action)).toEqual(["NEWLINE", "SPEC"]);
+    expect(nonbasic.rows.map((r) => r.name)).toEqual(["Charizard ex", "Charmeleon"]);
+    expect(nonbasic.rows.map((r) => r.action)).toEqual(["SPEC", "NEWLINE"]);
   });
 
   it("gives the new Fire line a workable destination in the active binder's back half", () => {

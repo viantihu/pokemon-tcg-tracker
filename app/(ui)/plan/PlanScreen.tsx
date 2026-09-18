@@ -5,7 +5,7 @@
  *
  * Flow: create a haul (source) → fast card entry (type-ahead + variant per card) → run the M3
  * cascade over the whole haul → a placement plan GROUPED to mirror the physical sort (band in
- * rainbow order → basics vs non-basics → action), worked top-to-bottom with check-off → commit,
+ * rainbow order → basics vs non-basics → name A–Z), worked top-to-bottom with check-off → commit,
  * which writes every record + audit trail atomically on the server.
  *
  * TWO WAYS CARDS ARRIVE HERE (UIL-003). Typed intake is one. The other is the Sync screen's "Place
@@ -1273,7 +1273,7 @@ function PlanView(props: {
         </aside>
       </div>
 
-      <div className="foot">BAND → BASIC / NON-BASIC → ACTION · WORK TOP TO BOTTOM</div>
+      <div className="foot">BAND → BASIC / NON-BASIC → A–Z · WORK TOP TO BOTTOM</div>
     </>
   );
 }
