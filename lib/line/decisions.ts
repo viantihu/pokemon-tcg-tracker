@@ -13,6 +13,32 @@
  * 'auto'`). This layer records her confirmation, or overrides it. Holo-swap cards are supported by
  * the shared component + this type set (so M9 reuses them) but are surfaced at haul time, not
  * derived from persisted line state.
+ *
+ * STAYING RESOLVED (UIL-078). Because DERIVE re-runs from scratch on every load, a choice that
+ * accepts/adjusts the recommendation without changing the condition its own trigger checks (state
+ * stays `placeholder`, a claimed collection stays claimed) re-derived the SAME decision forever — "line
+ * decisions do not stick," her report. The fix is `line_slot.resolved_decision_kind`, a behavioural
+ * marker on the SLOT: `deriveDecisions` skips a kind whose slot already carries it. Deliberately NOT
+ * on `PlacementDecision` — that table is already load-bearing for QUEUE state (UIL-042) and Karvi was
+ * burned once when clearing it silently re-queued her whole collection; making it load-bearing for a
+ * SECOND kind of state would mean pruning audit history could silently make the app re-ask everything.
+ * State lives in state; the audit row stays audit-only (it now also carries `line_id`/`line_slot_id`,
+ * for traceability alone — nothing reads them back).
+ *
+ * The marker is written ONLY by a choice that resolves this exact question and leaves the situation
+ * matching it (`confirm-cap`, `cap-no-wishlist`, `collection-wins`, `collection-wins-no-target`,
+ * `confirm-root-block`, `root-block-no-wishlist`, `confirm-termination`). It is NOT written by
+ * `leave-it` (resurfaces by design — its own description says so) or by a choice that hands the slot
+ * or line off to a DIFFERENT decision (`block-instead` → block; `no-line` → termination;
+ * `make-line-anyway` → the block resurfaces) — those aren't suppression failures, they're a fresh
+ * question, and marking the old one resolved would not change that a new one now applies.
+ *
+ * Two more rules keep the marker from outliving the question it answered (QA's two findings on the
+ * first cut): a `collection-vs-line` marker also records WHICH collection's claim was answered
+ * (`resolved_decision_collection_id`) and suppresses only while that is the collection claiming the
+ * species — a different collection's claim is a new question; and `releaseSlotOps` (lib/line/move.ts,
+ * the one path every slot release goes through) clears all three marker columns, so a slot that was
+ * resolved, then filled by a card, then vacated again asks afresh instead of never asking again.
  */
 
 import type { LineStatus, SlotState } from "@/lib/engine";
@@ -55,6 +81,20 @@ export interface DecisionSlotInput {
   facts: StageFacts;
   /** Wishlist template fields (from the target card), so a resolution can (re)create the hunt. */
   requiredType: string | null;
+  /**
+   * The decision kind she already resolved for this slot, straight off `line_slot` (UIL-078). NULL
+   * if this slot has never had a decision resolved, or its last resolution was a hand-off/leave-it.
+   * `deriveDecisions` skips re-deriving a kind that matches this — see the module header.
+   */
+  resolvedDecisionKind: string | null;
+  /**
+   * For a resolved `collection-vs-line`, WHICH collection's claim she answered (`line_slot.
+   * resolved_decision_collection_id`). "Collection wins" is an answer about one collection's claim, so
+   * the suppression compares this against who claims the species NOW: the same collection still
+   * claiming is the same question; a different collection claiming is a new one and is asked. NULL for
+   * every other kind, and whenever `resolvedDecisionKind` is NULL.
+   */
+  resolvedDecisionCollectionId: string | null;
 }
 
 export interface DecisionLineInput {
@@ -65,8 +105,12 @@ export interface DecisionLineInput {
   status: LineStatus;
   binderLabel: string;
   slots: DecisionSlotInput[];
-  /** dexIds claimed by a running collection (collection-vs-line detection). */
-  claimedDexIds: Set<number>;
+  /**
+   * dexId → ids of the running collections that claim a printing of that species (collection-vs-line
+   * detection). A species with an entry is "claimed"; the ids are what the resolved marker is compared
+   * against, so kind alone can never suppress a claim from a collection she has not answered for.
+   */
+  claimedBy: Map<number, string[]>;
 }
 
 /** Server-side payload that lets a chosen option be turned into writes (never sent to the client). */
@@ -85,6 +129,12 @@ export interface DecisionResolution {
   willLiveInSpecialty: boolean;
   /** The other open placeholder in the line (root-block "no wishlist" resolves this too). */
   otherOpenSlotId: string | null;
+  /**
+   * `collection-vs-line` only: the collection whose claim this decision is about — written onto the
+   * slot's marker when she answers, so the loader can tell "same claim, answered" from "a different
+   * collection now claims this" (UIL-078). null for every other kind.
+   */
+  claimingCollectionId: string | null;
 }
 
 export interface DerivedDecision {
@@ -132,6 +182,7 @@ function baseResolution(
   line: DecisionLineInput,
   slot: DecisionSlotInput | null,
   kind: DecisionCard["kind"],
+  claimingCollectionId: string | null = null,
 ): DecisionResolution {
   const otherOpen = line.slots.find(
     (s) => s.state === "placeholder" && (!slot || s.slotId !== slot.slotId),
@@ -149,6 +200,7 @@ function baseResolution(
     alternateCatalogCardIds: slot?.alternates.map((a) => a.tcgdexId) ?? [],
     willLiveInSpecialty: slot?.willLiveInSpecialty ?? false,
     otherOpenSlotId: otherOpen?.slotId ?? null,
+    claimingCollectionId,
   };
 }
 
@@ -161,6 +213,9 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
   // TERMINATION — the whole line was killed (one member left, no page).
   if (line.status === "terminated") {
     const blockSlot = ordered.find((s) => s.state === "block");
+    // UIL-078: she already confirmed this termination and nothing about it has changed (a line stays
+    // terminated forever once it is) — re-deriving the identical card would ask her again.
+    if (blockSlot?.resolvedDecisionKind === "termination") return out;
     const survivor = ordered.find((s) => s.state === "filled");
     const species = blockSlot?.speciesName ?? blockSlot?.card?.name ?? "the root";
     out.push({
@@ -204,10 +259,16 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
 
   for (const slot of ordered) {
     const species = slot.speciesName ?? slot.card?.name ?? slot.stage;
-    const claimed = slot.dexId !== null && line.claimedDexIds.has(slot.dexId);
+    // Sorted so the id stored on the marker is deterministic whoever loaded the collections.
+    const claimers = slot.dexId !== null ? [...(line.claimedBy.get(slot.dexId) ?? [])].sort() : [];
+    const claimed = claimers.length > 0;
 
-    // EX-ONLY CAP — an open stage whose only same-color printings are specialty class.
+    // EX-ONLY CAP — an open stage whose only same-color printings are specialty class. The slot
+    // belongs to this kind exclusively once the DATA condition matches (unchanged priority ordering:
+    // `continue` either way, so a resolved cap never falls through to collection-vs-line/block for
+    // the same slot) — UIL-078 only changes whether the card is PUSHED, not which kind claims the slot.
     if (slot.state === "placeholder" && slot.willLiveInSpecialty) {
+      if (slot.resolvedDecisionKind === "ex-only-cap") continue; // already answered, don't re-ask
       out.push({
         card: {
           id: `${line.lineId}:ex-only-cap:${slot.stageIndex}`,
@@ -252,8 +313,22 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
       continue;
     }
 
-    // COLLECTION vs LINE — an open stage whose species a collection has claimed.
+    // COLLECTION vs LINE — an open stage whose species a collection has claimed. Same priority-order
+    // shape as ex-only-cap above: `continue` either way, UIL-078 only changes whether it is pushed.
     if (slot.state === "placeholder" && claimed) {
+      // Already answered ONLY if the answer was about the collection(s) claiming it now. Kind alone
+      // is not enough (QA on #188): "collection wins" was said about one collection's claim, so a
+      // different collection claiming this species afterwards is a fresh question and is asked. With
+      // several claimers the marker holds the first (sorted); any other claimer therefore re-asks,
+      // which is the safe direction — a second claim is a new claim.
+      const answeredFor = slot.resolvedDecisionCollectionId;
+      if (
+        slot.resolvedDecisionKind === "collection-vs-line" &&
+        answeredFor !== null &&
+        claimers.every((id) => id === answeredFor)
+      ) {
+        continue;
+      }
       out.push({
         card: {
           id: `${line.lineId}:collection-vs-line:${slot.stageIndex}`,
@@ -289,7 +364,7 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
             leaveIt,
           ],
         },
-        resolution: baseResolution(line, slot, "collection-vs-line"),
+        resolution: baseResolution(line, slot, "collection-vs-line", claimers[0] ?? null),
       });
       continue;
     }
@@ -297,11 +372,13 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
     // BLOCK — no same-color printing exists at all. Root block keeps the line; both need a decision.
     if (slot.state === "block") {
       const isRoot = slot.stageIndex === 0;
+      const kind = isRoot ? "root-block" : "block";
+      if (slot.resolvedDecisionKind === kind) continue; // UIL-078: already answered
       const openStage = ordered.find((s) => s.state === "placeholder");
       out.push({
         card: {
-          id: `${line.lineId}:${isRoot ? "root-block" : "block"}:${slot.stageIndex}`,
-          kind: isRoot ? "root-block" : "block",
+          id: `${line.lineId}:${kind}:${slot.stageIndex}`,
+          kind,
           lineId: line.lineId,
           slotStageIndex: slot.stageIndex,
           title: isRoot
@@ -342,7 +419,7 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
             },
           ],
         },
-        resolution: baseResolution(line, slot, isRoot ? "root-block" : "block"),
+        resolution: baseResolution(line, slot, kind),
       });
     }
   }
@@ -412,11 +489,24 @@ export function resolveDecisionWrites(
     wishlistResolveSlotIds: [],
   };
 
+  // UIL-078: the marker for a branch that resolves THIS question and leaves it matching its own
+  // trigger — merged into whatever slotPatches entry the branch already needs, or the only entry
+  // when the branch otherwise patches nothing (confirm-cap, collection-wins). `res.kind` is already
+  // the exact string `deriveDecisions` checks, so no separate kind lookup is needed here.
+  const resolvedMark = {
+    resolvedDecisionKind: res.kind,
+    resolvedDecisionChoice: choiceId,
+    // Which claim was answered (collection-vs-line); null for every other kind. The loader compares
+    // it against who claims the species now, so the marker never outlives the claim it was about.
+    resolvedDecisionCollectionId: res.claimingCollectionId,
+  };
+
   switch (choiceId) {
     case "confirm-cap":
       return {
         ...base,
         linePatch: { status: "capped" },
+        slotPatches: res.slotId ? [{ slotId: res.slotId, ...resolvedMark }] : [],
         wishlistUpserts: wishlistUpsertFor(res, true, pickedCatalogCardId),
         decision: {
           decision: "line-cap-confirmed",
@@ -430,7 +520,14 @@ export function resolveDecisionWrites(
         ...base,
         linePatch: { status: "capped" },
         slotPatches: res.slotId
-          ? [{ slotId: res.slotId, state: "placeholder", targetCatalogCardId: null }]
+          ? [
+              {
+                slotId: res.slotId,
+                state: "placeholder",
+                targetCatalogCardId: null,
+                ...resolvedMark,
+              },
+            ]
           : [],
         wishlistResolveSlotIds: res.slotId ? [res.slotId] : [],
         decision: {
@@ -440,6 +537,9 @@ export function resolveDecisionWrites(
       };
 
     case "block-instead":
+      // Hand-off, not suppression (UIL-078): the slot moves to `state: "block"`, which is a
+      // DIFFERENT trigger (root-block/block) — no marker written here, that decision resolves on
+      // its own terms if and when she answers it.
       return {
         ...base,
         linePatch: { status: "open" },
@@ -467,7 +567,15 @@ export function resolveDecisionWrites(
         ...base,
         linePatch: { status: "open" },
         slotPatches: res.slotId
-          ? [{ slotId: res.slotId, state: "block", copyId: null, targetCatalogCardId: null }]
+          ? [
+              {
+                slotId: res.slotId,
+                state: "block",
+                copyId: null,
+                targetCatalogCardId: null,
+                ...resolvedMark,
+              },
+            ]
           : [],
         decision: {
           decision: "root-block-confirmed",
@@ -481,7 +589,9 @@ export function resolveDecisionWrites(
       return {
         ...base,
         linePatch: { status: "open" },
-        slotPatches: res.slotId ? [{ slotId: res.slotId, state: "block", copyId: null }] : [],
+        slotPatches: res.slotId
+          ? [{ slotId: res.slotId, state: "block", copyId: null, ...resolvedMark }]
+          : [],
         wishlistResolveSlotIds: resolveIds,
         decision: {
           decision: "root-block-no-wishlist",
@@ -491,7 +601,10 @@ export function resolveDecisionWrites(
     }
 
     case "no-line":
-    case "confirm-termination":
+      // Hand-off, not suppression (UIL-078): this is root-block's choice, not termination's own —
+      // it moves the LINE to `status: "terminated"`, a different trigger entirely, which surfaces
+      // the termination card fresh. Marking root-block resolved here would be marking the wrong
+      // decision; termination resolves on its own terms via `confirm-termination` below.
       return {
         ...base,
         linePatch: { status: "terminated" },
@@ -502,7 +615,22 @@ export function resolveDecisionWrites(
         },
       };
 
+    case "confirm-termination":
+      return {
+        ...base,
+        linePatch: { status: "terminated" },
+        slotPatches: res.slotId ? [{ slotId: res.slotId, ...resolvedMark }] : [],
+        decision: {
+          decision: "line-terminated",
+          reason:
+            "Confirmed there is no viable line; the surviving card falls through to the front half.",
+        },
+      };
+
     case "make-line-anyway":
+      // Hand-off, not suppression (UIL-078): reopens the line, so the SAME blocked slot resurfaces
+      // as a fresh root-block/block decision under its own kind — this did not answer that question,
+      // it undid the termination that had been suppressing it.
       return {
         ...base,
         linePatch: { status: "open" },
@@ -516,6 +644,7 @@ export function resolveDecisionWrites(
     case "collection-wins":
       return {
         ...base,
+        slotPatches: res.slotId ? [{ slotId: res.slotId, ...resolvedMark }] : [],
         wishlistUpserts: wishlistUpsertFor(res, res.willLiveInSpecialty, pickedCatalogCardId),
         decision: {
           decision: "collection-wins",
@@ -528,7 +657,14 @@ export function resolveDecisionWrites(
       return {
         ...base,
         slotPatches: res.slotId
-          ? [{ slotId: res.slotId, state: "placeholder", targetCatalogCardId: null }]
+          ? [
+              {
+                slotId: res.slotId,
+                state: "placeholder",
+                targetCatalogCardId: null,
+                ...resolvedMark,
+              },
+            ]
           : [],
         wishlistResolveSlotIds: res.slotId ? [res.slotId] : [],
         decision: {
@@ -538,6 +674,7 @@ export function resolveDecisionWrites(
       };
 
     case "leave-it":
+      // No marker: resurfaces next time BY DESIGN — the choice's own description says so.
       return {
         ...base,
         decision: {

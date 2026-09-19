@@ -247,13 +247,21 @@ export async function applyDecision(
     });
   }
 
-  // Slot state / target changes.
+  // Slot state / target changes, including the UIL-078 "stays resolved" marker: state in state,
+  // so the marker survives whatever happens to the audit trail (docs/issue-log.md UIL-042).
   for (const p of writes.slotPatches) {
     const patch: Record<string, unknown> = {};
     if (p.state !== undefined) patch.state = p.state;
     if (p.copyId !== undefined) patch.copy_id = p.copyId;
     if (p.targetCatalogCardId !== undefined) patch.target_catalog_card_id = p.targetCatalogCardId;
     if (p.note !== undefined) patch.note = p.note;
+    if (p.resolvedDecisionKind !== undefined) patch.resolved_decision_kind = p.resolvedDecisionKind;
+    if (p.resolvedDecisionChoice !== undefined) {
+      patch.resolved_decision_choice = p.resolvedDecisionChoice;
+    }
+    if (p.resolvedDecisionCollectionId !== undefined) {
+      patch.resolved_decision_collection_id = p.resolvedDecisionCollectionId;
+    }
     if (Object.keys(patch).length > 0) await lineSlotRepo.update(db, p.slotId, patch);
   }
 
@@ -286,11 +294,15 @@ export async function applyDecision(
     }
   }
 
-  // Audit (dev-spec §4 — one row per user decision).
+  // Audit (dev-spec §4 — one row per user decision). `line_id`/`line_slot_id` are traceability only
+  // (UIL-078) — naming which slot this row was about, since nothing here or anywhere else reads them
+  // back to decide behaviour (that's `line_slot.resolved_decision_kind`'s job, not this table's).
   await placementDecisionRepo.insert(db, {
     owner_id: ownerId,
     haul_id: null,
     copy_id: null,
+    line_id: derived.resolution.lineId,
+    line_slot_id: derived.resolution.slotId,
     decision: writes.decision.decision,
     reason: writes.decision.reason,
     resolved_by: "user",

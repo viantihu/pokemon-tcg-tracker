@@ -39,6 +39,9 @@ const MIGRATIONS = [
   // conflict (different filenames), so a numbering collision is only caught by checking file-by-file
   // against develop — do that on every rebase, not just this once.
   "0012_collection_updated_at.sql",
+  // UIL-078's own migration (#188): the suppression columns on line_slot / placement_decision — the
+  // first migration here whose ABSENCE would break a PGlite test (tests/line/decision-persistence).
+  "0013_decision_persistence.sql",
 ];
 
 // Supabase provides auth.uid() + the anon/authenticated/service_role roles; PGlite (vanilla PG) does

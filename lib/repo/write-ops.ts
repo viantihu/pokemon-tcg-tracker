@@ -36,6 +36,14 @@ export interface SlotPatch {
   copy_id?: string | null;
   target_catalog_card_id?: string | null;
   note?: string | null;
+  /**
+   * UIL-078's "she already answered this" marker (0013). `releaseSlotOps` nulls all three when a slot
+   * is vacated, inside the same transaction as the placement rewrite; `applyDecision` sets them
+   * through the repo layer rather than here.
+   */
+  resolved_decision_kind?: string | null;
+  resolved_decision_choice?: string | null;
+  resolved_decision_collection_id?: string | null;
 }
 
 /** An evolution-line patch (0008). Only `status` is expressible — nothing else needs patching. */
