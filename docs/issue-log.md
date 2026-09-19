@@ -3865,8 +3865,19 @@ exactly what C3 warns about.
 ways.** Once resolved to a set (correctly or not), a card TCGdex simply doesn't carry lands as
 UNKNOWN_CARD — the same "external database has no record for this card" gap UIL-060 proposes a
 stand-in-record fix for. The six UNKNOWN_SET rows remain this entry's own C1/C2 (no set to resolve to at
-all); the fix decision here still has to cover the already-learned bad alias, not just prevent new ones
-— there is no `delete_set_alias` path to unlearn one (confirmed: no such op anywhere in the codebase).
+all); the fix decision here still has to cover the already-learned bad alias, not just prevent new ones.
+
+**Update 2026-09-19: the "no `delete_set_alias` path" line above is now false — corrected, not
+deleted, so the record of what was true when written stays.** PR #194 (see the status line for the full
+mechanism — a LEARNED SET ALIASES panel with a two-step Forget) adds exactly that op. Not repeating the
+mechanism here to avoid the two descriptions drifting apart; see the status line.
+
+**Tech Lead's before/after Testing read confirms the migration itself changed nothing — the button
+hasn't been pressed yet.** Runs before (01:00Z) and after (20:52Z, run `35468672267`) 0014 landed show
+every figure identical: `set_alias` 22 (3 manual, 19 name-resolved), the `ja:m6 → swshp` alias still
+present as 1 row, `unresolved_entry` 8 (WAITING 7 = 5 UNKNOWN_SET + 2 UNKNOWN_CARD, RESOLVED 1,
+DISMISSED 0), the Forget predicate matching 1 row, `collection` 11, `copy` 706. Migration 0014 shipped
+the capability; it did not itself touch data, and nobody has clicked Forget on Testing yet.
 
 ## UIL-048 — "Logging" a card she already owns into a collection creates a second physical copy row
 
