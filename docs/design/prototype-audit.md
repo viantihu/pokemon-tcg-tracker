@@ -6,8 +6,11 @@ prototype is a single 1,803-line file: HTML, CSS and one `<script>` block (lines
 functions, 50 inline `onclick` handlers and 11 `addEventListener` calls. Every user-visible behaviour
 those drive is listed below, grouped by screen, with the React file that ports it.
 
-**This is a checklist, not a build list.** Rows marked *Not ported* are candidates; whether any becomes
-an issue-log entry is the Senior BA's call with Karvi. Nothing here was built.
+**How to read this.** It is a checklist, not a bug list and not a build list. *Not ported* means two
+things at once: the app has no counterpart, **and** the issue log has no entry recording a decision to
+drop it. It does not mean the behaviour is wanted; some of these will turn out to be design evolution
+nobody wrote down. Rows marked *Not ported* are candidates, and whether any becomes an issue-log entry is
+the Senior BA's call with Karvi. Nothing here was built.
 
 ## How to read the status column
 
