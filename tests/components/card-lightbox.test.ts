@@ -16,7 +16,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { CardFace } from "@/app/(ui)/_components/CardFace";
-import { CardLightbox } from "@/app/(ui)/_components/CardLightbox";
+import {
+  CardLightbox,
+  lightboxClosesOnClick,
+  lightboxClosesOnKey,
+} from "@/app/(ui)/_components/CardLightbox";
 
 const ART = "https://assets.tcgdex.net/en/sv/sv03/027";
 
@@ -84,5 +88,26 @@ describe("UIL-036 · CardLightbox shows the same card at high quality, with its 
     );
     expect(html).toContain('class="nm">Mystery<');
     expect(html).not.toContain('class="no"');
+  });
+});
+
+describe("UIL-036 · the dismissal policy: click ANYWHERE, Escape only (QA debt on #232)", () => {
+  /**
+   * `renderToStaticMarkup` cannot fire a click, and QA showed that swapping the overlay's handler for
+   * MoveOverlay's `target === currentTarget` guard left every render test green. The policy is now a pair
+   * of exported pure functions the component calls, so the decision itself is pinned here.
+   */
+  it("a click on the image or caption — not just the backdrop — closes it", () => {
+    const root = {} as EventTarget;
+    const inner = {} as EventTarget;
+    expect(lightboxClosesOnClick(inner, root)).toBe(true); // the MoveOverlay guard would say false here
+    expect(lightboxClosesOnClick(root, root)).toBe(true);
+  });
+
+  it("Escape closes it and no other key does", () => {
+    expect(lightboxClosesOnKey("Escape")).toBe(true);
+    expect(lightboxClosesOnKey("Enter")).toBe(false);
+    expect(lightboxClosesOnKey(" ")).toBe(false);
+    expect(lightboxClosesOnKey("Tab")).toBe(false);
   });
 });

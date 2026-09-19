@@ -26,6 +26,27 @@ export function cardCaption(
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+/**
+ * The dismissal policy, as data rather than an inline handler so it can be pinned without a DOM:
+ *
+ *  - a click ANYWHERE on the overlay closes it — including on the image and the caption. This is the
+ *    prototype's behaviour and the opposite of `MoveOverlay`'s `e.target === e.currentTarget` guard,
+ *    which is right for a form with unsaved choices and wrong for an image viewer that has nothing to
+ *    lose. `target`/`currentTarget` are accepted only so the signature can be compared against that
+ *    guard; they do not change the answer.
+ *  - Escape closes it; no other key does.
+ */
+export function lightboxClosesOnClick(
+  _target: EventTarget | null,
+  _root: EventTarget | null,
+): boolean {
+  return true;
+}
+
+export function lightboxClosesOnKey(key: string): boolean {
+  return key === "Escape";
+}
+
 export function CardLightbox({
   name,
   imageUrl,
@@ -44,7 +65,7 @@ export function CardLightbox({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (lightboxClosesOnKey(e.key)) onClose();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -56,7 +77,9 @@ export function CardLightbox({
       role="dialog"
       aria-modal="true"
       aria-label={`${name}, enlarged`}
-      onClick={onClose}
+      onClick={(e) => {
+        if (lightboxClosesOnClick(e.target, e.currentTarget)) onClose();
+      }}
     >
       <div className="lbwrap">
         <div className="lbcard">
