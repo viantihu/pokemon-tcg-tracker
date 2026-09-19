@@ -2555,6 +2555,18 @@ by a developer checking, not by a test failing** — which is this entry's own t
 mitigation pattern needing the same kind of check applied to itself four separate times. Staying Open
 on that basis, not closed by any one of the four fixes.
 
+**A fifth instance, and worse than the fourth — a second, independent copy of the same hardcoded
+list, further behind.** [`tests/backfill/binder-section.test.ts:27-32`](../tests/backfill/binder-section.test.ts:27)
+has its **own separate** `MIGRATIONS` array, not shared with `pglite-rpc.ts`'s — confirmed directly, and
+it stops at `0004_catalog_artwork.sql`, roughly nine migrations behind `develop` as of this writing.
+Same shape, same cause: a literal list that has to be remembered and updated by hand every time a
+migration is added, in a second location nobody was checking. **Fix direction, generalized rather than
+patched per-copy:** both harnesses should read `supabase/migrations/` at runtime (sorted, all `.sql`
+files) instead of maintaining a duplicated literal — from an incoming root-cause-analysis doc (§9 step
+1; not yet on `develop`, Tech Lead's docs PR #217, swap to `docs/root-cause-analysis.md` once it lands),
+which also recommends a DbClient contract suite and a 1000-plus-row fixture as the durable answer to
+this entry's whole class of gap (RC-5) — noted here as a forward pointer, not yet built.
+
 ## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
 
 - **Reported:** 2026-09-14 (not from Karvi — found by the Senior Dev session while fixing UIL-017)
@@ -2800,8 +2812,24 @@ worse odds, not better.
 `apply_write_ops` op set the other three already use (`insert_copy`, `union_collection_targets`,
 `insert_decision`), rather than adding a fifth bespoke implementation to fix a fourth one.
 
+**Update 2026-09-19: citation corrected and one hazard added, from an incoming root-cause-analysis doc
+(§7a; not yet on `develop` — Tech Lead's docs PR #217; swap this pointer to `docs/root-cause-analysis.md`
+once it lands).** The read-modify-write append moved in a refactor — it now lives at
+[`lib/coll/log.ts:122`](../lib/coll/log.ts:122) (`target_catalog_card_ids: [...targets, tcgdexId]`),
+not the `app/(ui)/coll/actions.ts:271-296` this entry originally cited. The defect is unchanged: a
+TypeScript array append written back whole **loses a concurrent write without erroring** — two appends
+racing on the same collection each read the same base array, and the second clobbers the first's
+addition, silently. An atomic server-side union already exists for exactly this
+(`union_collection_targets`, migration 0007, built by `collectionTargetJoinOp` in `lib/line/move.ts`)
+and is what the fix should route through. **Second, smaller hazard to fold into the same fix:**
+`union_collection_targets` writes nothing when no row matches
+([`lib/line/write.ts:193`](../lib/line/write.ts:193) documents this as deliberate for the backfill
+tagger), and that silence is indistinguishable from success at the call site — a consolidated path
+should surface a no-op union rather than swallow it.
+
 **Priority rationale.** Medium: same class as UIL-023 (small ordered writes, no report of a real
-partial-write incident), raised by the four-site drift risk rather than by an observed failure.
+partial-write incident), raised by the four-site drift risk rather than by an observed failure — and now
+by the concurrency-loss shape the RCA names, still unobserved but no longer only a tidiness argument.
 
 ## UIL-034 — The Collections page mounts every card of every collection at once, with no fold
 
@@ -3613,6 +3641,13 @@ Karvi separately asked that "the haul plan and the spotlight of the other cards 
 happened to those cards" when placing a card alongside other compatible cards in the same haul — same
 functional requirement as this entry's own title, in her own words a second time, not a new gap. No new
 mechanism to add; recorded here so the two reports aren't read as two separate things later.
+
+**Update 2026-09-19: this entry sits inside a broader fix sequence, per an incoming root-cause-analysis
+doc (RC-4; not yet on `develop`, Tech Lead's docs PR #217, swap to `docs/root-cause-analysis.md` once it
+lands).** RC-4 step 1 is #121's spotlight fix, already shipped; the worklist-table gap this entry's
+2026-09-18 update covers is step 2. **Step 3 — a "stateful forecast" — is a further piece not yet
+detailed in this entry**, and not verified here since the source document isn't on develop yet; recorded
+as a pointer so whoever picks up step 3 knows it exists rather than treating steps 1–2 as the whole fix.
 
 ## UIL-046 — Unresolved entries never record a retry attempt, so "self-heal when the catalog catches up" may never actually run
 
@@ -5675,6 +5710,12 @@ whoever eventually picks this up chooses with the tradeoff stated, not rediscove
 **Cross-reference UIL-029** (wrong-behaviour-certified, the opposite failure mode) **and UIL-021** (the
 other standing Low in test infrastructure, with its own recorded counter-argument).
 
+**Update 2026-09-19: a durable-answer pointer, from an incoming root-cause-analysis doc (RC-5; not yet
+on `develop`, Tech Lead's docs PR #217, swap to `docs/root-cause-analysis.md` once it lands).**
+Recommends a real component-render harness via Playwright rather than continuing to rely solely on the
+static-layout-markup technique this entry already records — the same gap, a concrete tool named for it.
+Not built; recorded as a forward pointer alongside UIL-029's own RC-5 note (a DbClient contract suite).
+
 **Priority rationale.** Low, per the Senior BA: no known live defect traces to this gap specifically,
 and the cost of fixing it now (touching shared config mid-freeze, against seven open PRs) outweighs
 the benefit of fixing it immediately rather than logging it for later.
@@ -5894,3 +5935,80 @@ its own check before assuming it does.
 **Priority rationale.** High, Karvi's own call — a decision she's already made keeps asking her again,
 which both wastes her time and risks her picking a different answer the second time without noticing
 it's the same question.
+
+## UIL-079 — Two source files carry raw embedded NUL bytes, and a schema-types header comment is nine migrations stale
+
+- **Reported:** 2026-09-19 (not from Karvi — found in a broader root-cause pass, relayed by the Senior
+  BA; zero-risk repo hygiene, batched into one entry rather than three)
+- **Status:** Open
+- **Priority:** Low (Senior BA's read) — no behavior is wrong, both fixes are text-only and mechanical
+- **Area:** all (repo hygiene)
+- **Env:** n/a — in the repo, not a running environment
+
+**Confirmed directly, byte-for-byte — `grep` alone would have missed this, which is the point of
+recording it.** `git cat-file blob` on both files, checked with `od -c` rather than trusting a text
+tool: [`lib/sync/diff.ts:29`](../lib/sync/diff.ts:29) and
+[`lib/sync/pipeline.ts:66`](../lib/sync/pipeline.ts:66) each contain one **raw, literal `0x00` byte**
+embedded directly in a template literal — not the two-character escape sequence `\0`, an actual NUL byte
+typed (or pasted) into the source. Both are the presence-key separator the comment right above
+`diff.ts`'s occurrence names explicitly: "NUL separator can't appear in a tcgdex id or variant." The
+code is very likely correct at runtime — a raw NUL byte inside a template literal and the `\0` escape
+produce the identical character in the resulting string — but the raw byte makes `file` report these as
+`data`, not text, which is why a plain `grep` (no `-a`) on either file silently reports nothing rather
+than a match: exactly the "grep lies" symptom that makes this worth fixing rather than shrugging at.
+**Fix:** replace the raw byte with the literal escape sequence `\0` (two ASCII characters) at each site
+— zero behavior change, restores the files to plain text for every tool that assumes it.
+
+**Separately, `lib/repo/database.types.ts`'s own header comment is badly stale.** It reads "Supabase
+schema types for the `public` schema (migrations 0001 + 0002 + 0004 + 0005)" — confirmed against
+`origin/develop`, where migrations run through at least `0013` (0014 landed the same day this was
+found). The file's own instruction — regenerate via `supabase gen types typescript --local` and commit
+the result verbatim — still applies; the header just never got updated to say which migrations are
+actually reflected. Not touching the generated types themselves here (that needs a live database
+connection this session doesn't have); recording the stale claim so it isn't read as current.
+
+**Priority rationale.** Low, Senior BA's read — no behavior defect in either case, both fixes are
+mechanical and low-risk, batched as one entry since grouping by "found in the same zero-risk audit
+pass" is Karvi's own convention for entries like this, applied consistently with how UIL-029 already
+absorbs multiple instances of one theme.
+
+## UIL-080 — Backfill re-implements colour-band derivation client-side, and it can genuinely disagree with the canonical engine function
+
+- **Reported:** 2026-09-19 (not from Karvi — found in a broader root-cause pass, relayed by the Senior
+  BA)
+- **Status:** Open
+- **Priority:** Medium (Senior BA's read)
+- **Area:** Backfill
+- **Env:** Testing
+
+**Confirmed: two independent implementations of the same decision, and they can produce different
+answers for the same card class, not just theoretically.** The canonical band derivation is
+[`band()`](../lib/engine/bands.ts:107) in `lib/engine/bands.ts` — it calls `effectiveType(card)` first,
+which special-cases `category === "Trainer"` (resolves to `card.trainerType ?? "Trainer"`, e.g.
+"Supporter"/"Item"/"Stadium"/"Tool") and Energy/unknown (resolves to `"Colorless"`), **before** ever
+consulting the `TypeColorMap`.
+[`BackfillScreen.tsx`'s own `bandKeyForCard`](<../app/(ui)/backfill/BackfillScreen.tsx>:46) has neither
+of those branches — it only receives `types: string[]` (no `category`, no `trainerType`), so it
+literally cannot replicate `effectiveType`'s logic even if it tried: it just takes `types[0]` (or
+`"Colorless"` if empty) and looks that up directly. For a Pokémon card the two usually agree, since
+`types[0]` and `effectiveType`'s Pokémon branch resolve the same way. **For a Trainer or Energy card
+they structurally cannot agree** unless `map["Colorless"]` happens to equal whatever `map[card.trainerType]`
+or the engine's own resolution would have produced — which is not guaranteed and isn't checked anywhere.
+
+**Why this matters beyond tidiness: it's the same shape UIL-012 already named.** UIL-012's white-key
+problem was two places spelling one piece of domain logic differently, and one silently drifting. This
+is that shape again, at the same two-owners scale UIL-012 warned would keep recurring once one canonical
+function exists and a second one gets written anyway — see also UIL-013 (fixture-vs-production drift)
+and UIL-033 (four independent "joining a collection" implementations), the same category of defect
+appearing across this codebase's different subsystems.
+
+**Suggested fix.** Delete `bandKeyForCard` and call the canonical `band()` from `lib/engine/bands.ts`
+instead — it needs the full card (`category`, `trainerType`) threaded through rather than just
+`types`, which is the actual fix, not a cosmetic rename.
+
+**Cross-reference UIL-012, UIL-013, and UIL-033** (the same "one decision, two+ implementations" shape,
+different subsystems each time).
+
+**Priority rationale.** Medium, Senior BA's read: a confirmed, reachable divergence on real card
+classes (Trainer/Energy), not a hypothetical — but Backfill is a lower-traffic screen than the Haul
+Plan or Lines, and no report of a wrong band has surfaced from it yet.
