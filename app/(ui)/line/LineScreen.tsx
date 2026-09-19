@@ -22,6 +22,7 @@ import type {
 } from "@/lib/line/types";
 import { CardFace } from "../_components/CardFace";
 import { DecisionCard } from "../_components/DecisionCard";
+import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { bandMeta } from "../_components/plan-meta";
 import { fmtPrice } from "../_components/decision-format";
@@ -43,6 +44,44 @@ const STATUS_GLYPH: Record<LineView["status"], string> = {
   complete: "◆ COMPLETE",
   terminated: "■ TERMINATED",
 };
+
+/**
+ * The Move sheet's card for a filled slot (UIL-056/UIL-077). PURE and exported so the mapping the Line
+ * screen's sheet depends on is unit-pinned — `openMove` runs from a click, which a static render cannot
+ * reach. Null when the slot holds no movable card.
+ */
+export function slotMoveTarget(line: LineView, slot: SlotView): MoveTargetCard | null {
+  if (!slot.copyId || !slot.card) return null;
+  const initialDest: MoveDestination | undefined = line.binderId
+    ? { kind: "shelf", binderId: line.binderId, half: "back", band: line.bandKey }
+    : undefined;
+  return {
+    copyId: slot.copyId,
+    name: slot.card.name,
+    localId: slot.card.localId,
+    setCardCountOfficial: slot.card.setCardCountOfficial,
+    imageUrl: slot.card.imageUrl,
+    bandKey: line.bandKey,
+    currentLabel: `${line.binderLabel} · ${bandMeta(line.bandKey).display}`,
+    initial: initialDest,
+  };
+}
+
+/** The Move sheet's card for a shelved, line-less card (UIL-056) — the one offered the line picker. */
+export function unlinedMoveTarget(card: UnlinedCard): MoveTargetCard {
+  return {
+    copyId: card.copyId,
+    name: card.card.name,
+    localId: card.card.localId,
+    setCardCountOfficial: card.card.setCardCountOfficial,
+    imageUrl: card.card.imageUrl,
+    bandKey: card.card.bandKey,
+    currentLabel: card.currentLabel,
+    joinCandidates: card.joinCandidates,
+    existingLineByBand: card.existingLineByBand,
+    naturalBandKey: card.naturalBandKey,
+  };
+}
 
 export function LineScreen() {
   const [data, setData] = useState<LineScreenData | null>(null);
@@ -119,19 +158,8 @@ export function LineScreen() {
   }
 
   function openMove(line: LineView, slot: SlotView) {
-    if (!slot.copyId || !slot.card) return;
-    const initialDest: MoveDestination | undefined = line.binderId
-      ? { kind: "shelf", binderId: line.binderId, half: "back", band: line.bandKey }
-      : undefined;
-    setMove({
-      copyId: slot.copyId,
-      name: slot.card.name,
-      localId: slot.card.localId,
-      imageUrl: slot.card.imageUrl,
-      bandKey: line.bandKey,
-      currentLabel: `${line.binderLabel} · ${bandMeta(line.bandKey).display}`,
-      initial: initialDest,
-    });
+    const target = slotMoveTarget(line, slot);
+    if (target) setMove(target);
   }
 
   /**
@@ -140,17 +168,7 @@ export function LineScreen() {
    * moving one INTO a different line is a rarer case left for a follow-up.
    */
   function openMoveForUnlined(card: UnlinedCard) {
-    setMove({
-      copyId: card.copyId,
-      name: card.card.name,
-      localId: card.card.localId,
-      imageUrl: card.card.imageUrl,
-      bandKey: card.card.bandKey,
-      currentLabel: card.currentLabel,
-      joinCandidates: card.joinCandidates,
-      existingLineByBand: card.existingLineByBand,
-      naturalBandKey: card.naturalBandKey,
-    });
+    setMove(unlinedMoveTarget(card));
   }
 
   async function onMoveConfirm(dest: MoveDestination) {
@@ -486,9 +504,11 @@ function Slot({ line, slot, onMove }: { line: LineView; slot: SlotView; onMove: 
         </div>
         <div className="info">
           <div className="cn">{slot.card?.name ?? slot.stage}</div>
-          {slot.card?.localId ? (
+          {slot.card && formatCollectorNumber(slot.card.localId, slot.card.setCardCountOfficial) ? (
             <div>
-              <span className="no">{slot.card.localId}</span>
+              <span className="no">
+                {formatCollectorNumber(slot.card.localId, slot.card.setCardCountOfficial)}
+              </span>
             </div>
           ) : null}
           {slot.card?.setName || slot.card?.setId ? (
@@ -516,7 +536,9 @@ function Slot({ line, slot, onMove }: { line: LineView; slot: SlotView; onMove: 
                   ALTS ·{" "}
                   {slot.alternates
                     .slice(0, 3)
-                    .map((a) => `${a.localId ?? a.name} ${fmtPrice(a.priceMarket) ?? ""}`.trim())
+                    .map((a) =>
+                      `${formatCollectorNumber(a.localId, a.setCardCountOfficial) ?? a.name} ${fmtPrice(a.priceMarket) ?? ""}`.trim(),
+                    )
                     .join(" · ")}
                 </div>
               ) : null}

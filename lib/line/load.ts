@@ -182,6 +182,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
     setId: cc.setId,
     setName: cc.setName ?? null,
     localId: cc.localId,
+    setCardCountOfficial: cc.setCardCountOfficial ?? null,
     imageUrl: imageUrlById.get(cc.tcgdexId) ?? null,
     bandKey,
   });
@@ -220,6 +221,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
         tcgdexId: cc.tcgdexId,
         name: cc.name,
         localId: cc.localId,
+        setCardCountOfficial: cc.setCardCountOfficial ?? null,
         setId: cc.setId,
         imageUrl: imageUrlById.get(cc.tcgdexId) ?? null,
         bandKey,
@@ -357,6 +359,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
             tcgdexId: a.tcgdexId,
             name: a.name,
             localId: a.localId,
+            setCardCountOfficial: a.setCardCountOfficial ?? null,
             priceMarket: a.priceMarket,
           })),
           note: null,

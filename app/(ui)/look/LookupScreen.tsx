@@ -19,6 +19,7 @@ import type { LookupAnswer } from "@/lib/surfaces";
 import { CardFace } from "../_components/CardFace";
 import { cardCaption } from "../_components/CardLightbox";
 import { CardLookup } from "../_components/CardLookup";
+import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { bandMeta } from "../_components/plan-meta";
 import type { LookupCard } from "../plan/plan-types";
@@ -35,6 +36,23 @@ import { lookupViewFrom, type LookupView } from "./lookup-state";
 const FACT_ICON: Record<string, string> = { y: "✓", n: "·", hot: "★" };
 
 const EMPTY_VIEW: LookupView = { answer: null, copies: [], notFound: false, failed: null };
+
+/**
+ * The Move sheet's card for one of her copies of the looked-up printing (UIL-051/UIL-077). PURE and
+ * exported so the mapping is unit-pinned; `openMove` runs from a click a static render cannot reach.
+ */
+export function lookupMoveTarget(answer: LookupAnswer, copy: LookupMovableCopy): MoveTargetCard {
+  return {
+    copyId: copy.copyId,
+    name: answer.card.name,
+    localId: answer.card.localId,
+    setCardCountOfficial: answer.card.setCardCountOfficial,
+    imageUrl: answer.card.imageUrl,
+    bandKey: answer.bandKey,
+    currentLabel: copy.currentLabel,
+    initial: copy.initial,
+  };
+}
 
 export function LookupScreen() {
   const [view, setView] = useState<LookupView>(EMPTY_VIEW);
@@ -87,15 +105,7 @@ export function LookupScreen() {
       opts = r.options;
       setMoveOptions(opts);
     }
-    setMoveTarget({
-      copyId: copy.copyId,
-      name: answer.card.name,
-      localId: answer.card.localId,
-      imageUrl: answer.card.imageUrl,
-      bandKey: answer.bandKey,
-      currentLabel: copy.currentLabel,
-      initial: copy.initial,
-    });
+    setMoveTarget(lookupMoveTarget(answer, copy));
   }
 
   async function onMoveConfirm(dest: MoveDestination) {
@@ -213,9 +223,11 @@ export function AnswerPanel({
         />
         <div style={{ minWidth: 0 }}>
           <div className="nm">{answer.card.name}</div>
-          {answer.card.localId ? (
+          {formatCollectorNumber(answer.card.localId, answer.card.setCardCountOfficial) ? (
             <div style={{ marginTop: 6 }}>
-              <span className="no">{answer.card.localId}</span>
+              <span className="no">
+                {formatCollectorNumber(answer.card.localId, answer.card.setCardCountOfficial)}
+              </span>
             </div>
           ) : null}
           <div className="sb u">{answer.subtitle}</div>

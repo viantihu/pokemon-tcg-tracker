@@ -206,6 +206,7 @@ async function assembleLookup(
       name: row.name,
       setName: row.set_name,
       localId: row.local_id,
+      setCardCountOfficial: row.set_card_count_official,
       rarity: row.rarity,
       types: row.types ?? [],
       stage: row.stage,

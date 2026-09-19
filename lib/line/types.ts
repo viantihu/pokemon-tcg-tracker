@@ -20,6 +20,11 @@ export interface CardIdentity {
   setName: string | null;
   /** The full printed collector number, stored EXACTLY as TCGdex returns it (no zero-pad). */
   localId: string | null;
+  /**
+   * Printed set total, for the full "099/182" form (UIL-077). Optional: null when TCGdex reports none,
+   * absent only where a caller predates it — `formatCollectorNumber` falls back to the bare number.
+   */
+  setCardCountOfficial?: number | null;
   imageUrl: string | null;
   bandKey: string;
 }
@@ -29,6 +34,8 @@ export interface AlternateView {
   tcgdexId: string;
   name: string;
   localId: string | null;
+  /** Printed set total for the full "099/182" form (UIL-077); null when TCGdex reports none. */
+  setCardCountOfficial?: number | null;
   priceMarket: number | null;
 }
 
@@ -98,6 +105,8 @@ export interface WishlistOption {
   tcgdexId: string;
   name: string;
   localId: string | null;
+  /** Printed set total for the full "099/182" form (UIL-077); null when TCGdex reports none. */
+  setCardCountOfficial?: number | null;
   setId: string | null;
   imageUrl: string | null;
   bandKey: string;
