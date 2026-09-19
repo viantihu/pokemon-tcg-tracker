@@ -2582,6 +2582,14 @@ files) instead of maintaining a duplicated literal — from
 DbClient contract suite and a 1000-plus-row fixture as the durable answer to this entry's whole class
 of gap (RC-5) — noted here as a forward pointer, not yet built.
 
+**A sixth shape, found while building UIL-074, not yet a fault.** PR
+[#239](https://github.com/viantihu/pokemon-tcg-tracker/pull/239) (merged `bd6156c`) surfaced that the
+PGlite shim hands `created_at` back as a JavaScript `Date`, where PostgREST returns an ISO string.
+UIL-074's own loader compares epochs, so it is correct under either representation — this is not a live
+defect. It is the same family as the numeric-parser fix in [#186](https://github.com/viantihu/pokemon-tcg-tracker/pull/186):
+a fake diverging from the server on a value's *type*, not its ordering or filtering. Recorded so a future
+test that string-compares a `timestamptz` off this shim doesn't pass or fail for the wrong reason.
+
 ## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
 
 - **Reported:** 2026-09-14 (not from Karvi — found by the Senior Dev session while fixing UIL-017)
@@ -2803,6 +2811,13 @@ didn't exist as an action yet when the stamp was designed.
 
 **Suggested fix.** Add `current_binder_ids` (or a hash of it) to the collection entry the fingerprint
 already carries — same shape as the existing `[id, targetCount]` pair, just one field wider.
+
+**Update 2026-09-20: QA's mutations found the fix bites two ways but not a third — closed same day.**
+Poisoning the digest fails 3 tests and poisoning the loader mapping fails 1, but dropping the `sort` on
+`current_binder_ids` left every test green, so the stamp's order-independence (two collections re-pointed
+to the same binder set in a different order should still fingerprint identically) was unpinned. PR
+[#242](https://github.com/viantihu/pokemon-tcg-tracker/pull/242) (merged `dc0ce08`, test-only) adds a
+binder-order case; reverting the `sort` now fails it.
 
 **Priority rationale.** Medium rather than High because it needs a Collections edit mid-plan to reach,
 and the failure is a stale plan rather than corrupted data — but UIL-006's own precedent is that a
@@ -3123,6 +3138,12 @@ on `CardFace` (gated on the card actually having art, matching the prototype's o
 lightbox rendering `${imageUrl}/high.webp`, closing on backdrop click or Escape — deliberately not
 reusing `MoveOverlay`'s careful-dismiss guard, since an image viewer has nothing to lose on an accidental
 close.
+
+**Update 2026-09-20: the click-anywhere/Escape dismiss debt named above is closed.** Restricting the
+backdrop click to `target === currentTarget` had left all five lightbox tests green, since a static
+render cannot see event handlers fire. PR
+[#241](https://github.com/viantihu/pokemon-tcg-tracker/pull/241) (merged `672727d`, test-only) pins the
+dismissal policy as pure functions instead of relying on a DOM click to prove it.
 
 **Priority rationale (Karvi's call): Medium.** Not a bug — a designed feature that never shipped. Worth
 doing because it's a designed, already-scoped piece of the product (down to the CSS and JS existing
@@ -3510,6 +3531,12 @@ reconstructible.
 result standing in for a correct one. Here the plausible result is "the queue is full of unplaced
 cards," which is true, and gives no hint that it's true because history was cleared rather than because
 a sync ran.
+
+**Update 2026-09-20: the lighter, documentation-only reading above shipped.** PR
+[#240](https://github.com/viantihu/pokemon-tcg-tracker/pull/240) (merged `1de1a4e`) states the load-bearing
+fact directly in `lib/plan/pending.ts`'s doc comment and adds the same warning as a callout in
+`docs/go-live-runbook.md`, directly under the B2 promotion table — the one ops document that lists the
+tables. No pending flag, no migration, zero behaviour change.
 
 ## UIL-043 — Offer the move inline from the collection editor's owned-target row
 
@@ -6050,6 +6077,12 @@ file: the Lookup answer header
 wishlist alternate row (`:178`). Reported by Full Stack Dev - 2 while closing the Move-sheet site; all
 four go into the same assigned `CardIdentity` follow-on rather than a new report — the fix point named
 above is unchanged, just wider than first counted.
+
+**Update 2026-09-20: the render-pin debt named in the status line above is closed.** Reverting the
+LineScreen (three sites) and LookupScreen (two sites) render calls back to the bare number had left every
+test green, because the Move-sheet tests pinned the card data handed to `MoveOverlay`, not the on-screen
+label actually rendered. PR [#243](https://github.com/viantihu/pokemon-tcg-tracker/pull/243) (merged
+`678a55f`, test-only) pins the on-screen labels themselves at both screens.
 
 **Priority rationale.** High, Karvi's own call — this touches how she identifies which physical card is
 which, everywhere the app shows one.
