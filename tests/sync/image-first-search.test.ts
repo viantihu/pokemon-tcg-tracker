@@ -1,14 +1,14 @@
 /**
  * UIL-071, the Sync site: pinning an unresolved entry to a catalog card. Karvi: "the search throughout
  * the app should be uniform" — image-first, because she recognises artwork before she reads a name. #212
- * built `CardResultsGrid` with `CardLookup`'s exact `{ search, onPick, placeholder }` contract so a site
+ * built `CardResultsGrid` behind the text list's exact `{ search, onPick, placeholder }` contract so a site
  * migrates by changing one tag; this pins that the Sync screen's one type-ahead has.
  *
- * Why the assertion is on the SOURCE and not a render: at rest the two components produce byte-identical
- * markup (one input, `aria-label="Card lookup"`); the list-versus-grid difference only appears once a
- * query of two-plus characters has been typed and the debounced fetch has answered, which a static
- * render in a node environment cannot drive. So the tag is what is pinned — the same way #212 pins the
- * grid's effect against `CardLookup`'s by diffing source. Revert the swap and the first case fails.
+ * Why the assertion is on the SOURCE and not a render: at rest the grid and the text list it replaced
+ * produced byte-identical markup (one input, `aria-label="Card lookup"`); the difference only appears
+ * once a query of two-plus characters has been typed and the debounced fetch has answered, which a
+ * static render in a node environment cannot drive. So the tag is what is pinned. (The text list is now
+ * deleted, so the remaining risk this guards is a site quietly dropping the grid.)
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -21,12 +21,11 @@ const sites = [...src.matchAll(/<CardResultsGrid\b([\s\S]*?)\/>/g)].map((m) => m
 const placeholderOf = (props: string) => /placeholder="([^"]+)"/.exec(props)?.[1] ?? null;
 
 describe("UIL-071 · the Sync screen's type-ahead is the image-first grid", () => {
-  it("the text-list component is neither imported nor rendered on the screen", () => {
-    expect(src).not.toMatch(/\bCardLookup\b/);
+  it("the grid is imported on the screen", () => {
     expect(src).toContain('import { CardResultsGrid } from "../_components/CardResultsGrid";');
   });
 
-  it("exactly one site — pinning an unresolved entry — on the new tag, with CardLookup's contract", () => {
+  it("exactly one site — pinning an unresolved entry — on the grid, with the contract", () => {
     expect(sites).toHaveLength(1);
     const props = sites[0];
     expect(props).toMatch(/\bsearch=\{\w+\}/);

@@ -1,23 +1,22 @@
 "use client";
 
 /**
- * Card type-ahead against the LOCAL mirror, results as a GRID of card tiles (UIL-071 step 1).
+ * Card type-ahead against the LOCAL mirror, results as a GRID of card tiles (UIL-071).
  *
  * Karvi: "the search throughout the app should be uniform." UIL-039 built Collections' builder search
  * image-first — a grid of `CardFace` tiles, because this is a visual hobby and she recognises artwork
- * before she reads a name — and this is that presentation for the six inline type-ahead sites, one
- * consumer per PR. It keeps `CardLookup`'s EXACT contract (`search`, `onPick`, `placeholder?`) so a
- * call site migrates by changing one tag, and its exact behaviour: the same 200 ms debounce, the same
- * 2-character minimum, the same three non-result states — searching, no match, and the UIL-035 failure
- * ("could not search … the card may well exist"), with the last good results kept on screen through a
- * transient failure. Only the results rendering changes: tiles with name / set / full collector number
- * ("099/182", UIL-077) underneath, instead of a text list.
+ * before she reads a name — and this is that presentation for EVERY inline type-ahead in the app: the
+ * Haul Plan intake, the Lookup tab, Backfill's five sites, Sync's unresolved-entry pin picker and
+ * Collections' log-a-card. Each composes it with the same contract (`search`, `onPick`, `placeholder?`;
+ * the query runs on the SERVER via the injected `search`, a server action over `lib/repo` — the client
+ * never calls TCGdex), so its behaviour is the app's behaviour: a 200 ms debounce, a 2-character
+ * minimum, three non-result states — searching, no match, and the UIL-035 failure ("could not search …
+ * the card may well exist"), with the last good results kept on screen through a transient failure —
+ * and results as tiles with name / set / full collector number ("099/182", UIL-077) underneath.
  *
- * The debounce/state logic below is a verbatim copy of `CardLookup`'s rather than a shared hook, on
- * purpose: `CardLookup` is untouched here so its five remaining call sites cannot change under this PR,
- * and once they have each migrated (one PR apiece) `CardLookup` goes, leaving one copy. NOT the builder
- * page's `CardSearchGrid`, which is a different thing — filters, pagination, multi-select, bulk add —
- * coupled to that page.
+ * It replaced the text-list type-ahead one call site per PR (UIL-071) and is now the ONLY copy of this
+ * logic. NOT the builder page's `CardSearchGrid`, which is a different thing — filters, pagination,
+ * multi-select, bulk add — coupled to that page.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -37,7 +36,13 @@ export function CardResultsGrid({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<LookupCard[]>([]);
   const [loading, setLoading] = useState(false);
-  /** The search FAILED, as distinct from finding nothing (UIL-035) — see CardLookup for the history. */
+  /**
+   * The search FAILED, as distinct from finding nothing (UIL-035). Before this the dropdown reported
+   * "no match" for a Supabase outage, an expired session and a genuinely unknown card alike — telling her
+   * a card does not exist when the truth was that nothing was asked. `search` throws on failure and an
+   * empty array means only "asked, and there was nothing", so the two states are separable here, once,
+   * for every screen that injects a `search`.
+   */
   const [failed, setFailed] = useState<string | null>(null);
   const latest = useRef(0);
 
@@ -104,7 +109,7 @@ export function CardResultsGrid({
 
 /**
  * The results half, presentational and exported so it can be rendered without driving the type-ahead:
- * a grid of tiles, or one of the three states said in the same words `CardLookup` uses. A failure is
+ * a grid of tiles, or one of the three non-result states. A failure is
  * shown ABOVE whatever results were already there — never instead of them, never as "no match".
  */
 export function CardResultTiles({
