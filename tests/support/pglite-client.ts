@@ -13,7 +13,9 @@
  * (`select` / `eq` / `in` / `ilike` / `contains` / `overlaps` / `or` / `order` / `range` /
  * `maybeSingle` / `insert` / `update` / awaited-list) plus `rpc`. Anything else throws loudly rather
  * than quietly returning the wrong rows — if a repo grows a new call shape, the test fails instead
- * of lying. `ilike`/`contains`/`overlaps`/`or` added for UIL-039's `catalogCardRepo.browse`.
+ * of lying. `ilike`/`contains`/`overlaps`/`or` added for UIL-039's `catalogCardRepo.browse`;
+ * `not(col, "is", null)` for UIL-046's retry-sweep test, which drives the sync resolver's set-name
+ * fallback (`catalogCardRepo.findSetIdsByName`) on real Postgres.
  *
  * `select(cols, { count: "exact" })` is supported (UIL-031's `assertReadComplete` needs it), and the
  * count it reports is real: this runs the query's actual SQL with no `LIMIT`/`OFFSET`, so `count` is
@@ -30,6 +32,7 @@ import type { DbClient } from "@/lib/repo";
 type Filter =
   | { kind: "eq" | "in"; col: string; value: unknown }
   | { kind: "is"; col: string }
+  | { kind: "not-null"; col: string }
   | { kind: "ilike"; col: string; pattern: string }
   | { kind: "contains" | "overlaps"; col: string; value: unknown }
   | { kind: "or"; clauses: { col: string; pattern: string }[] };
@@ -121,6 +124,16 @@ class PgQuery {
     return this;
   }
 
+  /** `IS NOT NULL` — the one `not()` shape a repo uses (`catalogCardRepo.findSetIdsByName`'s
+   * `.not("set_id", "is", null)`, on the sync resolver's set-name fallback). Anything else throws. */
+  not(col: string, op: string, value: unknown): this {
+    if (op !== "is" || value !== null) {
+      throw new Error('pglite-client: not() only supports ("is", null)');
+    }
+    this.filters.push({ kind: "not-null", col });
+    return this;
+  }
+
   in(col: string, value: unknown[]): this {
     this.filters.push({ kind: "in", col, value });
     return this;
@@ -188,6 +201,8 @@ class PgQuery {
         where.push(`${quoteIdent(f.col)} = $${params.length}`);
       } else if (f.kind === "is") {
         where.push(`${quoteIdent(f.col)} is null`);
+      } else if (f.kind === "not-null") {
+        where.push(`${quoteIdent(f.col)} is not null`);
       } else if (f.kind === "in") {
         const list = f.value as unknown[];
         if (list.length === 0) {
