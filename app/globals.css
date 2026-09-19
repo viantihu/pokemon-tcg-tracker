@@ -3028,3 +3028,24 @@ button.subhead.folded {
 button.subhead.folded:hover {
   background: var(--hi);
 }
+
+/* ---- A greyed placement chip (UIL-072) ------------------------------------------
+   The BACK HALF chip is disabled while no line is picked (see MovePanel). Same
+   appended-block discipline as above: nothing edits the two `.ochip` rules earlier
+   in the sheet; equal specificity, later, so these win only in the disabled state.
+   `.on` can coexist with `:disabled` — the Line screen opens the panel on the back
+   half by default (lib/line/move.ts `defaultMoveHalf`) — so the selected-but-dead
+   state keeps its outline while dropping the amber "live" fill. */
+.ochip:disabled {
+  cursor: not-allowed;
+  color: var(--ink-2);
+  border-color: var(--ink-2);
+  background: var(--panel-2);
+}
+.ochip:disabled:hover {
+  background: var(--panel-2);
+}
+.ochip.on:disabled {
+  background: var(--panel-2);
+  box-shadow: inset 0 0 0 2px var(--ink-2);
+}
