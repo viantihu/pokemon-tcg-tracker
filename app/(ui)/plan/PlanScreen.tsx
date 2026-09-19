@@ -25,6 +25,7 @@ import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { progressPips } from "@/lib/plan/progress";
 import type { BandMismatchChoice, PlanBandGroup, PlanItem, ProposedPull } from "@/lib/plan";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
+import type { LineJoinOptions } from "@/lib/line/join-options";
 // Leaf import of the pure move module (its only dependency is ./types; the `WriteOp` it names is a
 // type-only import), so bringing `describeMove` into the browser bundle drags in no server code.
 import { describeMove, moveNameLookups, type MoveNameLookups } from "@/lib/line/move";
@@ -357,21 +358,16 @@ export function PlanScreen({
     }
     const gen = opts.binders.find((b) => b.type === "general");
     const existing = overrides[item.incomingId];
-    setMoveTarget({
-      copyId: item.incomingId, // carries the draft id; the override is keyed by it (no copy exists yet)
-      name: item.name,
-      localId: item.localId,
-      setCardCountOfficial: item.setCardCountOfficial,
-      imageUrl: item.imageUrl ?? null,
-      bandKey: item.bandKey,
-      currentLabel: item.destination,
-      joinCandidates: join?.joinCandidates,
-      existingLineByBand: join?.existingLineByBand,
-      naturalBandKey: join?.naturalBandKey,
-      initial:
+    setMoveTarget(
+      moveTargetFor(
+        item,
+        join,
         existing ??
-        (gen ? { kind: "shelf", binderId: gen.id, half: "front", band: item.bandKey } : undefined),
-    });
+          (gen
+            ? { kind: "shelf", binderId: gen.id, half: "front", band: item.bandKey }
+            : undefined),
+      ),
+    );
   }
 
   function onMoveConfirm(dest: MoveDestination) {
@@ -724,9 +720,9 @@ export function PlanScreen({
         <MoveOverlay
           card={moveTarget}
           options={moveOptions}
-          // Same signal the Line screen uses (UIL-070 part 1): candidates present, even empty, turns
-          // the line-first flow on; absent (Trainer, failed lookup) keeps the plain move.
-          allowLineJoin={Boolean(moveTarget.joinCandidates)}
+          // No `allowLineJoin` here on purpose: MoveOverlay derives it from `card.joinCandidates`,
+          // which `moveTargetFor` threads from the line-join lookup (UIL-070 part 1). One signal,
+          // owned by the component that renders the picker, so a call site cannot drop it.
           onConfirm={onMoveConfirm}
           onClose={() => setMoveTarget(null)}
         />
@@ -924,6 +920,33 @@ function IntakePanel(props: {
 }
 
 /* ---------------------------------- plan ---------------------------------- */
+
+/**
+ * The Move panel's card for a plan row (UIL-070 part 1). PURE and exported so the wiring the Plan's
+ * picker depends on is unit-pinned: `join` present (even with no candidates) puts `joinCandidates` on
+ * the card, which is what turns MoveOverlay's line-first flow on; null (a Trainer, or the lookup
+ * failed) leaves it absent and the panel plain. `copyId` carries the DRAFT id — no copy exists yet —
+ * because the override map is keyed by it.
+ */
+export function moveTargetFor(
+  item: PlanItem,
+  join: LineJoinOptions | null,
+  initial: MoveDestination | undefined,
+): MoveTargetCard {
+  return {
+    copyId: item.incomingId,
+    name: item.name,
+    localId: item.localId,
+    setCardCountOfficial: item.setCardCountOfficial,
+    imageUrl: item.imageUrl ?? null,
+    bandKey: item.bandKey,
+    currentLabel: item.destination,
+    joinCandidates: join?.joinCandidates,
+    existingLineByBand: join?.existingLineByBand,
+    naturalBandKey: join?.naturalBandKey,
+    initial,
+  };
+}
 
 /**
  * What to SHOW for a card: the destination she overrode to, or — absent an override — the cascade's
