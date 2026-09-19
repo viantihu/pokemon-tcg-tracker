@@ -4012,11 +4012,15 @@ address post go-live. Flagged Low honestly, not "Low because busy."
 ## UIL-053 — A card can be shelved without appearing in the collection it should belong to
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open — **still needs clarification; her first answer ruled out two candidates but not
-  the third the way it looked like it would**
-- **Priority:** High (Karvi's own ruling, 2026-09-18, via Junior BA - 2) — the mechanism is still
-  unidentified; a Testing count of shelved copies absent from their collection's target list is running to
-  localise it
+- **Status:** Open — **on watch, by Karvi's ruling 2026-09-19: keep it open, do not close.** Not
+  reproducible on current data: her example (Magneton, moved to the Saboteur collection, not shown there
+  at the time) now shows correctly, and the Tech Lead's Testing read found every shelved copy in the
+  specialty binder her collections list on exactly one collection's list (27 of 27; 0 on none, 0 on two).
+  She does not remember what she did in between, so stale view vs a write-path gap cannot be told apart
+  from her account. **What re-opens active work:** a fresh example caught while it is still wrong, with the
+  collection's target list and the copy's binder read at that moment (Tech Lead, on request).
+- **Priority:** High (Karvi's own ruling, 2026-09-18, via Junior BA - 2) — mechanism narrowed by
+  measurement, not identified; see the body's 2026-09-19 update
 - **Area:** Collections
 - **Env:** Testing
 
@@ -5478,7 +5482,23 @@ Medium by default; the scope (six call sites, not one) is worth her seeing befor
   Convey this to the Senior BA and ensure the team is aware of this product ethos so that we can
   proactively avoid more issues."
 
-- **Status:** Open
+- **Status:** **Fixed** — PR [#203](https://github.com/viantihu/pokemon-tcg-tracker/pull/203) MERGED to
+  `develop` 2026-09-19 (squash `53d75f8`), QA-gated on the merged tree (794 tests, build, `globals.css`
+  481/481, `lib/line` untouched; forcing `backHalfNeedsLine = false` fails 3 of 7 new tests), confirmed
+  **deployed** to Testing (Vercel, migrate, smoke and acceptance all green on `32f707d`, which contains
+  it). This is her 2026-09-18 ruling applied, not the ethos read literally: the back-half refusal
+  (UIL-056's invariant) **stays**, but the BACK HALF chip is now natively disabled whenever no line is
+  picked, with the reason in her terms on the chip — "The back half holds lines. Pick a line above to
+  enable." ("below" where UIL-068 put the picker under the manual controls; "Move it from the Lines page
+  to pick one." where the panel has no picker: Plan spotlight, Collections, Lookup) — and the remedy
+  named: front half, collection and bulk all stay live. The disabled state is derived from the same
+  predicate the server throw checks (`isMoveDestinationComplete`, probed with stand-in ids), so if the
+  invariant is ever relaxed in `lib/line` the chip follows with no change here. The two old free-floating
+  "needs a line" hints are gone. **Not rendered in a browser before merge**; UIL-070's measurement pass
+  ran on this markup afterwards and found the chips correctly sized and centred at 375 / 1000 / 1440. The
+  stranded-cards half of her report was UIL-068's mechanism and shipped in #176. Awaiting Karvi's
+  confirmation when UAT resumes: open Move on a stranded card, see BACK HALF greyed with its reason,
+  pick a line, see it enable.
 - **Priority:** High (Karvi's own ruling, 2026-09-18, via Junior BA - 2)
 - **Area:** Lines, Plan
 - **Env:** Testing
