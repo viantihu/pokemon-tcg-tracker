@@ -1167,7 +1167,16 @@ what is **inferred**.
 
 - **Reported:** 2026-09-13 (not from Karvi — surfaced during UIL-012's investigation, independently
   confirmed from two directions)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#237](https://github.com/viantihu/pokemon-tcg-tracker/pull/237) MERGED to
+  `develop` 2026-09-20 (squash `e5203b8`), QA-gated on the merged tree (890 tests; re-introducing UIL-012's
+  exact shape, `band()` returning the "White" literal for Trainers, fails three named tests that could not
+  fail under the old display-form map; `whiteKey` → `WHITE` fails the three fallback tests). Test-only,
+  zero behaviour change: every engine suite now runs on `KEY_FORM_TYPE_COLOR_MAP`, built from migration
+  0003's rows the same way `lib/plan/context.ts` builds production's map, and `DEFAULT_TYPE_COLOR_MAP` is
+  deleted (zero readers in `lib/`, `app/` or `tests/`). `BAND_ORDER` (the `Band` type derives from it) and
+  `WHITE` (last-resort fallback) are kept, readers listed in the PR. No branded type: that is the RCA's
+  RC-1 and stays parked until UAT closes. Nothing for Karvi to test; closes on evidence. Karvi never ruled
+  the priority; the Medium read stands as recorded.
 - **Priority:** Medium (Senior BA's proposed read — Karvi has not ruled yet)
 - **Area:** Plan / Engine (test infrastructure)
 - **Env:** n/a — the defect is in the repo, not a running environment
@@ -3431,7 +3440,16 @@ High value as process: one list beats six more surprises, and it's cheap relativ
 
 - **Reported:** 2026-09-14 (not from Karvi — surfaced investigating today's 702-decision event; credit
   the tech-lead session)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#240](https://github.com/viantihu/pokemon-tcg-tracker/pull/240) MERGED to
+  `develop` 2026-09-20 (squash `1de1a4e`), documentation only, the entry's own lighter reading: a doc
+  comment on `loadPendingPlacements` in `lib/plan/pending.ts` stating that the absence of a
+  `placement_decision` row is what "still waiting" means, and a callout under the go-live runbook's B2
+  promotion table: never clear or prune `placement_decision`, on Testing or Production, because deleting
+  rows re-queues every affected card as if it had never been placed (the 702-row clear of 2026-09-14).
+  No explicit pending flag (the entry's counter-argument stands: a second source of truth can disagree
+  with the placement columns) and no migration comment yet; that rides on the next real migration rather
+  than opening 0015 for a comment. The runbook is the Tech Lead's file; both Tech Lead sessions were gone
+  when this landed, so the hunk is on the Senior BA's authority. Nothing for Karvi to test.
 - **Priority:** Medium
 - **Area:** Plan, Collections
 - **Env:** Testing
@@ -5848,7 +5866,20 @@ the benefit of fixing it immediately rather than logging it for later.
 - **Reported:** 2026-09-17 (Karvi). In her words: "Lines must be sorted by binder. I want a UX where I
   can either view lines grouped by binder or in color + alphabetical order" — her stated priority,
   Medium.
-- **Status:** Open
+- **Status:** **Fixed** — PR [#239](https://github.com/viantihu/pokemon-tcg-tracker/pull/239) MERGED to
+  `develop` 2026-09-20 (squash `bd6156c`), QA-gated on the merged tree (924 tests, `/line` builds under
+  its new Suspense boundary; loader sort removed → 2 fail, binder key dropped → 4 fail, headings
+  suppressed → 1 fails; pre-fix-failing PGlite case "default: colour (seeded rainbow order) then species
+  A to Z — NOT insertion order"), confirmed **deployed** to Testing (Deploy, migrate, smoke, acceptance
+  and Vercel green on `678a55f`). Two views, both hers: **COLOUR + A–Z** (default; band order from
+  `color_band`, then species name, case- and accent-insensitive) and **BY BINDER** (binders in creation
+  order, matching the Move panel's existing order; colour + A–Z inside each; lines with no binder last
+  under NO BINDER). The toggle is the app's existing two-way control at the top of the Lines screen; the
+  choice lives in `?view=binder` so a reload, a move or a decision keeps it. Sorting happens in
+  `buildScreenModel` via the pure `lib/line/order.ts`, not in the component. **Structural call by the
+  Senior BA, flagged for Karvi:** colour + A–Z is the default; if she wants BY BINDER first, that is a
+  one-line switch. Step for Karvi when UAT resumes: open Lines; lines should read in colour order then
+  A to Z, and BY BINDER should group them by binder in the order the binders were created.
 - **Priority:** Medium (Karvi's own read)
 - **Area:** Lines
 - **Env:** Testing
