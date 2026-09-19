@@ -3617,7 +3617,9 @@ mechanism to add; recorded here so the two reports aren't read as two separate t
 ## UIL-046 — Unresolved entries never record a retry attempt, so "self-heal when the catalog catches up" may never actually run
 
 - **Reported:** 2026-09-14 (not from Karvi — measured on Testing by the Senior BA/tech-lead)
-- **Status:** **Fixed** — PR [#183](https://github.com/viantihu/pokemon-tcg-tracker/pull/183) MERGED to
+- **Status:** **Closed** — verified behaviourally on Testing 2026-09-19 (see the end of this line); not
+  Karvi's report, so it closes on that read plus #208's real-Postgres test, not on a confirmation from
+  her. Fix: PR [#183](https://github.com/viantihu/pokemon-tcg-tracker/pull/183) MERGED to
   `develop` 2026-09-18 (squash `62fa838`), QA-gated on the merged tree (701 tests, build), confirmed
   **deployed** to Testing (Deploy and Vercel both green on `d1bfce3`, which contains it). The cause was
   narrower than the title feared: the self-heal DID run, on the retry path and on a full import — what
@@ -3635,9 +3637,15 @@ mechanism to add; recorded here so the two reports aren't read as two separate t
   test proving waiting rows gain `last_retry_sync` and `retry_count`+1 while promoted rows don't is owed."
   So the dev's "revert-checked" claim rests on a source-text test, and this entry does not close on it: it
   closes on the Tech Lead's Testing read of `retry_count` / `last_retry_sync` across the 7 WAITING rows
-  after the next retry sweep (expect all 7 stamped unless one promotes), which is a behavioural check the
-  suite still lacks. The same PR carries UIL-047's C3 guard (a manual match never learns a set alias
-  across locales), recorded under UIL-047, which stays Open on C1/C2. Not Karvi's report.
+  after the next retry sweep (expect all 7 stamped unless one promotes). **Both halves of that debt are
+  now paid.** Suite: PR [#208](https://github.com/viantihu/pokemon-tcg-tracker/pull/208) MERGED 2026-09-19
+  (squash `cef3919`) adds the behavioural PGlite test proving waiting rows gain `last_retry_sync` and
+  `retry_count`+1 while promoted rows do not; it exposed no defect. Testing: she ran a sync between the
+  Tech Lead's 23:5xZ and 01:00Z reads (runs `35407106965` → `35411245355`), and `last_retry_sync` went
+  not-null **1 of 8 → 8 of 8** while `retry_count` went from two distinct values to one, with WAITING
+  still 7 and RESOLVED still 1 — every examined-and-not-promoted row was stamped and nothing promoted,
+  which is the expectation set above. The same PR (#183) carries UIL-047's C3 guard (a manual match
+  never learns a set alias across locales), recorded under UIL-047, which stays Open on C1/C2.
 - **Priority:** Medium (Senior BA's read — explicitly provisional; verify the cause before treating the
   ranking as settled)
 - **Area:** Sync
