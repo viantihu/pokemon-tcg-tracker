@@ -2645,8 +2645,11 @@ test that string-compares a `timestamptz` off this shim doesn't pass or fail for
 ## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
 
 - **Reported:** 2026-09-14 (not from Karvi — found by the Senior Dev session while fixing UIL-017)
-- **Status:** Open
-- **Priority:** Low (Senior BA's read)
+- **Status:** Open — **Karvi ruled 2026-09-20: wire it, do not delete.** Assigned to Full Stack Dev - 1. The
+  entry never defined where the count of "open binder block needs" comes from, so a one-paragraph
+  definition (table, state, when it changes) comes first and is recorded here before code.
+- **Priority:** High (Karvi's own ruling, 2026-09-20: a must-have — "the user must be able to track where
+  ALL cards are, including blocks"). Was Low, Senior BA's read.
 - **Area:** Plan / Engine
 - **Env:** n/a — in the repo, not a running environment
 
@@ -3606,8 +3609,10 @@ tables. No pending flag, no migration, zero behaviour change.
 
 - **Reported:** 2026-09-14 (not from Karvi — a follow-up suggestion from QA and the UX Dev, on
   UIL-014's shipped behaviour)
-- **Status:** Open
-- **Priority:** Low
+- **Status:** Open — **Karvi ruled 2026-09-20: build it.** Assigned to Full Stack Dev - 1: the owned-target
+  row in the collection editor offers the move inline, reusing the Move sheet with the collection's
+  binder pre-selected (a card is always movable); click path pinned with a `*.dom.test.ts` case.
+- **Priority:** High (Karvi's own ruling, 2026-09-20: "do not drop it, this is a must have"). Was Low.
 - **Area:** Collections
 - **Env:** Testing
 
@@ -3929,7 +3934,11 @@ for the exact wording and what remains to close it (the Tech Lead's Testing read
 ## UIL-047 — Japanese cards are unfindable and can be confidently mis-matched, because the catalog mirror is English-only
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet — three separate reports, one root cause)
-- **Status:** Open — **C3 is covered end to end and deployed; C1 and C2 stay blocked on her ruling.**
+- **Status:** Open — **C3 is covered end to end and deployed; Karvi ruled on C1/C2 2026-09-20: pull the
+  Japanese catalog this phase** ("user has a lot of Japanese cards"). Assigned to Full Stack Dev - 1,
+  proposal before code: what the mirror needs to fetch the `ja` locale, how a `ja` printing matches a Dex
+  export row given `set_alias` keys on (locale, dex_code), the fate of the 22 learned aliases and 8
+  unresolved rows on Testing, and the run-time and row-count cost.
   C3 guard: PR [#183](https://github.com/viantihu/pokemon-tcg-tracker/pull/183) (squash `62fa838`,
   2026-09-18) — a manual match on a non-English entry never learns a cross-locale set alias, because the
   mirror is English-only so any such alias is wrong by construction. C3 remedy: PR
@@ -4330,8 +4339,11 @@ just unrated; recorded here so the two fields agree with each other now that a p
 ## UIL-054 — Team Rocket's Wobbuffet (SVP full-art promo) has no image because TCGdex serves none
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open
-- **Priority:** Low (Claude's read — needs Karvi's confirmation)
+- **Status:** **Closed** — Karvi 2026-09-20: "that is fine". An upstream data gap (TCGdex serves no image
+  for `svp-203`) with nothing to fix in the app; a later re-sync picks the image up if TCGdex ever adds
+  one. Her follow-on in the same breath, a pixelated placeholder image for any card without art in place
+  of the initials fallback, is its own entry: UIL-081.
+- **Priority:** Low (Karvi confirmed 2026-09-20)
 - **Area:** Catalog
 - **Env:** Testing
 
@@ -4607,9 +4619,14 @@ convenience, not a defect.
 ## UIL-060 — Let her create a stand-in catalog record for a card the external database doesn't have yet, and swap it for the real one once it arrives
 
 - **Reported:** 2026-09-14 (Karvi, retesting Sync)
-- **Status:** Open
-- **Priority:** Medium (Claude's read — a real gap with a working manual fallback already in place;
-  needs Karvi's confirmation)
+- **Status:** Open — **Karvi ruled 2026-09-20: build Half 1 now.** A user-created stand-in `catalog_card` so a
+  card TCGdex does not carry yet can be shelved today; migration `0015` is allocated to it (provenance
+  column, stand-in id scheme, any new op). Assigned to Full Stack Dev - 1, design proposal before code (id
+  shape, column, RLS, where the form lives, how Half 2 stays possible). Half 2 (swap for the real record
+  when it arrives) remains a follow-on, not dropped.
+- **Priority:** High (Karvi's own ruling, 2026-09-20: a go-live blocker — "the catalog and the match are
+  not always correct, so a manual override is necessary for users to accurately maintain their
+  collection"). Was Medium, Claude's read.
 - **Area:** Sync, Catalog
 - **Env:** Testing
 
@@ -5478,7 +5495,10 @@ flake (previous update, PR #175) — re-run it; anything else red is real.
 - **Reported:** 2026-09-17 (Karvi, screenshot of a live "COLLECTION CLAIM VS LINE SLOT" decision for
   Charizard). In her words: "This UX is too crowded, and a lot of the information here is not helpful.
   I need something simpler."
-- **Status:** Open
+- **Status:** Open — **Karvi approved the shape 2026-09-20:** the proposal line; one line naming which of
+  the collection or the line physically ends up with this copy (the one fact the card never surfaced); one
+  sentence of why; the choice buttons. The CATALOG statistics and the wishlist-alternates grid move
+  behind a "details" disclosure. Assigned to Full Stack Dev - 1.
 - **Priority:** Medium (Karvi's own ruling, 2026-09-18, via Junior BA - 2)
 - **Area:** Lines
 - **Env:** Testing
@@ -5998,7 +6018,10 @@ the benefit of fixing it immediately rather than logging it for later.
 - **Reported:** 2026-09-17 (Karvi). In her words: "Lines must be sorted by binder. I want a UX where I
   can either view lines grouped by binder or in color + alphabetical order" — her stated priority,
   Medium.
-- **Status:** **Fixed** — PR [#239](https://github.com/viantihu/pokemon-tcg-tracker/pull/239) MERGED to
+- **Status:** Open — **part 1 Fixed and deployed; part 2 open on Karvi's report 2026-09-20:** "when switching
+  to Binder, the text for the binder sort is not super visible" — the BY BINDER group headings in the
+  Lines strip need contrast and weight; assigned to Full Stack Dev - 1, harness-measured. She confirmed
+  the COLOUR + A–Z default. Part 1: PR [#239](https://github.com/viantihu/pokemon-tcg-tracker/pull/239) MERGED to
   `develop` 2026-09-20 (squash `bd6156c`), QA-gated on the merged tree (924 tests, `/line` builds under
   its new Suspense boundary; loader sort removed → 2 fail, binder key dropped → 4 fail, headings
   suppressed → 1 fails; pre-fix-failing PGlite case "default: colour (seeded rainbow order) then species
@@ -6362,3 +6385,31 @@ duplication shape, one level up the call stack.
 **Priority rationale.** Medium, Senior BA's read: a confirmed, reachable divergence on real card
 classes (Trainer/Energy), not a hypothetical — but Backfill is a lower-traffic screen than the Haul
 Plan or Lines, and no report of a wrong band has surfaced from it yet.
+
+## UIL-081 — Cards with no art show initials; Karvi wants a pixelated placeholder image that fits the brand
+
+- **Reported:** 2026-09-20 (Karvi, while closing UIL-054; body written by the Senior BA because no intake
+  session was on the roster)
+- **Status:** Open
+- **Priority:** Medium (Karvi's own request — a brand decision on a state every screen can reach)
+- **Area:** all (CardFace)
+- **Env:** Testing
+
+In her words, ruling on UIL-054: "That is fine. I want to use pixelated image placeholders so that it
+fits with the brand of the app."
+
+**Confirmed structure.** Every thumbnail in the app is one component, `CardFace`
+([`app/(ui)/_components/CardFace.tsx`](<../app/(ui)/_components/CardFace.tsx>)). When `imageUrl` is
+null, or the image fails to load (`onError`), it renders the card's initials on a plain block; that is
+UIL-016's fallback and it is what Team Rocket's Wobbuffet (UIL-054, `svp-203`, no image upstream) shows
+today. UIL-036's lightbox already treats such a face as not zoomable ("a block has nothing to enlarge"),
+so a placeholder image must keep that guard: the placeholder is not art and must not open the lightbox.
+
+**Scope.** One component, one asset or one generator. Either a single pixel-art placeholder shipped as a
+static asset, or a deterministic pixel pattern derived from the card's name so two imageless cards do not
+look identical; the name and collector number stay legible on or under it. Applies wherever `CardFace`
+renders with no art: Plan rows and spotlight, Lines slot faces, Lookup, Collections tiles, Sync rows,
+Backfill pickers. Not scoped here: fetching art from any other source.
+
+**Priority rationale.** Medium, Karvi's own request: not a defect, but it is a stated brand call on a
+state that several screens reach, and the change is contained to one component.
