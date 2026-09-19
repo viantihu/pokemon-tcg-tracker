@@ -18,6 +18,7 @@ import type {
   DecisionChoiceId,
   EvidenceRow,
 } from "@/lib/line/types";
+import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "./CardFace";
 import { bandMeta } from "./plan-meta";
 import { fmtPrice } from "./decision-format";
@@ -85,9 +86,11 @@ export function DecisionCard({
               <div className="nm" style={{ fontSize: 15 }}>
                 {d.card.name}
               </div>
-              {d.card.localId ? (
+              {formatCollectorNumber(d.card.localId, d.card.setCardCountOfficial) ? (
                 <div style={{ marginTop: 6 }}>
-                  <span className="no">{d.card.localId}</span>
+                  <span className="no">
+                    {formatCollectorNumber(d.card.localId, d.card.setCardCountOfficial)}
+                  </span>
                 </div>
               ) : null}
               <div className="bd u" style={{ marginTop: 8 }}>
@@ -143,7 +146,7 @@ export function DecisionCard({
                 WISHLISTING ·{" "}
                 {(() => {
                   const picked = d.wishlist.find((w) => w.tcgdexId === pickedAlt) ?? d.wishlist[0];
-                  return `${picked.name} ${picked.localId ?? ""} ${fmtPrice(picked.priceMarket) ?? ""}`;
+                  return `${picked.name} ${formatCollectorNumber(picked.localId, picked.setCardCountOfficial) ?? ""} ${fmtPrice(picked.priceMarket) ?? ""}`;
                 })()}
               </span>
             </div>
@@ -175,7 +178,9 @@ export function DecisionCard({
                       {w.badge ? <span className="badge">{w.badge}</span> : null}
                     </div>
                     <div className="wn">{w.name}</div>
-                    <div className="wno">{w.localId ?? ""}</div>
+                    <div className="wno">
+                      {formatCollectorNumber(w.localId, w.setCardCountOfficial) ?? ""}
+                    </div>
                     <div className="wpx">{fmtPrice(w.priceMarket) ?? "—"}</div>
                     {isPicked ? <span className="pill">WISHLISTING</span> : null}
                   </div>
