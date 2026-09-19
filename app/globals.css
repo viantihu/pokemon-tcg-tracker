@@ -3041,6 +3041,22 @@ button.subhead.folded:hover {
   text-align: left;
 }
 
+/* ---- Move sheet header at phone width (UIL-070 part 2) --------------------------
+   `.dsheet .cap` is flex-wrap, so when "MOVE A SHELVED CARD" + the card name + Close
+   do not fit (they need ~350px; a 375px phone gives the header 319px), the LAST item
+   wraps — and that is the Close button, which landed on a second row under the card
+   name, right-aligned (header 82.8px tall, measured). Reflow at phone width so the
+   button keeps the top-right corner it has everywhere else and the card name takes
+   the second row under the title instead. Scoped to `.movecap`, which only
+   MoveOverlay renders: Collections, DecisionCard and Sync share `.dsheet .cap` and
+   are untouched. Desktop is unaffected (one row, 52.5px, at 1000 and 1440). */
+@media (max-width: 520px) {
+  .dsheet .cap.movecap .n {
+    order: 3;
+    flex-basis: 100%;
+  }
+}
+
 /* ---- A greyed placement chip (UIL-072) ------------------------------------------
    The BACK HALF chip is disabled while no line is picked (see MovePanel). Same
    appended-block discipline as above: nothing edits the two `.ochip` rules earlier
