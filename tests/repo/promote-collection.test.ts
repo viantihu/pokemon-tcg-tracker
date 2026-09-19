@@ -6,7 +6,7 @@
  * indistinguishable from success until the production app renders an empty binder. So
  * it gets the same treatment as a migration: two REAL Postgres databases via PGlite
  * (WASM, no Docker — the project's standing pattern, see tests/support/pglite-rpc.ts),
- * both built from the frozen 0001-0007, one seeded as "Testing" and one virgin as
+ * both built from EVERY migration on disk, one seeded as "Testing" and one virgin as
  * "Production".
  *
  * The four things that actually matter, and are asserted below:
@@ -19,22 +19,23 @@
  *   4. Preflight refuses, having written nothing, on schema drift / a missing
  *      production user / a non-empty production / an ambiguous source owner.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { promoteCollection, PromotionError } from "@/scripts/promote-collection.mjs";
 
-const MIGRATIONS = [
-  "0001_init.sql",
-  "0002_domain.sql",
-  "0003_config.sql",
-  "0004_catalog_artwork.sql",
-  "0005_collection_mode.sql",
-  "0006_commit_rpc.sql",
-  "0007_backfill_ops.sql",
-];
+/**
+ * EVERY migration on disk, in order — not a hand-kept list. The list used to stop at 0007 (the frozen
+ * set when this file was written), which meant the promotion was being proven against a schema six
+ * versions behind what Testing and Production actually run: tables and columns added since (0009's set
+ * metadata, 0012's `collection.updated_at` + trigger, 0013's `line_slot` marker columns) were never
+ * copied under test. Reading the directory is the fix that cannot go stale again (UIL-029's lesson).
+ */
+const MIGRATIONS = readdirSync(path.join(process.cwd(), "supabase", "migrations"))
+  .filter((f) => f.endsWith(".sql"))
+  .sort();
 
 const TESTING_OWNER = "11111111-1111-1111-1111-111111111111";
 const SEED_OWNER = "00000000-0000-0000-0000-000000000001";
@@ -66,7 +67,7 @@ function migrationSql(file: string): string {
   return readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8");
 }
 
-/** A database at 0001-0007 with the platform shims, recording its own migration history. */
+/** A database at the full migration set (or a prefix) with the platform shims, recording its own migration history. */
 async function freshDb(migrations: string[] = MIGRATIONS): Promise<PGlite> {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(SUPABASE_SHIMS);
@@ -405,7 +406,13 @@ describe("promote-collection: preflight refusals", () => {
 
     await expect(
       promoteCollection({ source, target: behind, ownerEmail: PROD_EMAIL }),
-    ).rejects.toThrow(/migration histories differ[\s\S]*MISSING: 0006, 0007/);
+    ).rejects.toThrow(
+      new RegExp(
+        `migration histories differ[\\s\\S]*MISSING: ${MIGRATIONS.slice(5)
+          .map((f) => f.split("_")[0])
+          .join(", ")}`,
+      ),
+    );
     expect(await count(behind, "copy")).toBe(0);
   });
 
