@@ -53,11 +53,16 @@ const LIST_ALL_HARD_CAP = 200_000;
  * at all: it catches truncation at whatever `max-rows` the project is actually configured to, not
  * just the Supabase default of 1000.
  */
-export function assertReadComplete(table: string, rows: unknown[], count: number | null): void {
+export function assertReadComplete(
+  table: string,
+  rows: unknown[],
+  count: number | null,
+  remedy = "Use listAll()/pageAll for a table that can grow past the cap.",
+): void {
   if (count !== null && rows.length < count) {
     throw new Error(
       `${table}: read ${rows.length} of ${count} row(s) — the server's row cap truncated this ` +
-        `"read everything" query. Use listAll()/pageAll for a table that can grow past the cap.`,
+        `"read everything" query. ${remedy}`,
     );
   }
 }

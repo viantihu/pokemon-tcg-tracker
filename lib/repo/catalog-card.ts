@@ -1,6 +1,6 @@
 /** CatalogCard: a TCGdex printing mirrored into the DB (read-only to the app). system-design §4. */
 import { parseCardQuery } from "@/lib/catalog/collector-number";
-import { createRepo, type DbClient, type Insert, type Row } from "./base";
+import { assertReadComplete, createRepo, type DbClient, type Insert, type Row } from "./base";
 
 /**
  * Upper bound on how many exact `local_id` matches one candidate can produce — a number exists in at
@@ -92,7 +92,17 @@ export const catalogCardRepo = {
    *
    * The sync resolves ~685 rows and asked for each `(set, localId)` separately, which is one serial
    * round trip per candidate: the wait she sees on an import. Grouping by set collapses that to one
-   * query per distinct set. Chunked because the ids ride on the request URL.
+   * query per distinct set.
+   *
+   * `chunkSize` is bounded by TWO constraints, so raising it for speed is NOT safe (UIL-028):
+   *  - the ids ride on the request URL, so a chunk has to fit in one;
+   *  - each chunk is ONE unpaged PostgREST response, cut at the server's `max-rows` (1000 on Supabase).
+   *    A 200-id chunk within one set returns ~200 rows, so today the cap is far away; a 2000-id chunk
+   *    would come back as 1000 rows and — because `lib/sync/catalog-lookup.ts` marks every REQUESTED id
+   *    as fetched — the cut cards would read as proven absences and park in the unresolved queue looking
+   *    like a catalog gap. So every chunk asks for the true total and `assertReadComplete` throws by
+   *    name the moment the cap cuts one: at 2000, or at the default should a set ever carry five-plus
+   *    printings per collector number.
    */
   async findBySetLocalMany(
     db: DbClient,
@@ -104,13 +114,22 @@ export const catalogCardRepo = {
     if (unique.length === 0) return [];
     const out: Row<"catalog_card">[] = [];
     for (let i = 0; i < unique.length; i += chunkSize) {
-      const { data, error } = await db
+      const chunk = unique.slice(i, i + chunkSize);
+      const { data, error, count } = await db
         .from("catalog_card")
-        .select("*")
+        .select("*", { count: "exact" })
         .eq("set_id", setId)
-        .in("local_id", unique.slice(i, i + chunkSize));
+        .in("local_id", chunk);
       if (error) throw error;
-      out.push(...(data ?? []));
+      const rows = data ?? [];
+      assertReadComplete(
+        "catalog_card",
+        rows,
+        count,
+        `findBySetLocalMany(${setId}): a chunk of ${chunk.length} local ids was cut by the cap — ` +
+          `lower chunkSize (never raise it); the sync must not mark these ids fetched.`,
+      );
+      out.push(...rows);
     }
     return out;
   },
