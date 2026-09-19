@@ -140,9 +140,11 @@ Repo-level `DEPLOY_ENABLED` is `true`; if it were not, every Deploy job is skipp
 - [ ] Merge it as a **merge commit**, not a squash. A squash would give `main` a
       single new SHA whose history no longer matches `develop`'s, and every later
       `develop` → `main` PR would present the whole history as new again.
-- [ ] `main` has **no branch protection** today (measured 2026-09-18; `develop` has
-      `verify`, `migration-order` and `Vercel` required). Ask DevOps to mirror
-      `develop`'s protection onto `main` before A5 so the same three checks gate it.
+- [x] `main` carries the same branch protection as `develop` (mirrored 2026-09-19:
+      `verify`, `migration-order` and `Vercel` required, strict off, no review count,
+      force-push and deletion blocked, linear history **not** required so a merge
+      commit is allowed). Its first live test is this PR: `mergeStateStatus` must read
+      `BLOCKED` until all three checks are green on the head SHA.
 - [ ] Merge only after Karvi has said go on the day. This is the irreversible step:
       the merge pushes `main`, Vercel builds the production deployment, and Deploy
       applies every migration from `0003` onward to Production in one `migrate` job.
@@ -327,7 +329,8 @@ count that matters is the one the app sees:
   `devops-strategy.md` §5 principle applies from here on: no CSV-reconciliation or
   destructive-diff experiments against Production.
 - **Branch protection on `main`** (A5) stays on. The `Vercel` context on `main` is the
-  production deployment.
+  production deployment, so a "Canceled" (superseded) status on a later merge commit
+  means the testable production SHA is the next one that contains it.
 
 ## Known exposure before cutover
 
