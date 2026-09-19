@@ -264,10 +264,15 @@ jobs:
             done < expected-counts.txt
             echo "Complete already: $skipped set(s). To mirror: $(wc -l < remaining.txt | tr -d ' ')."
           else
-            # Do NOT quietly fall back to a presence-free full run without saying so — the
-            # whole reason UIL-004 went unnoticed is a step that degraded silently.
-            echo "::warning::could not read the current catalog_card contents, so this run cannot resume — falling back to mirroring all $total sets. Expect TCGdex throttling."
-            cp set-ids.txt remaining.txt
+            # Do NOT fall back to a presence-free full run — not quietly, and (since 2026-09-19)
+            # not at all. The whole reason UIL-004 went unnoticed is a step that degraded
+            # silently, and the previous shape here (a `::warning::` then a full run) still
+            # produced a GREEN job whose log had to be read to learn the read had failed
+            # (docs/root-cause-analysis.md RC-6b). "Could not determine what is stored" and
+            # "nothing is stored" are different states; only the operator can collapse them,
+            # by re-dispatching with force_all=true, which takes the full-run path above.
+            echo "::error::could not read the current catalog_card contents, so this run cannot tell which of the $total sets are already mirrored. Refusing to guess. If a full re-mirror is what you want, re-dispatch with force_all=true (expect TCGdex throttling); otherwise fix the read (the step above prints the failing request) and re-run."
+            exit 1
           fi
 
           if [ ! -s remaining.txt ]; then
