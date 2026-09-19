@@ -3191,14 +3191,21 @@ button.subhead.folded:hover {
   color: var(--ink-2);
 }
 .linetabs .lgh {
+  /* UIL-074 part 2. Karvi: "the text for the binder sort is not super visible." As 9px --ink-2 text
+     sitting bare on the shell it read as a caption next to 11px ink-bordered tabs. Now an inverted
+     plate — the same ink-on-panel the active tab uses — spanning the row, so each binder's run of
+     tabs hangs from its own labelled bar (the plate's bottom edge meets the tabs' 3px ink top border). */
   flex-basis: 100%;
-  padding: 8px 0 4px;
-  font-size: 9px;
+  margin-top: 10px;
+  padding: 6px 10px;
+  font-size: 10px;
+  font-weight: 700;
   letter-spacing: 0.14em;
-  color: var(--ink-2);
+  color: var(--panel);
+  background: var(--ink);
 }
 .linetabs .lgh:first-child {
-  padding-top: 0;
+  margin-top: 0;
 }
 .linetabs .lt.gend {
   border-right-width: 3px;
