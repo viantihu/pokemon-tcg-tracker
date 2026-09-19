@@ -295,7 +295,13 @@ export interface ExistingLineBlock {
 }
 
 /** The client-facing line-screen payload (loaded server-side, rendered client-side). */
+/** How the Lines screen orders its strips (UIL-074): colour + A–Z (default) or grouped by binder. */
+export type LineViewMode = "color" | "binder";
+
 export interface LineScreenData {
+  /** The order `lines` is in — echoed so the strip renders group headings only when it applies. */
+  view: LineViewMode;
+  /** Ordered per `view` (lib/line/order.ts). */
   lines: LineView[];
   decisions: DecisionCard[];
   moveOptions: MoveOptions;

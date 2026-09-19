@@ -17,15 +17,16 @@ import {
   moveNameLookups,
   type DecisionChoiceId,
   type LineScreenData,
+  type LineViewMode,
   type MoveDestination,
 } from "@/lib/line";
 import { getOwnerContext } from "@/lib/plan/session";
 import { errorMessage } from "@/lib/errors";
 
 /** Reload the whole screen model (called after every mutation so the strip + queue stay truthful). */
-export async function loadLine(): Promise<LineScreenData> {
+export async function loadLine(view: LineViewMode = "color"): Promise<LineScreenData> {
   const { db } = await getOwnerContext();
-  return loadLineScreen(db);
+  return loadLineScreen(db, { view });
 }
 
 export type MoveActionResult =
@@ -41,12 +42,14 @@ export type MoveActionResult =
 export async function moveCardAction(
   copyId: string,
   destination: MoveDestination,
+  /** The strip order she is viewing (UIL-074), so the refreshed data comes back in it. */
+  view: LineViewMode = "color",
 ): Promise<MoveActionResult> {
   try {
     const { db } = await getOwnerContext();
     const before = await loadLineScreen(db);
     const res = await applyMove(db, { copyId, destination }, moveNameLookups(before.moveOptions));
-    const data = await loadLineScreen(db);
+    const data = await loadLineScreen(db, { view });
     return { ok: true, label: res.destinationLabel, data };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
@@ -61,11 +64,13 @@ export async function resolveDecisionAction(
   decisionId: string,
   choiceId: DecisionChoiceId,
   pickedCatalogCardId?: string,
+  /** The strip order she is viewing (UIL-074), so the refreshed data comes back in it. */
+  view: LineViewMode = "color",
 ): Promise<DecisionActionResult> {
   try {
     const { db, ownerId } = await getOwnerContext();
     await applyDecision(db, ownerId, decisionId, choiceId, pickedCatalogCardId);
-    const data = await loadLineScreen(db);
+    const data = await loadLineScreen(db, { view });
     return { ok: true, data };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };

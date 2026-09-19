@@ -3167,3 +3167,34 @@ button.subhead.folded:hover {
   color: var(--panel);
   opacity: 0.75;
 }
+
+/* ---- Lines strip: order toggle + binder group headings (UIL-074) ----------------
+   Appended block, same discipline as the folds above. Reuses `.modetoggle`/`.modebtn`
+   (Collections' two-way control) for the order toggle. `.linetabs` is flex-wrap, so a
+   heading with `flex-basis: 100%` starts each binder's run on its own row; `.gend`
+   restores the right border on a run's last tab, which `.lt:last-child` alone only
+   gives the strip's final tab. */
+.viewmode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.viewmode .hk {
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  color: var(--ink-2);
+}
+.linetabs .lgh {
+  flex-basis: 100%;
+  padding: 8px 0 4px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--ink-2);
+}
+.linetabs .lgh:first-child {
+  padding-top: 0;
+}
+.linetabs .lt.gend {
+  border-right-width: 3px;
+}
