@@ -314,6 +314,7 @@ async function loadEnrichment(
       name: row.name,
       imageUrl: row.image_url,
       localId: row.local_id,
+      setCardCountOfficial: row.set_card_count_official,
       bandKey: band(toCatalogCard(row), typeColorMap) ?? "white",
     };
   }

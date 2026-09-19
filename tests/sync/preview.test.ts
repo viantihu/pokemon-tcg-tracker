@@ -45,8 +45,20 @@ function group(catalogCardId: string, dexVariantRaw: string, copies: CopySnapsho
 function enrichment(over: Partial<PreviewEnrichment> = {}): PreviewEnrichment {
   return {
     cardMetaById: {
-      [AMPHAROS]: { name: "Ampharos", imageUrl: null, localId: "29", bandKey: "yellow" },
-      [GABITE]: { name: "Cynthia's Gabite", imageUrl: null, localId: "103", bandKey: "navy" },
+      [AMPHAROS]: {
+        name: "Ampharos",
+        imageUrl: null,
+        localId: "29",
+        setCardCountOfficial: null,
+        bandKey: "yellow",
+      },
+      [GABITE]: {
+        name: "Cynthia's Gabite",
+        imageUrl: null,
+        localId: "103",
+        setCardCountOfficial: null,
+        bandKey: "navy",
+      },
     },
     placementByCopyId: {},
     groupCopies: {},

@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
 import type { SyncOverrides, SyncPlanBundle, SyncPreview } from "@/lib/sync";
+import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
 import { BandChip } from "../_components/BandChip";
 import { CardLookup } from "../_components/CardLookup";
@@ -315,7 +316,8 @@ function UndoBar({
   );
 }
 
-function PreviewPanel({
+/** Exported so the collector-number rendering can be pinned without driving a sync (UIL-077). */
+export function PreviewPanel({
   preview,
   overrides,
   busy,
@@ -357,7 +359,12 @@ function PreviewPanel({
                     <CardFace name={r.name} imageUrl={r.imageUrl} size="s" />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 700 }}>
-                        {r.name} {r.localId ? <span className="no">{r.localId}</span> : null}
+                        {r.name}{" "}
+                        {formatCollectorNumber(r.localId, r.setCardCountOfficial) ? (
+                          <span className="no">
+                            {formatCollectorNumber(r.localId, r.setCardCountOfficial)}
+                          </span>
+                        ) : null}
                       </div>
                       <div style={{ fontSize: 11, color: "var(--ink-2)" }}>
                         {r.dexVariantRaw} · {r.consequenceLabel}
@@ -407,7 +414,12 @@ function PreviewPanel({
                     <CardFace name={v.name} imageUrl={v.imageUrl} size="s" />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 700 }}>
-                        {v.name} {v.localId ? <span className="no">{v.localId}</span> : null}
+                        {v.name}{" "}
+                        {formatCollectorNumber(v.localId, v.setCardCountOfficial) ? (
+                          <span className="no">
+                            {formatCollectorNumber(v.localId, v.setCardCountOfficial)}
+                          </span>
+                        ) : null}
                       </div>
                       <div
                         style={{
@@ -451,8 +463,13 @@ function PreviewPanel({
               >
                 <CardFace name={a.name} imageUrl={a.imageUrl} size="s" />
                 <span style={{ flex: 1 }}>
-                  {a.name} {a.localId ? <span className="no">{a.localId}</span> : null} ·{" "}
-                  {a.dexVariantRaw}
+                  {a.name}{" "}
+                  {formatCollectorNumber(a.localId, a.setCardCountOfficial) ? (
+                    <span className="no">
+                      {formatCollectorNumber(a.localId, a.setCardCountOfficial)}
+                    </span>
+                  ) : null}{" "}
+                  · {a.dexVariantRaw}
                 </span>
                 <BandChip bandKey={a.bandKey} />
                 <span className="tag">×{a.count}</span>

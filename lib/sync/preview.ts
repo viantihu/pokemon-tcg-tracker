@@ -15,6 +15,8 @@ export interface CardMeta {
   name: string;
   imageUrl: string | null;
   localId: string | null;
+  /** Printed set total, for the full "099/182" form (UIL-077). Null when TCGdex reports none. */
+  setCardCountOfficial: number | null;
   bandKey: string;
 }
 
@@ -27,6 +29,7 @@ export interface RemovalRow {
   name: string;
   imageUrl: string | null;
   localId: string | null;
+  setCardCountOfficial: number | null;
   bandKey: string;
   dexVariantRaw: string;
   consequence: RemovalConsequence;
@@ -42,6 +45,7 @@ export interface VariantRow {
   name: string;
   imageUrl: string | null;
   localId: string | null;
+  setCardCountOfficial: number | null;
   bandKey: string;
   fromVariantRaw: string;
   toVariantRaw: string;
@@ -52,6 +56,7 @@ export interface AdditionRow {
   name: string;
   imageUrl: string | null;
   localId: string | null;
+  setCardCountOfficial: number | null;
   bandKey: string;
   dexVariantRaw: string;
   count: number;
@@ -104,6 +109,7 @@ const UNKNOWN_CARD: CardMeta = {
   name: "(unknown card)",
   imageUrl: null,
   localId: null,
+  setCardCountOfficial: null,
   bandKey: "white",
 };
 
@@ -142,6 +148,7 @@ export function buildPreview(plan: ReconcilePlan, enr: PreviewEnrichment): SyncP
       name: m.name,
       imageUrl: m.imageUrl,
       localId: m.localId,
+      setCardCountOfficial: m.setCardCountOfficial,
       bandKey: m.bandKey,
       dexVariantRaw: r.dexVariantRaw,
       consequence: r.consequence,
@@ -160,6 +167,7 @@ export function buildPreview(plan: ReconcilePlan, enr: PreviewEnrichment): SyncP
       name: m.name,
       imageUrl: m.imageUrl,
       localId: m.localId,
+      setCardCountOfficial: m.setCardCountOfficial,
       bandKey: m.bandKey,
       fromVariantRaw: v.fromVariantRaw,
       toVariantRaw: v.toVariantRaw,
@@ -180,6 +188,7 @@ export function buildPreview(plan: ReconcilePlan, enr: PreviewEnrichment): SyncP
         name: m.name,
         imageUrl: m.imageUrl,
         localId: m.localId,
+        setCardCountOfficial: m.setCardCountOfficial,
         bandKey: m.bandKey,
         dexVariantRaw: c.dexVariantRaw,
         count: 1,
