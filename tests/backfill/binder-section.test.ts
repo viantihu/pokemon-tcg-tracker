@@ -9,7 +9,7 @@
  * `tests/catalog/migration.test.ts` (PGlite lacks `auth.uid()` and the anon/authenticated roles).
  */
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
@@ -24,12 +24,11 @@ import {
   SCIZOR_SV03_141,
 } from "../engine/fixtures";
 
-const MIGRATIONS = [
-  "0001_init.sql",
-  "0002_domain.sql",
-  "0003_config.sql",
-  "0004_catalog_artwork.sql",
-];
+// Every migration on disk, not a list frozen at 0004 — the view under test must hold on the schema that
+// actually ships (see tests/support/pglite-rpc.ts for the longer why).
+const MIGRATIONS = readdirSync(path.join(process.cwd(), "supabase", "migrations"))
+  .filter((f) => f.endsWith(".sql"))
+  .sort();
 
 const SUPABASE_SHIMS = `
   create schema if not exists auth;

@@ -5,7 +5,7 @@
  * `auth.uid()` shim Supabase provides so the SECURITY INVOKER function runs under the authenticated
  * owner's RLS — exactly as production does. Never edits a migration file.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
@@ -14,43 +14,26 @@ import type { WritePayload } from "@/lib/repo";
 
 export const OWNER = "00000000-0000-0000-0000-000000000001";
 
-const MIGRATIONS = [
-  "0001_init.sql",
-  "0002_domain.sql",
-  "0003_config.sql",
-  "0004_catalog_artwork.sql",
-  "0005_collection_mode.sql",
-  "0006_commit_rpc.sql",
-  "0007_backfill_ops.sql",
-  "0008_collection_removal_ops.sql",
-  // 0009/0010 were missing from this list (a pre-existing gap, not from this PR) — every PGlite test
-  // was silently running one schema version behind whatever actually ships. Restored here so this harness
-  // reflects the real migration history rather than a snapshot frozen at 0008.
-  "0009_set_metadata.sql",
-  "0010_release_stale_line_slots.sql",
-  // 0011 (relink) is a one-time data repair, same shape as 0010 — a no-op on a fresh/empty test DB,
-  // included so the harness's schema stays in sync with what actually ships rather than needing every
-  // future migration remembered here by hand one at a time.
-  "0011_relink_unambiguous_line_slots.sql",
-  // UIL-052's own migration (this PR). Numbered 0012 per the Senior BA's allocation — originally
-  // authored as 0011, renumbered once 0011_relink_unambiguous_line_slots.sql (a different,
-  // independently-developed migration) landed on develop first and claimed that number. UIL-078's
-  // #188 ships 0013, not 0012, so 0012 is this PR's. Two files sharing one prefix is not a git
-  // conflict (different filenames), so a numbering collision is only caught by checking file-by-file
-  // against develop — do that on every rebase, not just this once.
-  "0012_collection_updated_at.sql",
-  // UIL-078's own migration (#188): the suppression columns on line_slot / placement_decision — the
-  // first migration here whose ABSENCE would break a PGlite test (tests/line/decision-persistence).
-  "0013_decision_persistence.sql",
-  // UIL-047 C3's own migration (#194): replaces apply_write_ops AGAIN — 0013's body + `delete_set_alias` —
-  // so the composed function under test here is 0014's. Whichever of 0013/0014 runs last is the function.
-  "0014_forget_set_alias.sql",
-];
+export const MIGRATIONS_DIR = path.join(process.cwd(), "supabase", "migrations");
+
+/**
+ * EVERY migration on disk, in filename order — read, not listed. The hand-kept list this replaced ran
+ * one, then two, then six versions behind what actually ships (UIL-029's fourth harness-fidelity fault
+ * and its successors), and each time a PGlite test was passing against a schema production no longer
+ * had. `freshRpcDb` records each applied version in the same `supabase_migrations.schema_migrations`
+ * table the Supabase CLI writes, so tests/support/harness-applies-every-migration.test.ts can prove the
+ * applied set equals the directory rather than trusting this constant.
+ */
+export const MIGRATIONS: readonly string[] = readdirSync(MIGRATIONS_DIR)
+  .filter((f) => f.endsWith(".sql"))
+  .sort();
 
 // Supabase provides auth.uid() + the anon/authenticated/service_role roles; PGlite (vanilla PG) does
 // not, so we shim exactly those before applying the migrations (never editing the frozen files).
 const SUPABASE_SHIMS = `
   create schema if not exists auth;
+  create schema if not exists supabase_migrations;
+  create table if not exists supabase_migrations.schema_migrations (version text primary key);
   create or replace function auth.uid() returns uuid language sql stable as $$
     select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
   $$;
@@ -62,14 +45,19 @@ const SUPABASE_SHIMS = `
 `;
 
 function migrationSql(file: string): string {
-  return readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8");
+  return readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
 }
 
 /** Fresh DB with `MIGRATIONS` applied, platform grants replicated. Ends as the bootstrap superuser. */
 export async function freshRpcDb(): Promise<PGlite> {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(SUPABASE_SHIMS);
-  for (const f of MIGRATIONS) await db.exec(migrationSql(f));
+  for (const f of MIGRATIONS) {
+    await db.exec(migrationSql(f));
+    await db.query(`insert into supabase_migrations.schema_migrations (version) values ($1)`, [
+      f.split("_")[0],
+    ]);
+  }
   // Supabase grants base-table privileges to these roles as a platform default; RLS is the security
   // boundary on top. Replicate it so `set role authenticated` can write through the RPC.
   await db.exec(`
