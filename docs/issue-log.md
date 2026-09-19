@@ -2960,12 +2960,20 @@ discriminated-result shape this entry originally suggested, and for a stated rea
 `search` prop type is shared across five screens under three different owners, and a throw keeps that
 signature byte-identical rather than forcing edits into files this fix had no business touching.
 
-**The third site — `app/(ui)/look/LookupScreen.tsx`'s own `catch` setting `notFound` — was deliberately
-NOT touched**, per the fix's own commit message: that file is a different session's fence. It benefits
-*partially* anyway, since its injected `searchCatalog` now flows through the same shared component and
-gets the honest message for a search-side failure — but its own separate `onPick` catch (the one quoted
-above, at the top of this entry) is untouched and still needs that session's attention. **Not closing
-this entry on a two-thirds fix** — the third site is exactly why.
+**Update 2026-09-18: the third site is fixed too — all three, not two of three.** PR
+[#201](https://github.com/viantihu/pokemon-tcg-tracker/pull/201) (squash `fc8646b`, merged) removed
+`LookupScreen.tsx`'s own `catch → notFound`. `lookupAnswer` now returns a result union
+(`{ ok: false, error }` / `{ ok: true, answer: null }`) instead of throwing — deliberately, because
+Next 16 redacts a forwarded server error in production, so a throw could never say *what* failed. The
+screen keeps a `failed` state separate from `notFound`, so an outage reads as "could not look this up"
+rather than a claim her card doesn't exist. Revert-checked: restoring the old `catch → notFound`
+behaviour fails the state test. This is the same PR that shipped UIL-051.
+
+**Test-debt note from QA at merge, verbatim, worth carrying forward rather than treating as closed on
+green:** "#201's action-level failure path is unpinned (its tests cover `lookup-state` and the render;
+mutating `lookupAnswer`'s catch back to not-found passes 18/18)." So the *screen's* handling of the two
+states is pinned; the *action*'s own catch block silently reverting to the old behaviour would not be
+caught today. Recorded here rather than left implicit in the status line's own detail.
 
 **Priority rationale (Senior BA's read): Medium.** Not High: nothing is corrupted, no data is at risk,
 and all three paths work correctly when the database does. Not Low: it makes a real failure
@@ -3710,6 +3718,11 @@ actually resolves; this is a missing stamp on a checked-and-still-unresolved out
 path or lost data. The Senior BA is putting a revised Low to Karvi now that the cause is settled;
 recording that as proposed rather than final since priority is her call.
 
+**Note:** the fix's own test-debt gap — `stampRetrySweep` unpinned by any behavioural test — is already
+quoted in full in the status line above (QA's caveat at merge). Not repeated here; see the status line
+for the exact wording and what remains to close it (the Tech Lead's Testing read of `retry_count` /
+`last_retry_sync` across the 7 WAITING rows after the next sweep).
+
 ## UIL-047 — Japanese cards are unfindable and can be confidently mis-matched, because the catalog mirror is English-only
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet — three separate reports, one root cause)
@@ -4080,13 +4093,8 @@ a hypothesis, not a finding: at the time of her report Magneton was in the share
 Saboteur's target list, and later was — the current-data read above cannot distinguish that timing from
 a fix landing in the interim, because it only sees the present state, not the history.
 
-**Her follow-up, 2026-09-19: keep this Open, on watch — not Closed.** She does not remember what she
-did between seeing Magneton missing and seeing it corrected, so a stale client view and a genuine
-write-path gap cannot be told apart from her account alone. **What would reactivate this as live work:
-a fresh example caught while it is still visibly wrong** — the collection's target list and the copy's
-binder read at that moment, before anything else touches it. The Tech Lead can take that read on
-request the next time this happens. Not reproducible on current data; the mechanism remains
-unidentified, not ruled out.
+**Her follow-up, 2026-09-19: see the status line above** — keep Open, on watch, not Closed, and what
+would reactivate it. Not repeating it here; recorded once to avoid the two copies drifting apart later.
 
 **Priority rationale.** High (Karvi's own ruling, 2026-09-18) — the mechanism is still unidentified, not
 just unrated; recorded here so the two fields agree with each other now that a priority has been set.
