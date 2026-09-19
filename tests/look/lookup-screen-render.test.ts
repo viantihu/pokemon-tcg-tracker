@@ -143,3 +143,40 @@ describe("UIL-051 · every copy is on screen, every movable copy has a Move", ()
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Move<\/button>/);
   });
 });
+
+describe("UIL-077 · the answer header shows the full printed collector number", () => {
+  // QA's #234 note: the Move sheet's number was pinned, this on-screen label was not. Same component,
+  // same `formatCollectorNumber`, same fallback — pinned on the static markup she actually reads.
+  const withTotal = (setCardCountOfficial: number | null) =>
+    render(
+      createElement(AnswerPanel, {
+        answer: answer({
+          card: {
+            tcgdexId: "sv03-099",
+            name: "Charmeleon",
+            setName: "Obsidian Flames",
+            localId: "099",
+            setCardCountOfficial,
+            rarity: "Uncommon",
+            types: ["Fire"],
+            stage: "Stage1",
+            cardClass: "standard",
+            imageUrl: null,
+          },
+        }),
+        copies: COPIES,
+        busy: false,
+        onMove: () => {},
+      }),
+    );
+
+  it('renders "099/182" when the set total is known', () => {
+    expect(withTotal(182)).toContain('<span class="no">099/182</span>');
+  });
+
+  it("falls back to the bare number when TCGdex reports no total", () => {
+    const html = withTotal(null);
+    expect(html).toContain('<span class="no">099</span>');
+    expect(html).not.toContain("099/");
+  });
+});

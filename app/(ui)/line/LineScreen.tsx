@@ -543,7 +543,19 @@ function UnlinedCardGrid({
   );
 }
 
-function Slot({ line, slot, onMove }: { line: LineView; slot: SlotView; onMove: () => void }) {
+/**
+ * One stage of a line as an object on the strip. Exported so the labels she reads on it — the printed
+ * collector number and the priced alternates line — are render-tested (UIL-077), not just read.
+ */
+export function Slot({
+  line,
+  slot,
+  onMove,
+}: {
+  line: LineView;
+  slot: SlotView;
+  onMove: () => void;
+}) {
   const meta = bandMeta(line.bandKey);
   const topBg =
     slot.state === "filled" ? meta.color : slot.state === "placeholder" ? "var(--ink)" : "#5F5035";
