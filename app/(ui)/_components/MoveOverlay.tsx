@@ -68,7 +68,9 @@ export function MoveOverlay({
       }}
     >
       <div className="dsheet panel">
-        <div className="cap">
+        {/* `movecap` scopes UIL-070's narrow-width reflow to THIS sheet's header; the other .dsheet
+            users (Collections, DecisionCard, Sync) keep the shared rule untouched. */}
+        <div className="cap movecap">
           <span className="t">MOVE A SHELVED CARD</span>
           <span className="n">{card.name}</span>
           <button
