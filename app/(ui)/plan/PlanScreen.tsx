@@ -361,6 +361,7 @@ export function PlanScreen({
       copyId: item.incomingId, // carries the draft id; the override is keyed by it (no copy exists yet)
       name: item.name,
       localId: item.localId,
+      setCardCountOfficial: item.setCardCountOfficial,
       imageUrl: item.imageUrl ?? null,
       bandKey: item.bandKey,
       currentLabel: item.destination,
