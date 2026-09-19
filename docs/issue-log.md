@@ -3888,7 +3888,21 @@ competes with other Mediums rather than being a bug that jumps the queue.
 ## UIL-050 — Shelved count can exceed a binder's capacity because editing a binder never rebalances what's already in it
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#171](https://github.com/viantihu/pokemon-tcg-tracker/pull/171) MERGED to
+  `develop` 2026-09-18 (squash `3bdb29d`), QA-gated on the merged tree, confirmed **deployed** to Testing
+  (Deploy and Vercel both green on `f1b788f`, which contains it). Capacity is derived live from
+  pages / pockets / divider while the shelved count is a straight count of `copy` rows, and `saveBinder`
+  wrote new dimensions with no check that what was already shelved still fit — so shrinking pages or moving
+  the divider could leave more cards shelved than pockets. **Design decision, flagged and approved: the
+  save is blocked and the message names which section would strand how many cards**, rather than silently
+  rebalancing pages or the divider — moving her cards without asking is the UIL-061 mistake, and she has
+  said she validates placements herself. A brand-new binder has nothing shelved, so nothing to check. QA
+  finding closed before merge: the guard and its read were each tested in isolation but nothing proved
+  `saveBinder` called them (the #146 pass-through shape), so a direct `saveBinder` wiring test was added.
+  The PR body's "follow-up owed after #159" was discharged before merge: the rebased head (`5328b0a`) reads
+  the null-half bucket through `copyRepo.listShelvedInSection` with a single PGlite `.is()` shim, no
+  duplicate read left (QA, in code; 766 tests on the merged tree). Awaiting Karvi's confirmation when UAT
+  resumes: shrink a binder below what it holds and the save should refuse with the count.
 - **Priority:** Medium (Claude's read — needs Karvi's confirmation)
 - **Area:** Binders, Settings
 - **Env:** Testing
@@ -4265,7 +4279,18 @@ core daily screen, on desktop, right after a fix that was supposed to make that 
 ## UIL-059 — Collections always reopen fully folded, even right after she expanded one
 
 - **Reported:** 2026-09-14 (Karvi, retesting UIL-034's fix, PR #106)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#172](https://github.com/viantihu/pokemon-tcg-tracker/pull/172) MERGED to
+  `develop` 2026-09-18 (squash `4f033e1`), QA-gated on the merged tree, confirmed **deployed** to Testing
+  (Deploy and Vercel both green on `f1b788f`, which contains it). UIL-034's fold state was a plain
+  `useState`, so every fresh load of Collections re-folded everything, including the one she had just
+  opened. The collapsed set is now restored from **`localStorage`** on mount and written back on every
+  change (same key convention and storage try/catch as the Haul Plan's resume) — `localStorage`, not
+  `sessionStorage`, per the Senior BA's ruling and confirmed in the merged code by QA, so the state survives
+  closing the tab, not just navigating away. Persisting the **collapsed** set rather than the expanded one
+  keeps "a brand-new collection opens expanded" for free. Two files, exercised through the real
+  `CollectionsView` against stubbed storage; removing the restore call fails the two "not everything folds"
+  tests; 750 tests on the merged tree. Awaiting Karvi's confirmation when UAT resumes: expand a collection,
+  leave and come back (or close and reopen the tab), it should still be open.
 - **Priority:** Low (Claude's read — needs Karvi's confirmation)
 - **Area:** Collections
 - **Env:** Testing
@@ -5340,7 +5365,9 @@ picks one — matching her rejection of a default exactly. Status line lands sep
   plainly that two of its four selected problems were still unfixed; relayed by the Senior BA, who is
   recording that closure on her explicit instruction)
 - **Status:** Open
-- **Priority:** Not yet rated (see rationale)
+- **Priority:** High (Karvi's own ruling, 2026-09-18, via Junior BA - 2 — she asked what this entry was,
+  was reminded it is UIL-064's two carried-forward parts, and rated it High; the rationale below predates
+  that ruling)
 - **Area:** Plan, Lines
 - **Env:** Testing
 
@@ -5629,7 +5656,20 @@ UIL-073** (a different axis on the same screen — this is progressive disclosur
 
 - **Reported:** 2026-09-17 (Karvi). In her words: "In the haul plan, the cards must be in alphabetical
   order" — her stated priority, High.
-- **Status:** Open
+- **Status:** **Fixed** — PR [#200](https://github.com/viantihu/pokemon-tcg-tracker/pull/200) MERGED to
+  `develop` 2026-09-18 (squash `f1b788f`), QA-gated on the merged tree, confirmed **deployed** to Testing
+  (Deploy and Vercel both green on `f1b788f`). **Interpretation chosen by the Senior BA, not confirmed by
+  her, and she can overrule it in one line:** the outer grouping (band → basics / non-basics) is kept,
+  because the design docs call it functional and it mirrors her shelf; inside each sub-group rows now sort
+  by **name alone** (Intl.Collator, numeric, so "9" sorts before "10"; ties by collector number, then input
+  order), and the cascade action is dropped as an inner sort key but stays visible as the row chip. The
+  alternative — action first, then name — was rejected because it would show her alphabetical runs broken
+  by action label and read as "still not sorted". Footer now reads "BAND → BASIC / NON-BASIC → A–Z". If
+  she wants action-first back it is a one-line comparator change. Dev's mutation check: swapping in the
+  pre-fix comparator fails 5 of 16 tests including a real-cascade "Charizard ex before Charmeleon" run;
+  747 tests on the rebased head. Only visual change is the footer string, not rendered in a browser. The
+  three design-doc passages that still say "then action" are routed to intake. Awaiting Karvi's
+  confirmation when UAT resumes.
 - **Priority:** High (Karvi's own read)
 - **Area:** Plan
 - **Env:** Testing
