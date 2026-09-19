@@ -4055,8 +4055,37 @@ screen move-into-collection, Collections' "Log a card"), and only one of the thr
 code. Recommend asking her which specific action she took, rather than continuing to guess from a
 description that fits more than one flow.
 
-**Priority rationale.** Still unrated — a real mechanism hasn't been identified yet, and rating a guess
-would be worse than rating nothing.
+**Update 2026-09-18: a Testing count, narrowed but not conclusive.** Membership is derived exactly as
+this entry already states — a shelved copy whose `binder_id` is in the collection's
+`current_binder_ids` and whose `catalog_card_id` is on `target_catalog_card_ids`
+([`lib/coll/remove.ts`](../lib/coll/remove.ts)). Testing has 3 binders (1 specialty, 2 general); **all
+11 of her collections list the same single specialty binder.** Of 105 shelved copies, 27 sit in that
+shared specialty binder and 78 in the two general binders. Of the 27: every one is on **exactly one**
+listing collection's target list — 0 on none, 0 on two or more, which refutes "in the binder but off
+its list" for this population **on current data**. The 78 general-binder shelved copies are the only
+population where "shelved but in no collection" is structurally true — no collection lists a general
+binder at all — legitimate state or mis-set `role`, not yet answered. Adjacent counts: shelved-no-binder
+0, bulk 601 (8 carry a `binder_id`, unexplained, not investigated), block 0. The per-collection
+off-target figures seen earlier (22–27) are an artifact of the shared binder, not evidence of a defect
+on their own.
+
+**Her concrete report, verbatim (via Junior BA - 2, 2026-09-18): "I attempted to move Magneton to the
+Saboteri collection. I now see that card in the proper collection. Maybe a different issue resolution
+fixed it."** The trigger was a **Move to a collection destination**. Candidate explanation, recorded as
+a hypothesis, not a finding: at the time of her report Magneton was in the shared binder but not yet on
+Saboteur's target list, and later was — the current-data read above cannot distinguish that timing from
+a fix landing in the interim, because it only sees the present state, not the history.
+
+**Her follow-up, 2026-09-19: keep this Open, on watch — not Closed.** She does not remember what she
+did between seeing Magneton missing and seeing it corrected, so a stale client view and a genuine
+write-path gap cannot be told apart from her account alone. **What would reactivate this as live work:
+a fresh example caught while it is still visibly wrong** — the collection's target list and the copy's
+binder read at that moment, before anything else touches it. The Tech Lead can take that read on
+request the next time this happens. Not reproducible on current data; the mechanism remains
+unidentified, not ruled out.
+
+**Priority rationale.** High (Karvi's own ruling, 2026-09-18) — the mechanism is still unidentified, not
+just unrated; recorded here so the two fields agree with each other now that a priority has been set.
 
 ## UIL-054 — Team Rocket's Wobbuffet (SVP full-art promo) has no image because TCGdex serves none
 
@@ -5694,11 +5723,16 @@ UIL-073** (a different axis on the same screen — this is progressive disclosur
 as a tiebreak — never on `it.name`. So two cards with the same action land in whatever order they were
 typed or synced in, and cards with different actions never sort by name against each other at all.
 
-**Open question this entry doesn't resolve: does "alphabetical" replace the action-based sort, or sit
-inside it (alphabetical WITHIN each action group, action order preserved as the outer sort)?** The
-current grouping — basics vs. non-basics, then by action — is described in `group.ts`'s own header as
-FUNCTIONAL, mirroring how she physically works a haul; a flat alphabetical re-sort could undo that
-rhythm. Worth her confirming which she means before this is built.
+**Update 2026-09-18: the open question above is answered — name alone, not name-within-action.** See
+the status line for the shipped mechanism and the Senior BA's rationale for that choice; verified
+directly against PR #200's merged diff before this was recorded there.
+
+**Action item flagged in the status line as "routed to intake" — the specifics.** Three design docs
+still describe the pre-fix inner sort and need to agree with shipped code: `docs/system-design.md:384-386`,
+`docs/dev-spec.md:299-301`, and `docs/designer-brief.md:80-81` all read "...then action" / "then by
+action," confirmed directly against `origin/develop`. Not edited here — those files are outside
+`docs/issue-log.md`, the only file this role touches — recording the exact locations so whoever picks
+this up doesn't have to re-find them.
 
 **Priority rationale.** High, Karvi's own call.
 
