@@ -2767,7 +2767,15 @@ carried all day as "deduced from the header spec, not yet seen through the clien
 ## UIL-032 — The plan fingerprint doesn't cover `current_binder_ids`, so a cached plan can survive a collection being re-pointed
 
 - **Reported:** 2026-09-14 (not from Karvi — found reviewing UIL-022's fix)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#236](https://github.com/viantihu/pokemon-tcg-tracker/pull/236) MERGED to
+  `develop` 2026-09-20 (squash `88c6de8`), QA-gated on the merged tree (893 tests; three pre-fix-failing
+  cases, two pure and one PGlite through the real `loadPlanFingerprint`, which returned identical stamps
+  before the fix), confirmed **deployed** to Testing (Deploy, migrate, smoke, acceptance and Vercel green
+  on `88c6de8`). The fingerprint's collection entry is now `[id, targetCount, sorted current_binder_ids]`
+  and the stamp version moved to v3, so re-pointing a collection at a different binder invalidates a
+  cached plan the same way deleting it always did. No migration. Step for Karvi when UAT resumes: with a
+  plan already computed, re-point a collection at another binder, then reopen the Plan; it should
+  recompute rather than serve the cached plan.
 - **Priority:** Medium
 - **Area:** Plan, Collections
 - **Env:** Testing
@@ -3045,7 +3053,20 @@ and this. Five in one day is a property of the codebase, not five coincidences.
 ## UIL-036 — Clicking a card thumbnail should enlarge it — designed in the prototype, never ported
 
 - **Reported:** 2026-09-14
-- **Status:** Open
+- **Status:** **Fixed** — PR [#232](https://github.com/viantihu/pokemon-tcg-tracker/pull/232) MERGED to
+  `develop` 2026-09-20 (squash `8eebc93`), QA-gated on the merged tree (894 tests; dropping the art guard
+  fails "zoomable but NO art", swapping high.webp for low.webp fails the lightbox test), confirmed
+  **deployed** to Testing (Deploy, migrate, smoke, acceptance and Vercel green on `88c6de8`). The
+  prototype's lightbox is ported as written: a card thumbnail with real art gets a zoom-in cursor and a
+  button role; clicking it opens the high-resolution image with a name and set/number caption; any
+  click or Escape closes it. Wired on the Plan (worklist rows, spotlight), Lookup (answer face) and
+  Collections (both tile grids, the Log-a-card picked row); a block with no art stays a plain thumbnail.
+  Measured with the static harness: at 375 the card is 293×410 (78vw, aspect 0.714) over the veils; at
+  1440 it caps at 360×504, centred. **Follow-ons, not done here:** the decision card's faces and the
+  search-result tiles (whose faces sit inside a button, so a nested button role is invalid). Test debt,
+  not a hold: the click-anywhere dismiss is not pinned by a static render; b0's tiny follow-up. Step for
+  Karvi when UAT resumes: on the Plan, tap any card thumbnail; the large image should open, and one tap
+  anywhere or Escape should close it.
 - **Priority:** Medium (Karvi's call)
 - **Area:** Plan
 - **Env:** Testing
@@ -5950,11 +5971,18 @@ this up doesn't have to re-find them.
   revert-checked (bare numbers restored → 2 render tests fail). **Move sheet landed
   2026-09-19:** PR [#222](https://github.com/viantihu/pokemon-tcg-tracker/pull/222) (squash `ad528b8`,
   deployed, all gates green on `a910d83`) renders the formatter in `MoveOverlay.tsx` for the Plan's Move
-  sheet (render-tested for "099/182" and for a card with no total). **Two entry points still show the
-  bare number:** the Move sheets opened from the Line and Lookup screens build their card from
-  `CardIdentity`, which carries no set total; a small follow-on threads the total onto `CardIdentity`
-  (assigned, not started). Fixed-not-Closed until that lands. Awaiting Karvi's confirmation when UAT
-  resumes.
+  sheet (render-tested for "099/182" and for a card with no total). **Every remaining site landed
+  2026-09-20:** PR [#234](https://github.com/viantihu/pokemon-tcg-tracker/pull/234) (squash `4516139`;
+  `CardIdentity`, `AlternateView` and `WishlistOption` now carry the set total, rendered at the Line slot
+  strip, the placeholder alternates, both Line Move sheets, the Lookup header and Move sheet, and the
+  decision card's header, WISHLISTING line and alternate tiles) and PR
+  [#235](https://github.com/viantihu/pokemon-tcg-tracker/pull/235) (squash `f38900c`; the Sync preview's
+  three candidate rows), both **deployed** (all gates green on `88c6de8`). Finding while closing the
+  Move sheet: it was not the last bare site; five more were found by grep and fixed in the same pass. No
+  bare collector-number render remains in `app/`. Test debt, not a hold: the Line (3) and Lookup (2)
+  on-screen labels are pinned through the card handed to the Move sheet, not the label itself; Full
+  Stack Dev - 2's tiny follow-up. **Closed candidate** on Karvi's confirmation when UAT resumes: any
+  card, on any screen, reads "099/182" when its set has a printed total.
 - **Priority:** High (Karvi's own read)
 - **Area:** Lines, Plan, Lookup, Backfill, Collections
 - **Env:** Testing
