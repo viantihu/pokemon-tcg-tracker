@@ -12,6 +12,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
+import type { DbClient } from "@/lib/repo";
 import { applyCollectionLog } from "@/lib/coll";
 import {
   asOwner,
@@ -178,5 +179,91 @@ describe("CONTROL — the pre-fix shape (insert unconditionally) doubles the row
       [OWNER, "cardA", SPEC],
     );
     expect(await copyCountFor("cardA")).toBe(2); // the defect UIL-048 is about
+  });
+});
+
+/**
+ * UIL-033 — logging a card is ONE transaction through `apply_write_ops`, not three awaited writes with a
+ * TypeScript read-modify-write on `target_catalog_card_ids` in the middle. The RPC's
+ * `union_collection_targets` (0007) unions SERVER-SIDE in one statement, so two logs that interleave
+ * compose instead of the second clobbering the first — the lost update the old shape had.
+ */
+describe("UIL-033 · logging is atomic and two concurrent logs both land", () => {
+  it("two cards logged at the same time both end up on the target list (pre-fix: one is lost)", async () => {
+    await seedCatalogCards(db, ["cardA", "cardB"]);
+    await seedBinders(db, [{ id: SPEC, type: "specialty", name: "Specialty A" }]);
+    await seedCollections(db, [
+      { id: COL, name: "Matsuno", targetCatalogCardIds: [], currentBinderIds: [SPEC] },
+    ]);
+    await asOwner(db);
+    const client = pgliteClient(db);
+
+    const [a, b] = await Promise.all([
+      applyCollectionLog(client, OWNER, COL, "cardA"),
+      applyCollectionLog(client, OWNER, COL, "cardB"),
+    ]);
+    expect(a).toMatchObject({ ok: true, created: true });
+    expect(b).toMatchObject({ ok: true, created: true });
+
+    await asSuperuser(db);
+    expect((await targetsOf(COL)).sort()).toEqual(["cardA", "cardB"]);
+    expect(await copyCountFor("cardA")).toBe(1);
+    expect(await copyCountFor("cardB")).toBe(1);
+  });
+
+  it("copy, audit row and tag land together — or none of them do", async () => {
+    await seedCatalogCards(db, ["cardA"]);
+    // The collection points at a binder that does not exist: insert_copy's FK fails INSIDE the RPC, and
+    // because the tag and the audit row are in the same call, nothing is left half-written. The old
+    // shape inserted the copy first and would have thrown with a placed card on no list.
+    const GHOST = "b0000000-0000-0000-0000-0000000000ff";
+    await seedCollections(db, [
+      { id: COL, name: "Matsuno", targetCatalogCardIds: [], currentBinderIds: [GHOST] },
+    ]);
+    await asOwner(db);
+    const res = await applyCollectionLog(pgliteClient(db), OWNER, COL, "cardA");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/Could not log the card/);
+
+    await asSuperuser(db);
+    expect(await copyCountFor("cardA")).toBe(0);
+    expect(await targetsOf(COL)).toEqual([]);
+    const audit = await db.query<{ n: number }>(`select count(*)::int n from placement_decision`);
+    expect(audit.rows[0].n).toBe(0);
+  });
+
+  it("a collection that vanishes between read and write is NAMED, not passed off as success", async () => {
+    await seedCatalogCards(db, ["cardA"]);
+    await seedBinders(db, [{ id: SPEC, type: "specialty", name: "Specialty A" }]);
+    await seedCollections(db, [
+      { id: COL, name: "Matsuno", targetCatalogCardIds: [], currentBinderIds: [SPEC] },
+    ]);
+    await asOwner(db);
+    // Sabotage as a side effect of the ownership read, i.e. after the collection was read and before the
+    // write: the collection row goes away (hers, so RLS allows it). union_collection_targets then matches
+    // no row and says nothing — the case that must not come back as { ok: true }.
+    const raw = pgliteClient(db);
+    let armed = true;
+    const client = new Proxy(raw as object, {
+      get(target, prop, receiver) {
+        if (prop !== "from") return Reflect.get(target, prop, receiver);
+        return (table: string) => {
+          if (table === "copy" && armed) {
+            armed = false;
+            void db.query(`delete from collection where id = $1`, [COL]);
+          }
+          return (raw as unknown as { from: (t: string) => unknown }).from(table);
+        };
+      },
+    }) as unknown as DbClient;
+    const res = await applyCollectionLog(client, OWNER, COL, "cardA");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toContain("changed under you");
+      expect(res.error).toContain("move it from the binder view"); // the remedy, on screen
+    }
+    // Honest about the state: the copy IS shelved in the binder (it committed), on no collection's list.
+    await asSuperuser(db);
+    expect(await copyCountFor("cardA")).toBe(1);
   });
 });
