@@ -121,15 +121,23 @@ Measured 2026-09-18 via the GitHub API:
 | var | `SUPABASE_PROJECT_REF` = `bqqerxpdxywnpvndhxbs` | yes |
 | var | `SUPABASE_DB_POOLER_HOST` = `aws-0-us-west-2.pooler.supabase.com` | yes |
 | secret | `SUPABASE_DB_PASSWORD` | yes |
-| secret | `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | **no**, and not needed |
+| secret | `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | **no**: add both before A5 |
 
 `migrate` on `main` needs only the first four and connects straight to Postgres over the
 **session-mode pooler on 5432** (never 6543, whose transaction mode breaks `db push`'s
 advisory locks). It never touches the Supabase Management API, so the account's
-Management-API privilege loss (UIL-024) cannot block the production migration. The two
-missing secrets exist on `testing` for the `acceptance` job, which runs only on
-`develop` (`if: github.ref_name == 'develop'`); nothing on the `main` rail reads them.
-Add them only if acceptance is ever extended to Production.
+Management-API privilege loss (UIL-024) cannot block the production migration.
+
+The two missing secrets are for the `acceptance` job, which since 2026-09-19 runs on
+**both** rails against the environment that was just migrated (it used to be gated to
+`develop`, so a Production deploy skipped the one suite that proves RLS and the
+colour-band config on the project the app actually serves from). It is read-only.
+
+- [ ] Karvi adds `SUPABASE_ANON_KEY` (the Production publishable / anon key) and
+      `SUPABASE_SERVICE_ROLE_KEY` (the Production secret / service-role key) as
+      **environment** secrets on the GitHub `production` environment (repo Settings →
+      Environments → production). Same values as the Vercel Production variables in A3.
+      Without them the job fails loudly on the first `main` deploy; `smoke` still runs.
 
 Repo-level `DEPLOY_ENABLED` is `true`; if it were not, every Deploy job is skipped.
 
@@ -159,8 +167,13 @@ Deploy (`.github/workflows/deploy.yml`) triggers on the push to `main` with
       `supabase_migrations.schema_migrations` back over the pooler and fails on any
       version present in the repo but absent from Production.
 - [ ] `smoke` green: `/api/health` 200 and `/login` 200 on `APP_URL`.
-- [ ] `acceptance` is **skipped** on `main` by design. Its evidence is the green run on
-      the same `develop` SHA that was merged.
+- [ ] `acceptance` runs against Production. Expect **one red assertion on this first
+      deploy**: "service role DOES see seeded data" requires at least 3 `catalog_card`
+      rows, and Production's catalog is empty until B5 copies it. The RLS-denial and
+      colour-band assertions must be green; a red there means `0003` did not apply or
+      the keys point at the wrong project. After B6, re-run the `acceptance` job on
+      that Deploy run (`gh run rerun <run-id> --job <job-id>`) to record it green. Do
+      not weaken the assertion to make the first deploy green.
 - [ ] Vercel's commit status on the merge commit is `success`. A "Canceled" status means
       a newer push superseded that build; the testable SHA is the later one that
       contains it.
