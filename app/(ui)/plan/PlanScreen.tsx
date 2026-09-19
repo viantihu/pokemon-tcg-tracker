@@ -32,7 +32,7 @@ import { describeMove, moveNameLookups, type MoveNameLookups } from "@/lib/line/
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
 import { cardCaption } from "../_components/CardLightbox";
-import { CardLookup } from "../_components/CardLookup";
+import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { ProgressBar } from "../_components/ProgressBar";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { VariantSelector } from "../_components/VariantSelector";
@@ -850,7 +850,7 @@ function IntakePanel(props: {
         />
       </div>
 
-      <CardLookup search={lookupCatalog} onPick={onAdd} />
+      <CardResultsGrid search={lookupCatalog} onPick={onAdd} />
 
       {draft.length === 0 ? (
         <p style={{ marginTop: 14, fontSize: 11, color: "var(--ink-2)", lineHeight: 1.8 }}>
