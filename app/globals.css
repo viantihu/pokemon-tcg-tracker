@@ -1972,6 +1972,11 @@ nav.menu .tab .n {
   display: flex;
   border: 3px solid var(--ink);
   flex: 0 0 auto;
+  /* Hug the buttons in every container (UIL-025). `.orow` is redefined further down as a column flex
+     box, whose default `align-items: stretch` pulled this border out to the row's full width while the
+     buttons kept their own; `flex: 0 0 auto` only governs the main axis. `width: fit-content` also
+     covers the block and row-flex containers (.viewmode, .collactions) that `align-self` would not. */
+  width: fit-content;
 }
 .modebtn {
   padding: 7px 12px;
