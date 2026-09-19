@@ -88,6 +88,19 @@ describe("planFingerprint is stable for unchanged state", () => {
     expect(stamp({ pendingCopyIds: ["copy-c", "copy-b", "copy-a"] })).not.toBe(stamp());
   });
 
+  it("does not depend on the ORDER of a collection's binder ids (UIL-032 — QA's debt on #236)", () => {
+    // The digest sorts currentBinderIds; without the sort, the same collection on the same binders
+    // would stamp differently depending on which order the rows came back in, and a cached plan would
+    // be dropped on every visit for no reason.
+    const ab = stamp({
+      collections: [{ id: "c1", targetCount: 7, currentBinderIds: ["b1", "b2"] }],
+    });
+    const ba = stamp({
+      collections: [{ id: "c1", targetCount: 7, currentBinderIds: ["b2", "b1"] }],
+    });
+    expect(ab).toBe(ba);
+  });
+
   it("is blind to two copies swapping WITHIN one placement tuple — the cascade is too", () => {
     // The two bulk copies are identical placements; reordering them changes nothing that routes.
     const swapped = [BASE.copies[0], BASE.copies[1], bulk(), bulk(), bulk()];
