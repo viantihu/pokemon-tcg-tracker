@@ -24,6 +24,8 @@ const card = (over: Partial<LookupCard>): LookupCard => ({
   setCardCountOfficial: 182,
   stage: "Basic",
   types: ["Fighting"],
+  category: "Pokemon",
+  trainerType: null,
   cardClass: "standard",
   imageUrl: null,
   variants: [],

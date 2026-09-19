@@ -180,6 +180,50 @@ interface FrontRow {
   variant: Variant;
 }
 
+/**
+ * One card in the front-half sequence, with its auto-computed colour band. Exported so the band
+ * derivation can be rendered in a test with a Trainer/Energy card — the case where a local re-derivation
+ * from `types` alone and the engine's canonical `band()` can disagree (UIL-080).
+ */
+export function FrontRowItem({
+  row,
+  typeColorMap,
+  onRemove,
+  onVariant,
+}: {
+  row: FrontRow;
+  typeColorMap: Record<string, string>;
+  onRemove: () => void;
+  onVariant: (v: Variant) => void;
+}) {
+  const key = bandKeyForCard(row.card.types, typeColorMap);
+  return (
+    <span className="c" style={{ flexDirection: "column", gap: 6 }}>
+      <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        <BandChip bandKey={key} />
+        <CardFace name={row.card.name} imageUrl={row.card.imageUrl} size="s" />
+        <span className="tx">
+          <span className="nm">{row.card.name}</span>
+          {formatCollectorNumber(row.card.localId, row.card.setCardCountOfficial) ? (
+            <span className="no">
+              {formatCollectorNumber(row.card.localId, row.card.setCardCountOfficial)}
+            </span>
+          ) : null}
+        </span>
+        <button
+          type="button"
+          className="iconbtn"
+          onClick={onRemove}
+          aria-label={`Remove ${row.card.name}`}
+        >
+          ✕
+        </button>
+      </span>
+      <VariantSelector variants={row.card.variants} value={row.variant} onChange={onVariant} />
+    </span>
+  );
+}
+
 function FrontHalfPanel({
   ctx,
   binderId,
@@ -234,38 +278,15 @@ function FrontHalfPanel({
         </p>
       ) : (
         <div className="seq" style={{ marginTop: 12 }}>
-          {rows.map((r) => {
-            const key = bandKeyForCard(r.card.types, ctx.typeColorMap);
-            return (
-              <span key={r.id} className="c" style={{ flexDirection: "column", gap: 6 }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <BandChip bandKey={key} />
-                  <CardFace name={r.card.name} imageUrl={r.card.imageUrl} size="s" />
-                  <span className="tx">
-                    <span className="nm">{r.card.name}</span>
-                    {formatCollectorNumber(r.card.localId, r.card.setCardCountOfficial) ? (
-                      <span className="no">
-                        {formatCollectorNumber(r.card.localId, r.card.setCardCountOfficial)}
-                      </span>
-                    ) : null}
-                  </span>
-                  <button
-                    type="button"
-                    className="iconbtn"
-                    onClick={() => remove(r.id)}
-                    aria-label={`Remove ${r.card.name}`}
-                  >
-                    ✕
-                  </button>
-                </span>
-                <VariantSelector
-                  variants={r.card.variants}
-                  value={r.variant}
-                  onChange={(v) => setVariant(r.id, v)}
-                />
-              </span>
-            );
-          })}
+          {rows.map((r) => (
+            <FrontRowItem
+              key={r.id}
+              row={r}
+              typeColorMap={ctx.typeColorMap}
+              onRemove={() => remove(r.id)}
+              onVariant={(v) => setVariant(r.id, v)}
+            />
+          ))}
         </div>
       )}
 

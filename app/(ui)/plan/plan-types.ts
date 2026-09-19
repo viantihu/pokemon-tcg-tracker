@@ -3,7 +3,7 @@
  * from both the server actions and the client screen; contains only serializable data types.
  */
 
-import type { Variant } from "@/lib/engine";
+import type { CardCategory, Variant } from "@/lib/engine";
 import type { CommitCounts, PlanBandGroup } from "@/lib/plan";
 import type { MoveDestination } from "@/lib/line/types";
 
@@ -20,6 +20,14 @@ export interface LookupCard {
   setCardCountOfficial: number | null;
   stage: string | null;
   types: string[];
+  /**
+   * The engine's own reading of what kind of card this is (UIL-080). `catalog_card` stores neither
+   * TCGdex `category` nor `trainerType`; `toCatalogCard` derives them, and they ride here so a screen
+   * can call the canonical `band()` on a LookupCard instead of re-deriving a band from `types` alone —
+   * which for a Trainer or Energy card is a DIFFERENT answer whenever the type→band map says so.
+   */
+  category: CardCategory;
+  trainerType: string | null;
   cardClass: "standard" | "specialty";
   imageUrl: string | null;
   /** Which physical variants this printing exists in (the selector's choices). */
