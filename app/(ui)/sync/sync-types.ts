@@ -22,6 +22,25 @@ export interface QueueEntryView {
   lastRetrySync: string | null;
   retryCount: number;
   manualMatchId: string | null;
+  /**
+   * `${locale}:${dexCode}` — the key this entry's set resolves through (lib/sync/alias.ts). Lets the
+   * queue say WHICH learned alias a "needs your match" entry owes its known set to (UIL-047 C3).
+   */
+  aliasKey: string;
+}
+
+/** One learned `set_alias` row plus what forgetting it would do (UIL-047 C3, second half). */
+export interface LearnedAliasView {
+  locale: string;
+  dexCode: string;
+  tcgdexSetId: string;
+  /** `manual` = she taught it by matching a card; `name-resolved` = the import matched the set name. */
+  source: "manual" | "name-resolved";
+  createdAt: string;
+  /** The Dex export's own name for the set, from any queue entry carrying the code; null if none does. */
+  dexSetName: string | null;
+  /** WAITING entries that read "needs your match" only because of this alias; forgetting re-parks them. */
+  reparks: number;
 }
 
 /** The queue + undo status the screen loads on mount and after every mutation (sync-ui-spec §A.9). */
@@ -30,6 +49,8 @@ export interface SyncState {
   dismissed: QueueEntryView[];
   counts: { waiting: number; dismissed: number };
   undo: { available: boolean; createdAt: string | null; summary: SyncCounts | null };
+  /** Every learned alias, hers first (manual before name-resolved), newest first within each. */
+  aliases: LearnedAliasView[];
 }
 
 /** Result of an apply (fast-path or gated) — carries the fast-path notification text. */

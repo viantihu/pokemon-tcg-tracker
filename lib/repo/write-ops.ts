@@ -1,6 +1,6 @@
 /**
  * The atomic write-orchestration boundary (dev-spec §5 M10; migrations 0006_commit_rpc.sql +
- * 0007_backfill_ops.sql + 0008_collection_removal_ops.sql).
+ * 0007_backfill_ops.sql + 0008_collection_removal_ops.sql + 0014_forget_set_alias.sql).
  *
  * All THREE commit paths (lib/plan/commit.ts haul, lib/sync/exec.ts sync, lib/backfill/commit.ts
  * backfill) — plus the collection-removal path (lib/coll/remove.ts, UIL-014) — keep ALL the pure
@@ -194,7 +194,13 @@ export type WriteOp =
   | { op: "subtract_collection_targets"; collection_id: string; catalog_card_ids: string[] }
   | { op: "delete_copy"; id: string }
   | { op: "delete_unresolved_entry"; id: string }
-  | { op: "delete_snapshot"; id: string };
+  | { op: "delete_snapshot"; id: string }
+  /**
+   * Forget a learned set alias (0014, UIL-047 C3). Keyed on `set_alias`'s primary key; a key that
+   * matches no row is a silent no-op like `delete_copy`. Emitted together with the re-classification of
+   * that set's WAITING entries (lib/sync/alias.ts) so the two land in one transaction.
+   */
+  | { op: "delete_set_alias"; locale: string; dex_code: string };
 
 /** The full atomic write set for one commit. `ops` apply in order; groups resync last. */
 export interface WritePayload {

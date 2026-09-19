@@ -20,9 +20,12 @@ export {
   executeApply,
   executeUndo,
   manualMatch,
+  forgetSetAlias,
   dismissEntry,
   undismissEntry,
   type ApplyResult,
   type UndoResult,
   type ManualMatchResult,
+  type ForgetAliasResult,
 } from "./exec";
+export * from "./alias";

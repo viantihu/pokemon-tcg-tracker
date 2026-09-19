@@ -17,10 +17,12 @@ import {
   lastSyncSnapshotRepo,
   lineSlotRepo,
   presenceGroupRepo,
+  setAliasRepo,
   unresolvedEntryRepo,
 } from "@/lib/repo";
 import { releaseSlotOps } from "@/lib/line/move";
 import { parseDexId } from "./resolve";
+import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
 import type { SyncPlanBundle } from "./pipeline";
 import {
@@ -529,6 +531,38 @@ export async function manualMatch(
   await applyWriteOps(db, { ops, resyncGroupIds: [groupId] });
 
   return { learnedAlias, aliasSkippedReason, created: qty };
+}
+
+export interface ForgetAliasResult {
+  alias: LearnedAlias;
+  /** WAITING entries moved from UNKNOWN_CARD back to UNKNOWN_SET in the same transaction. */
+  reparked: number;
+}
+
+/**
+ * Forget a learned set alias (UIL-047 C3, second half) — the inverse of the alias `manualMatch` learns.
+ * Drops the `(locale, dexCode)` row and, in the SAME transaction, re-parks the set's WAITING
+ * UNKNOWN_CARD entries as UNKNOWN_SET: without the alias their set is not known, so "needs your match"
+ * would be a false promise (migration 0014's header). Copies and RESOLVED entries are untouched — a card
+ * she matched by hand is a card she identified; the alias was only that match's side effect. The
+ * decision of what to re-park lives in lib/sync/alias.ts; this is the I/O around it.
+ */
+export async function forgetSetAlias(
+  db: DbClient,
+  locale: string,
+  dexCode: string,
+): Promise<ForgetAliasResult> {
+  const row = await setAliasRepo.getByCode(db, locale, dexCode);
+  if (!row) throw new Error("That set alias is already gone.");
+  const alias: LearnedAlias = {
+    locale: row.locale,
+    dexCode: row.dex_code,
+    tcgdexSetId: row.tcgdex_set_id,
+  };
+  const waiting = await unresolvedEntryRepo.listWaiting(db);
+  const ops = buildForgetAliasOps(alias, waiting);
+  await applyWriteOps(db, { ops });
+  return { alias, reparked: ops.length - 1 };
 }
 
 /** Dismiss a WAITING entry — excluded from auto-retry, kept so a re-export doesn't re-park it (A.4). */
