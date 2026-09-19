@@ -18,7 +18,7 @@ import type { MoveDestination, MoveOptions } from "@/lib/line/types";
 import type { LookupAnswer } from "@/lib/surfaces";
 import { CardFace } from "../_components/CardFace";
 import { cardCaption } from "../_components/CardLightbox";
-import { CardLookup } from "../_components/CardLookup";
+import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { bandMeta } from "../_components/plan-meta";
@@ -126,7 +126,7 @@ export function LookupScreen() {
 
   return (
     <div className="lookwrap">
-      <CardLookup search={searchCatalog} onPick={onPick} placeholder="Where is my…" />
+      <CardResultsGrid search={searchCatalog} onPick={onPick} placeholder="Where is my…" />
 
       {loading && (
         <p style={{ marginTop: 14, fontSize: 11, color: "var(--ink-2)" }}>Reading the shelf…</p>
