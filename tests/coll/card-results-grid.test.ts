@@ -8,6 +8,7 @@
  * the initial input, each tile's contents, and the three non-result states in `CardLookup`'s exact words
  * — including that a failure is shown alongside the last good results, never as "no match" (UIL-035).
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -114,5 +115,33 @@ describe("UIL-071 · the three non-result states, in CardLookup's words", () => 
     // The tile she could already see is still there under the alert.
     expect(html).toContain("Minior");
     expect(html).toContain('role="option"');
+  });
+});
+
+describe("UIL-071 · the type-ahead effect is CardLookup's, verbatim — the two cannot drift", () => {
+  /**
+   * The debounce, the 2-character minimum, the loading flag, the UIL-035 catch that keeps the last good
+   * results: all of it is a copy of `CardLookup`'s effect, and a static render cannot drive an effect.
+   * So the copy is pinned as a copy — the same way 0014's function body is pinned against 0013's — by
+   * diffing the two `useEffect` blocks. While both components exist, a fix to one that misses the other
+   * fails here. (The grid also asserts on the strings the effect keys off, so a rename in one is caught.)
+   */
+  const effectOf = (file: string) => {
+    const src = readFileSync(new URL(file, import.meta.url), "utf8");
+    const start = src.indexOf("  useEffect(() => {");
+    const end = src.indexOf("  }, [query, search]);", start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    return src.slice(start, end);
+  };
+
+  it("CardResultsGrid's useEffect block is byte-identical to CardLookup's", () => {
+    const lookup = effectOf("../../app/(ui)/_components/CardLookup.tsx");
+    const grid = effectOf("../../app/(ui)/_components/CardResultsGrid.tsx");
+    expect(grid).toBe(lookup);
+    // And the block really is the one with the rules in it.
+    expect(grid).toContain("q.length < 2");
+    expect(grid).toContain("q.length < 2 ? 0 : 200");
+    expect(grid).toContain("setFailed(err instanceof Error ? err.message");
   });
 });
