@@ -37,6 +37,7 @@ import { VariantSelector } from "../_components/VariantSelector";
 import { ACTION_META, bandMeta, moveMeta } from "../_components/plan-meta";
 import {
   shelveCardAction,
+  getLineJoinOptions,
   getMoveOptions,
   loadPendingPlacementDraft,
   lookupCatalog,
@@ -345,6 +346,15 @@ export function PlanScreen({
         return;
       }
     }
+    // The lines this card could join (UIL-070 part 1) — the same offer the Line screen makes a
+    // stranded card, so back half is a real choice here too, not the dead end UIL-070 named. Absent
+    // (a Trainer, or the lookup failed) the panel simply has no picker: the plain move still works.
+    let join: Awaited<ReturnType<typeof getLineJoinOptions>> = null;
+    try {
+      join = await getLineJoinOptions(item.tcgdexId);
+    } catch {
+      /* no picker; MovePanel greys the back half and names the Lines page instead */
+    }
     const gen = opts.binders.find((b) => b.type === "general");
     const existing = overrides[item.incomingId];
     setMoveTarget({
@@ -354,6 +364,9 @@ export function PlanScreen({
       imageUrl: item.imageUrl ?? null,
       bandKey: item.bandKey,
       currentLabel: item.destination,
+      joinCandidates: join?.joinCandidates,
+      existingLineByBand: join?.existingLineByBand,
+      naturalBandKey: join?.naturalBandKey,
       initial:
         existing ??
         (gen ? { kind: "shelf", binderId: gen.id, half: "front", band: item.bandKey } : undefined),
@@ -710,6 +723,9 @@ export function PlanScreen({
         <MoveOverlay
           card={moveTarget}
           options={moveOptions}
+          // Same signal the Line screen uses (UIL-070 part 1): candidates present, even empty, turns
+          // the line-first flow on; absent (Trainer, failed lookup) keeps the plain move.
+          allowLineJoin={Boolean(moveTarget.joinCandidates)}
           onConfirm={onMoveConfirm}
           onClose={() => setMoveTarget(null)}
         />

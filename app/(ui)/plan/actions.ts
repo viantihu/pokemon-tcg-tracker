@@ -16,6 +16,7 @@ import {
   existingCopyIds,
   getOwnerContext,
   groupPlan,
+  lineJoinOptionsFromContext,
   loadPendingPlacements,
   loadPlanContext,
   loadPlanFingerprint,
@@ -27,6 +28,7 @@ import {
   type ProposedPull,
 } from "@/lib/plan";
 import { loadMoveOptions, type MoveOptions } from "@/lib/line";
+import type { LineJoinOptions } from "@/lib/line/join-options";
 import type { MoveDestination } from "@/lib/line/types";
 import { catalogCardRepo, type Row } from "@/lib/repo";
 import { errorMessage } from "@/lib/errors";
@@ -261,4 +263,15 @@ export async function refreshSpotlightAction(input: { card: DraftPayloadItem }):
 export async function getMoveOptions(): Promise<MoveOptions> {
   const { db } = await getOwnerContext();
   return loadMoveOptions(db);
+}
+
+/**
+ * The lines a spotlight card could join, for the Move panel's line-first flow (UIL-070 part 1) — the
+ * SAME derivation the Line screen offers a stranded card, run against the plan context. Null for a
+ * printing with no species (Trainer/Energy) or one the mirror does not know.
+ */
+export async function getLineJoinOptions(tcgdexId: string): Promise<LineJoinOptions | null> {
+  const { db } = await getOwnerContext();
+  const pc = await loadPlanContext(db);
+  return lineJoinOptionsFromContext(pc, tcgdexId);
 }
