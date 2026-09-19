@@ -5135,7 +5135,15 @@ Flagging for Karvi's confirmation since severity calls are hers.
 ## UIL-066 — GitHub Actions billing lockout renders every check red, indistinguishable from a real test failure, for as long as it lasts
 
 - **Reported:** 2026-09-17 (not from Karvi — found by the tech lead during tonight's outage)
-- **Status:** Open
+- **Status:** **Closed** — **confirmed resolved by Karvi 2026-09-19** (via Junior BA - 2). The cause and
+  fix are in the body's 2026-09-18 updates: Free-plan minutes exhausted on a private repo, resolved by
+  making the repository public at 2026-09-17 23:52Z (unlimited standard-runner minutes, no payment or
+  spending-limit change), and every CI, Deploy and diagnostic run since has started normally — including
+  the ~40 PR merges of 2026-09-18. Lasting consequences recorded in the body and carried into standing
+  practice: Actions logs are world-readable so diagnostics print counts and shape only; branch protection
+  is now ON for `develop` (2026-09-18) and `main` (2026-09-19) with verify, migration-order and Vercel
+  required. The "is this red real" tell (a run with `steps = 0` never started) stays in the memory
+  notes.
 - **Priority:** Medium (Senior BA's read — an ops/CI incident, not a product defect Karvi will see)
 - **Area:** Deploy
 - **Env:** CI (GitHub Actions)
@@ -5819,7 +5827,32 @@ which, everywhere the app shows one.
 
 - **Reported:** 2026-09-17 (Karvi). In her words: "Line decisions do not stick" — her stated priority,
   High.
-- **Status:** Open
+- **Status:** **Fixed** — PR [#188](https://github.com/viantihu/pokemon-tcg-tracker/pull/188) MERGED to
+  `develop` 2026-09-19 (squash `0795a29`, head `05cdcd5`), QA-gated on the merged tree (806 tests, build,
+  migration-order "0013 above 12"), confirmed **deployed** to Testing (Deploy migrate/smoke/acceptance
+  and Vercel all green on `0795a29`). A resolved decision now lives **on the slot**:
+  `line_slot.resolved_decision_kind` / `_choice` / `_collection_id`, written when she resolves and read by
+  the Lines loader, so the same question does not resurface; `placement_decision` gains `line_id` /
+  `line_slot_id` as audit only and nothing reads it to decide (the load-bearing-queue concern from
+  UIL-042 is respected). Its original author's session was lost mid-review; QA HELD the PR on two gaps
+  found by reading the code and b0 fixed both with pre-fix-failing tests: (a) collection-vs-line
+  suppression was kind-only, so a **different** collection later claiming the same card would have been
+  silenced — the claiming collection id is now stored and compared; (b) nothing cleared the marker when a
+  slot left filled, so a released-and-refilled slot would never ask again — `releaseSlotOps` now nulls all
+  three marker columns, covering the move path, #145's pull path, #151's override path and (folded in on
+  the Senior BA's call) the sync-retire path in `lib/sync/exec.ts`, which had reopened slots with its own
+  inline write. Hand-offs and leave-it are not suppressed. QA's mutations: claimant compare forced true
+  fails 2, marker nulls removed fails 3, sync retire reverted fails 1, and removing the patch keys from
+  0013's RPC fails the two PGlite release tests — so the composed `apply_write_ops` (0013 replaces 0008's
+  body plus exactly three `update_slot` patch keys) is what is under test. Migration `0013` adds columns
+  only, and the Tech Lead's before/after pair says exactly that (runs `35410225042` 00:42Z →
+  `35410859376` 00:53Z): all five columns ABSENT → PRESENT with **not-null 0 on every row** (56 slots,
+  137 decisions), so nothing was backfilled and no decision she has never seen is suppressed; `collection`
+  11 and `copy` 706 unchanged, 0 collection triggers fired. `line_slot` 50 → 56, `placement_decision`
+  135 → 137, `evolution_line` 19 → 21 and `wishlist_item` 8 → 12 moved in those eleven minutes — a
+  schema-only migration cannot create lines or wishlist rows, so that is her building lines in Testing,
+  not the migration. Awaiting Karvi's confirmation when UAT resumes: resolve a line decision, leave the
+  screen, come back, it should not ask again.
 - **Priority:** High (Karvi's own read)
 - **Area:** Lines
 - **Env:** Testing
