@@ -2846,6 +2846,15 @@ and is what the fix should route through. **Second, smaller hazard to fold into 
 tagger), and that silence is indistinguishable from success at the call site — a consolidated path
 should surface a no-op union rather than swallow it.
 
+**Second update 2026-09-19: the debt QA flagged on #224 is closed, same day.** Splitting the write back
+into two `apply_write_ops` calls (copy + audit, then the union join alone) still passed all nine existing
+tests, because the original atomicity test's poison sat in the copy insert and never reached the join — a
+gap in the test, not a live defect. PR [#227](https://github.com/viantihu/pokemon-tcg-tracker/pull/227)
+(merged `1223e71`, test-only, no production code) adds a test that poisons the **join** instead (a trigger
+raising on any `collection` update), asserting a two-call write commits the copy and audit row before the
+join fails, while a single-call write leaves zero copies, zero decisions and an empty target list.
+Revert-checked: reintroducing the two-call split now fails this new test.
+
 **Priority rationale.** Medium: same class as UIL-023 (small ordered writes, no report of a real
 partial-write incident), raised by the four-site drift risk rather than by an observed failure — and now
 by the concurrency-loss shape the RCA names, still unobserved but no longer only a tidiness argument.
@@ -5580,6 +5589,14 @@ verification available without one.
 repeats), UIL-056 (the manual line-creation UI all of this sits on top of), UIL-068 (resolves the
 front-half/bulk/collection part of #1; back-half is what's left here).
 
+**Update 2026-09-19: the picker-wiring debt named above (Part 1) is closed.** PR
+[#230](https://github.com/viantihu/pokemon-tcg-tracker/pull/230) (merged `58008f9`) moves the signal to
+where a static render can reach it: `MoveOverlay` now derives `allowLineJoin` from
+`Boolean(card.joinCandidates)` whenever the prop is omitted, so a call site cannot silently drop what it
+never had to pass, and `PlanScreen`'s card-mapping is extracted as the pure, exported `moveTargetFor` for
+exactly that purpose. Mutation-tested: forcing the default to `false` fails 2 of 4 new `MoveOverlay`
+cases; dropping `joinCandidates` from the mapping fails 1 of 3.
+
 **Priority rationale.** Deliberately left unrated rather than guessed. She chose to close the parent
 knowing #1 was open, which may mean she doesn't want it at all — rating it myself would assert an
 intent she hasn't stated. #2 is a defect she personally observed and should not sit unrated forever,
@@ -5963,6 +5980,18 @@ then a display-layer choice at each of the several call sites, not a data proble
 **Cross-reference UIL-026** (the search-side use of this same column) **and UIL-067** (her earlier
 screenshot of the wishlist grid, which shows the exact symptom of this gap).
 
+**Update 2026-09-19: the "two entry points still show the bare number" count above was itself
+incomplete — checked against develop today, not just relayed.** Beyond the Line and Lookup Move sheets,
+four more surfaces build from `CardIdentity` and also render the bare number, confirmed directly in each
+file: the Lookup answer header
+([`app/(ui)/look/LookupScreen.tsx:209-211`](<../app/(ui)/look/LookupScreen.tsx>:209)), the Line slot strip
+([`app/(ui)/line/LineScreen.tsx:489-491`](<../app/(ui)/line/LineScreen.tsx>:489)), and two spots in
+`DecisionCard` — the resolved card
+([`app/(ui)/_components/DecisionCard.tsx:88-90`](<../app/(ui)/_components/DecisionCard.tsx>:88)) and the
+wishlist alternate row (`:178`). Reported by Full Stack Dev - 2 while closing the Move-sheet site; all
+four go into the same assigned `CardIdentity` follow-on rather than a new report — the fix point named
+above is unchanged, just wider than first counted.
+
 **Priority rationale.** High, Karvi's own call — this touches how she identifies which physical card is
 which, everywhere the app shows one.
 
@@ -6120,6 +6149,18 @@ instead — it needs the full card (`category`, `trainerType`) threaded through 
 
 **Cross-reference UIL-012, UIL-013, and UIL-033** (the same "one decision, two+ implementations" shape,
 different subsystems each time).
+
+**Update 2026-09-19: the divergence above is fixed; the producer duplication that caused it is not yet
+consolidated.** PR [#229](https://github.com/viantihu/pokemon-tcg-tracker/pull/229) (merged `bfbda03`)
+makes both `LookupCard` producers — `lib/plan/actions.ts`'s named `toLookupCard` and
+`backfill/actions.ts`'s inline mapping — thread `category`/`trainerType` from the engine's own
+`toCatalogCard` rather than re-deriving them, and the front-half row now calls `band()` directly; the
+local `bandKeyForCard` this entry named is deleted. Pre-fix-failing, verified on the preparation commit
+before the derivation swap: 3 of 5 new cases failed ("a Trainer with no types gets the TRAINER band, not
+Colorless's", "a Trainer with a trainerType gets that type's band", "an unmapped type falls back to the
+map's own white key, not a literal"). **Noted in the PR itself as a named follow-on, not done there:**
+Backfill's producer remains its own inline copy of Plan's `toLookupCard`, not a call to it — the same
+duplication shape, one level up the call stack.
 
 **Priority rationale.** Medium, Senior BA's read: a confirmed, reachable divergence on real card
 classes (Trainer/Energy), not a hypothetical — but Backfill is a lower-traffic screen than the Haul
