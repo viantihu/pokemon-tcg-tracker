@@ -36,8 +36,29 @@ import {
   type WritePayload,
 } from "@/lib/repo";
 // Leaf import (lib/line/move depends only on lib/line/types → lib/engine; no cycle back to lib/plan).
-import { collectionTargetJoinOp, placementForMove, releaseSlotOps } from "@/lib/line/move";
+import {
+  buildExistingLineJoinOps,
+  buildNewLineJoinOps,
+  collectionTargetJoinOp,
+  isMoveDestinationComplete,
+  lineJoinOf,
+  placementForMove,
+  releaseSlotOps,
+} from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
+
+/**
+ * `applyMove`'s exact wording (lib/line/write.ts) for the same refusals on this path (UIL-070 part 1).
+ * One vocabulary: whichever screen she moved a card from, a stale pick reads the same way.
+ */
+const REFUSE = {
+  incomplete: "That destination is incomplete — reload the screen and pick again.",
+  slotGone: "That line slot no longer exists — reload the screen and pick again.",
+  slotFilled: "That slot has already been filled — reload the screen and pick again.",
+  lineExists:
+    "A line for this species and band already exists — reload the screen and join it instead.",
+  catalogMissing: "That card's catalog entry is missing — reload and try again.",
+} as const;
 import { copyPlacementFromTarget } from "./placement";
 import { loadPlanContext, planFromDraft, type DraftItem, type PlanContext } from "./context";
 import { derivePlacementFrom, placementDigest } from "./spotlight";
@@ -227,6 +248,14 @@ export async function commitCardPlacement(
     bandChoice?: "line" | "own-color" | null;
   },
 ): Promise<CommitResult> {
+  // UIL-070 part 1: the refusal `applyMove` makes, made here too. The panel disables Confirm for an
+  // incomplete destination, but a stale tab or a caller that skips the panel could still send a bare
+  // back-half shelf — which this path used to WRITE, as exactly UIL-056's strand: a back-half copy
+  // with no line. Checked before any I/O; nothing to roll back.
+  if (input.override && !isMoveDestinationComplete(input.override)) {
+    throw new Error(REFUSE.incomplete);
+  }
+
   const draft = [input.card];
   const pc = await loadPlanContext(db, { excludeOwnedCopyIds: existingCopyIds(draft) });
   const { planned } = planFromDraft(pc, draft);
@@ -378,7 +407,17 @@ export function buildHaulCommitPayload(
     const mismatch = p.result.bandMismatch;
     if (override) {
       // Manual placement wins: place the copy where she said, skip all cascade side effects.
-      const copyId = writeOverriddenCard(ops, haulId, p, override, pc, slotsByLine, now, counts);
+      const copyId = writeOverriddenCard(
+        ops,
+        haulId,
+        p,
+        override,
+        pc,
+        slotsByLine,
+        passLines,
+        now,
+        counts,
+      );
       const reason = mismatch
         ? "Colour mismatch resolved at intake (her call, UIL-069): filed by its own colour rather " +
           "than joining the existing line."
@@ -539,6 +578,7 @@ function writeOverriddenCard(
   dest: MoveDestination,
   pc: PlanContext,
   slotsByLine: Map<string, MutableSlot[]>,
+  passLines: Map<string, { lineId: string }>,
   now: string,
   counts: CommitCounts,
 ): string {
@@ -566,6 +606,36 @@ function writeOverriddenCard(
     // still filled and skip a stage it could now use.
     touchSlot(slotsByLine, leavingSlotId, null);
   }
+
+  /**
+   * THE LINE SHE PICKED (UIL-070 part 1). A back-half destination carries her `lineJoin` — UIL-056's
+   * invariant, checked upstream by `isMoveDestinationComplete` — and this path used to drop it on the
+   * floor: `placementForMove` nulls `line_slot_id` for every kind, so the copy landed in the back half
+   * with no line and the picker's answer was never written (the UIL-045 shape, a screen showing one
+   * thing and the write doing another).
+   *
+   * Resolved against the loaded snapshot and this pass's mirror — never trusted from the client — and
+   * emitted through the SAME builders `applyMove` uses, so joining a line means one thing whichever
+   * screen she did it from. An EXISTING slot is known before the copy is emitted, so the copy can
+   * carry its `line_slot_id` directly; a NEW line's slots do not exist until their ops run, so the copy
+   * goes in first, the line and slots reference it, and a final `update_copy` points back — the order
+   * `writeNewLine` already uses for the cascade's own lines. Because she picked the line herself in the
+   * picker, a band that differs from the card's own is her explicit choice: no UIL-069 ask applies.
+   */
+  const join = lineJoinOf(dest);
+  let existingJoin: { lineId: string; slotId: string; slotIsLastOpen: boolean } | null = null;
+  if (join?.mode === "existing") {
+    const siblings = slotsByLine.get(join.lineId);
+    const slot = siblings?.find((s) => s.id === join.slotId);
+    if (!siblings || !slot) throw new Error(REFUSE.slotGone);
+    if (slot.state === "filled") throw new Error(REFUSE.slotFilled);
+    existingJoin = {
+      lineId: join.lineId,
+      slotId: slot.id,
+      slotIsLastOpen: siblings.every((s) => s.id === slot.id || s.state === "filled"),
+    };
+  }
+
   const copyId = emitIncomingCopy(
     ops,
     haulId,
@@ -575,14 +645,56 @@ function writeOverriddenCard(
       binderId: placement.binder_id,
       binderHalf: placement.binder_half,
       colorBand: placement.color_band,
-      lineSlotId: placement.line_slot_id,
+      lineSlotId: existingJoin?.slotId ?? placement.line_slot_id,
     },
     now,
     counts,
   );
 
-  const join = collectionTargetJoinOp(dest, p.tcgdexId);
-  if (join) ops.push(join);
+  if (existingJoin) {
+    ops.push(...buildExistingLineJoinOps({ copyId, ...existingJoin }).ops);
+    touchSlot(slotsByLine, existingJoin.slotId, copyId);
+  } else if (join?.mode === "new" && dest.kind === "shelf") {
+    const card = pc.catalogById.get(p.tcgdexId);
+    if (!card) throw new Error(REFUSE.catalogMissing);
+    const built = buildNewLineJoinOps({
+      incoming: { id: copyId, card, variant: p.variant },
+      catalog: pc.ctx.catalog,
+      typeColorMap: pc.ctx.typeColorMap,
+      binderId: dest.binderId,
+      destinationBand: dest.band,
+    });
+    // Keyed on the line's ACTUAL root, not the card's own dexId (a Stage1 is not its own root) —
+    // the same check, and the same key, `applyMove` uses. The picker already showed her this band
+    // as "line exists, your stage is filled", so reaching here is a stale client.
+    const key = `${built.rootDexId}:${dest.band}`;
+    if (passLines.has(key) || findLineByRootAndBand(pc, built.rootDexId, dest.band)) {
+      throw new Error(REFUSE.lineExists);
+    }
+    ops.push(...built.ops);
+    if (built.slotId) {
+      ops.push({ op: "update_copy", id: copyId, patch: { line_slot_id: built.slotId } });
+    }
+    // Mirror + pass bookkeeping, as `writeNewLine` does, so a later card this pass sees the new line.
+    const lineOp = built.ops.find((o) => o.op === "insert_line");
+    const mirror: MutableSlot[] = built.ops
+      .filter((o): o is Extract<WriteOp, { op: "insert_slot" }> => o.op === "insert_slot")
+      .map((o) => ({
+        id: o.id,
+        stage_index: o.stage_index,
+        state: o.state,
+        copy_id: o.copy_id ?? null,
+      }));
+    if (lineOp?.op === "insert_line") {
+      slotsByLine.set(lineOp.id, mirror);
+      passLines.set(key, { lineId: lineOp.id });
+      counts.lines += 1;
+      counts.slots += mirror.length;
+    }
+  }
+
+  const collectionJoin = collectionTargetJoinOp(dest, p.tcgdexId);
+  if (collectionJoin) ops.push(collectionJoin);
 
   return copyId;
 }
