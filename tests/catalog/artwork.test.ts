@@ -275,12 +275,17 @@ describe("clusterArtwork — optimized (LSH banding) matches the naive all-pairs
     }
   });
 
-  // Explicit vitest timeout, because the DEFAULT (5 s) is below this test's own 10 s
-  // bound on `elapsedMs` below — so on a loaded runner vitest killed the test before the
-  // assertion the author actually wrote could run. Measured on GitHub-hosted runners: the
-  // whole test takes 2.7–3.2 s when green (generating 23.5k hashes is part of that), and on
-  // 2026-09-17 it hit the 5 s wall on five of six simultaneous runs, then passed unchanged
-  // on re-run. 20 s leaves the in-test 10 s assertion as the operative performance bound.
+  // There is deliberately NO wall-clock assertion in this file (UIL-021). Elapsed time on a shared
+  // CI runner measures the runner's load, not the algorithm: the 10 s bound this test used to carry
+  // redded unrelated PRs at random and passed unchanged on re-run. What PR #25 actually needs guarded
+  // is that the banded clustering finds exactly the pairs the all-pairs scan finds, and the two
+  // equivalence tests above pin that against a verbatim naive reference. (Because the outputs are
+  // identical by design, speed is the only thing that distinguishes the two, and speed is not
+  // something a test on a shared runner can assert honestly.)
+  //
+  // The explicit vitest timeout stays (#175): the whole test took 2.7–3.2 s when green on
+  // GitHub-hosted runners and hit the 5 s default on five of six simultaneous runs on 2026-09-17.
+  // 20 s is hang protection for the suite, not a performance bound.
   it(
     "scale sanity: clusters ~23.5k hashes and still groups planted reprints correctly",
     { timeout: 20_000 },
@@ -299,17 +304,13 @@ describe("clusterArtwork — optimized (LSH banding) matches the naive all-pairs
           expectedPairs.push([id, repId]);
         }
       }
-      const started = Date.now();
       const groups = clusterArtwork(entries, { threshold: 10 });
-      const elapsedMs = Date.now() - started;
 
       expect(groups.size).toBe(entries.length);
       // Planted reprints land in the same group as their base…
       for (const [a, b] of expectedPairs) expect(groups.get(a)).toBe(groups.get(b));
       // …and random unrelated hashes stay in their own singleton group (id === group).
       expect(groups.get("c-00001")).toBe("c-00001");
-      // Banding must avoid the ~276M-pair all-vs-all scan; comfortably under a generous CI bound.
-      expect(elapsedMs).toBeLessThan(10000);
     },
   );
 });
