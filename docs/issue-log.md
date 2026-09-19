@@ -5691,33 +5691,56 @@ but needs something to show her first.
 **Confirmed footprint, found by searching the whole app rather than trusting a partial list.** One
 shared component, `CardLookup` ([`app/(ui)/_components/CardLookup.tsx`](../app/(ui)/_components/CardLookup.tsx))
 — a single debounced text field against the local catalog mirror, one result list, one `onPick` — is
-used at **six call sites across five screens**, unchanged since UIL-039 confirmed the same pattern
-there:
+used at **nine call sites across five screens** (corrected 2026-09-20, see below), unchanged since
+UIL-039 confirmed the same pattern there:
 
 1. **Lookup** ([`app/(ui)/look/LookupScreen.tsx:43`](../app/(ui)/look/LookupScreen.tsx:43)) —
    "Where is my…", the standalone Lookup tab.
 2. **Backfill**, front-half intake
-   ([`app/(ui)/backfill/BackfillScreen.tsx:227`](../app/(ui)/backfill/BackfillScreen.tsx:227)) —
+   ([`app/(ui)/backfill/BackfillScreen.tsx:271`](<../app/(ui)/backfill/BackfillScreen.tsx>:271)) —
    "Set + number or name…".
-3. **Backfill**, picking an owned printing during back-line resolution
-   ([`BackfillScreen.tsx:476`](../app/(ui)/backfill/BackfillScreen.tsx:476)).
-4. **Sync**, pinning an unresolved entry to a real catalog card
+3. **Backfill**, back-half species picker
+   ([`BackfillScreen.tsx:501`](<../app/(ui)/backfill/BackfillScreen.tsx>:501)) — "Pick a species in
+   this line (any stage)…".
+4. **Backfill**, the StageRow's "Which printing?" picker
+   ([`BackfillScreen.tsx:655`](<../app/(ui)/backfill/BackfillScreen.tsx>:655)).
+5. **Backfill**, the StageRow's "Which duplicate was repurposed?" picker
+   ([`BackfillScreen.tsx:686`](<../app/(ui)/backfill/BackfillScreen.tsx>:686)).
+6. **Backfill**, the Specialty flat-list intake
+   ([`BackfillScreen.tsx:834`](<../app/(ui)/backfill/BackfillScreen.tsx>:834)) — "Set + number or
+   name…".
+7. **Sync**, pinning an unresolved entry to a real catalog card
    ([`app/(ui)/sync/SyncScreen.tsx:631`](../app/(ui)/sync/SyncScreen.tsx:631)).
-5. **Collections' "Log a card" modal** ([`app/(ui)/coll/CollHub.tsx:1075`](../app/(ui)/coll/CollHub.tsx:1075))
+8. **Collections' "Log a card" modal** ([`app/(ui)/coll/CollHub.tsx:1075`](../app/(ui)/coll/CollHub.tsx:1075))
    — "Search the catalog…". This is the ONE case UIL-039 didn't touch: that fix replaced the
    collection-*builder* grid search entirely, but this separate, still-inline "log a single card into
    this collection" modal is a distinct `CardLookup` call site UIL-039 left alone.
-6. **Haul Plan's own add-card intake**
+9. **Haul Plan's own add-card intake**
    ([`app/(ui)/plan/PlanScreen.tsx:727`](../app/(ui)/plan/PlanScreen.tsx:727)) — not named in the
    relay, but the same component, found by grepping every usage rather than working from the
    relayed list alone.
 
-**Not scoping a fix here — just the footprint, so whoever does isn't guessing at it.** Six call sites,
+**Corrected 2026-09-20: Backfill alone carries five sites, not two — found by b0 while building #249,
+confirmed directly against `BackfillScreen.tsx` on develop today.** The original count (items 2 and 3
+above, before this correction) missed the back-half species picker, both StageRow pickers, and the
+Specialty intake — five `<CardLookup>` call sites in that one file, not two. Total footprint: **nine**,
+not six.
+
+**Not scoping a fix here — just the footprint, so whoever does isn't guessing at it.** Nine call sites,
 five screens, each with a different `placeholder` and a different downstream action after `onPick`
 (add to a haul draft, log into a collection, pin a sync entry, fill a backfill slot) — a uniform
-front end would need to keep those six different "what happens next" behaviors distinct even if the
+front end would need to keep those nine different "what happens next" behaviors distinct even if the
 search-and-pick experience itself becomes one shared grid component, the way UIL-039 built it for
 Collections' builder.
+
+**Progress, tracked here since it spans several owners' PRs; the status line above is the Senior BA's
+count to keep current.** Site 1 (Collections' Log-a-card): PR
+[#212](https://github.com/viantihu/pokemon-tcg-tracker/pull/212) (squash `5e03a80`, deployed). Haul Plan
+intake: PR [#248](https://github.com/viantihu/pokemon-tcg-tracker/pull/248) (merged `4de827c`). Backfill,
+all five sites: PR [#249](https://github.com/viantihu/pokemon-tcg-tracker/pull/249) (dev session b0,
+open). Sync: PR [#250](https://github.com/viantihu/pokemon-tcg-tracker/pull/250) (dev session b0,
+open). Lookup tab: branch `fix/uil-071-lookup-grid` (Full Stack Dev - 2, no PR yet). Once all nine land,
+`CardLookup` has no remaining consumers and is deleted in a final PR.
 
 **Cross-reference UIL-039** (the grid-search page this generalizes from, `/coll/search`, PR #155).
 
