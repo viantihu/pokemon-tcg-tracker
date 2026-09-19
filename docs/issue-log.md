@@ -2788,7 +2788,20 @@ stale plan misleads her at the binder, which is exactly the moment a wrong answe
 ## UIL-033 — `logCardIntoCollection` is a fourth definition of "joining a collection," and it isn't atomic
 
 - **Reported:** 2026-09-14 (not from Karvi — found reviewing UIL-022's fix)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#224](https://github.com/viantihu/pokemon-tcg-tracker/pull/224) MERGED to
+  `develop` 2026-09-19 (squash `a910d83`), QA-gated on the merged tree (851 tests; two pre-fix-failing
+  cases, "two cards logged at the same time both end up on the target list" and "copy, audit row and tag
+  land together — or none of them do"; dropping the union op fails 3, tolerating a no-row match fails the
+  "vanished collection is NAMED" case), confirmed **deployed** to Testing (Deploy, migrate, smoke,
+  acceptance and Vercel green on `a910d83`). Logging a card into a collection is now ONE `apply_write_ops`
+  call: copy, decision and the collection's target-list union land together or not at all, so two logs
+  into the same collection no longer lose a tag. **Qualifier:** if the collection is deleted between the
+  read and the write, the card is still shelved in the binder and the Collections screen shows an alert
+  naming that ("That collection changed under you, so the card was shelved in the binder but not added to
+  this list. Reload to see what changed, then move it from the binder view.") rather than rolling back;
+  making the RPC refuse outright needs a new `apply_write_ops` body (migration 0015) and is parked until
+  UAT resumes. Step for Karvi when UAT resumes: log two cards into one collection in quick succession;
+  both should appear on the collection's list.
 - **Priority:** Medium
 - **Area:** Collections
 - **Env:** Testing
@@ -5486,8 +5499,18 @@ picks one — matching her rejection of a default exactly. Status line lands sep
 - **Reported:** 2026-09-17 (not from Karvi directly — she ruled to close UIL-064 after being told
   plainly that two of its four selected problems were still unfixed; relayed by the Senior BA, who is
   recording that closure on her explicit instruction)
-- **Status:** **Fixed** — part 2 of 2 ("it's somewhat buggy and the icons are not aligned"); part 1
-  (back-half placement from the Haul Plan) is in flight, proposal approved 2026-09-19. Part 2: PR
+- **Status:** **Fixed** — both parts. **Part 1 (back-half placement from the Haul Plan joins a line):** PR
+  [#222](https://github.com/viantihu/pokemon-tcg-tracker/pull/222) MERGED to `develop` 2026-09-19 (squash
+  `ad528b8`), QA-gated on the merged tree (873 tests; removing the completeness check fails the
+  pre-fix-failing case "REFUSES a bare back-half shelf (no line picked) instead of writing UIL-056's
+  strand", neutralising the line join fails 7 more), confirmed **deployed** to Testing (Deploy, migrate,
+  smoke, acceptance and Vercel green on `a910d83`). A back-half destination now means a picked line slot:
+  the BACK HALF chip stays greyed with its reason until a line is picked, the pick travels to the server,
+  and the write refuses an incomplete destination before any I/O with the reason and the remedy on
+  screen ("reload the screen and pick again"). Step for Karvi when UAT resumes: on the Plan, Move a card
+  to BACK HALF, pick a line slot, Done; the card should land in that slot, not as a bare strand. One test
+  debt, not a hold: the Plan's own wiring of the picker prop is unpinned (QA's gate); a render assertion
+  follows in the dev's next PR. **Part 2 of 2** ("it's somewhat buggy and the icons are not aligned"): PR
   [#211](https://github.com/viantihu/pokemon-tcg-tracker/pull/211) MERGED to `develop` 2026-09-19 (squash
   `17d334b`), QA-gated on the merged tree (807 tests, build; dropping the scoping class fails the new
   test), confirmed **deployed** to Testing (Deploy and Vercel green on `07b0c88`). **Found by
@@ -5890,9 +5913,14 @@ this up doesn't have to re-find them.
   Vercel green on `5e03a80`) threads `setCardCountOfficial` onto `CollectionCardView`, `BrowseCard` and
   `WishlistCard` and calls the shared formatter at every Collections site — tiles, editor target list,
   wishlist rows and ALT lists, the removal move sheet, the Log-a-card picked row, builder tiles;
-  revert-checked (bare numbers restored → 2 render tests fail). **One site still bare:** `MoveOverlay.tsx`,
-  a one-line call of the exported formatter, assigned inside the UIL-070 dev's fence; this entry stays
-  Fixed-not-Closed until it lands. Awaiting Karvi's confirmation when UAT resumes.
+  revert-checked (bare numbers restored → 2 render tests fail). **Move sheet landed
+  2026-09-19:** PR [#222](https://github.com/viantihu/pokemon-tcg-tracker/pull/222) (squash `ad528b8`,
+  deployed, all gates green on `a910d83`) renders the formatter in `MoveOverlay.tsx` for the Plan's Move
+  sheet (render-tested for "099/182" and for a card with no total). **Two entry points still show the
+  bare number:** the Move sheets opened from the Line and Lookup screens build their card from
+  `CardIdentity`, which carries no set total; a small follow-on threads the total onto `CardIdentity`
+  (assigned, not started). Fixed-not-Closed until that lands. Awaiting Karvi's confirmation when UAT
+  resumes.
 - **Priority:** High (Karvi's own read)
 - **Area:** Lines, Plan, Lookup, Backfill, Collections
 - **Env:** Testing
