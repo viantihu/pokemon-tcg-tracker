@@ -53,7 +53,7 @@ const BASE: PlanFingerprintParts = {
     { id: "b1", type: "general", pages: 40, pocketsPerPage: 9, backHalfStartPage: 21 },
     { id: "b2", type: "specialty", pages: 30, pocketsPerPage: 9, backHalfStartPage: null },
   ],
-  collections: [{ id: "c1", targetCount: 7 }],
+  collections: [{ id: "c1", targetCount: 7, currentBinderIds: ["b2"] }],
   typeMap: [
     { cardType: "Fire", band: "red" },
     { cardType: "Water", band: "light_blue" },
@@ -69,7 +69,7 @@ describe("planFingerprint is stable for unchanged state", () => {
   });
 
   it("stamps the shape version so an old cached plan is dropped on deploy", () => {
-    expect(stamp()).toContain('"v":2');
+    expect(stamp()).toContain('"v":3');
   });
 
   it("does not depend on the ORDER of sets it was handed", () => {
@@ -126,8 +126,25 @@ describe("planFingerprint moves when a cascade input moves", () => {
       },
     ],
     ["a binder is deleted", { binders: [BASE.binders[0]] }],
-    ["a collection's membership changes", { collections: [{ id: "c1", targetCount: 8 }] }],
-    ["a collection is added", { collections: [...BASE.collections, { id: "c2", targetCount: 1 }] }],
+    [
+      "a collection's membership changes",
+      { collections: [{ id: "c1", targetCount: 8, currentBinderIds: ["b2"] }] },
+    ],
+    [
+      "a collection is added",
+      {
+        collections: [...BASE.collections, { id: "c2", targetCount: 1, currentBinderIds: ["b2"] }],
+      },
+    ],
+    // UIL-032: same id, same target count, a DIFFERENT binder — the re-point the old stamp was blind to.
+    [
+      "a collection is re-pointed at another binder (same id, same count)",
+      { collections: [{ id: "c1", targetCount: 7, currentBinderIds: ["b1"] }] },
+    ],
+    [
+      "a collection gains a second binder",
+      { collections: [{ id: "c1", targetCount: 7, currentBinderIds: ["b2", "b1"] }] },
+    ],
     [
       "a type is remapped to another band",
       { typeMap: [{ cardType: "Fire", band: "orange" }, BASE.typeMap[1]] },
@@ -255,7 +272,7 @@ describe("planFingerprint edge shapes", () => {
       typeMap: [],
       decisionCount: 0,
     });
-    expect(empty).toContain('"v":2');
+    expect(empty).toContain('"v":3');
     expect(empty).not.toBe(stamp());
   });
 
