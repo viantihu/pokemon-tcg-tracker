@@ -1,5 +1,6 @@
 /**
- * Supabase schema types for the `public` schema (migrations 0001 + 0002 + 0004 + 0005).
+ * Supabase schema types for the `public` schema, mirroring EVERY migration under supabase/migrations/
+ * (the header used to name four of them; that list went stale by 0006 and was never true again).
  *
  * HAND-AUTHORED to mirror `supabase gen types typescript --local`. Regenerate from the live local
  * schema once the database is reachable and commit the result verbatim:
