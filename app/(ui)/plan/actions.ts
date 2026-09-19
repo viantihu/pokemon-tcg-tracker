@@ -9,7 +9,7 @@
  * (`await getOwnerContext()` — RLS-scoped client + session owner id; see lib/plan/session.ts).
  */
 
-import { availableVariants, toCardVariants } from "@/lib/plan";
+import { availableVariants, toCardVariants, toCatalogCard } from "@/lib/plan";
 import {
   commitCardPlacement,
   deriveSpotlightPlacement,
@@ -37,6 +37,9 @@ import type { CommitActionInput, DraftPayloadItem } from "./plan-types";
 
 /** A `catalog_card` row trimmed to what the intake UI renders. */
 function toLookupCard(r: Row<"catalog_card">): LookupCard {
+  // The engine's derivation of category/trainerType (lib/plan/adapt.ts), reused rather than re-spelled
+  // here (UIL-080): the whole point is ONE reading of what kind of card this is.
+  const engine = toCatalogCard(r);
   return {
     tcgdexId: r.tcgdex_id,
     name: r.name,
@@ -46,6 +49,8 @@ function toLookupCard(r: Row<"catalog_card">): LookupCard {
     setCardCountOfficial: r.set_card_count_official,
     stage: r.stage,
     types: r.types ?? [],
+    category: engine.category ?? "Pokemon",
+    trainerType: engine.trainerType ?? null,
     cardClass: r.card_class === "specialty" ? "specialty" : "standard",
     imageUrl: r.image_url,
     variants: availableVariants(toCardVariants(r.variants)),

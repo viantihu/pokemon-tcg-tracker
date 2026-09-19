@@ -9,7 +9,7 @@
  * (`await getOwnerContext()` — RLS-scoped client + session owner id; see lib/plan/session.ts).
  */
 
-import { availableVariants, getOwnerContext, toCardVariants } from "@/lib/plan";
+import { availableVariants, getOwnerContext, toCardVariants, toCatalogCard } from "@/lib/plan";
 import {
   commitBackLine,
   commitFrontHalf,
@@ -33,19 +33,25 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
   try {
     const { db } = await getOwnerContext();
     const rows = await catalogCardRepo.search(db, q, 12);
-    return rows.map((r) => ({
-      tcgdexId: r.tcgdex_id,
-      name: r.name,
-      setId: r.set_id,
-      setName: r.set_name,
-      localId: r.local_id,
-      setCardCountOfficial: r.set_card_count_official,
-      stage: r.stage,
-      types: r.types ?? [],
-      cardClass: r.card_class === "specialty" ? "specialty" : "standard",
-      imageUrl: r.image_url,
-      variants: availableVariants(toCardVariants(r.variants)),
-    }));
+    return rows.map((r) => {
+      // The engine's derivation of category/trainerType, reused not re-spelled (UIL-080).
+      const engine = toCatalogCard(r);
+      return {
+        tcgdexId: r.tcgdex_id,
+        name: r.name,
+        setId: r.set_id,
+        setName: r.set_name,
+        localId: r.local_id,
+        setCardCountOfficial: r.set_card_count_official,
+        stage: r.stage,
+        types: r.types ?? [],
+        category: engine.category ?? "Pokemon",
+        trainerType: engine.trainerType ?? null,
+        cardClass: r.card_class === "specialty" ? "specialty" : "standard",
+        imageUrl: r.image_url,
+        variants: availableVariants(toCardVariants(r.variants)),
+      };
+    });
   } catch (err) {
     // Throws rather than returning [] (UIL-035): an empty result must mean "the mirror had nothing",
     // not "the request failed". See lookupCatalog in ../plan/actions.ts for why a throw and not a
