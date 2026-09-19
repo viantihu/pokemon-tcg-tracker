@@ -6018,10 +6018,17 @@ the benefit of fixing it immediately rather than logging it for later.
 - **Reported:** 2026-09-17 (Karvi). In her words: "Lines must be sorted by binder. I want a UX where I
   can either view lines grouped by binder or in color + alphabetical order" — her stated priority,
   Medium.
-- **Status:** Open — **part 1 Fixed and deployed; part 2 open on Karvi's report 2026-09-20:** "when switching
-  to Binder, the text for the binder sort is not super visible" — the BY BINDER group headings in the
-  Lines strip need contrast and weight; assigned to Full Stack Dev - 1, harness-measured. She confirmed
-  the COLOUR + A–Z default. Part 1: PR [#239](https://github.com/viantihu/pokemon-tcg-tracker/pull/239) MERGED to
+- **Status:** **Fixed** — both parts. **Part 2** (Karvi 2026-09-20: "when switching to Binder, the text for
+  the binder sort is not super visible"): PR [#267](https://github.com/viantihu/pokemon-tcg-tracker/pull/267)
+  MERGED to `develop` 2026-09-20 (squash `ad93e81`), confirmed **deployed** (all gates and Vercel green on
+  `ad93e81`). Measured cause, not the guessed one: the Lines screen renders into a shell with no
+  background, so the BY BINDER heading sat as 9 px brown text on the body's olive at a 1.69:1 contrast
+  ratio. It is now an inverted ink-on-panel plate, 10 px bold, spanning the row and meeting the tabs'
+  top border so each binder's tabs hang from a labelled bar; harness at 375 and 1440, re-measured by QA
+  on the merged tree: contrast 1.69:1 → 9.91:1 (equal to the active tab), heading box 17 → 26.5 px, no
+  overflow, the COLOUR + A–Z view unchanged. CSS only; no markup change. Step for Karvi when UAT resumes:
+  switch Lines to BY BINDER; each binder's name should read as a labelled bar above its tabs. She
+  confirmed the COLOUR + A–Z default. **Part 1:** PR [#239](https://github.com/viantihu/pokemon-tcg-tracker/pull/239) MERGED to
   `develop` 2026-09-20 (squash `bd6156c`), QA-gated on the merged tree (924 tests, `/line` builds under
   its new Suspense boundary; loader sort removed → 2 fail, binder key dropped → 4 fail, headings
   suppressed → 1 fails; pre-fix-failing PGlite case "default: colour (seeded rainbow order) then species
