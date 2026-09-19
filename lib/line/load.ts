@@ -74,6 +74,8 @@ interface ResolvedSlot {
   wedgeLabel: string | null;
   /** Straight off `line_slot.resolved_decision_kind` (UIL-078) — see decisions.ts's header. */
   resolvedDecisionKind: string | null;
+  /** Straight off `line_slot.resolved_decision_collection_id` — the claim a collection-vs-line answered. */
+  resolvedDecisionCollectionId: string | null;
 }
 
 const EMPTY_FACTS: StageFacts = {
@@ -162,14 +164,19 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
     );
   }
 
-  // Collections claim dexIds (collection-vs-line detection).
-  const claimedDexIds = new Set<number>();
+  // Collections claim dexIds (collection-vs-line detection) — and WHICH collections, so a resolved
+  // collection-vs-line marker can be compared against the claim it was about (UIL-078).
+  const claimedBy = new Map<number, string[]>();
   for (const c of collectionRows) {
     for (const id of c.target_catalog_card_ids ?? []) {
-      const cc = catalogById.get(id);
-      if (cc?.dexId[0] !== undefined) claimedDexIds.add(cc.dexId[0]);
+      const dex = catalogById.get(id)?.dexId[0];
+      if (dex === undefined) continue;
+      const list = claimedBy.get(dex) ?? [];
+      if (!list.includes(c.id)) list.push(c.id);
+      claimedBy.set(dex, list);
     }
   }
+  for (const list of claimedBy.values()) list.sort();
 
   const slotsByLine = new Map<string, Row<"line_slot">[]>();
   for (const s of slotRows) {
@@ -362,6 +369,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
         facts,
         wedgeLabel,
         resolvedDecisionKind: s.resolved_decision_kind,
+        resolvedDecisionCollectionId: s.resolved_decision_collection_id,
       };
     });
 
@@ -405,7 +413,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
       bandDisplay: bandDisplayByKey.get(bandKey) ?? bandKey,
       status: line.status as DecisionLineInput["status"],
       binderLabel: `${binderName} · BACK`,
-      claimedDexIds,
+      claimedBy,
       slots: resolved.map((r) => ({
         slotId: r.slotId,
         stageIndex: r.stageIndex,
@@ -420,6 +428,7 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
         facts: r.facts,
         requiredType: r.requiredType,
         resolvedDecisionKind: r.resolvedDecisionKind,
+        resolvedDecisionCollectionId: r.resolvedDecisionCollectionId,
       })),
     });
   }

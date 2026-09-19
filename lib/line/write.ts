@@ -259,6 +259,9 @@ export async function applyDecision(
     if (p.resolvedDecisionChoice !== undefined) {
       patch.resolved_decision_choice = p.resolvedDecisionChoice;
     }
+    if (p.resolvedDecisionCollectionId !== undefined) {
+      patch.resolved_decision_collection_id = p.resolvedDecisionCollectionId;
+    }
     if (Object.keys(patch).length > 0) await lineSlotRepo.update(db, p.slotId, patch);
   }
 

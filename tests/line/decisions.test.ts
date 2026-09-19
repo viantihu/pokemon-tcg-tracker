@@ -64,6 +64,7 @@ const slot = (
   facts: facts(),
   requiredType: "Fire",
   resolvedDecisionKind: null,
+  resolvedDecisionCollectionId: null,
   ...over,
 });
 
@@ -76,7 +77,7 @@ const line = (
   bandDisplay: "Red",
   status: "open",
   binderLabel: "Binder 1 · BACK",
-  claimedDexIds: new Set<number>(),
+  claimedBy: new Map<number, string[]>(),
   ...over,
 });
 
@@ -176,7 +177,7 @@ describe("deriveDecisions", () => {
         rootDexId: 280,
         bandKey: "purple",
         bandDisplay: "Purple",
-        claimedDexIds: new Set([280]),
+        claimedBy: new Map([[280, ["coll-fire"]]]),
         slots: [
           slot({
             stageIndex: 0,
@@ -191,6 +192,39 @@ describe("deriveDecisions", () => {
       }),
     );
     expect(derived.map((d) => d.card.kind)).toContain("collection-vs-line");
+    // The resolution carries WHICH claim this is about, so the answer can be scoped to it (UIL-078).
+    expect(derived[0].resolution.claimingCollectionId).toBe("coll-fire");
+  });
+
+  it("a resolved collection-vs-line is suppressed only while the SAME collection is the claimant", () => {
+    const claimedSlot = slot({
+      stageIndex: 0,
+      state: "placeholder",
+      dexId: 280,
+      speciesName: "Ralts",
+      card: ident("Ralts", "084"),
+      facts: facts({ sameBandStandard: 30, sameBandSpecialty: 0 }),
+      resolvedDecisionKind: "collection-vs-line",
+      resolvedDecisionCollectionId: "coll-fire",
+    });
+    const kinds = (claimedBy: Map<number, string[]>) =>
+      deriveDecisions(line({ rootDexId: 280, claimedBy, slots: [claimedSlot] })).map(
+        (d) => d.card.kind,
+      );
+
+    // Same collection, still claiming: the same question, already answered.
+    expect(kinds(new Map([[280, ["coll-fire"]]]))).not.toContain("collection-vs-line");
+    // A different collection now claims it: a new question.
+    expect(kinds(new Map([[280, ["coll-water"]]]))).toContain("collection-vs-line");
+    // A second collection joined the claim: also new — the safe direction for the multi-claim edge.
+    expect(kinds(new Map([[280, ["coll-fire", "coll-water"]]]))).toContain("collection-vs-line");
+    // Kind alone, with no recorded claimant (a marker written by the first cut), never suppresses.
+    const kindOnly = { ...claimedSlot, resolvedDecisionCollectionId: null };
+    expect(
+      deriveDecisions(
+        line({ rootDexId: 280, claimedBy: new Map([[280, ["coll-fire"]]]), slots: [kindOnly] }),
+      ).map((d) => d.card.kind),
+    ).toContain("collection-vs-line");
   });
 });
 
@@ -208,6 +242,7 @@ describe("resolveDecisionWrites", () => {
     alternateCatalogCardIds: ["Charizard ex-183"],
     willLiveInSpecialty: true,
     otherOpenSlotId: null,
+    claimingCollectionId: null,
   };
 
   it("a confirmed cap sets the line capped and wishlists the ex with willLiveInSpecialty", () => {

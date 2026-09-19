@@ -182,6 +182,8 @@ export interface SlotPatch {
    */
   resolvedDecisionKind?: string | null;
   resolvedDecisionChoice?: string | null;
+  /** The collection whose claim a `collection-vs-line` answer was about; null for other kinds. */
+  resolvedDecisionCollectionId?: string | null;
 }
 
 /** A wishlist upsert keyed by slot: create/refresh the hunt for a stage. */

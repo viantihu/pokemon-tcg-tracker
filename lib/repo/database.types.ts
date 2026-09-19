@@ -401,6 +401,7 @@ export type Database = {
           note: string | null;
           resolved_decision_kind: string | null;
           resolved_decision_choice: string | null;
+          resolved_decision_collection_id: string | null;
         };
         Insert: {
           id?: string;
@@ -414,6 +415,7 @@ export type Database = {
           note?: string | null;
           resolved_decision_kind?: string | null;
           resolved_decision_choice?: string | null;
+          resolved_decision_collection_id?: string | null;
         };
         Update: {
           id?: string;
@@ -427,6 +429,7 @@ export type Database = {
           note?: string | null;
           resolved_decision_kind?: string | null;
           resolved_decision_choice?: string | null;
+          resolved_decision_collection_id?: string | null;
         };
         Relationships: [
           {
@@ -439,6 +442,12 @@ export type Database = {
             foreignKeyName: "line_slot_copy_id_fkey";
             columns: ["copy_id"];
             referencedRelation: "copy";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "line_slot_resolved_decision_collection_id_fkey";
+            columns: ["resolved_decision_collection_id"];
+            referencedRelation: "collection";
             referencedColumns: ["id"];
           },
           {

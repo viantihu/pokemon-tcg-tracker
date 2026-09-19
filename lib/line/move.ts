@@ -141,7 +141,21 @@ export function releaseSlotOps(
 ): WriteOp[] {
   const ops: WriteOp[] = [];
   if (slotId) {
-    ops.push({ op: "update_slot", id: slotId, patch: { state: "placeholder", copy_id: null } });
+    ops.push({
+      op: "update_slot",
+      id: slotId,
+      patch: {
+        state: "placeholder",
+        copy_id: null,
+        // A vacated slot is a new situation: whatever decision she resolved on it before it was filled
+        // (UIL-078's "stays resolved" marker) must not carry over, or a released-and-refilled slot would
+        // never ask again. Cleared here, on the one path every release goes through, so the Line move,
+        // the Haul Plan pull (#145) and the Haul Plan override (#151) all get it without knowing.
+        resolved_decision_kind: null,
+        resolved_decision_choice: null,
+        resolved_decision_collection_id: null,
+      },
+    });
   }
   if (demoteLineId) {
     ops.push({ op: "update_line", id: demoteLineId, patch: { status: "open" } });

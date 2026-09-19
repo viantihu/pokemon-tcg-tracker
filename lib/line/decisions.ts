@@ -32,6 +32,13 @@
  * or line off to a DIFFERENT decision (`block-instead` → block; `no-line` → termination;
  * `make-line-anyway` → the block resurfaces) — those aren't suppression failures, they're a fresh
  * question, and marking the old one resolved would not change that a new one now applies.
+ *
+ * Two more rules keep the marker from outliving the question it answered (QA's two findings on the
+ * first cut): a `collection-vs-line` marker also records WHICH collection's claim was answered
+ * (`resolved_decision_collection_id`) and suppresses only while that is the collection claiming the
+ * species — a different collection's claim is a new question; and `releaseSlotOps` (lib/line/move.ts,
+ * the one path every slot release goes through) clears all three marker columns, so a slot that was
+ * resolved, then filled by a card, then vacated again asks afresh instead of never asking again.
  */
 
 import type { LineStatus, SlotState } from "@/lib/engine";
@@ -80,6 +87,14 @@ export interface DecisionSlotInput {
    * `deriveDecisions` skips re-deriving a kind that matches this — see the module header.
    */
   resolvedDecisionKind: string | null;
+  /**
+   * For a resolved `collection-vs-line`, WHICH collection's claim she answered (`line_slot.
+   * resolved_decision_collection_id`). "Collection wins" is an answer about one collection's claim, so
+   * the suppression compares this against who claims the species NOW: the same collection still
+   * claiming is the same question; a different collection claiming is a new one and is asked. NULL for
+   * every other kind, and whenever `resolvedDecisionKind` is NULL.
+   */
+  resolvedDecisionCollectionId: string | null;
 }
 
 export interface DecisionLineInput {
@@ -90,8 +105,12 @@ export interface DecisionLineInput {
   status: LineStatus;
   binderLabel: string;
   slots: DecisionSlotInput[];
-  /** dexIds claimed by a running collection (collection-vs-line detection). */
-  claimedDexIds: Set<number>;
+  /**
+   * dexId → ids of the running collections that claim a printing of that species (collection-vs-line
+   * detection). A species with an entry is "claimed"; the ids are what the resolved marker is compared
+   * against, so kind alone can never suppress a claim from a collection she has not answered for.
+   */
+  claimedBy: Map<number, string[]>;
 }
 
 /** Server-side payload that lets a chosen option be turned into writes (never sent to the client). */
@@ -110,6 +129,12 @@ export interface DecisionResolution {
   willLiveInSpecialty: boolean;
   /** The other open placeholder in the line (root-block "no wishlist" resolves this too). */
   otherOpenSlotId: string | null;
+  /**
+   * `collection-vs-line` only: the collection whose claim this decision is about — written onto the
+   * slot's marker when she answers, so the loader can tell "same claim, answered" from "a different
+   * collection now claims this" (UIL-078). null for every other kind.
+   */
+  claimingCollectionId: string | null;
 }
 
 export interface DerivedDecision {
@@ -157,6 +182,7 @@ function baseResolution(
   line: DecisionLineInput,
   slot: DecisionSlotInput | null,
   kind: DecisionCard["kind"],
+  claimingCollectionId: string | null = null,
 ): DecisionResolution {
   const otherOpen = line.slots.find(
     (s) => s.state === "placeholder" && (!slot || s.slotId !== slot.slotId),
@@ -174,6 +200,7 @@ function baseResolution(
     alternateCatalogCardIds: slot?.alternates.map((a) => a.tcgdexId) ?? [],
     willLiveInSpecialty: slot?.willLiveInSpecialty ?? false,
     otherOpenSlotId: otherOpen?.slotId ?? null,
+    claimingCollectionId,
   };
 }
 
@@ -232,7 +259,9 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
 
   for (const slot of ordered) {
     const species = slot.speciesName ?? slot.card?.name ?? slot.stage;
-    const claimed = slot.dexId !== null && line.claimedDexIds.has(slot.dexId);
+    // Sorted so the id stored on the marker is deterministic whoever loaded the collections.
+    const claimers = slot.dexId !== null ? [...(line.claimedBy.get(slot.dexId) ?? [])].sort() : [];
+    const claimed = claimers.length > 0;
 
     // EX-ONLY CAP — an open stage whose only same-color printings are specialty class. The slot
     // belongs to this kind exclusively once the DATA condition matches (unchanged priority ordering:
@@ -287,7 +316,19 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
     // COLLECTION vs LINE — an open stage whose species a collection has claimed. Same priority-order
     // shape as ex-only-cap above: `continue` either way, UIL-078 only changes whether it is pushed.
     if (slot.state === "placeholder" && claimed) {
-      if (slot.resolvedDecisionKind === "collection-vs-line") continue; // already answered
+      // Already answered ONLY if the answer was about the collection(s) claiming it now. Kind alone
+      // is not enough (QA on #188): "collection wins" was said about one collection's claim, so a
+      // different collection claiming this species afterwards is a fresh question and is asked. With
+      // several claimers the marker holds the first (sorted); any other claimer therefore re-asks,
+      // which is the safe direction — a second claim is a new claim.
+      const answeredFor = slot.resolvedDecisionCollectionId;
+      if (
+        slot.resolvedDecisionKind === "collection-vs-line" &&
+        answeredFor !== null &&
+        claimers.every((id) => id === answeredFor)
+      ) {
+        continue;
+      }
       out.push({
         card: {
           id: `${line.lineId}:collection-vs-line:${slot.stageIndex}`,
@@ -323,7 +364,7 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
             leaveIt,
           ],
         },
-        resolution: baseResolution(line, slot, "collection-vs-line"),
+        resolution: baseResolution(line, slot, "collection-vs-line", claimers[0] ?? null),
       });
       continue;
     }
@@ -452,7 +493,13 @@ export function resolveDecisionWrites(
   // trigger — merged into whatever slotPatches entry the branch already needs, or the only entry
   // when the branch otherwise patches nothing (confirm-cap, collection-wins). `res.kind` is already
   // the exact string `deriveDecisions` checks, so no separate kind lookup is needed here.
-  const resolvedMark = { resolvedDecisionKind: res.kind, resolvedDecisionChoice: choiceId };
+  const resolvedMark = {
+    resolvedDecisionKind: res.kind,
+    resolvedDecisionChoice: choiceId,
+    // Which claim was answered (collection-vs-line); null for every other kind. The loader compares
+    // it against who claims the species now, so the marker never outlives the claim it was about.
+    resolvedDecisionCollectionId: res.claimingCollectionId,
+  };
 
   switch (choiceId) {
     case "confirm-cap":
