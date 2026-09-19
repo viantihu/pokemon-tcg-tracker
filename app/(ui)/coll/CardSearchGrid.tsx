@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BandChip } from "../_components/BandChip";
+import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
 import { DEFAULT_BAND_ORDER, bandMeta } from "../_components/plan-meta";
 import {
@@ -285,19 +286,12 @@ export function CardSearchGrid({ collectionId }: { collectionId: string }) {
         {cards.map((c) => {
           const picked = selected.has(c.tcgdexId);
           return (
-            <button
+            <BrowseCardTile
               key={c.tcgdexId}
-              type="button"
-              className={"ccard" + (picked ? " picked" : "")}
-              onClick={() => toggle(c.tcgdexId)}
-              aria-pressed={picked}
-            >
-              <CardFace name={c.name} imageUrl={c.imageUrl} size="m" />
-              <div className="cn u">{c.name}</div>
-              {c.localId ? <div className="cno">{c.localId}</div> : null}
-              {c.owned && <span className="cpill have u">Owned</span>}
-              {picked && <span className="cpill wish u">Selected</span>}
-            </button>
+              card={c}
+              picked={picked}
+              onToggle={() => toggle(c.tcgdexId)}
+            />
           );
         })}
       </div>
@@ -329,5 +323,36 @@ export function CardSearchGrid({ collectionId }: { collectionId: string }) {
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * One tile of the builder grid, exported so the collector-number rendering can be pinned without
+ * driving the page (it needs a router). Shows the FULL printed number, "099/182" (UIL-077) — the bare
+ * digits were the wishlist-grid gap Karvi screenshotted.
+ */
+export function BrowseCardTile({
+  card,
+  picked,
+  onToggle,
+}: {
+  card: BrowseCard;
+  picked: boolean;
+  onToggle: () => void;
+}) {
+  const number = formatCollectorNumber(card.localId, card.setCardCountOfficial);
+  return (
+    <button
+      type="button"
+      className={"ccard" + (picked ? " picked" : "")}
+      onClick={onToggle}
+      aria-pressed={picked}
+    >
+      <CardFace name={card.name} imageUrl={card.imageUrl} size="m" />
+      <div className="cn u">{card.name}</div>
+      {number ? <div className="cno">{number}</div> : null}
+      {card.owned && <span className="cpill have u">Owned</span>}
+      {picked && <span className="cpill wish u">Selected</span>}
+    </button>
   );
 }

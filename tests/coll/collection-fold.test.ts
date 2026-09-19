@@ -24,6 +24,7 @@ function card(n: number, owned: boolean): CollectionCardView {
     name: `Testcard ${n}`,
     setName: "sv03",
     localId: String(n),
+    setCardCountOfficial: null,
     bandKey: "red",
     imageUrl: `https://assets.tcgdex.net/en/sv/sv03/${n}`,
     owned,

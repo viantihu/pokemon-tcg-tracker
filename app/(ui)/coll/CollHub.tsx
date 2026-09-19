@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { MoveDestination } from "@/lib/line/types";
+import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import {
   buildWishlistCopyText,
   buildWishlistCsv,
@@ -23,7 +24,7 @@ import {
 } from "@/lib/surfaces";
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
-import { CardLookup } from "../_components/CardLookup";
+import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { MoveOverlay } from "../_components/MoveOverlay";
 import type { LookupCard } from "../plan/plan-types";
 import { createAutosaveScheduler, flushBeforeNavigate } from "./autosave";
@@ -52,6 +53,8 @@ interface DraftTarget {
   name: string;
   setName: string | null;
   localId: string | null;
+  /** Printed set total, so the row can show "099/182" (UIL-077). */
+  setCardCountOfficial: number | null;
   /**
    * She holds a copy of this card in the collection's binder. Dropping it from the list here would
    * strand that physical copy, so the row's "✕" is not offered (UIL-014 defect 2) — removal is a move,
@@ -201,6 +204,7 @@ export function CollHub() {
         name: k.name,
         setName: k.setName,
         localId: k.localId,
+        setCardCountOfficial: k.setCardCountOfficial,
         owned: k.owned,
       })),
     });
@@ -335,7 +339,10 @@ export function CollHub() {
           card={{
             copyId: removeFor.card.copyIds[0] ?? "",
             name: removeFor.card.name,
-            localId: removeFor.card.localId,
+            localId: formatCollectorNumber(
+              removeFor.card.localId,
+              removeFor.card.setCardCountOfficial,
+            ),
             imageUrl: removeFor.card.imageUrl,
             bandKey: removeFor.card.bandKey,
             currentLabel: `${removeFor.collection.binderNames[0] ?? "No binder"} · ${removeFor.collection.name}`,
@@ -596,7 +603,11 @@ export function CollectionCard(props: {
               <div key={k.tcgdexId} className={"ccard" + (k.owned ? "" : " need")}>
                 <CardFace name={k.name} imageUrl={k.imageUrl} size="m" />
                 <div className="cn u">{k.name}</div>
-                {k.localId ? <div className="cno">{k.localId}</div> : null}
+                {formatCollectorNumber(k.localId, k.setCardCountOfficial) ? (
+                  <div className="cno">
+                    {formatCollectorNumber(k.localId, k.setCardCountOfficial)}
+                  </div>
+                ) : null}
                 {k.owned ? (
                   <>
                     <span className="cpill have u">Owned</span>
@@ -638,7 +649,11 @@ export function CollectionCard(props: {
                 <div key={k.tcgdexId} className="ccard">
                   <CardFace name={k.name} imageUrl={k.imageUrl} size="m" />
                   <div className="cn u">{k.name}</div>
-                  {k.localId ? <div className="cno">{k.localId}</div> : null}
+                  {formatCollectorNumber(k.localId, k.setCardCountOfficial) ? (
+                    <div className="cno">
+                      {formatCollectorNumber(k.localId, k.setCardCountOfficial)}
+                    </div>
+                  ) : null}
                   <span className="cpill have u">In collection</span>
                   <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
                 </div>
@@ -760,9 +775,10 @@ function WishlistBinder({ group }: { group: WishlistBinderGroup }) {
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div className="nm">
                   {e.chosen ? e.chosen.name : (e.speciesName ?? "Unknown")}
-                  {e.chosen?.localId ? (
+                  {e.chosen &&
+                  formatCollectorNumber(e.chosen.localId, e.chosen.setCardCountOfficial) ? (
                     <span className="no" style={{ marginLeft: 8 }}>
-                      {e.chosen.localId}
+                      {formatCollectorNumber(e.chosen.localId, e.chosen.setCardCountOfficial)}
                     </span>
                   ) : null}
                 </div>
@@ -774,7 +790,10 @@ function WishlistBinder({ group }: { group: WishlistBinderGroup }) {
                   <div className="alts u">
                     ALT:{" "}
                     {e.alternates
-                      .map((a) => `${a.name}${a.localId ? ` ${a.localId}` : ""}`)
+                      .map((a) => {
+                        const n = formatCollectorNumber(a.localId, a.setCardCountOfficial);
+                        return `${a.name}${n ? ` ${n}` : ""}`;
+                      })
                       .join(" · ")}
                   </div>
                 )}
@@ -1042,7 +1061,9 @@ function CollectionEditor(props: {
                       <b>{t.name}</b>
                       <i>
                         {t.setName ?? ""}
-                        {t.localId ? ` · ${t.localId}` : ""}
+                        {formatCollectorNumber(t.localId, t.setCardCountOfficial)
+                          ? ` · ${formatCollectorNumber(t.localId, t.setCardCountOfficial)}`
+                          : ""}
                       </i>
                     </span>
                     {t.owned ? (
@@ -1128,7 +1149,11 @@ function LogCardModal(props: {
             Find the card — logging it is a placement into{" "}
             {collection.binderNames[0] ?? "the binder"}, not a tally bump.
           </div>
-          <CardLookup search={searchCatalog} onPick={setPick} placeholder="Search the catalog…" />
+          <CardResultsGrid
+            search={searchCatalog}
+            onPick={setPick}
+            placeholder="Search the catalog…"
+          />
           {pick && (
             <div className="cerow own" style={{ marginTop: 10 }}>
               <span className="cet">
@@ -1138,7 +1163,9 @@ function LogCardModal(props: {
                 <b>{pick.name}</b>
                 <i>
                   {pick.setName ?? ""}
-                  {pick.localId ? ` · ${pick.localId}` : ""}
+                  {formatCollectorNumber(pick.localId, pick.setCardCountOfficial)
+                    ? ` · ${formatCollectorNumber(pick.localId, pick.setCardCountOfficial)}`
+                    : ""}
                 </i>
               </span>
               <button className="cex" onClick={() => setPick(null)}>
