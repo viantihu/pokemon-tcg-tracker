@@ -31,6 +31,7 @@ import type { LineJoinOptions } from "@/lib/line/join-options";
 import { describeMove, moveNameLookups, type MoveNameLookups } from "@/lib/line/move";
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
+import { cardCaption } from "../_components/CardLightbox";
 import { CardLookup } from "../_components/CardLookup";
 import { ProgressBar } from "../_components/ProgressBar";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
@@ -860,7 +861,16 @@ function IntakePanel(props: {
         <div className="draftlist">
           {draft.map((d) => (
             <div key={d.id} className="draftrow">
-              <CardFace name={d.card.name} imageUrl={d.card.imageUrl} size="s" />
+              <CardFace
+                name={d.card.name}
+                imageUrl={d.card.imageUrl}
+                size="s"
+                zoomable
+                caption={cardCaption(
+                  d.card.setName ?? d.card.setId,
+                  formatCollectorNumber(d.card.localId, d.card.setCardCountOfficial),
+                )}
+              />
               <div className="di">
                 <div className="nm">{d.card.name}</div>
                 <div style={{ fontSize: 10, color: "var(--ink-2)", marginTop: 3 }}>
@@ -1512,7 +1522,13 @@ export function PlanRow(props: {
           has no `imageUrl` on its rows, and its stamp still matches (the stamp is DB state only), so
           it resumes with the field `undefined`. Coercing here keeps CardFace's contract honest rather
           than bumping the resume key and throwing away her check-off progress on deploy. */}
-      <CardFace name={item.name} imageUrl={item.imageUrl ?? null} size="s" />
+      <CardFace
+        name={item.name}
+        imageUrl={item.imageUrl ?? null}
+        size="s"
+        zoomable
+        caption={cardCaption(null, formatCollectorNumber(item.localId, item.setCardCountOfficial))}
+      />
       <div style={{ minWidth: 0 }}>
         <div className="nm">{item.name}</div>
         <div className="meta">
@@ -1618,7 +1634,16 @@ export function Spotlight(props: {
   return (
     <>
       <div className="hand">
-        <CardFace name={item.name} imageUrl={item.imageUrl ?? null} size="l" />
+        <CardFace
+          name={item.name}
+          imageUrl={item.imageUrl ?? null}
+          size="l"
+          zoomable
+          caption={cardCaption(
+            null,
+            formatCollectorNumber(item.localId, item.setCardCountOfficial),
+          )}
+        />
         <div style={{ minWidth: 0 }}>
           <div className="nm">{item.name}</div>
           {formatCollectorNumber(item.localId, item.setCardCountOfficial) ? (
