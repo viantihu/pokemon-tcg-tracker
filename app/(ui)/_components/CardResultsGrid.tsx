@@ -135,11 +135,11 @@ export function CardResultTiles({
         </div>
       ) : loading && results.length === 0 ? (
         <div className="hint u" role="status">
-          Searching the mirror…
+          Searching…
         </div>
       ) : results.length === 0 ? (
         <div className="hint u" role="status">
-          No match in the local mirror. (Full catalog needs a sync run.)
+          No card found — check the number or try the card name.
         </div>
       ) : null}
 

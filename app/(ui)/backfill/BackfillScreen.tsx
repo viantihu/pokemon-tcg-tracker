@@ -362,7 +362,7 @@ function BackHalfPanel({
     try {
       const r = await resolveLine(card.tcgdexId, bandKey);
       if (!r) {
-        onResult({ kind: "err", text: "Could not resolve that species from the mirror." });
+        onResult({ kind: "err", text: "Could not find that species' evolution line." });
         return;
       }
       setResolved(r);

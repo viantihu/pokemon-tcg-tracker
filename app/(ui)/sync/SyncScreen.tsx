@@ -484,8 +484,8 @@ export function PreviewPanel({
           <div className="hd u">Unresolved · waiting on catalog</div>
           <div style={{ fontSize: 11, color: "var(--ink-2)" }}>
             {sections.unresolved.newParks.length} newly parked · {sections.unresolved.stillWaiting}{" "}
-            waiting total. These are safe — nothing is lost; they self-heal when the catalog catches
-            up.
+            waiting total. These are safe — nothing is lost; they resolve automatically once the
+            card is in the catalog.
           </div>
         </section>
       ) : null}

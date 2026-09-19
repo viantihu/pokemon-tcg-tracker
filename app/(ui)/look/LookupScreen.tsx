@@ -176,7 +176,7 @@ export function LookupNotice({
       <div className="notfound panel">
         <b>NO MATCH.</b>
         <div style={{ fontSize: 11, color: "var(--ink-2)", marginTop: 8 }}>
-          Not in the local mirror. A full catalog needs a sync run.
+          No card found — check the number or try the card name.
         </div>
       </div>
     );

@@ -96,13 +96,13 @@ describe("UIL-071 · results are tiles: image first, then name, set, full collec
 describe("UIL-071 · the three non-result states", () => {
   it("searching", () => {
     const html = tiles({ loading: true });
-    expect(html).toContain("Searching the mirror…");
+    expect(html).toContain("Searching…");
     expect(html).toContain('role="status"');
   });
 
   it("no match — only ever said when the search answered with nothing", () => {
     const html = tiles({});
-    expect(html).toContain("No match in the local mirror.");
+    expect(html).toContain("No card found — check the number or try the card name.");
     expect(html).not.toContain("did not answer");
   });
 
