@@ -18,7 +18,8 @@
  *   - `evolution_line` rows: id + status + band — a decision caps or terminates a line IN PLACE
  *   - `line_slot` rows: id + state + filling copy + wishlist target — all rewritten IN PLACE by M7
  *   - binder rows, in full    — capacity edits are IN PLACE, so a count would miss them entirely
- *   - collection ids + target counts — step 1 of the cascade is a collection claim
+ *   - collection ids + target counts + current binder ids — step 1 of the cascade is a collection claim,
+ *     routed to the collection's binder (UIL-032)
  *   - type→band map           — changes which band a card routes to
  *   - `placement_decision` count — a backstop, see below
  *
@@ -114,7 +115,13 @@ export interface PlanFingerprintParts {
     pocketsPerPage: number;
     backHalfStartPage: number | null;
   }[];
-  collections: readonly { id: string; targetCount: number }[];
+  /**
+   * Which cards a collection claims (its count) AND which binder(s) it lives in (UIL-032). Step 1 of the
+   * cascade is a collection claim, and where the claimed copy is routed depends on the collection's
+   * binder — so re-pointing a collection at another binder changes the plan even though its id and
+   * target count do not move. The same in-place-edit gap #44/#48 closed for copies, one field over.
+   */
+  collections: readonly { id: string; targetCount: number; currentBinderIds: readonly string[] }[];
   typeMap: readonly { cardType: string; band: string }[];
   /** Audit rows: one per user move or decision resolution. A backstop — see the header. */
   decisionCount: number;
@@ -158,7 +165,7 @@ function digestCopies(copies: readonly StampCopyPlacement[]): (string | number |
  */
 export function planFingerprint(p: PlanFingerprintParts): string {
   return JSON.stringify({
-    v: 2,
+    v: 3, // v3: collections carry current_binder_ids (UIL-032)
     copies: digestCopies(p.copies),
     // Queue ORDER is part of the identity: the plan's rows are worked in it.
     pending: [...p.pendingCopyIds],
@@ -169,7 +176,9 @@ export function planFingerprint(p: PlanFingerprintParts): string {
     binders: [...p.binders]
       .sort(byId)
       .map((b) => [b.id, b.type, b.pages, b.pocketsPerPage, b.backHalfStartPage]),
-    collections: [...p.collections].sort(byId).map((c) => [c.id, c.targetCount]),
+    collections: [...p.collections]
+      .sort(byId)
+      .map((c) => [c.id, c.targetCount, [...c.currentBinderIds].sort()]),
     typeMap: [...p.typeMap]
       .sort((a, b) => a.cardType.localeCompare(b.cardType))
       .map((t) => [t.cardType, t.band]),
@@ -237,6 +246,7 @@ export async function loadPlanFingerprint(
     collections: collectionRows.map((c) => ({
       id: c.id,
       targetCount: (c.target_catalog_card_ids ?? []).length,
+      currentBinderIds: c.current_binder_ids ?? [],
     })),
     typeMap: typeMapRows.map((t) => ({ cardType: t.card_type, band: t.band })),
     decisionCount,

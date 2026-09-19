@@ -11,7 +11,7 @@
  *
  * DELIBERATELY NARROW: only the read/write surface `lib/repo` actually uses on these paths
  * (`select` / `eq` / `in` / `ilike` / `contains` / `overlaps` / `or` / `order` / `range` /
- * `maybeSingle` / `insert` / `update` / awaited-list) plus `rpc`. Anything else throws loudly rather
+ * `maybeSingle` / `insert` / `update` / awaited-list / `{ count: "exact", head: true }`) plus `rpc`. Anything else throws loudly rather
  * than quietly returning the wrong rows — if a repo grows a new call shape, the test fails instead
  * of lying. `ilike`/`contains`/`overlaps`/`or` added for UIL-039's `catalogCardRepo.browse`;
  * `not(col, "is", null)` for UIL-046's retry-sweep test, which drives the sync resolver's set-name
@@ -72,6 +72,7 @@ class PgQuery {
   private mode: "select" | "insert" | "update" = "select";
   private writeValues: Row | Row[] | null = null;
   private wantSingle = false;
+  private wantHead = false;
 
   constructor(
     private readonly db: PGlite,
@@ -80,10 +81,13 @@ class PgQuery {
 
   select(cols?: string, opts?: { count?: "exact"; head?: boolean }): this {
     if (opts !== undefined) {
-      if (opts.count !== "exact" || opts.head) {
-        throw new Error('pglite-client: select() only supports { count: "exact" } (no head)');
+      if (opts.count !== "exact") {
+        throw new Error('pglite-client: select() only supports { count: "exact" }');
       }
       this.wantCount = true;
+      // `head: true` is PostgREST's "count only, no rows" (createRepo's `count()`); honoured here by
+      // skipping the row query and answering `data: null` with the real total (UIL-032's loader test).
+      if (opts.head) this.wantHead = true;
     }
     if (cols && cols !== "*") {
       this.cols = cols
@@ -325,8 +329,9 @@ class PgQuery {
       | null,
     onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): PromiseLike<TResult1 | TResult2> {
-    const run =
-      this.mode === "insert"
+    const run = this.wantHead
+      ? Promise.resolve([] as Row[])
+      : this.mode === "insert"
         ? this.runInsert()
         : this.mode === "update"
           ? this.runUpdate()
@@ -335,7 +340,7 @@ class PgQuery {
       run
         // `async` because the count below is a second query (see its note); #119's version needed none.
         .then(async (rows) => ({
-          data: this.wantSingle ? (rows[0] ?? null) : rows,
+          data: this.wantHead ? null : this.wantSingle ? (rows[0] ?? null) : rows,
           error: null as null,
           // NOT `rows.length`: with a `range` applied that is the page size, and reporting it as the
           // total is exactly how `assertReadComplete` would be fooled into thinking a truncated read
