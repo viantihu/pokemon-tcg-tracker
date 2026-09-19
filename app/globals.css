@@ -3029,6 +3029,18 @@ button.subhead.folded:hover {
   background: var(--hi);
 }
 
+/* ---- Wrapped chip labels start every line at the same x (UIL-070 part 2) --------
+   A <button>'s UA default is text-align: center, and nothing above overrides it for
+   `.ochip`. Single-line chips never showed it (a content-sized flex button has no
+   slack), but a JOIN A LINE candidate whose label wraps at phone width rendered its
+   second line centred — measured at 375px: line 1 starts at x=86.1 after the swatch,
+   line 2 at x=154.6, a 68.5px indent that made the swatch look misaligned with the
+   text. Appended rather than merged into either `.ochip` rule, same discipline as
+   the blocks above. */
+.ochip {
+  text-align: left;
+}
+
 /* ---- A greyed placement chip (UIL-072) ------------------------------------------
    The BACK HALF chip is disabled while no line is picked (see MovePanel). Same
    appended-block discipline as above: nothing edits the two `.ochip` rules earlier
