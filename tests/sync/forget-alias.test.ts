@@ -5,8 +5,8 @@
  *  1. Pure — which WAITING entries a forget re-parks, and the ordered op set it emits (lib/sync/alias.ts).
  *  2. RPC (PGlite, real plpgsql, 0001→0014 applied) — `delete_set_alias` removes exactly the keyed row as
  *     the authenticated owner; the re-parks land in the same transaction; a poison op rolls the whole
- *     thing back; the branches inherited from 0008 still behave. Plus a mechanical check of 0014's
- *     "0008's body verbatim plus one branch" claim, by diffing the two function texts.
+ *     thing back; the branches inherited from 0008/0013 still behave. Plus a mechanical check of 0014's
+ *     "0013's body verbatim plus one branch" claim, by diffing the two function texts.
  *  3. End to end — the real `forgetSetAlias` against a PGlite-backed DbClient (real reads under RLS, real
  *     RPC), not a fake whose semantics are the author's guess.
  *
@@ -162,11 +162,10 @@ function migrationFn(file: string): string {
 }
 
 describe("forget alias — delete_set_alias through apply_write_ops (PGlite)", () => {
-  it("0014 is 0008's function verbatim plus the one delete_set_alias branch", () => {
-    const base = migrationFn("0008_collection_removal_ops.sql").replace(
-      "(Restated from 0006:",
-      "(Restated from 0006/0007/0008:",
-    );
+  it("0014 is 0013's function verbatim plus the one delete_set_alias branch", () => {
+    // 0013 (UIL-078) replaced apply_write_ops first — 0008's body + three update_slot patch keys — so
+    // this file is built on THAT body, and the composed function (0013 then 0014) is what ships.
+    const base = migrationFn("0013_decision_persistence.sql");
     const mine = migrationFn("0014_forget_set_alias.sql");
     const start = mine.indexOf("      -- NEW in 0014");
     const end = mine.indexOf("      else\n", start);
@@ -178,6 +177,10 @@ describe("forget alias — delete_set_alias through apply_write_ops (PGlite)", (
     expect(mine.slice(start, end)).toContain("when 'delete_set_alias' then");
     expect(mine.slice(start, end)).toContain(
       "where locale = (op ->> 'locale') and dex_code = (op ->> 'dex_code');",
+    );
+    // The inherited 0013 branch is still there: the composed function carries BOTH additions.
+    expect(mine).toContain(
+      "resolved_decision_collection_id = case when p ? 'resolved_decision_collection_id'",
     );
   });
 

@@ -2,10 +2,13 @@
 -- FORGOTTEN, together with the queue re-classification that follows from it (UIL-047 C3, second half).
 --
 -- Build contract: docs/dev-spec.md §4 (migrations are FORWARD-ONLY and ordered; RLS on every table).
--- Additive — 0001–0011 are FROZEN (applied to live prod + testing); never edit them
--- (docs/devops-strategy.md §6, dev-spec §4). 0012 and 0013 are allocated to other open PRs (UIL-052,
--- UIL-078); this file depends on neither, and neither touches this function, so it is correct whichever
--- order the three land in.
+-- Additive — 0001–0013 are FROZEN (0001–0012 applied to live prod + testing; 0013 lands with #188);
+-- never edit them (docs/devops-strategy.md §6, dev-spec §4).
+--
+-- COMPOSED FUNCTION, READ WITH ITS NEIGHBOURS. 0013_decision_persistence replaced `apply_write_ops`
+-- (0008's body + three `update_slot` patch keys for UIL-078's marker). This file replaces it AGAIN and
+-- is built on 0013's body — verbatim — plus one `delete_set_alias` branch. Neither file is the whole
+-- function on its own; the one that runs last is. Gate the composed result, not either file.
 --
 -- WHY. A manual match on an UNKNOWN_SET entry teaches `set_alias (locale, dex_code) → tcgdex_set_id`, and
 -- from then on EVERY row from that Dex set resolves through it ("one match drains the set", sync-ui-spec
@@ -26,12 +29,12 @@
 -- the next import resolves through it anyway. `apply_write_ops` is the one transaction boundary every
 -- other multi-row user action already uses (0006/0007/0008), so the op goes there.
 --
--- `apply_write_ops` is a single function, so extending it means REPLACING it: the body below is 0008's
+-- `apply_write_ops` is a single function, so extending it means REPLACING it: the body below is 0013's
 -- body verbatim plus exactly one new op branch, `delete_set_alias`, keyed on the table's primary key
 -- `(locale, dex_code)`. A key that matches no row deletes nothing — the same silent no-op as
 -- `delete_copy`; the TypeScript layer (lib/sync/exec.ts `forgetSetAlias`) checks the row exists before
 -- building the op and tells the user "already gone" instead. tests/sync/forget-alias.test.ts pins the
--- "verbatim plus one branch" claim mechanically, by diffing this function against 0008's.
+-- "verbatim plus one branch" claim mechanically, by diffing this function against 0013's.
 --
 -- WHAT IT DELIBERATELY DOES NOT DO. It does not touch copies: a card she matched by hand through the
 -- alias is a card she identified, and the alias is only that match's side effect. Copies that later
@@ -39,14 +42,14 @@
 -- the next import can: their Dex rows will no longer resolve, and the reconciler lists the copies as
 -- removals in the gated preview for her review. Nor does it touch RESOLVED or DISMISSED entries.
 --
--- SECURITY properties are preserved EXACTLY as 0006/0007/0008 declared them: `security invoker` (the
+-- SECURITY properties are preserved EXACTLY as 0006/0007/0008/0013 declared them: `security invoker` (the
 -- delete runs under 0002's `set_alias_all` policy — `set_alias` has no owner column and is writable by
 -- any authenticated user, which is exactly what the existing `upsert_set_alias` branch already relies
 -- on), `set search_path = public, pg_temp`, `owner_id` never read from the payload, NO dynamic SQL (every
 -- table and column name is a literal chosen by a fixed `case`), and an unknown op raises so a typo fails
 -- the whole transaction rather than silently writing less.
 --
--- `create or replace function` preserves the object's existing privileges, so 0006/0007/0008's grants
+-- `create or replace function` preserves the object's existing privileges, so the earlier grants
 -- survive. They are restated at the bottom anyway so this file is self-sufficient (and idempotent).
 
 create or replace function apply_write_ops(payload jsonb)
@@ -238,7 +241,13 @@ begin
           state                  = case when p ? 'state'                  then p ->> 'state'                    else state end,
           copy_id                = case when p ? 'copy_id'                then (p ->> 'copy_id')::uuid          else copy_id end,
           target_catalog_card_id = case when p ? 'target_catalog_card_id' then p ->> 'target_catalog_card_id'   else target_catalog_card_id end,
-          note                   = case when p ? 'note'                   then p ->> 'note'                     else note end
+          note                   = case when p ? 'note'                   then p ->> 'note'                     else note end,
+          -- NEW in 0013 — UIL-078's "she already answered this" marker, so `releaseSlotOps` can clear it
+          -- in the SAME transaction that vacates the slot (see this file's header). Same partial-patch
+          -- semantics as every column above: key present sets it (null included), key absent leaves it.
+          resolved_decision_kind          = case when p ? 'resolved_decision_kind'          then p ->> 'resolved_decision_kind'                  else resolved_decision_kind end,
+          resolved_decision_choice        = case when p ? 'resolved_decision_choice'        then p ->> 'resolved_decision_choice'                else resolved_decision_choice end,
+          resolved_decision_collection_id = case when p ? 'resolved_decision_collection_id' then (p ->> 'resolved_decision_collection_id')::uuid else resolved_decision_collection_id end
         where id = (op ->> 'id')::uuid;
 
       when 'update_unresolved_entry' then
