@@ -773,7 +773,7 @@ function WishlistView({ data }: { data: CollHubData }) {
         <WishlistBinder key={g.binderId ?? "none"} group={g} />
       ))}
 
-      <div className="foot">GROUPED BY BINDER → LINE · CSV MIRRORS BACK INTO DEX FOR SCANNING</div>
+      <div className="foot">GROUPED BY BINDER → LINE · CSV EXPORTS BACK INTO DEX FOR SCANNING</div>
     </div>
   );
 }

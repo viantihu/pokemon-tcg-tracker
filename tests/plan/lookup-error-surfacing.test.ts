@@ -55,13 +55,10 @@ describe("UIL-035 · the copy itself distinguishes the two cases", () => {
     const text = readFileSync(src, "utf8");
     // The failure branch exists and is distinct from the empty branch.
     expect(text).toContain("did not answer");
-    expect(text).toContain("No match in the local mirror");
+    expect(text).toContain("No card found");
     // And it explicitly does NOT assert absence — the phrase that would be a claim about her
     // collection the app cannot support.
-    const failureBranch = text.slice(
-      text.indexOf("{failed ?"),
-      text.indexOf("Searching the mirror"),
-    );
+    const failureBranch = text.slice(text.indexOf("{failed ?"), text.indexOf("Searching…"));
     expect(failureBranch).not.toContain("No match");
     expect(failureBranch).toContain("may well exist");
   });
