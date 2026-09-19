@@ -20,7 +20,7 @@ import type { BackLineStageInfo, BackLineStageInput, ResolvedBackLine } from "@/
 import { BandChip } from "../_components/BandChip";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
-import { CardLookup } from "../_components/CardLookup";
+import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { VariantSelector } from "../_components/VariantSelector";
 import { bandMeta } from "../_components/plan-meta";
 import type { LookupCard } from "../plan/plan-types";
@@ -268,7 +268,7 @@ function FrontHalfPanel({
   return (
     <div className="entry panel">
       <div className="hd u">Front half · in order</div>
-      <CardLookup search={lookupCatalog} onPick={add} placeholder="Set + number or name…" />
+      <CardResultsGrid search={lookupCatalog} onPick={add} placeholder="Set + number or name…" />
 
       {rows.length === 0 ? (
         <p style={{ marginTop: 14, fontSize: 11, color: "var(--ink-2)", lineHeight: 1.8 }}>
@@ -498,7 +498,7 @@ function BackHalfPanel({
               <BandChip bandKey={bandKey} label />
             </span>
           </div>
-          <CardLookup
+          <CardResultsGrid
             search={lookupCatalog}
             onPick={startLine}
             placeholder="Pick a species in this line (any stage)…"
@@ -652,7 +652,11 @@ function StageRow({
                 Pick the printing you own:
               </span>
             )}
-            <CardLookup search={lookupCatalog} onPick={onFilled} placeholder="Which printing?" />
+            <CardResultsGrid
+              search={lookupCatalog}
+              onPick={onFilled}
+              placeholder="Which printing?"
+            />
             {entry.filledCard ? (
               <VariantSelector
                 variants={entry.filledCard.variants}
@@ -683,7 +687,7 @@ function StageRow({
               </button>
             </div>
             {entry.blockMaterial === "repurposedDuplicate" && (
-              <CardLookup
+              <CardResultsGrid
                 search={lookupCatalog}
                 onPick={onBlockCard}
                 placeholder="Which duplicate was repurposed?"
@@ -831,7 +835,7 @@ function SpecialtyPanel({
   return (
     <div className="entry panel">
       <div className="hd u">Specialty · flat list with collection tags</div>
-      <CardLookup search={lookupCatalog} onPick={add} placeholder="Set + number or name…" />
+      <CardResultsGrid search={lookupCatalog} onPick={add} placeholder="Set + number or name…" />
 
       {rows.length === 0 ? (
         <p style={{ marginTop: 14, fontSize: 11, color: "var(--ink-2)", lineHeight: 1.8 }}>
