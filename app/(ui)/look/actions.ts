@@ -6,37 +6,115 @@
  * Type-ahead reuses the plan screen's mirror search (M6). `lookupAnswer` loads the shared plan
  * context (M6 `loadPlanContext`) + open wishlist items, then hands the joins to the PURE
  * `buildLookupAnswer` (lib/surfaces). The client never touches the DB or TCGdex.
+ *
+ * EVERY action here returns a RESULT and never throws to the client (UIL-035, third site). A thrown
+ * server-action error reaches a production browser as a generic message with a digest — Next redacts
+ * the text — so a throw could never tell her WHAT failed, and the old `catch → notFound` told her the
+ * card did not exist when the truth was that nothing was asked. A returned `{ ok: false, error }`
+ * carries the real message across the boundary, and `answer: null` inside `ok: true` is the ONLY thing
+ * that means "the mirror was asked and does not have this card".
  */
 
 import { band } from "@/lib/engine";
-import { getOwnerContext, loadPlanContext } from "@/lib/plan";
-import { catalogCardRepo, wishlistItemRepo } from "@/lib/repo";
+import { applyMove, loadMoveOptions, moveNameLookups } from "@/lib/line";
+import type { MoveDestination, MoveOptions } from "@/lib/line/types";
+import { getOwnerContext, loadPlanContext, type PlanContext } from "@/lib/plan";
+import { catalogCardRepo, wishlistItemRepo, type DbClient } from "@/lib/repo";
 import {
   buildLookupAnswer,
   type LookupAnswer,
   type LookupCopy,
   type LookupLineRef,
 } from "@/lib/surfaces";
+import { errorMessage } from "@/lib/errors";
 import { lookupCatalog } from "../plan/actions";
 import type { LookupCard } from "../plan/plan-types";
+import { toMovableCopy, type HomeNames, type LookupMovableCopy } from "./lookup-copies";
 
 /** Type-ahead against the local mirror — the same server search the plan intake uses. */
 export async function searchCatalog(query: string): Promise<LookupCard[]> {
   return lookupCatalog(query);
 }
 
-/** Assemble the show-floor answer for one printing, or null if it is not in the mirror. */
-export async function lookupAnswer(tcgdexId: string): Promise<LookupAnswer | null> {
-  const { db } = await getOwnerContext();
+/**
+ * The show-floor answer for one printing. `answer: null` = not in the mirror (a real miss);
+ * `ok: false` = the lookup itself failed, and the card may well exist.
+ */
+export type LookupResult =
+  | { ok: true; answer: LookupAnswer | null; copies: LookupMovableCopy[] }
+  | { ok: false; error: string };
+
+export async function lookupAnswer(tcgdexId: string): Promise<LookupResult> {
+  try {
+    const { db } = await getOwnerContext();
+    return await assembleLookup(db, tcgdexId);
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/** Move-picker options (binders, collections, bands) for the per-copy Move (UIL-051). */
+export async function lookupMoveOptions(): Promise<
+  { ok: true; options: MoveOptions } | { ok: false; error: string }
+> {
+  try {
+    const { db } = await getOwnerContext();
+    return { ok: true, options: await loadMoveOptions(db) };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+export type LookupMoveResult =
+  { ok: true; label: string; lookup: LookupResult } | { ok: false; error: string };
+
+/**
+ * Move one of her copies from the Lookup screen (UIL-051) through the SAME atomic write the Line and
+ * Plan screens use (`applyMove`: placement + vacated slot + demoted line + collection membership +
+ * audit, one transaction), then re-read the answer so the screen shows the card where it now is.
+ */
+export async function moveFromLookup(
+  copyId: string,
+  destination: MoveDestination,
+  tcgdexId: string,
+): Promise<LookupMoveResult> {
+  try {
+    const { db } = await getOwnerContext();
+    const options = await loadMoveOptions(db);
+    const res = await applyMove(db, { copyId, destination }, moveNameLookups(options));
+    const lookup = await assembleLookup(db, tcgdexId);
+    return { ok: true, label: res.destinationLabel, lookup };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/** Name lookups for a copy's present home, resolved from the plan context (see lookup-copies.ts). */
+function homeNames(pc: PlanContext, tcgdexId: string): HomeNames {
+  return {
+    binderName: (id) => pc.lookups.binderNameById.get(id),
+    bandDisplay: (key) => pc.lookups.bandDisplayByKey.get(key),
+    collectionIn: (binderId) =>
+      pc.ctx.collections.find(
+        (c) => c.currentBinderIds.includes(binderId) && c.targetCatalogCardIds.includes(tcgdexId),
+      )?.id ?? null,
+  };
+}
+
+/** Assemble the answer + movable copies for one printing. Throws on I/O failure; callers wrap. */
+async function assembleLookup(
+  db: DbClient,
+  tcgdexId: string,
+): Promise<Extract<LookupResult, { ok: true }>> {
   const [row, pc, openWishlist] = await Promise.all([
     catalogCardRepo.getByPk(db, tcgdexId),
     loadPlanContext(db),
     wishlistItemRepo.listOpen(db),
   ]);
-  if (!row) return null;
+  if (!row) return { ok: true, answer: null, copies: [] };
 
   const engineCard = pc.catalogById.get(tcgdexId);
-  if (!engineCard) return null;
+  if (!engineCard) return { ok: true, answer: null, copies: [] };
 
   const bandKey = band(engineCard, pc.ctx.typeColorMap);
   const bandDisplay = pc.lookups.bandDisplayByKey.get(bandKey) ?? bandKey;
@@ -51,18 +129,17 @@ export async function lookupAnswer(tcgdexId: string): Promise<LookupAnswer | nul
   const lineLabel = (rootDexId: number) => `${nameByDexId.get(rootDexId) ?? "Line"} line`;
 
   // Physical copies of THIS printing (all roles).
-  const copies: LookupCopy[] = pc.ctx.owned
-    .filter((o) => o.card.tcgdexId === tcgdexId)
-    .map((o) => ({
-      role: o.role,
-      binderId: o.binderId,
-      binderName: o.binderId ? (pc.lookups.binderNameById.get(o.binderId) ?? null) : null,
-      binderHalf: o.binderHalf,
-      bandDisplay: o.colorBand
-        ? (pc.lookups.bandDisplayByKey.get(o.colorBand) ?? o.colorBand)
-        : null,
-      lineSlotId: o.lineSlotId,
-    }));
+  const ownedHere = pc.ctx.owned.filter((o) => o.card.tcgdexId === tcgdexId);
+  const copies: LookupCopy[] = ownedHere.map((o) => ({
+    role: o.role,
+    binderId: o.binderId,
+    binderName: o.binderId ? (pc.lookups.binderNameById.get(o.binderId) ?? null) : null,
+    binderHalf: o.binderHalf,
+    bandDisplay: o.colorBand ? (pc.lookups.bandDisplayByKey.get(o.colorBand) ?? o.colorBand) : null,
+    lineSlotId: o.lineSlotId,
+  }));
+  const names = homeNames(pc, tcgdexId);
+  const movable = ownedHere.map((o) => toMovableCopy(o, names));
 
   const toLineRef = (
     lineId: string,
@@ -123,7 +200,7 @@ export async function lookupAnswer(tcgdexId: string): Promise<LookupAnswer | nul
     .filter((c) => c.targetCatalogCardIds.includes(tcgdexId))
     .map((c) => ({ id: c.id, name: c.name }));
 
-  return buildLookupAnswer({
+  const answer = buildLookupAnswer({
     card: {
       tcgdexId: row.tcgdex_id,
       name: row.name,
@@ -144,4 +221,5 @@ export async function lookupAnswer(tcgdexId: string): Promise<LookupAnswer | nul
     wishlist,
     collections,
   });
+  return { ok: true, answer, copies: movable };
 }
