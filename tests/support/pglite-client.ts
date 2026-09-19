@@ -11,7 +11,8 @@
  *
  * DELIBERATELY NARROW: only the read/write surface `lib/repo` actually uses on these paths
  * (`select` / `eq` / `in` / `ilike` / `contains` / `overlaps` / `or` / `order` / `range` /
- * `maybeSingle` / `insert` / `update` / awaited-list / `{ count: "exact", head: true }`) plus `rpc`. Anything else throws loudly rather
+ * `maybeSingle` / `insert` / `update` / `upsert` / awaited-list / `{ count: "exact", head: true }`) plus
+ * `rpc`. Anything else throws loudly rather
  * than quietly returning the wrong rows — if a repo grows a new call shape, the test fails instead
  * of lying. `ilike`/`contains`/`overlaps`/`or` added for UIL-039's `catalogCardRepo.browse`;
  * `not(col, "is", null)` for UIL-046's retry-sweep test, which drives the sync resolver's set-name
@@ -69,7 +70,8 @@ class PgQuery {
   private orderAsc = true;
   private limitOffset: { from: number; to: number } | null = null;
   private wantCount = false;
-  private mode: "select" | "insert" | "update" = "select";
+  private mode: "select" | "insert" | "update" | "upsert" = "select";
+  private conflictCol: string | null = null;
   private writeValues: Row | Row[] | null = null;
   private wantSingle = false;
   private wantHead = false;
@@ -107,6 +109,25 @@ class PgQuery {
   update(patch: Row): this {
     this.mode = "update";
     this.writeValues = patch;
+    return this;
+  }
+
+  /**
+   * `upsert(rows, { onConflict })` — PostgREST's `INSERT … ON CONFLICT (col) DO UPDATE SET every other
+   * supplied column = excluded.<col>`, the shape `catalogCardRepo.upsertMany` sends for the mirror
+   * (UIL-029: tests/catalog/mirror.test.ts moved off a hand-written double onto this). Narrow: exactly
+   * one conflict column, `ignoreDuplicates` not modelled. Postgres itself supplies the behaviour the old
+   * double had to hand-code — "cannot affect row a second time" when a batch repeats a key.
+   */
+  upsert(rows: Row | Row[], opts: { onConflict: string; ignoreDuplicates?: boolean }): this {
+    if (!opts?.onConflict || opts.onConflict.includes(",") || opts.ignoreDuplicates) {
+      throw new Error(
+        "pglite-client: upsert() supports exactly one onConflict column, no ignoreDuplicates",
+      );
+    }
+    this.mode = "upsert";
+    this.conflictCol = opts.onConflict;
+    this.writeValues = rows;
     return this;
   }
 
@@ -292,9 +313,16 @@ class PgQuery {
     const valueRows = rows.map(
       (row) => `(${cols.map((c) => (params.push(row[c]), `$${params.length}`)).join(", ")})`,
     );
+    const conflict =
+      this.mode === "upsert" && this.conflictCol
+        ? ` on conflict (${quoteIdent(this.conflictCol)}) do update set ${cols
+            .filter((c) => c !== this.conflictCol)
+            .map((c) => `${quoteIdent(c)} = excluded.${quoteIdent(c)}`)
+            .join(", ")}`
+        : "";
     const sql =
       `insert into ${quoteIdent(this.table)} (${cols.map(quoteIdent).join(", ")})` +
-      ` values ${valueRows.join(", ")} returning *`;
+      ` values ${valueRows.join(", ")}${conflict} returning *`;
     const res = await this.db.query<Row>(sql, params, { parsers: NUMERIC_PARSERS });
     return res.rows;
   }
@@ -331,7 +359,7 @@ class PgQuery {
   ): PromiseLike<TResult1 | TResult2> {
     const run = this.wantHead
       ? Promise.resolve([] as Row[])
-      : this.mode === "insert"
+      : this.mode === "insert" || this.mode === "upsert"
         ? this.runInsert()
         : this.mode === "update"
           ? this.runUpdate()

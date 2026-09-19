@@ -7,7 +7,10 @@
  * mirror over the same input must not duplicate rows (idempotent upsert acceptance).
  */
 import { describe, expect, it } from "vitest";
+import type { PGlite } from "@electric-sql/pglite";
 import type { DbClient } from "@/lib/repo";
+import { freshRpcDb } from "../support/pglite-rpc";
+import { pgliteClient } from "../support/pglite-client";
 import { catalogCardRepo } from "@/lib/repo";
 import { dedupeById, extractPrices, syncSet, toCatalogRow } from "@/lib/catalog/mirror";
 import type { TcgdexCardFull, TcgdexClient, TcgdexSet } from "@/lib/catalog/tcgdex";
@@ -97,33 +100,26 @@ function fakeTcgdex(set: TcgdexSet, cards: TcgdexCardFull[]): TcgdexClient {
   };
 }
 
-/** Minimal in-memory DB that models catalog_card upsert-on-conflict (tcgdex_id) semantics. */
-function fakeDb() {
-  const store = new Map<string, Record<string, unknown>>();
-  const db = {
-    from(table: string) {
-      if (table !== "catalog_card") throw new Error(`unexpected table ${table}`);
-      return {
-        upsert(rows: Record<string, unknown>[], opts: { onConflict: string }) {
-          const key = opts.onConflict;
-          const seen = new Set<string>();
-          for (const r of rows) {
-            const k = r[key] as string;
-            if (seen.has(k)) {
-              throw new Error(`ON CONFLICT DO UPDATE cannot affect row a second time: ${k}`);
-            }
-            seen.add(k);
-          }
-          for (const r of rows)
-            store.set(r[key] as string, { ...store.get(r[key] as string), ...r });
-          const result = { data: rows, error: null };
-          return { select: () => Promise.resolve(result) };
-        },
-        select: () => Promise.resolve({ data: [...store.values()], error: null }),
-      };
-    },
-  };
-  return { db: db as unknown as DbClient, store };
+/**
+ * A real Postgres (PGlite) with every migration applied, wrapped in the same `DbClient` shim the other
+ * end-to-end suites use (UIL-029). The hand-written in-memory double this replaced had to model
+ * upsert-on-conflict semantics by hand — the exact kind of fake that certifies its author's guess rather
+ * than the database's behaviour. The mirror runs under the service role in production (catalog_card is
+ * read-only to the app user), so these run as the harness's bootstrap superuser, not `asOwner`.
+ */
+async function mirrorDb(): Promise<{ db: DbClient; pg: PGlite }> {
+  const pg = await freshRpcDb();
+  return { db: pgliteClient(pg), pg };
+}
+
+async function rowCount(pg: PGlite): Promise<number> {
+  return (await pg.query<{ n: number }>(`select count(*)::int n from catalog_card`)).rows[0].n;
+}
+
+async function rowOf(pg: PGlite, id: string): Promise<Record<string, unknown> | undefined> {
+  return (
+    await pg.query<Record<string, unknown>>(`select * from catalog_card where tcgdex_id = $1`, [id])
+  ).rows[0];
 }
 
 // -----------------------------------------------------------------------------------------------
@@ -191,9 +187,16 @@ describe("dedupeById", () => {
 
 describe("catalogCardRepo.upsertMany", () => {
   it("throws if a batch touches the same conflict key twice (why dedupe is required)", async () => {
-    const { db } = fakeDb();
-    const row = toCatalogRow(CHARMELEON, { isDigitalOnly: false });
-    await expect(catalogCardRepo.upsertMany(db, [row, row])).rejects.toThrow(/second time/);
+    // Postgres's own rule, not a fake's re-statement of it: "ON CONFLICT DO UPDATE command cannot affect
+    // row a second time".
+    const { db, pg } = await mirrorDb();
+    try {
+      const row = toCatalogRow(CHARMELEON, { isDigitalOnly: false });
+      await expect(catalogCardRepo.upsertMany(db, [row, row])).rejects.toThrow(/second time/);
+      expect(await rowCount(pg)).toBe(0); // and the failed batch wrote nothing
+    } finally {
+      await pg.close();
+    }
   });
 });
 
@@ -201,19 +204,27 @@ describe("syncSet — idempotent mirror", () => {
   it("populates the mirror and re-runs without duplicating rows", async () => {
     const cards = [CHARMANDER, CHARMELEON, CHARIZARD_EX];
     const tcgdex = fakeTcgdex(obsidianFlamesSet(cards), cards);
-    const { db, store } = fakeDb();
+    const { db, pg } = await mirrorDb();
+    try {
+      const first = await syncSet(db, tcgdex, "sv03");
+      expect(first.fetched).toBe(3);
+      expect(first.upserted).toBe(3);
+      expect(await rowCount(pg)).toBe(3);
 
-    const first = await syncSet(db, tcgdex, "sv03");
-    expect(first.fetched).toBe(3);
-    expect(first.upserted).toBe(3);
-    expect(store.size).toBe(3);
+      const second = await syncSet(db, tcgdex, "sv03");
+      expect(second.upserted).toBe(3);
+      expect(await rowCount(pg)).toBe(3); // no duplication on re-run — the PK, not a fake, enforces it
 
-    const second = await syncSet(db, tcgdex, "sv03");
-    expect(second.upserted).toBe(3);
-    expect(store.size).toBe(3); // no duplication on re-run
-
-    expect(store.get("sv03-125")!.card_class).toBe("specialty");
-    expect(store.get("sv03-026")!.evolve_from).toBeNull();
+      expect((await rowOf(pg, "sv03-125"))!.card_class).toBe("specialty");
+      expect((await rowOf(pg, "sv03-026"))!.evolve_from).toBeNull();
+      // The row shape production stores, read back from the real table.
+      const charmeleon = (await rowOf(pg, "sv03-027"))!;
+      expect(charmeleon.set_id).toBe("sv03");
+      expect(charmeleon.local_id).toBe("027");
+      expect(charmeleon.types).toEqual(["Fire"]);
+    } finally {
+      await pg.close();
+    }
   });
 
   it("flags every card in a TCG Pocket set as digital-only", async () => {
@@ -228,9 +239,13 @@ describe("syncSet — idempotent mirror", () => {
       serie: { id: "tcgp", name: "Pokémon TCG Pocket" },
       cards: [{ id: pocket.id, localId: pocket.localId, name: pocket.name }],
     };
-    const { db, store } = fakeDb();
-    const result = await syncSet(db, fakeTcgdex(set, [pocket]), "A1");
-    expect(result.isDigitalOnly).toBe(true);
-    expect(store.get("A1-001")!.is_digital_only).toBe(true);
+    const { db, pg } = await mirrorDb();
+    try {
+      const result = await syncSet(db, fakeTcgdex(set, [pocket]), "A1");
+      expect(result.isDigitalOnly).toBe(true);
+      expect((await rowOf(pg, "A1-001"))!.is_digital_only).toBe(true);
+    } finally {
+      await pg.close();
+    }
   });
 });
