@@ -234,6 +234,13 @@ substitute a raw dump/restore for it.
 | `catalog_card` | the mirror her copies were reconciled against (23,548 cards / 214 sets on Testing as of 2026-09-14), including artwork hashes, clusters and the `0009` set metadata. Upserted, so a partially-mirrored Production is fine. Re-mirroring instead would be slow (one set per request) and would recompute clustering |
 | `set_alias` | learned and manual set aliases her syncs produced |
 
+> **Do not clear or prune `placement_decision` — on Testing, on Production, ever.** It is queue state,
+> not only audit history: the Haul Plan derives its pending queue from the **absence** of a row
+> (`lib/plan/pending.ts` `loadPendingPlacements` — an unplaced copy with no decision row is "still
+> waiting"), so deleting rows re-queues every affected card as if it had never been placed. That is what
+> the 702-row clear on Testing did on 2026-09-14 (UIL-042). Copy it with the collection, as above; never
+> archive it out of the live table.
+
 | Not copied | Why |
 |---|---|
 | `color_band`, `type_color_map` | ship via migration `0003_config.sql`; Production already has them and copying collides |

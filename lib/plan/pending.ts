@@ -46,6 +46,14 @@ export interface PendingPlacement {
  * Every copy waiting to be placed, oldest first. Skips a copy whose catalog row has since vanished
  * from the mirror (the FK is `on delete restrict`, so this is defensive only) rather than surfacing a
  * card the plan could not describe.
+ *
+ * `placement_decision` IS QUEUE STATE, NOT ONLY AN AUDIT LOG (UIL-042). "Pending" is defined by the
+ * ABSENCE of a decision row: an unplaced copy with no row is "still waiting", and the only thing that
+ * takes it out of this queue is a decision row being written by a commit. So deleting or pruning
+ * `placement_decision` rows does not tidy history — it re-queues every affected card as if it had never
+ * been placed, which is exactly what happened when 702 rows were cleared by hand on Testing
+ * (2026-09-14). There is deliberately no separate "pending" flag to keep in step with this: the row is
+ * the flag. Never clear that table; never archive it out of the live database.
  */
 export async function loadPendingPlacements(db: DbClient): Promise<PendingPlacement[]> {
   const unplaced = await copyRepo.listUnplaced(db);
