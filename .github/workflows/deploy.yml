@@ -14,10 +14,11 @@ name: Deploy
 #   vars.SUPABASE_DB_POOLER_HOST       (matching env — Supavisor host, see `migrate` below)
 #   vars.SUPABASE_PROJECT_REF          (matching env — the project subdomain, not secret)
 #   vars.APP_URL                       (matching env — deployed base URL)
-#   secrets.SUPABASE_ANON_KEY          (testing — the `acceptance` job FAILS without it;
+#   secrets.SUPABASE_ANON_KEY          (matching env — the `acceptance` job FAILS without it;
 #                                       holds the publishable key on a current project)
-#   secrets.SUPABASE_SERVICE_ROLE_KEY  (testing — the `acceptance` job FAILS without it;
-#                                       holds the secret key on a current project)
+#   secrets.SUPABASE_SERVICE_ROLE_KEY  (matching env — the `acceptance` job FAILS without it;
+#                                       holds the secret key on a current project.
+#                                       Set on `production` before the cutover PR.)
 #   secrets.SUPABASE_ACCESS_TOKEN      (OPTIONAL. `migrate` no longer uses it at all —
 #                                       see UIL-005. The `acceptance` job still tries it
 #                                       as a best-effort shortcut for deriving its two
@@ -193,11 +194,29 @@ jobs:
   # The M1 acceptance suite (dev-spec §8: "worked examples ... pass as automated
   # tests") needs a real Supabase project — it asserts that RLS denies anonymous
   # reads on every table, which PGlite cannot model. It therefore skips in `pnpm
-  # test` and has never actually executed anywhere. This runs it against Testing
-  # right after migrations land, which is the only place it can run.
+  # test` and has never actually executed anywhere. This runs it against the
+  # environment that was just migrated, right after migrations land.
   #
-  # Read-only (SELECTs only), so it is safe against the shared Testing project.
-  # Testing only: never point a suite that asserts on seed data at Production.
+  # Read-only (SELECTs only), so it is safe against the shared Testing project AND
+  # against Production. It runs on BOTH rails on purpose (docs/root-cause-analysis.md
+  # RC-6b: until 2026-09-19 it was gated on `ref_name == 'develop'`, so a deploy to
+  # main skipped the only suite that proves RLS and the colour-band config on the
+  # project the app actually serves from — the two things most likely to differ
+  # between projects). What it asserts and why that is right for Production:
+  #   - anon reads are denied on every table            -> Production's RLS, not Testing's
+  #   - color_band holds the ten bands, type_color_map   -> proves 0003 applied there (the
+  #     matches the confirmed table                        "empty bands" cutover symptom)
+  #   - catalog_card has >= 3 rows                        -> EXPECTED RED on the first main
+  #     deploy: Production's catalog is empty until the promotion script copies it
+  #     (docs/go-live-runbook.md B5). Re-run this job after the promotion for the
+  #     green record. Do NOT weaken the assertion to make the first deploy green.
+  # Nothing here reads seed.sql-only rows; the "seeded data" wording in the suite's
+  # title is historical.
+  #
+  # Production needs the same two environment secrets as Testing
+  # (SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY on the `production` environment,
+  # runbook A4); without them this job FAILS loudly on main, which is the intended
+  # reminder, and `smoke` still runs because it needs only `migrate`.
   #
   # This job FAILS rather than skips when its credentials are missing. It was added
   # (#33) to finally run that suite, then never ran once: its credential check
@@ -213,9 +232,9 @@ jobs:
   # advisory notice buys a green check that asserts nothing.
   acceptance:
     needs: migrate
-    if: ${{ vars.DEPLOY_ENABLED == 'true' && github.ref_name == 'develop' }}
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
-    environment: testing
+    environment: ${{ github.ref_name == 'main' && 'production' || 'testing' }}
     steps:
       - uses: actions/checkout@v7
 
