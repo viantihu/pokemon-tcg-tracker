@@ -23,6 +23,12 @@
  * Order, not visibility, is what varies: the line section leads when there's a candidate or an open
  * "start new" to offer, and drops behind the manual controls when there is nothing to join — leading
  * with an unanswerable line question is the same friction from the other direction.
+ *
+ * UIL-072 (her ruling): the back half is the one option of the four that the server refuses unless a
+ * line is picked (UIL-056's invariant, which stays), so it must not LOOK like an enabled peer of front
+ * half / collection / bulk. While no line is picked the BACK HALF chip is disabled with the reason and
+ * the remedy inline. The disabled state is derived from `isMoveDestinationComplete` — the same
+ * predicate `applyMove` throws on — so the chip and the refusal cannot drift apart.
  */
 
 import { useState } from "react";
@@ -99,6 +105,29 @@ export function MovePanel({
         };
 
   const canConfirm = isMoveDestinationComplete(destination);
+
+  const hasCandidates = (joinCandidates ?? []).length > 0;
+
+  /**
+   * Would a back-half shelf be accepted with the line choice as it stands? Probed through the SAME
+   * predicate `applyMove` refuses on, with stand-in binder/band ids so the answer isolates the line
+   * condition rather than a band she simply has not picked yet (front half would be equally
+   * incomplete without a band, and it is not greyed). If UIL-056's invariant is ever relaxed in
+   * lib/line/move.ts, this chip enables itself the same day — nothing here restates the rule.
+   */
+  const backHalfNeedsLine = !isMoveDestinationComplete({
+    kind: "shelf",
+    binderId: "probe",
+    half: "back",
+    band: "probe",
+    ...(allowLineJoin ? { lineJoin } : {}),
+  });
+  // Her words for the condition; the remedy names where the line picker is on THIS panel (the
+  // section order flips when there is nothing to join — see the render below) or, where the panel has
+  // no picker at all (plan spotlight, Collections), the screen that does.
+  const backHalfReason = allowLineJoin
+    ? `The back half holds lines. Pick a line ${hasCandidates ? "above" : "below"} to enable. Or choose the front half, a collection, or bulk.`
+    : "The back half holds lines. Move it from the Lines page to pick one. Or choose the front half, a collection, or bulk.";
 
   function summary(): string {
     if (isBulk) return "BULK BOX · NOT SHELVED";
@@ -192,20 +221,26 @@ export function MovePanel({
           <div className="orow">
             <div className="ol">HALF</div>
             <div className="ochips">
-              {(["front", "back"] as const).map((h) => (
-                <button
-                  key={h}
-                  type="button"
-                  className={"ochip" + (half === h ? " on" : "")}
-                  aria-pressed={half === h}
-                  onClick={() => {
-                    setHalf(h);
-                    setLineJoin(undefined);
-                  }}
-                >
-                  {h.toUpperCase()} HALF
-                </button>
-              ))}
+              {(["front", "back"] as const).map((h) => {
+                const dead = h === "back" && backHalfNeedsLine;
+                return (
+                  <button
+                    key={h}
+                    type="button"
+                    className={"ochip" + (half === h ? " on" : "")}
+                    aria-pressed={half === h}
+                    disabled={dead}
+                    title={dead ? backHalfReason : undefined}
+                    onClick={() => {
+                      setHalf(h);
+                      setLineJoin(undefined);
+                    }}
+                  >
+                    {h.toUpperCase()} HALF
+                  </button>
+                );
+              })}
+              {backHalfNeedsLine ? <span className="oskip">{backHalfReason}</span> : null}
             </div>
           </div>
           <div className="orow">
@@ -237,25 +272,15 @@ export function MovePanel({
           </div>
           {/* UIL-068: back-half-needs-a-line stays a real requirement (UIL-056's server-side
               invariant, unchanged here) — but it is no longer the reason the rest of this section is
-              hard to reach. Both hints below just point at the line section; they never gate it. */}
-          {half === "back" && !allowLineJoin ? (
+              hard to reach. The "needs a line" half of the old hint now lives on the greyed BACK HALF
+              chip itself (UIL-072); what remains here is the confirmation once a line IS picked. */}
+          {half === "back" && allowLineJoin && lineJoin ? (
             <div className="orow">
               <div className="ol" />
               <div className="ochips">
                 <span className="oskip">
-                  Back-half moves choose a line. Do this from the Lines page.
-                </span>
-              </div>
-            </div>
-          ) : null}
-          {half === "back" && allowLineJoin ? (
-            <div className="orow">
-              <div className="ol" />
-              <div className="ochips">
-                <span className="oskip">
-                  {lineJoin
-                    ? "Line picked above — change it there, or pick Bulk / a Collection / the front half here."
-                    : "Back-half moves need a line — pick one above, or choose Bulk / a Collection / the front half here."}
+                  Line picked {hasCandidates ? "above" : "below"} — change it there, or pick Bulk /
+                  a Collection / the front half here.
                 </span>
               </div>
             </div>
@@ -264,8 +289,6 @@ export function MovePanel({
       )}
     </>
   );
-
-  const hasCandidates = (joinCandidates ?? []).length > 0;
 
   /** "JOIN A LINE" — the candidate list + "start a new line", unchanged content (UIL-068 only
    *  changes WHERE this renders relative to `manualBody`, never gates it behind a click). */
