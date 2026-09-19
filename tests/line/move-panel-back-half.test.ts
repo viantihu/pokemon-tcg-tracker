@@ -162,6 +162,25 @@ describe("UIL-072 · panels with no line picker at all (plan spotlight, Collecti
   });
 });
 
+describe("UIL-070 part 1 · once the Plan spotlight HAS a picker, the reason flips by the same signal", () => {
+  it("with the picker on and nothing to join (the Plan's common case), names the picker below — not the Lines page", () => {
+    // Exactly what PlanScreen.openMove now passes: candidates present (possibly empty), the cascade's
+    // own front-half suggestion as `initial`. No per-screen branch exists in MovePanel — `allowLineJoin`
+    // is the one hasPicker signal — so this pins that the Plan lands on the right side of it.
+    const html = render({
+      allowLineJoin: true,
+      joinCandidates: [],
+      initial: { kind: "shelf", binderId: "b1", half: "front", band: "red" },
+    });
+    expect(isDisabled(chipTag(html, "BACK HALF"))).toBe(true);
+    expect(isDisabled(chipTag(html, "FRONT HALF"))).toBe(false);
+    expect(html).toContain(`${HER_WORDS} Pick a line below to enable.`);
+    expect(html).not.toContain("Lines page");
+    // The picker really is there to pick from.
+    expect(html).toContain("+ Start a new line");
+  });
+});
+
 describe("UIL-072 · the chip derives from the invariant it mirrors, it does not restate it", () => {
   it("isMoveDestinationComplete refuses a back-half shelf without a line and accepts one with", () => {
     // This is the exact probe MovePanel makes. If lib/line ever relaxes UIL-056 so a bare back-half

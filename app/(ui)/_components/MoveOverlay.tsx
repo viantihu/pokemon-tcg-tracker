@@ -13,6 +13,7 @@ import type {
   MoveDestination,
   MoveOptions,
 } from "@/lib/line/types";
+import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "./CardFace";
 import { MovePanel } from "./MovePanel";
 
@@ -20,6 +21,8 @@ export interface MoveTargetCard {
   copyId: string;
   name: string;
   localId: string | null;
+  /** Printed set total, for the full "099/182" form (UIL-077). Absent or null → the bare number. */
+  setCardCountOfficial?: number | null;
   imageUrl: string | null;
   bandKey: string;
   currentLabel: string;
@@ -89,9 +92,12 @@ export function MoveOverlay({
               <div className="nm" style={{ fontSize: 15 }}>
                 {card.name}
               </div>
-              {card.localId ? (
+              {/* The full printed number (UIL-077), the last site that still showed the bare one. */}
+              {formatCollectorNumber(card.localId, card.setCardCountOfficial) ? (
                 <div style={{ marginTop: 6 }}>
-                  <span className="no">{card.localId}</span>
+                  <span className="no">
+                    {formatCollectorNumber(card.localId, card.setCardCountOfficial)}
+                  </span>
                 </div>
               ) : null}
               <div

@@ -9,5 +9,6 @@ export * from "./types";
 export * from "./view";
 export * from "./decisions";
 export * from "./move";
+export * from "./join-options";
 export * from "./load";
 export * from "./write";

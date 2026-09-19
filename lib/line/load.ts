@@ -14,11 +14,9 @@
 
 import {
   band as bandOf,
-  buildChain,
   rankAlternates,
   type Band,
   type CatalogCard,
-  type IncomingCard,
   type TypeColorMap,
 } from "@/lib/engine";
 import { toCatalogCard } from "@/lib/plan/adapt";
@@ -42,11 +40,10 @@ import {
   type DerivedDecision,
   type StageFacts,
 } from "./decisions";
+import { buildLineJoinIndex, joinOptionsFor } from "./join-options";
 import { buildLineView, type SlotInput } from "./view";
 import type {
   CardIdentity,
-  ExistingLineBlock,
-  LineJoinCandidate,
   LineScreenData,
   LineView,
   MoveOptions,
@@ -87,16 +84,6 @@ const EMPTY_FACTS: StageFacts = {
   cheapestSameBand: null,
   chosenLocalId: null,
 };
-
-/** Closest-to-complete first (UIL-064 part 1) — finishing a nearly-done line is the more satisfying
- *  default, and in practice a card's species usually matches at most one candidate anyway. */
-function sortJoinCandidates(list: LineJoinCandidate[]): LineJoinCandidate[] {
-  return [...list].sort((a, b) => {
-    const ratioA = a.totalCount > 0 ? a.filledCount / a.totalCount : 0;
-    const ratioB = b.totalCount > 0 ? b.filledCount / b.totalCount : 0;
-    return ratioB - ratioA || a.speciesLabel.localeCompare(b.speciesLabel);
-  });
-}
 
 /** Everything the loader assembles: view lines + the decisions (cards + server-side resolutions). */
 export interface ScreenModel {
@@ -245,17 +232,19 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
 
   const lineViews: LineView[] = [];
   const decisionInputs: DecisionLineInput[] = [];
-  // Every OPEN (not filled) slot across every line, by the dexId it wants — the join candidates a
-  // line-less shelved card is offered (UIL-056). Built alongside each line's own chain rebuild below
-  // so the species walk happens once per line rather than once per candidate card.
-  const openSlotsByDexId = new Map<number, LineJoinCandidate[]>();
-  // Every line, by (its chain root, its band) — independent of whether ITS slot for any particular
-  // dexId is open. Lets `existingLineByBand` explain "a line exists here but your stage is filled"
-  // (UIL-056 note 3) rather than a card just seeing an empty candidate list with no reason given.
-  const lineByRootBand = new Map<
-    string,
-    { speciesLabel: string; filledCount: number; totalCount: number }
-  >();
+  // Every open slot by the dexId it wants, every line by (root, band), and each line's rebuilt chain
+  // — one walk per line. Shared with the Haul Plan's line picker (UIL-070 part 1) via
+  // ./join-options.ts, so both screens offer a card the same lines.
+  const joinIndex = buildLineJoinIndex(
+    lineRows.map((l) => ({
+      id: l.id,
+      rootDexId: l.root_dex_id,
+      colorBand: l.color_band,
+      binderId: l.binder_id,
+    })),
+    slotsByLine,
+    catalog,
+  );
 
   for (const line of lineRows) {
     const bandKey = line.color_band;
@@ -263,38 +252,8 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
       .slice()
       .sort((a, b) => a.stage_index - b.stage_index);
 
-    // Rebuild the chain from the root to name every slot (incl. blocks with no stored species).
-    const seed = catalog.find((c) => !c.isDigitalOnly && c.dexId.includes(line.root_dex_id));
-    const chain = seed
-      ? buildChain({ id: "r", card: seed, variant: "normal" } as IncomingCard, catalog)
-      : [];
-
-    const rootName = chain[0]?.name;
-    const lineSpeciesLabel = rootName ? `${rootName.toUpperCase()} LINE` : "EVOLUTION LINE";
-    const filledCount = slots.filter((s) => s.state === "filled").length;
-    const totalCount = slots.length;
-    lineByRootBand.set(`${line.root_dex_id}:${bandKey}`, {
-      speciesLabel: lineSpeciesLabel,
-      filledCount,
-      totalCount,
-    });
-    for (const s of slots) {
-      if (s.state === "filled") continue;
-      const dexId = chain[s.stage_index]?.dexId;
-      if (dexId === undefined) continue;
-      const list = openSlotsByDexId.get(dexId) ?? [];
-      list.push({
-        lineId: line.id,
-        slotId: s.id,
-        binderId: line.binder_id,
-        bandKey: line.color_band,
-        speciesLabel: lineSpeciesLabel,
-        stage: s.stage,
-        filledCount,
-        totalCount,
-      });
-      openSlotsByDexId.set(dexId, list);
-    }
+    // The chain from the root names every slot (incl. blocks with no stored species).
+    const chain = joinIndex.chains.get(line.id) ?? [];
 
     const resolved: ResolvedSlot[] = slots.map((s) => {
       const node = chain[s.stage_index];
@@ -438,26 +397,14 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
   // Shelved, line-less cards with a way OFF the front half and INTO a line (UIL-056): the strand her
   // UAT report named. `dexId.length > 0` excludes Trainer/Energy — there is no line concept for them.
   const unlinedCards: UnlinedCard[] = [];
+  const bandKeys = bandRows.map((b) => b.band);
   for (const c of copyRows) {
     if (c.role !== "shelved" || c.line_slot_id) continue;
     const cc = catalogById.get(c.catalog_card_id);
-    const dexId = cc?.dexId[0];
-    if (!cc || dexId === undefined) continue;
-    const bandKey = c.color_band ?? bandOf(cc, typeColorMap);
-    const joinCandidates = sortJoinCandidates(openSlotsByDexId.get(dexId) ?? []);
-
-    // THIS card's own chain root (may differ from its own dexId, e.g. a Stage1 whose Basic exists in
-    // the catalog) — the same key `applyMove`'s "does a line already exist" check uses, so a band
-    // that would REFUSE a new line explains why here rather than showing an empty candidate list.
-    const cardChain = buildChain({ id: "u", card: cc, variant: "normal" } as IncomingCard, catalog);
-    const cardRootDexId = cardChain[0]?.dexId ?? dexId;
-    const existingLineByBand: Record<string, ExistingLineBlock> = {};
-    const candidateBands = new Set(joinCandidates.map((cand) => cand.bandKey));
-    for (const b of bandRows) {
-      if (candidateBands.has(b.band)) continue; // already has an open slot
-      const existing = lineByRootBand.get(`${cardRootDexId}:${b.band}`);
-      if (existing) existingLineByBand[b.band] = existing;
-    }
+    if (!cc) continue;
+    const join = joinOptionsFor(cc, joinIndex, bandKeys, typeColorMap, catalog);
+    if (!join) continue; // Trainer/Energy: no species, no line concept
+    const bandKey = c.color_band ?? join.naturalBandKey;
 
     unlinedCards.push({
       copyId: c.id,
@@ -465,11 +412,11 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
       currentLabel: c.binder_id
         ? `${binderNameById.get(c.binder_id) ?? "Binder"} · ${c.binder_half === "back" ? "Back" : "Front"} · ${bandDisplayByKey.get(bandKey) ?? bandKey}`
         : "Unshelved",
-      dexId,
+      dexId: join.dexId,
       binderHalf: (c.binder_half as "front" | "back" | null) ?? null,
-      naturalBandKey: bandOf(cc, typeColorMap),
-      joinCandidates,
-      existingLineByBand,
+      naturalBandKey: join.naturalBandKey,
+      joinCandidates: join.joinCandidates,
+      existingLineByBand: join.existingLineByBand,
     });
   }
 
