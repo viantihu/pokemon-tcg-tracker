@@ -41,17 +41,24 @@ export interface MoveTargetCard {
 export function MoveOverlay({
   card,
   options,
-  allowLineJoin = false,
+  allowLineJoin,
   onConfirm,
   onClose,
 }: {
   card: MoveTargetCard;
   options: MoveOptions;
-  /** UIL-056: only the Line screen turns this on — see MovePanel's docstring. */
+  /**
+   * The line-first flow (UIL-056; see MovePanel's docstring). When omitted it FOLLOWS THE CARD:
+   * `joinCandidates` present (even empty) turns it on, absent leaves the plain move. Derived here
+   * rather than at each call site (UIL-070 part 1 follow-up): QA showed the Plan's call site could
+   * hard-code `false` with every test still green, because the picker's wiring lived in a prop the
+   * tests could not see. Passing the prop explicitly still overrides the default.
+   */
   allowLineJoin?: boolean;
   onConfirm: (dest: MoveDestination) => void;
   onClose: () => void;
 }) {
+  const lineJoinOn = allowLineJoin ?? Boolean(card.joinCandidates);
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -116,7 +123,7 @@ export function MoveOverlay({
           <MovePanel
             options={options}
             initial={card.initial}
-            allowLineJoin={allowLineJoin}
+            allowLineJoin={lineJoinOn}
             joinCandidates={card.joinCandidates}
             existingLineByBand={card.existingLineByBand}
             naturalBandKey={card.naturalBandKey}
