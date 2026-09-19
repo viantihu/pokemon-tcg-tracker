@@ -181,18 +181,22 @@ class PgQuery {
   /**
    * `upsert(rows, { onConflict })` — PostgREST's `INSERT … ON CONFLICT (col) DO UPDATE SET every other
    * supplied column = excluded.<col>`, the shape `catalogCardRepo.upsertMany` sends for the mirror
-   * (UIL-029: tests/catalog/mirror.test.ts moved off a hand-written double onto this). Narrow: exactly
-   * one conflict column, `ignoreDuplicates` not modelled. Postgres itself supplies the behaviour the old
-   * double had to hand-code — "cannot affect row a second time" when a batch repeats a key.
+   * (UIL-029: tests/catalog/mirror.test.ts moved off a hand-written double onto this). Without
+   * `onConflict` the conflict target is the table's PRIMARY KEY, read from the catalog at run time —
+   * composite keys included — which is what supabase-js/PostgREST do and the shape `setAliasRepo.upsert`
+   * sends (`set_alias` keys on (locale, dex_code)); a table with no primary key is refused rather than
+   * guessed. Narrow: at most one explicit conflict column, `ignoreDuplicates` not modelled. Postgres
+   * itself supplies the behaviour the old double had to hand-code — "cannot affect row a second time"
+   * when a batch repeats a key.
    */
-  upsert(rows: Row | Row[], opts: { onConflict: string; ignoreDuplicates?: boolean }): this {
-    if (!opts?.onConflict || opts.onConflict.includes(",") || opts.ignoreDuplicates) {
+  upsert(rows: Row | Row[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }): this {
+    if (opts?.onConflict?.includes(",") || opts?.ignoreDuplicates) {
       throw new Error(
-        "pglite-client: upsert() supports exactly one onConflict column, no ignoreDuplicates",
+        "pglite-client: upsert() supports one onConflict column or none (the primary key), no ignoreDuplicates",
       );
     }
     this.mode = "upsert";
-    this.conflictCol = opts.onConflict;
+    this.conflictCol = opts?.onConflict ?? null;
     this.writeValues = rows;
     return this;
   }
@@ -371,6 +375,24 @@ class PgQuery {
     }
   }
 
+  /** The table's primary-key columns in index order: `upsert()`'s conflict target when none is given. */
+  private async primaryKey(): Promise<string[]> {
+    const res = await this.db.query<{ attname: string }>(
+      `select a.attname
+         from pg_index i
+         join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey)
+        where i.indrelid = $1::regclass and i.indisprimary
+        order by array_position(i.indkey::int2[], a.attnum)`,
+      [quoteIdent(this.table)],
+    );
+    if (res.rows.length === 0) {
+      throw new Error(
+        `pglite-client: upsert() on ${this.table} needs onConflict — the table has no primary key`,
+      );
+    }
+    return res.rows.map((r) => r.attname);
+  }
+
   private async runInsert(): Promise<Row[]> {
     const rows = Array.isArray(this.writeValues) ? this.writeValues : [this.writeValues!];
     if (rows.length === 0) return [];
@@ -379,10 +401,13 @@ class PgQuery {
     const valueRows = rows.map(
       (row) => `(${cols.map((c) => (params.push(row[c]), `$${params.length}`)).join(", ")})`,
     );
+    // PostgREST's upsert: `on conflict (<target>) do update set` EVERY supplied column to its excluded
+    // value, the key columns included (a no-op for them, and it keeps a key-only payload valid SQL).
     const conflict =
-      this.mode === "upsert" && this.conflictCol
-        ? ` on conflict (${quoteIdent(this.conflictCol)}) do update set ${cols
-            .filter((c) => c !== this.conflictCol)
+      this.mode === "upsert"
+        ? ` on conflict (${(this.conflictCol ? [this.conflictCol] : await this.primaryKey())
+            .map(quoteIdent)
+            .join(", ")}) do update set ${cols
             .map((c) => `${quoteIdent(c)} = excluded.${quoteIdent(c)}`)
             .join(", ")}`
         : "";
