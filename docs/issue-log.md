@@ -1819,7 +1819,18 @@ first looks — a reason to do it deliberately with tests, not a reason to defer
 ## UIL-021 — A wall-clock test assertion will fail unrelated PRs at random
 
 - **Reported:** 2026-09-13 (not from Karvi — found while building UIL-008)
-- **Status:** Open
+- **Status:** **Fixed** — both halves, 2026-09-20. The wall-clock assertion: PR
+  [#254](https://github.com/viantihu/pokemon-tcg-tracker/pull/254) (`91b3a2f`) deletes
+  `expect(elapsedMs).toBeLessThan(10000)` from `tests/catalog/artwork.test.ts`; the two naive-vs-banded
+  output-equivalence tests are the guard PR #25 actually needed and stay, with a comment saying why there
+  is no timing bound (the outputs are identical by design, so only a clock could distinguish them, and a
+  clock on a shared runner measures the runner). The suite-level half, the same class one level up: PR
+  [#256](https://github.com/viantihu/pokemon-tcg-tracker/pull/256) (`d40159b`) sets vitest's
+  `testTimeout` and `hookTimeout` to 20 s as hang protection, because PGlite-backed files (a fresh WASM
+  Postgres plus every migration each) crossed the 5 s default at random under parallel load on two of
+  three full runs, and `promote-collection`'s setup hook crossed the 10 s hook default the same way;
+  two full runs 972 green afterwards, and #254's own first CI run hit exactly that flake before #256
+  landed. Test infrastructure only; nothing for Karvi to test; closes on evidence.
 - **Priority:** Low, with a counter-argument recorded
 - **Area:** Catalog (test infrastructure)
 - **Env:** n/a — the defect is in the repo, not a running environment
@@ -2338,7 +2349,16 @@ anywhere in `app/` or `lib/`.
 
 - **Reported:** 2026-09-13 (not from Karvi — found by QA reviewing #70's sync batching, corroborated
   independently)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#255](https://github.com/viantihu/pokemon-tcg-tracker/pull/255) MERGED to
+  `develop` 2026-09-20 (squash `d1d971f`), QA-gated on the merged tree (967 tests; guard removed or made a
+  no-op → the two throwing cases resolve silently with 1,000 rows), confirmed **deployed** to Testing
+  (Deploy, migrate, smoke, acceptance and Vercel green on `d40159b`). `findBySetLocalMany` now selects
+  each chunk with `{ count: "exact" }` and runs `assertReadComplete` (the UIL-031 guard), so a chunk cut by
+  PostgREST's `max-rows` throws by name with the remedy ("lower chunkSize, never raise it; the sync must not
+  mark these ids fetched") instead of truncating silently; default chunk stays 200; the comment names both
+  constraints (URL length and the unpaged per-chunk cap) and the failure mode. The count is computed inside
+  the same statement over the index-served filtered set, not a second scan. Sync semantics untouched.
+  Nothing for Karvi to test; closes on evidence.
 - **Priority:** Low, held behind all open Highs and Mediums per Karvi's queue rule
 - **Area:** Sync, Catalog
 - **Env:** n/a — latent in the repo, not currently reachable
@@ -2388,13 +2408,24 @@ owner and no tracking item doesn't get deprioritized, it evaporates.
 
 - **Reported:** 2026-09-13 (not from Karvi — found by the UIL-010/015 dev session, in its own test file,
   reported against itself)
-- **Status:** Open — **the fifth harness-fidelity instance is closed** by PR
-  [#218](https://github.com/viantihu/pokemon-tcg-tracker/pull/218) MERGED to `develop` 2026-09-19 (squash
-  `2e0a98c`), deployed (Deploy green on that SHA): `tests/support/pglite-rpc.ts` and
-  `tests/backfill/binder-section.test.ts` now read `supabase/migrations/` from disk instead of a hand-kept
-  list, and `tests/support/harness-applies-every-migration.test.ts` fails if any migration file on disk
-  was not applied (revert-checked: skipping 0014 fails 7 tests). No hand-kept migration list remains in
-  the test tree. The DbClient contract suite this entry asks for is still open, so the entry stays Open.
+- **Status:** **Fixed** — every harness-fidelity fault this entry recorded is closed, and the harness now
+  has tests of its own. Fifth instance (hand-kept migration lists): PR
+  [#218](https://github.com/viantihu/pokemon-tcg-tracker/pull/218) (`2e0a98c`), both harnesses read
+  `supabase/migrations/` from disk and `harness-applies-every-migration.test.ts` fails if a migration on
+  disk was not applied. The last hand-written `DbClient` double, `tests/catalog/mirror.test.ts`, moved onto
+  the PGlite shim: PR [#244](https://github.com/viantihu/pokemon-tcg-tracker/pull/244) (`aa1fe23`). The
+  contract suite the entry asked for: PR [#245](https://github.com/viantihu/pokemon-tcg-tracker/pull/245)
+  (`e1e171d`), `tests/support/pglite-client.contract.test.ts`, 19 cases against real Postgres and 1,200
+  rows, pinning count-under-range as the total, order direction, `head: true`, `maybeSingle` on 0/1/2
+  rows, numeric and timestamptz shapes, and unmodelled shapes throwing; nine mutations all killed. Three
+  more fidelity gaps found and fixed while writing it, each pinned: timestamptz returned as a `Date`
+  where PostgREST gives an ISO string (now an ISO string); `maybeSingle` on two rows returned the first
+  silently where PostgREST errors (now `PGRST116` in `error`); Postgres errors rejected raw where
+  supabase-js returns `{ data: null, error }` (now in `error`, so the `if (error) throw error` branches in
+  `lib/repo` are reachable from PGlite for the first time). `upsert()` without `onConflict` now conflicts
+  on the table's primary key read from `pg_index`, so `setAliasRepo.upsert` runs end to end on PGlite: PR
+  [#253](https://github.com/viantihu/pokemon-tcg-tracker/pull/253) (`ffb7dfb`). Test-only throughout;
+  nothing for Karvi to test; closes on evidence. The next fidelity gap gets a new entry, not this one.
 - **Priority:** Medium (Senior BA's read) — the one Medium with a live argument for jumping the queue,
   since it protects every fix currently being written; not reassigned ahead of the four open Highs unless
   Karvi says otherwise
@@ -5672,18 +5703,23 @@ but needs something to show her first.
 
 - **Reported:** 2026-09-17 (Karvi, relayed by Junior BA - 2 — a generalization of UIL-039, not a
   separate defect). In her words: "The search throughout the app should be uniform."
-- **Status:** Open — **step 1 of the incremental plan shipped and deployed; five of six call sites still
-  use the text list.** PR [#212](https://github.com/viantihu/pokemon-tcg-tracker/pull/212) MERGED to
-  `develop` 2026-09-19 (squash `5e03a80`), QA-gated on the merged tree (805 tests, 14 new; the debounce
-  copy pinned byte-identical to `CardLookup`'s), confirmed **deployed** (Deploy and Vercel green on
-  `5e03a80`): a new shared `CardResultsGrid` keeps `CardLookup`'s exact `{ search, onPick, placeholder }`
-  contract — same debounce, 2-character minimum, loading / empty / failure states with the #168 "could not
-  search" honesty — and renders results as a grid of full `CardFace` tiles with name, set and full collector
-  number, image-first per her visual-search principle. Deliberately NOT a reuse of the builder page's
-  `CardSearchGrid` (coupled to bulk-add, multi-select and pagination none of the inline sites need). First
-  and only consumer: Collections' "Log a card" modal, a one-tag swap. Remaining, one PR each by their
-  owners: Lookup, Backfill (two sites), Sync, Haul Plan intake. Closes when all six use the grid. Awaiting
-  Karvi's look at Log a card when UAT resumes: search should show tiles, not a list.
+- **Status:** **Fixed** — all nine call sites use the image-first grid and the text-list component is gone.
+  Step 1, Collections' Log-a-card: PR [#212](https://github.com/viantihu/pokemon-tcg-tracker/pull/212)
+  (squash `5e03a80`). The rest landed 2026-09-20, one PR per screen, each a one-tag swap because
+  `CardResultsGrid` keeps the old component's exact `{ search, onPick, placeholder }` contract: Haul Plan
+  intake [#248](https://github.com/viantihu/pokemon-tcg-tracker/pull/248) (`4de827c`); Backfill, all FIVE
+  sites on that screen (the footprint was undercounted at two)
+  [#249](https://github.com/viantihu/pokemon-tcg-tracker/pull/249) (`7155c8c`); Sync's unresolved-entry
+  pin [#250](https://github.com/viantihu/pokemon-tcg-tracker/pull/250) (`329508d`); the Lookup tab
+  [#251](https://github.com/viantihu/pokemon-tcg-tracker/pull/251) (`a4cf8e3`); then `CardLookup.tsx`
+  deleted with zero references left in `lib/`, `app/` or `tests/`
+  [#257](https://github.com/viantihu/pokemon-tcg-tracker/pull/257) (`4a0aab8`; typecheck and build clean
+  with the module gone, 972 tests). Each swap QA-gated with a source-pinning test (at rest both components
+  rendered byte-identical markup, so the tests assert the grid is the component mounted, with exactly the
+  contract props) and revert-checked by swapping the tag back. All confirmed **deployed** to Testing
+  (Deploy, migrate, smoke, acceptance and Vercel green on `d40159b`). Step for Karvi when UAT resumes:
+  search for a card anywhere in the app (Plan intake, Lookup, any Backfill picker, Sync pin, Log a card);
+  results should be image tiles, never a text list.
 - **Priority:** High (Karvi's own ruling, 2026-09-18, via Junior BA - 2)
 - **Area:** Plan, Lookup, Backfill, Sync, Collections
 - **Env:** Testing
