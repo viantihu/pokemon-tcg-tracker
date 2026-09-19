@@ -5,7 +5,7 @@
  * in its two surfaces: the preview / apply / undo flow and the unresolved queue. Thin client — all
  * parse / reconcile / apply / undo logic lives server-side in `@/lib/sync` (called via ./actions);
  * this component holds interaction state and renders the returned view-models. Reuses the shared
- * primitives (CardFace, BandChip, CardLookup) and the app's 16-bit olive/cream classes.
+ * primitives (CardFace, BandChip, CardResultsGrid) and the app's 16-bit olive/cream classes.
  */
 
 import Link from "next/link";
@@ -14,7 +14,7 @@ import type { SyncOverrides, SyncPlanBundle, SyncPreview } from "@/lib/sync";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
 import { BandChip } from "../_components/BandChip";
-import { CardLookup } from "../_components/CardLookup";
+import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { ProgressBar } from "../_components/ProgressBar";
 import {
   applySync,
@@ -803,7 +803,7 @@ function MatchOverlay({
             Pin this to the real catalog card. Matching a card whose set is unknown teaches the app
             that set, so the rest of it drains on the next retry.
           </p>
-          <CardLookup
+          <CardResultsGrid
             search={searchCatalog}
             onPick={(card) => onPicked(card.tcgdexId)}
             placeholder="Find the real card…"
