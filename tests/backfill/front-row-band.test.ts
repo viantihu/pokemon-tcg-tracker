@@ -74,9 +74,18 @@ describe("UIL-080 · the front-half row uses the engine's band(), not a local co
   });
 
   it("an unmapped type falls back to the map's own white key, not a literal", () => {
-    // The map's white lives under a non-literal key; a hard-coded "white" fallback would miss it.
-    const map = { Fire: "red", Colorless: "snow", Trainer: "purple", snow: "snow" };
+    // Every white-absorbed name resolves to a real band that is NOT literally "white", so whichever of
+    // them whiteKey() consults first, the canonical fallback is Olive — and a hard-coded "white" is not.
+    const map = {
+      Fire: "red",
+      Colorless: "olive",
+      Metal: "olive",
+      Trainer: "olive",
+      Supporter: "olive",
+      Item: "olive",
+    };
     const html = render(card({ name: "Mewtwo", types: ["Psychic"], category: "Pokemon" }), map);
-    expect(html).toContain('title="Snow"');
+    expect(html).toContain('title="Olive"');
+    expect(html).not.toContain('title="White"');
   });
 });

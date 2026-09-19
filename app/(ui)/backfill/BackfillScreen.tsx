@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState } from "react";
-import type { LineStatus, SlotState, Variant } from "@/lib/engine";
+import { band, type LineStatus, type SlotState, type Variant } from "@/lib/engine";
 import type { BackLineStageInfo, BackLineStageInput, ResolvedBackLine } from "@/lib/backfill";
 import { BandChip } from "../_components/BandChip";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
@@ -40,12 +40,6 @@ function newId(): string {
   return typeof crypto !== "undefined" && crypto.randomUUID
     ? crypto.randomUUID()
     : `bf-${Math.random().toString(36).slice(2)}`;
-}
-
-/** DB-key band for a card from its type — the auto-computed band the collector never types. */
-function bandKeyForCard(types: string[], map: Record<string, string>): string {
-  const t = types.length > 0 ? types[0] : "Colorless";
-  return map[t] ?? "white";
 }
 
 type Banner = { kind: "ok" | "err"; text: string } | null;
@@ -196,7 +190,12 @@ export function FrontRowItem({
   onRemove: () => void;
   onVariant: (v: Variant) => void;
 }) {
-  const key = bandKeyForCard(row.card.types, typeColorMap);
+  // The engine's canonical derivation (UIL-080), not a local copy: effectiveType first — a Trainer
+  // resolves to its trainerType or "Trainer", an Energy to "Colorless" — then the map, falling back to
+  // the map's OWN white key rather than a literal (UIL-012). The local helper this replaces read
+  // types[0] or "Colorless" straight into the map, so a Trainer could get a different band from the one
+  // the haul cascade would give the same card.
+  const key = band(row.card, typeColorMap);
   return (
     <span className="c" style={{ flexDirection: "column", gap: 6 }}>
       <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
