@@ -839,7 +839,19 @@ is now complete (23,548 cards / 214 sets), so it now advises a sync run that has
 ## UIL-011 — Remove internal catalog-mirror language from the UI
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Fixed** — PR [#259](https://github.com/viantihu/pokemon-tcg-tracker/pull/259) MERGED to
+  `develop` 2026-09-20 (squash `e67d9ab`), QA-gated on the merged tree (981 tests; the five screens
+  reverted to the old wording fails all 9 cases of the new `tests/ui/no-plumbing-language.test.ts`, one
+  string restored fails 3), confirmed **deployed** to Testing (Deploy, migrate, smoke, acceptance and
+  Vercel green on `e67d9ab`). Six rendered strings rewritten, in Karvi's reviewed wording: the search grid
+  says "Searching…" and "No card found — check the number or try the card name."; the Lookup empty answer
+  says the same; the Backfill banner says "Could not find that species' evolution line."; the Sync note
+  says the waiting rows "resolve automatically once the card is in the catalog"; the Collections footer
+  says "CSV EXPORTS BACK INTO DEX FOR SCANNING". Code comments and module docs keep "mirror" as the
+  precise term; the three "Waiting on catalog" labels stay under this entry's own rule, and her
+  2026-09-14 broadening ("database", "entry") is a wider pass awaiting her word. Step for Karvi when UAT
+  resumes: search for a number that does not exist, open Lookup with no match, and read Sync's waiting
+  note; none should mention a mirror or a sync run.
 - **Priority:** Low
 - **Area:** Lookup, Plan, Backfill, Collections, Sync
 - **Env:** Testing
@@ -2098,7 +2110,16 @@ decision. Both sessions flagged this; Karvi has been told at a high level and ha
 ## UIL-025 — Finite/Open mode toggle renders with a large dead area inside its own border
 
 - **Reported:** 2026-09-13
-- **Status:** Open
+- **Status:** **Fixed** — PR [#260](https://github.com/viantihu/pokemon-tcg-tracker/pull/260) MERGED to
+  `develop` 2026-09-20 (squash `0de7d66`), confirmed **deployed** to Testing (all gates green on
+  `9ae0587`). One declaration, `width: fit-content` on `.modetoggle` in `app/globals.css`, chosen over
+  `align-self` because the class also sits in row-flex containers where `align-self` would not hug the
+  width. Evidence is measurement, not a rule-text test: the static harness on compiled CSS, before and
+  after, at 375 and 1440, by both the dev and QA independently: the editor's Finite/Open border went
+  from 355 px wide (229.8 px of dead border at 375; 1,286.8 px at 1440) to 125.2 px, dead space 0; the
+  builder's "Own it?" toggle likewise to 186.3 px, dead space 0; the header toggle and the Lines ORDER
+  toggle unchanged; no horizontal overflow. Step for Karvi when UAT resumes: open a collection's editor;
+  the Finite/Open border should hug its two buttons.
 - **Priority:** Low (Karvi's call)
 - **Area:** Collections
 - **Env:** Testing
@@ -5882,7 +5903,20 @@ consistently with).
 - **Reported:** 2026-09-17 (not from Karvi — a recurring gap independently re-flagged by multiple dev
   sessions across four separate PRs; relayed by the Senior BA as worth tracking once rather than
   rediscovering repeatedly)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#261](https://github.com/viantihu/pokemon-tcg-tracker/pull/261) MERGED to
+  `develop` 2026-09-20 (squash `9ae0587`), QA-gated (clean frozen-lockfile install, 994 tests, build).
+  The harness now exists and is opt-in per file, so nothing global changed: `jsdom`, `@testing-library/react`,
+  `@testing-library/dom` and `@testing-library/user-event` as devDependencies; a file opts in with the
+  `// @vitest-environment jsdom` pragma and the `*.dom.test.ts` name; `vitest.config.mts` untouched, the
+  other 129 files stay on node. Proven on two click paths that were pinned only by reading or by pure
+  extraction: `CardLightbox` (image, caption, backdrop and hint clicks each close once; Escape closes;
+  other keys do not; the listener is gone after unmount) and `MovePanel` through the real component
+  (candidate click presses the chip, flips the reason, enables BACK HALF, Confirm hands the host the
+  lineJoin; new-line path; binder change clears it). The point, in QA's mutation table: swapping the
+  lightbox's dismiss for the careful guard fails 3 of 7 DOM cases while every pure and static test stays
+  green; dropping `setLineJoin` from the chip fails 2 of 6 the same way. Suite time +0.65 s. QA's standing
+  rule from here: an unpinned interaction claim is a gap to close with a `*.dom.test.ts` case. Nothing for
+  Karvi to test; closes on evidence.
 - **Priority:** Low (Senior BA's read) — nothing is known broken by this gap, and the fix touches
   shared config that would conflict with every open PR during the current freeze
 - **Area:** all (test infrastructure)
