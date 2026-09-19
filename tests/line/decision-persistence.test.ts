@@ -14,7 +14,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
-import { applyDecision, loadLineScreen } from "@/lib/line";
+import {
+  applyDecision,
+  applyMove,
+  loadLineScreen,
+  loadMoveOptions,
+  moveNameLookups,
+  releaseSlotOps,
+} from "@/lib/line";
 import { asOwner, asSuperuser, freshRpcDb, OWNER, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -123,6 +130,129 @@ describe("UIL-078 · collection-vs-line stays resolved", () => {
     await applyDecision(client, OWNER, `${LINE}:collection-vs-line:0`, "collection-wins");
 
     expect(await decisionIds()).not.toContain(`${LINE}:collection-vs-line:0`);
+    // And keeps staying resolved: the same collection, still claiming, is the same question.
+    expect(await decisionIds()).not.toContain(`${LINE}:collection-vs-line:0`);
+  });
+
+  /**
+   * QA finding (3) on #188: the suppression compared the KIND only. "Collection wins" is an answer
+   * about a PARTICULAR collection's claim; a different collection claiming the same card afterwards is
+   * a new question, and kind alone silenced it. The marker must carry the claiming collection and the
+   * loader must compare it.
+   */
+  it("a DIFFERENT collection claiming the same card is a new question — asked again", async () => {
+    const client = pgliteClient(db);
+    await asOwner(db);
+    await applyDecision(client, OWNER, `${LINE}:collection-vs-line:0`, "collection-wins");
+    expect(await decisionIds()).not.toContain(`${LINE}:collection-vs-line:0`);
+
+    await asSuperuser(db);
+    await db.exec(`
+      insert into collection (owner_id, name, target_catalog_card_ids)
+        values ('${OWNER}', 'Water Collection', array['collectamon-basic']);
+    `);
+    await asOwner(db);
+
+    expect(await decisionIds()).toContain(`${LINE}:collection-vs-line:0`);
+  });
+
+  it("the resolved collection dropping its claim while another holds one asks again too", async () => {
+    const client = pgliteClient(db);
+    await asOwner(db);
+    await applyDecision(client, OWNER, `${LINE}:collection-vs-line:0`, "collection-wins");
+
+    await asSuperuser(db);
+    await db.exec(`
+      update collection set target_catalog_card_ids = '{}' where name = 'Fire Collection';
+      insert into collection (owner_id, name, target_catalog_card_ids)
+        values ('${OWNER}', 'Water Collection', array['collectamon-basic']);
+    `);
+    await asOwner(db);
+
+    expect(await decisionIds()).toContain(`${LINE}:collection-vs-line:0`);
+  });
+});
+
+/**
+ * QA finding (4) on #188: nothing cleared the marker when a slot left `filled`. A slot she had
+ * resolved a cap on, later filled by a card and then vacated again, is a genuinely new situation — and
+ * with a stale marker it would never ask again, which the brief named as worse than the original bug.
+ * `releaseSlotOps` is the ONE release path (UIL-062: Line move, Haul Plan pull, Haul Plan override all
+ * emit it), so clearing there covers every caller.
+ */
+describe("UIL-078 · a released slot forgets its resolution", () => {
+  const LINE = "10000000-0000-0000-0000-00000000fc01";
+  const SLOT = "50000000-0000-0000-0000-00000000fc01";
+  const COPY = "c0000000-0000-0000-0000-00000000fc01";
+  const DEX = 9405;
+
+  beforeEach(async () => {
+    await seedCatalog([
+      { id: "refillmon-ex-a", name: "Refillmon ex", dexId: DEX, cardClass: "specialty" },
+      { id: "refillmon-ex-b", name: "Refillmon ex", dexId: DEX, cardClass: "specialty" },
+    ]);
+    await db.exec(`
+      insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+        values ('${LINE}', '${OWNER}', ${DEX}, 'red', '${B1}', 'back', 'open');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, target_catalog_card_id)
+        values ('${SLOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'placeholder', 'refillmon-ex-a');
+    `);
+  });
+
+  it("releaseSlotOps clears every marker column along with the copy", () => {
+    const [release] = releaseSlotOps("slot-x", null);
+    expect(release).toEqual({
+      op: "update_slot",
+      id: "slot-x",
+      patch: {
+        state: "placeholder",
+        copy_id: null,
+        resolved_decision_kind: null,
+        resolved_decision_choice: null,
+        resolved_decision_collection_id: null,
+      },
+    });
+  });
+
+  it("confirmed cap, then filled, then vacated by a move: the cap question is asked afresh", async () => {
+    const client = pgliteClient(db);
+    await asOwner(db);
+    await applyDecision(client, OWNER, `${LINE}:ex-only-cap:0`, "confirm-cap");
+    expect(await decisionIds()).not.toContain(`${LINE}:ex-only-cap:0`);
+
+    // A card lands in the slot (as the Haul Plan or a line join would leave it)…
+    await asSuperuser(db);
+    await db.exec(`
+      insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band, line_slot_id)
+        values ('${COPY}', '${OWNER}', 'refillmon-ex-a', 'shelved', '${B1}', 'back', 'red', '${SLOT}');
+      update line_slot set state = 'filled', copy_id = '${COPY}' where id = '${SLOT}';
+    `);
+    await asOwner(db);
+    expect(await decisionIds()).not.toContain(`${LINE}:ex-only-cap:0`); // filled: nothing to ask
+
+    // …and leaves again through the real move path, which releases the slot.
+    await applyMove(
+      client,
+      { copyId: COPY, destination: { kind: "bulk" } },
+      moveNameLookups(await loadMoveOptions(client)),
+    );
+
+    await asSuperuser(db);
+    const slot = await db.query<{
+      state: string;
+      resolved_decision_kind: string | null;
+      resolved_decision_choice: string | null;
+    }>(
+      `select state, resolved_decision_kind, resolved_decision_choice from line_slot where id = $1`,
+      [SLOT],
+    );
+    expect(slot.rows[0]).toEqual({
+      state: "placeholder",
+      resolved_decision_kind: null,
+      resolved_decision_choice: null,
+    });
+    await asOwner(db);
+    expect(await decisionIds()).toContain(`${LINE}:ex-only-cap:0`);
   });
 });
 
