@@ -2379,7 +2379,13 @@ owner and no tracking item doesn't get deprioritized, it evaporates.
 
 - **Reported:** 2026-09-13 (not from Karvi — found by the UIL-010/015 dev session, in its own test file,
   reported against itself)
-- **Status:** Open
+- **Status:** Open — **the fifth harness-fidelity instance is closed** by PR
+  [#218](https://github.com/viantihu/pokemon-tcg-tracker/pull/218) MERGED to `develop` 2026-09-19 (squash
+  `2e0a98c`), deployed (Deploy green on that SHA): `tests/support/pglite-rpc.ts` and
+  `tests/backfill/binder-section.test.ts` now read `supabase/migrations/` from disk instead of a hand-kept
+  list, and `tests/support/harness-applies-every-migration.test.ts` fails if any migration file on disk
+  was not applied (revert-checked: skipping 0014 fails 7 tests). No hand-kept migration list remains in
+  the test tree. The DbClient contract suite this entry asks for is still open, so the entry stays Open.
 - **Priority:** Medium (Senior BA's read) — the one Medium with a live argument for jumping the queue,
   since it protects every fix currently being written; not reassigned ahead of the four open Highs unless
   Karvi says otherwise
@@ -5989,7 +5995,14 @@ it's the same question.
 
 - **Reported:** 2026-09-19 (not from Karvi — found in a broader root-cause pass, relayed by the Senior
   BA; zero-risk repo hygiene, batched into one entry rather than three)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#218](https://github.com/viantihu/pokemon-tcg-tracker/pull/218) MERGED to
+  `develop` 2026-09-19 (squash `2e0a98c`), QA-gated on the merged tree (848 tests; the new
+  `harness-applies-every-migration` test fails 7 cases when the harness skips 0014), confirmed **deployed**
+  to Testing (Deploy green on `2e0a98c`). Both raw `0x00` bytes are now the two-character `\0` escape
+  (QA's read: zero NUL bytes remain under `lib/` on `develop`) and the `database.types.ts` header now
+  says what the file is — a mirror of every migration under `supabase/migrations/`. Nothing here is
+  visible in the app, so there is no UAT step for Karvi; this entry closes on evidence, not on her
+  confirmation.
 - **Priority:** Low (Senior BA's read) — no behavior is wrong, both fixes are text-only and mechanical
 - **Area:** all (repo hygiene)
 - **Env:** n/a — in the repo, not a running environment
