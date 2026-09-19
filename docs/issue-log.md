@@ -2562,10 +2562,10 @@ it stops at `0004_catalog_artwork.sql`, roughly nine migrations behind `develop`
 Same shape, same cause: a literal list that has to be remembered and updated by hand every time a
 migration is added, in a second location nobody was checking. **Fix direction, generalized rather than
 patched per-copy:** both harnesses should read `supabase/migrations/` at runtime (sorted, all `.sql`
-files) instead of maintaining a duplicated literal — from an incoming root-cause-analysis doc (§9 step
-1; not yet on `develop`, Tech Lead's docs PR #217, swap to `docs/root-cause-analysis.md` once it lands),
-which also recommends a DbClient contract suite and a 1000-plus-row fixture as the durable answer to
-this entry's whole class of gap (RC-5) — noted here as a forward pointer, not yet built.
+files) instead of maintaining a duplicated literal — from
+[`docs/root-cause-analysis.md`](../docs/root-cause-analysis.md) §9 step 1, which also recommends a
+DbClient contract suite and a 1000-plus-row fixture as the durable answer to this entry's whole class
+of gap (RC-5) — noted here as a forward pointer, not yet built.
 
 ## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
 
@@ -2812,9 +2812,9 @@ worse odds, not better.
 `apply_write_ops` op set the other three already use (`insert_copy`, `union_collection_targets`,
 `insert_decision`), rather than adding a fifth bespoke implementation to fix a fourth one.
 
-**Update 2026-09-19: citation corrected and one hazard added, from an incoming root-cause-analysis doc
-(§7a; not yet on `develop` — Tech Lead's docs PR #217; swap this pointer to `docs/root-cause-analysis.md`
-once it lands).** The read-modify-write append moved in a refactor — it now lives at
+**Update 2026-09-19: citation corrected and one hazard added, from**
+[`docs/root-cause-analysis.md`](../docs/root-cause-analysis.md) **§7a.** The read-modify-write append
+moved in a refactor — it now lives at
 [`lib/coll/log.ts:122`](../lib/coll/log.ts:122) (`target_catalog_card_ids: [...targets, tcgdexId]`),
 not the `app/(ui)/coll/actions.ts:271-296` this entry originally cited. The defect is unchanged: a
 TypeScript array append written back whole **loses a concurrent write without erroring** — two appends
@@ -3642,11 +3642,13 @@ happened to those cards" when placing a card alongside other compatible cards in
 functional requirement as this entry's own title, in her own words a second time, not a new gap. No new
 mechanism to add; recorded here so the two reports aren't read as two separate things later.
 
-**Update 2026-09-19: this entry sits inside a broader fix sequence, per an incoming root-cause-analysis
-doc (RC-4; not yet on `develop`, Tech Lead's docs PR #217, swap to `docs/root-cause-analysis.md` once it
-lands).** RC-4 step 1 is #121's spotlight fix, already shipped; the worklist-table gap this entry's
-2026-09-18 update covers is step 2. **Step 3 — a "stateful forecast" — is a further piece not yet
-detailed in this entry**, and not verified here since the source document isn't on develop yet; recorded
+**Update 2026-09-19: this entry sits inside a broader fix sequence, per**
+[`docs/root-cause-analysis.md`](../docs/root-cause-analysis.md) **RC-4, verified directly.** RC-4 step 1
+is #121's spotlight fix, already shipped — the RCA's own words: "the single highest-value test in this
+document, fails today," done via the digest-compare-and-refuse mechanism. The worklist-table gap this
+entry's 2026-09-18 update covers is step 2. **RC-4 step 3 — a stateful forecast for the tail of the
+worklist — is confirmed still open** by the RCA itself, which names #121's own description as the
+reason it was scoped out (cost, not oversight). Recorded
 as a pointer so whoever picks up step 3 knows it exists rather than treating steps 1–2 as the whole fix.
 
 ## UIL-046 — Unresolved entries never record a retry attempt, so "self-heal when the catalog catches up" may never actually run
@@ -5710,10 +5712,13 @@ whoever eventually picks this up chooses with the tradeoff stated, not rediscove
 **Cross-reference UIL-029** (wrong-behaviour-certified, the opposite failure mode) **and UIL-021** (the
 other standing Low in test infrastructure, with its own recorded counter-argument).
 
-**Update 2026-09-19: a durable-answer pointer, from an incoming root-cause-analysis doc (RC-5; not yet
-on `develop`, Tech Lead's docs PR #217, swap to `docs/root-cause-analysis.md` once it lands).**
-Recommends a real component-render harness via Playwright rather than continuing to rely solely on the
-static-layout-markup technique this entry already records — the same gap, a concrete tool named for it.
+**Update 2026-09-19: a durable-answer pointer, from**
+[`docs/root-cause-analysis.md`](../docs/root-cause-analysis.md) **RC-5, verified directly.** Confirms
+this entry's own finding precisely — "No playwright, jsdom, happy-dom, testing-library or puppeteer in
+`package.json`... No click, focus, layout or hydration behaviour is tested anywhere" — and recommends
+adding Playwright "over the three flows where a wrong pixel becomes a misplaced physical card: haul
+commit, move/override, sync preview" as the fix, rather than continuing to rely solely on the
+static-layout-markup technique this entry already records.
 Not built; recorded as a forward pointer alongside UIL-029's own RC-5 note (a DbClient contract suite).
 
 **Priority rationale.** Low, per the Senior BA: no known live defect traces to this gap specifically,
