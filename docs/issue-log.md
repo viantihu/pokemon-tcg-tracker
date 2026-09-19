@@ -2866,16 +2866,20 @@ identical Haul Plan case High, so this read shouldn't be treated as settled if s
 ## UIL-035 — Search and lookup swallow every error and report "not found," so an outage looks like a missing card
 
 - **Reported:** 2026-09-14 (not from Karvi — found proactively)
-- **Status:** **Fixed** — two of the three sites; PR [#168](https://github.com/viantihu/pokemon-tcg-tracker/pull/168)
-  MERGED to `develop` 2026-09-18 (squash `9d36796`), QA-gated on the merged tree, confirmed **deployed** to
-  Testing (Deploy green on `04dea51`, which contains it). `lookupCatalog` and backfill's search now **throw**
-  instead of returning `[]`, and the shared `CardLookup` separates the two cases for every screen that
-  injects a search: a failure reads "Could not search the catalog: … — the card may well exist; the catalog
-  just did not answer. Try again." and the last good results stay on screen. An empty list now means the
-  mirror was asked and had nothing, and nothing else. **The third site — `LookupScreen.tsx`'s own
-  `catch` → `notFound` — was deliberately left** (another session's fence); it benefits only partially via
-  the shared component and stays open under this entry, which closes when it ships. Not Karvi's report, so
-  no confirmation step is owed from her.
+- **Status:** **Closed** — all three sites fixed and deployed; not Karvi's report, so it closes on QA's
+  gate and content verified on `origin/develop`, not on a confirmation from her. Sites one and two: PR
+  [#168](https://github.com/viantihu/pokemon-tcg-tracker/pull/168) MERGED 2026-09-18 (squash `9d36796`,
+  deployed on `04dea51`) — `lookupCatalog` and backfill's search **throw** instead of returning `[]`, and
+  the shared `CardLookup` shows "Could not search the catalog: … — the card may well exist; the catalog just
+  did not answer. Try again." while keeping the last good results; an empty list now means the mirror was
+  asked and had nothing. Site three: PR [#201](https://github.com/viantihu/pokemon-tcg-tracker/pull/201)
+  MERGED 2026-09-18 (squash `fc8646b`), QA-gated on the merged tree (787 tests, build), confirmed
+  **deployed** (Deploy and Vercel both green on `fc8646b`) — `LookupScreen`'s own `catch → notFound` is gone;
+  `lookupAnswer` returns a result union (`{ ok: false, error }`) rather than throwing, because Next 16
+  redacts forwarded server errors in production so a throw could never say WHAT failed, and the screen keeps
+  a `failed` state separate from `notFound` (verified in `LookupScreen.tsx` / `actions.ts` on
+  `origin/develop`). Revert-checked: restoring `catch → notFound` fails the state test. Same PR shipped
+  UIL-051.
 - **Priority:** Medium (Senior BA's read)
 - **Area:** Lookup, Plan, Backfill
 - **Env:** Testing
@@ -3931,7 +3935,17 @@ of them. Not High since it takes a binder edit to trigger and nothing physically
 ## UIL-051 — Lookup has no way to move a card
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#201](https://github.com/viantihu/pokemon-tcg-tracker/pull/201) MERGED to
+  `develop` 2026-09-18 (squash `fc8646b`), QA-gated on the merged tree (787 tests, build, `lib/line`
+  untouched), confirmed **deployed** to Testing (Deploy and Vercel both green on `fc8646b`). Lookup now shows
+  **a Move on every owned copy row** under the address block — the entry's own ask, "a Move affordance per
+  copy row" — opening the same `MoveOverlay` / `MovePanel` the Lines screen uses (imported, not edited), so
+  a card found by lookup can be moved from where she found it. Per her ruling on refusals, the one blocked
+  case (a binder block) names the condition and the remedy on its row; an unowned card shows no Move; Move
+  is disabled mid-move. Static-rendered: the three notices kept apart, one Move per movable copy, the
+  block row's wording. **Not rendered live: the move itself and the overlay interaction** (needs browser +
+  DB), so her pass is the first real exercise of it. Fence held to `app/(ui)/look/*`. Awaiting Karvi's
+  confirmation when UAT resumes: look up a card she owns, press Move on a copy, and place it.
 - **Priority:** Medium (Claude's read — needs Karvi's confirmation)
 - **Area:** Lookup
 - **Env:** Testing
