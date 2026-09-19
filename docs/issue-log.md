@@ -6077,7 +6077,18 @@ absorbs multiple instances of one theme.
 
 - **Reported:** 2026-09-19 (not from Karvi — found in a broader root-cause pass, relayed by the Senior
   BA)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#229](https://github.com/viantihu/pokemon-tcg-tracker/pull/229) MERGED to
+  `develop` 2026-09-19 (squash `bfbda03`), QA-gated on the merged tree (881 tests; restoring the inline
+  `types[0]` / literal-white derivation fails exactly the three named cases: "a Trainer with no types
+  gets the TRAINER band, not Colorless's", "a Trainer with a trainerType gets that type's band", "an
+  unmapped type falls back to the map's own white key, not a literal"), confirmed **deployed** to Testing
+  (Deploy, migrate, smoke, acceptance and Vercel green on `bfbda03`). Backfill's front row now calls the
+  engine's own `band()` on a `LookupCard` that carries the engine's derived `category` / `trainerType`
+  (threaded through `toCatalogCard`, not re-spelled), and the hard-coded `"white"` fallback is the map's
+  own white key (the UIL-012 lesson). **Follow-on, not done here:** Backfill and the Plan each keep their
+  own `toLookupCard` producer; both gained the two fields, neither was consolidated (that needs a new
+  non-server module under `app/(ui)/plan`). Step for Karvi when UAT resumes: in Backfill, a Trainer or
+  Supporter row should show the Trainer band, not Colorless's.
 - **Priority:** Medium (Senior BA's read)
 - **Area:** Backfill
 - **Env:** Testing
