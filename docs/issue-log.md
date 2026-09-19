@@ -3485,7 +3485,19 @@ treated as merely a feature request.
 ## UIL-041 — Audit the design prototype against the shipped app, once, rather than finding gaps one at a time
 
 - **Reported:** 2026-09-14 (not from Karvi — the Senior BA's suggestion, prompted by UIL-036)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#262](https://github.com/viantihu/pokemon-tcg-tracker/pull/262) MERGED to
+  `develop` 2026-09-20 (squash `3e71bd6`), docs only. The deliverable was the checklist and it exists:
+  [`docs/design/prototype-audit.md`](design/prototype-audit.md), every interactive behaviour in
+  `docs/design/prototype.html` (50 `onclick` handlers, 11 listeners, ~40 ids) mapped to the React file
+  that ports it, 90 rows in six tables: 43 ported, 26 partial (exists, one named piece missing), 10
+  replaced or dropped with the deciding issue-log entry or code comment cited, and **11 not ported** — no
+  counterpart and no recorded decision. Those eleven are candidates, not bugs, and none was built: log a
+  not-in-catalog card as typed; starting count for an open collection; a collection note field; success
+  toasts on Collections; a "THE LINE" jump to a card's line; the NEXT UP strip; keyboard shortcuts;
+  "Place it myself" resolving a decision; new binder or collection from the Move panel; Lookup suggestion
+  chips; Lookup box focused on arrival. Sent to Karvi 2026-09-20 to pick which become entries; the rest
+  get recorded in the audit as deliberately dropped so they stop resurfacing one at a time, which was
+  this entry's whole point. Nothing for Karvi to test; closes on the deliverable.
 - **Priority:** Low as a defect, high value as process
 - **Area:** Plan, Lookup, Collections, Backfill
 - **Env:** n/a — a process gap, not a code defect
