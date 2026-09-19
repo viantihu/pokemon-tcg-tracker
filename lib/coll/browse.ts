@@ -35,6 +35,8 @@ export interface BrowseCoreCard {
   setId: string | null;
   setName: string | null;
   localId: string | null;
+  /** Printed set total, for the full "099/182" form (UIL-077). */
+  setCardCountOfficial: number | null;
   illustrator: string | null;
   types: string[];
   imageUrl: string | null;
@@ -60,6 +62,7 @@ function toBrowseCard(row: Row<"catalog_card">, owned: Set<string>): BrowseCoreC
     setId: row.set_id,
     setName: row.set_name,
     localId: row.local_id,
+    setCardCountOfficial: row.set_card_count_official,
     illustrator: row.illustrator,
     types: row.types ?? [],
     imageUrl: row.image_url,

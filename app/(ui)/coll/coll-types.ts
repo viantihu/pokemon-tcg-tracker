@@ -12,6 +12,8 @@ export interface CollectionCardView {
   name: string;
   setName: string | null;
   localId: string | null;
+  /** Printed set total, for the full "099/182" form (UIL-077). Null when TCGdex reports none. */
+  setCardCountOfficial: number | null;
   bandKey: string;
   imageUrl: string | null;
   owned: boolean;
@@ -92,6 +94,8 @@ export interface BrowseCard {
   setId: string | null;
   setName: string | null;
   localId: string | null;
+  /** Printed set total, for the full "099/182" form (UIL-077). */
+  setCardCountOfficial: number | null;
   illustrator: string | null;
   types: string[];
   imageUrl: string | null;

@@ -24,6 +24,8 @@ export interface WishlistCard {
   setName: string | null;
   setSeries: string | null;
   localId: string | null;
+  /** Printed set total, for the full "099/182" form (UIL-077). Null when TCGdex reports none. */
+  setCardCountOfficial: number | null;
   rarity: string | null;
   illustrator: string | null;
   priceMarket: number | null;
