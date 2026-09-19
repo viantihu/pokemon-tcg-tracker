@@ -189,3 +189,78 @@ describe("shim contract · it refuses shapes it does not model, rather than gues
 
 // Keep the OWNER import meaningful for readers: RLS-scoped reads above run under it via asOwner().
 void OWNER;
+
+describe("shim contract · upsert(rows, { onConflict }) is Postgres's, not a re-statement (#244)", () => {
+  it("a batch that repeats the conflict key errors — Postgres's own rule, written by nobody here", async () => {
+    const row = { tcgdex_id: "up-0001", name: "Up One" };
+    const { error } = await loose()
+      .from("catalog_card")
+      .upsert([row, { ...row, name: "Up One again" }], { onConflict: "tcgdex_id" })
+      .select();
+    expect(error).not.toBeNull();
+    expect(String(error.message)).toMatch(/second time/);
+    expect(error.code).toBe("21000"); // cardinality_violation — the SQLSTATE, as PostgREST forwards it
+    const { count } = await loose()
+      .from("catalog_card")
+      .select("*", { count: "exact", head: true })
+      .eq("tcgdex_id", "up-0001");
+    expect(count).toBe(0); // nothing landed
+  });
+
+  it("onConflict updates every OTHER supplied column and leaves the key; re-running does not duplicate", async () => {
+    await loose()
+      .from("catalog_card")
+      .upsert([{ tcgdex_id: "up-0002", name: "Before", set_id: "s1" }], { onConflict: "tcgdex_id" })
+      .select();
+    const { data, error } = await loose()
+      .from("catalog_card")
+      .upsert([{ tcgdex_id: "up-0002", name: "After", set_id: "s2" }], { onConflict: "tcgdex_id" })
+      .select();
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);
+    expect(data[0]).toMatchObject({ tcgdex_id: "up-0002", name: "After", set_id: "s2" });
+    const { count } = await loose()
+      .from("catalog_card")
+      .select("*", { count: "exact", head: true })
+      .eq("tcgdex_id", "up-0002");
+    expect(count).toBe(1);
+  });
+
+  it("a Postgres error is reported in `error` with its SQLSTATE, never thrown", async () => {
+    await loose()
+      .from("catalog_card")
+      .insert([{ tcgdex_id: "dup-0001", name: "One" }])
+      .select();
+    const { data, error } = await loose()
+      .from("catalog_card")
+      .insert([{ tcgdex_id: "dup-0001", name: "Two" }])
+      .select();
+    expect(data).toBeNull();
+    expect(error).toMatchObject({ code: "23505" }); // unique_violation
+    expect(String(error.message)).toMatch(/duplicate key/);
+    // A read Postgres rejects (an undefined column) reports the same way, through maybeSingle too.
+    const bad = await loose()
+      .from("catalog_card")
+      .select("*")
+      .eq("no_such_column", "x")
+      .maybeSingle();
+    expect(bad.data).toBeNull();
+    expect(bad.error).toMatchObject({ code: "42703" }); // undefined_column
+  });
+
+  it("refuses the shapes it does not model — the shim's own refusals still throw", () => {
+    expect(() =>
+      loose()
+        .from("catalog_card")
+        .upsert([{ tcgdex_id: "x", name: "x" }], { onConflict: "a,b" }),
+    ).toThrow(/upsert\(\)/);
+    expect(() =>
+      loose()
+        .from("catalog_card")
+        .upsert([{ tcgdex_id: "x", name: "x" }], {
+          onConflict: "tcgdex_id",
+          ignoreDuplicates: true,
+        }),
+    ).toThrow(/upsert\(\)/);
+  });
+});

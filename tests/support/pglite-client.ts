@@ -18,6 +18,11 @@
  * `not(col, "is", null)` for UIL-046's retry-sweep test, which drives the sync resolver's set-name
  * fallback (`catalogCardRepo.findSetIdsByName`) on real Postgres.
  *
+ * Failures are reported the way supabase-js reports them: a Postgres error (anything with a SQLSTATE)
+ * comes back as `{ data: null, error: { code, message, details, hint } }`, never as a rejected promise,
+ * so a call site's `if (error) throw error` is the path exercised here. Only the shim's OWN refusals
+ * (an unmodelled call shape) throw.
+ *
  * `select(cols, { count: "exact" })` is supported (UIL-031's `assertReadComplete` needs it), and the
  * count it reports is real: this runs the query's actual SQL with no `LIMIT`/`OFFSET`, so `count` is
  * just `rows.length` — genuinely accurate, not a guess. What that does NOT do is model PostgREST's
@@ -49,8 +54,27 @@ type Row = Record<string, unknown>;
 interface PostgrestLikeError {
   code: string;
   message: string;
-  details: string;
-  hint: null;
+  details: string | null;
+  hint: string | null;
+}
+
+/**
+ * A Postgres failure, in the shape supabase-js reports it: `{ data: null, error }` with `code` the
+ * SQLSTATE ("23505" unique_violation, "21000" cardinality_violation, "42703" undefined_column) — never a
+ * rejected promise. The shim used to reject with PGlite's raw error, so a call site's
+ * `if (error) throw error` was never the path exercised here (UIL-029 contract suite, the upsert case).
+ * Only errors carrying a SQLSTATE are translated; the shim's own refusals ("pglite-client: …") throw.
+ */
+function asPostgrestError(err: unknown): PostgrestLikeError | null {
+  const e = err as { code?: unknown; message?: unknown; detail?: unknown; hint?: unknown } | null;
+  if (!e || typeof e.code !== "string" || !/^[0-9A-Z]{5}$/.test(e.code)) return null;
+  if (typeof e.message !== "string") return null;
+  return {
+    code: e.code,
+    message: e.message,
+    details: typeof e.detail === "string" ? e.detail : null,
+    hint: typeof e.hint === "string" ? e.hint : null,
+  };
 }
 
 /** PGRST116, as PostgREST raises it when `.single()` / `.maybeSingle()` does not identify exactly one row. */
@@ -392,7 +416,14 @@ class PgQuery {
    * production (UIL-029 contract suite).
    */
   async maybeSingle(): Promise<{ data: Row | null; error: PostgrestLikeError | null }> {
-    const rows = await this.rows();
+    let rows: Row[];
+    try {
+      rows = await this.rows();
+    } catch (err) {
+      const pg = asPostgrestError(err);
+      if (!pg) throw err;
+      return { data: null, error: pg };
+    }
     if (rows.length > 1) return { data: null, error: multipleRows(rows.length) };
     return { data: rows[0] ?? null, error: null };
   }
@@ -427,6 +458,13 @@ class PgQuery {
           // was complete. Counted with the same filters and NO limit/offset, so it stays the real total.
           count: this.wantCount ? await this.total() : null,
         }))
+        // A Postgres error (anything with a SQLSTATE) comes back in `error`, as supabase-js reports it —
+        // never as a rejection. The shim's own refusals carry no SQLSTATE and still throw.
+        .catch((err: unknown) => {
+          const pg = asPostgrestError(err);
+          if (!pg) throw err;
+          return { data: null, error: pg, count: null };
+        })
         .then(onFulfilled, onRejected)
     );
   }
