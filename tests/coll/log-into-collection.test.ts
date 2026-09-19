@@ -267,3 +267,39 @@ describe("UIL-033 · logging is atomic and two concurrent logs both land", () =>
     expect(await copyCountFor("cardA")).toBe(1);
   });
 });
+
+/**
+ * UIL-033, QA's follow-up: the atomicity test above poisons the COPY insert, so a version that split the
+ * write back into two calls (copy + audit first, then the join in its own call) still passed it. This
+ * poisons the JOIN instead — a trigger that raises on any update to `collection` — so the union statement
+ * fails inside the RPC. Only a single-call write leaves NO copy and NO audit row behind; a two-call
+ * write would have committed both before the join failed.
+ */
+describe("UIL-033 · the join failing inside the RPC takes the copy and the audit row down with it", () => {
+  it("poisoned join → nothing lands, and the action says why", async () => {
+    await seedCatalogCards(db, ["cardA"]);
+    await seedBinders(db, [{ id: SPEC, type: "specialty", name: "Specialty A" }]);
+    await seedCollections(db, [
+      { id: COL, name: "Matsuno", targetCatalogCardIds: [], currentBinderIds: [SPEC] },
+    ]);
+    await db.exec(`
+      create function poison_collection_update() returns trigger language plpgsql as $$
+      begin
+        raise exception 'poisoned join';
+      end $$;
+      create trigger poison_join before update on collection
+        for each row execute function poison_collection_update();
+    `);
+
+    await asOwner(db);
+    const res = await applyCollectionLog(pgliteClient(db), OWNER, COL, "cardA");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("poisoned join");
+
+    await asSuperuser(db);
+    expect(await copyCountFor("cardA")).toBe(0);
+    const audit = await db.query<{ n: number }>(`select count(*)::int n from placement_decision`);
+    expect(audit.rows[0].n).toBe(0);
+    expect(await targetsOf(COL)).toEqual([]);
+  });
+});
