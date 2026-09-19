@@ -18,6 +18,11 @@
  * `not(col, "is", null)` for UIL-046's retry-sweep test, which drives the sync resolver's set-name
  * fallback (`catalogCardRepo.findSetIdsByName`) on real Postgres.
  *
+ * Failures are reported the way supabase-js reports them: a Postgres error (anything with a SQLSTATE)
+ * comes back as `{ data: null, error: { code, message, details, hint } }`, never as a rejected promise,
+ * so a call site's `if (error) throw error` is the path exercised here. Only the shim's OWN refusals
+ * (an unmodelled call shape) throw.
+ *
  * `select(cols, { count: "exact" })` is supported (UIL-031's `assertReadComplete` needs it), and the
  * count it reports is real: this runs the query's actual SQL with no `LIMIT`/`OFFSET`, so `count` is
  * just `rows.length` — genuinely accurate, not a guess. What that does NOT do is model PostgREST's
@@ -45,6 +50,43 @@ function quoteIdent(name: string): string {
 
 type Row = Record<string, unknown>;
 
+/** The shape supabase-js reports a PostgREST failure in — a plain object, not an Error (lib/errors.ts). */
+interface PostgrestLikeError {
+  code: string;
+  message: string;
+  details: string | null;
+  hint: string | null;
+}
+
+/**
+ * A Postgres failure, in the shape supabase-js reports it: `{ data: null, error }` with `code` the
+ * SQLSTATE ("23505" unique_violation, "21000" cardinality_violation, "42703" undefined_column) — never a
+ * rejected promise. The shim used to reject with PGlite's raw error, so a call site's
+ * `if (error) throw error` was never the path exercised here (UIL-029 contract suite, the upsert case).
+ * Only errors carrying a SQLSTATE are translated; the shim's own refusals ("pglite-client: …") throw.
+ */
+function asPostgrestError(err: unknown): PostgrestLikeError | null {
+  const e = err as { code?: unknown; message?: unknown; detail?: unknown; hint?: unknown } | null;
+  if (!e || typeof e.code !== "string" || !/^[0-9A-Z]{5}$/.test(e.code)) return null;
+  if (typeof e.message !== "string") return null;
+  return {
+    code: e.code,
+    message: e.message,
+    details: typeof e.detail === "string" ? e.detail : null,
+    hint: typeof e.hint === "string" ? e.hint : null,
+  };
+}
+
+/** PGRST116, as PostgREST raises it when `.single()` / `.maybeSingle()` does not identify exactly one row. */
+function multipleRows(n: number): PostgrestLikeError {
+  return {
+    code: "PGRST116",
+    message: "JSON object requested, multiple (or no) rows returned",
+    details: `Results contain ${n} rows, application/vnd.pgrst.object+json requires 1 row`,
+    hint: null,
+  };
+}
+
 /**
  * PostgREST (and so supabase-js in production) serializes `numeric` columns as JSON numbers, but the
  * raw pg wire protocol — what PGlite hands back here — returns them as strings by default, to avoid
@@ -53,7 +95,31 @@ type Row = Record<string, unknown>;
  * lib/line/view.ts) and throws. OID 1700 is `numeric`; parsing it here — the one place every read in
  * this shim funnels through — keeps the fidelity this file exists for without widening it further.
  */
-const NUMERIC_PARSERS = { 1700: (v: string) => Number(v) };
+/**
+ * Postgres `timestamptz` / `timestamp` come off the wire as text ("2026-09-19 16:00:00.123456+00"); PGlite's
+ * default parser turns them into a JS `Date`, but PostgREST — what production reads through — hands the app
+ * a STRING. Readers do `new Date(x)` on it. The shim's promise is therefore: a timestamp column is an
+ * ISO-8601 string that `new Date()` parses (`toISOString()` form, so `Z`, not PostgREST's `+00:00`
+ * spelling — byte-identity is not promised, parseability and ordering are). A `timestamp` without zone is
+ * read as UTC. Pinned by tests/support/pglite-client.contract.test.ts (UIL-029).
+ */
+function pgTimestampToIso(raw: string, hasZone: boolean): string {
+  let s = raw.replace(" ", "T");
+  if (hasZone) {
+    if (/[+-]\d\d$/.test(s)) s += ":00";
+  } else {
+    s += "Z";
+  }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? raw : d.toISOString();
+}
+
+/** Every column parser the shim applies — see the notes on each. OID 1700 numeric, 1114 timestamp, 1184 timestamptz. */
+const PARSERS = {
+  1700: (v: string) => Number(v),
+  1114: (v: string) => pgTimestampToIso(v, false),
+  1184: (v: string) => pgTimestampToIso(v, true),
+};
 
 /**
  * A thenable query builder that compiles to one SELECT, INSERT, or UPDATE. Mirrors the repo layer's
@@ -275,7 +341,7 @@ class PgQuery {
 
   private async rows(): Promise<Row[]> {
     const [sql, params] = this.compile();
-    const res = await this.db.query<Row>(sql, params, { parsers: NUMERIC_PARSERS });
+    const res = await this.db.query<Row>(sql, params, { parsers: PARSERS });
     return res.rows;
   }
 
@@ -323,7 +389,7 @@ class PgQuery {
     const sql =
       `insert into ${quoteIdent(this.table)} (${cols.map(quoteIdent).join(", ")})` +
       ` values ${valueRows.join(", ")}${conflict} returning *`;
-    const res = await this.db.query<Row>(sql, params, { parsers: NUMERIC_PARSERS });
+    const res = await this.db.query<Row>(sql, params, { parsers: PARSERS });
     return res.rows;
   }
 
@@ -338,12 +404,27 @@ class PgQuery {
       `update ${quoteIdent(this.table)} set ${setClause}` +
       this.whereClause(params) +
       ` returning *`;
-    const res = await this.db.query<Row>(sql, params, { parsers: NUMERIC_PARSERS });
+    const res = await this.db.query<Row>(sql, params, { parsers: PARSERS });
     return res.rows;
   }
 
-  async maybeSingle(): Promise<{ data: Row | null; error: null }> {
-    const rows = await this.rows();
+  /**
+   * PostgREST's `maybeSingle`: zero rows → `data: null`; ONE row → that row; MORE than one → an error
+   * (PGRST116, "JSON object requested, multiple (or no) rows returned"), because the caller asked for an
+   * object and the query did not identify one. The shim used to hand back the first row silently — a
+   * fidelity gap that would let a repo call which can match two rows pass here while erroring in
+   * production (UIL-029 contract suite).
+   */
+  async maybeSingle(): Promise<{ data: Row | null; error: PostgrestLikeError | null }> {
+    let rows: Row[];
+    try {
+      rows = await this.rows();
+    } catch (err) {
+      const pg = asPostgrestError(err);
+      if (!pg) throw err;
+      return { data: null, error: pg };
+    }
+    if (rows.length > 1) return { data: null, error: multipleRows(rows.length) };
     return { data: rows[0] ?? null, error: null };
   }
 
@@ -351,7 +432,7 @@ class PgQuery {
     onFulfilled?:
       | ((value: {
           data: Row[] | Row | null;
-          error: null;
+          error: PostgrestLikeError | null;
           count: number | null;
         }) => TResult1 | PromiseLike<TResult1>)
       | null,
@@ -369,12 +450,21 @@ class PgQuery {
         // `async` because the count below is a second query (see its note); #119's version needed none.
         .then(async (rows) => ({
           data: this.wantHead ? null : this.wantSingle ? (rows[0] ?? null) : rows,
-          error: null as null,
+          // `.single()` promises exactly one row; PostgREST errors (PGRST116) on zero or several, and so
+          // does this — an update that matched no row must not read as a silent success here.
+          error: this.wantSingle && rows.length !== 1 ? multipleRows(rows.length) : null,
           // NOT `rows.length`: with a `range` applied that is the page size, and reporting it as the
           // total is exactly how `assertReadComplete` would be fooled into thinking a truncated read
           // was complete. Counted with the same filters and NO limit/offset, so it stays the real total.
           count: this.wantCount ? await this.total() : null,
         }))
+        // A Postgres error (anything with a SQLSTATE) comes back in `error`, as supabase-js reports it —
+        // never as a rejection. The shim's own refusals carry no SQLSTATE and still throw.
+        .catch((err: unknown) => {
+          const pg = asPostgrestError(err);
+          if (!pg) throw err;
+          return { data: null, error: pg, count: null };
+        })
         .then(onFulfilled, onRejected)
     );
   }
