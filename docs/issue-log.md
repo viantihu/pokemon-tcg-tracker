@@ -3734,7 +3734,21 @@ for the exact wording and what remains to close it (the Tech Lead's Testing read
 ## UIL-047 — Japanese cards are unfindable and can be confidently mis-matched, because the catalog mirror is English-only
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet — three separate reports, one root cause)
-- **Status:** Open
+- **Status:** Open — **C3 is covered end to end and deployed; C1 and C2 stay blocked on her ruling.**
+  C3 guard: PR [#183](https://github.com/viantihu/pokemon-tcg-tracker/pull/183) (squash `62fa838`,
+  2026-09-18) — a manual match on a non-English entry never learns a cross-locale set alias, because the
+  mirror is English-only so any such alias is wrong by construction. C3 remedy: PR
+  [#194](https://github.com/viantihu/pokemon-tcg-tracker/pull/194) (squash `541c65c`, 2026-09-19, migration
+  `0014`), QA-gated on the merged tree (827 tests; 0014's function is 0013's text plus the eight-line
+  `delete_set_alias` branch and nothing else; five mutations all bite), confirmed **deployed** (Deploy and
+  Vercel green on `07b0c88`): Sync gains a LEARNED SET ALIASES panel and a two-step inline **Forget** that
+  deletes the alias and re-parks that set's "needs your match" entries to "waiting on catalog" in one
+  transaction; already-matched cards stay put until her next import. Predicate read from code, not memory:
+  WAITING + UNKNOWN_CARD + matching locale and Dex set code; on her data the Tech Lead's read says it hits
+  **exactly one row** (the earlier "two Battle Academy cards" was wrong and is retracted). The migration
+  itself changes no rows. **Open on C1/C2**: whether a Japanese printing is a distinct card or the same
+  card in another language determines the schema, so nothing is built either way until she rules; until
+  then she should not manual-match the five Japanese `UNKNOWN_SET` rows.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
 - **Area:** Catalog, Sync, Lookup, Plan
 - **Env:** Testing
@@ -5435,7 +5449,22 @@ picks one — matching her rejection of a default exactly. Status line lands sep
 - **Reported:** 2026-09-17 (not from Karvi directly — she ruled to close UIL-064 after being told
   plainly that two of its four selected problems were still unfixed; relayed by the Senior BA, who is
   recording that closure on her explicit instruction)
-- **Status:** Open
+- **Status:** **Fixed** — part 2 of 2 ("it's somewhat buggy and the icons are not aligned"); part 1
+  (back-half placement from the Haul Plan) is in flight, proposal approved 2026-09-19. Part 2: PR
+  [#211](https://github.com/viantihu/pokemon-tcg-tracker/pull/211) MERGED to `develop` 2026-09-19 (squash
+  `17d334b`), QA-gated on the merged tree (807 tests, build; dropping the scoping class fails the new
+  test), confirmed **deployed** to Testing (Deploy and Vercel green on `07b0c88`). **Found by
+  measurement, not by a screenshot** — the static harness rendered the real MoveOverlay/MovePanel for six
+  states against the compiled `globals.css` at 375 / 1000 / 1440: desktop had zero deviations; at phone
+  width a JOIN A LINE candidate chip whose label wraps rendered its second line centred (a `<button>`'s
+  default `text-align`), so the swatch on the left did not line up with the text block — line-2 start
+  154.6px vs line-1 86.1px — and the sheet header dropped Close under the card name (82.8px tall). Two
+  one-rule CSS fixes, each revertable alone: `.ochip { text-align: left }` (both lines now start at 81px,
+  swatch at 74) and a narrow-only `.cap.movecap` reflow keeping Close on the title row (header 77px;
+  control run without the class snapped back; CollHub / DecisionCard / Sync headers untouched). Only
+  chips with long labels wrap, which is why it read as "somewhat" buggy. Awaiting Karvi's confirmation on
+  her phone when UAT resumes: open Move on a card with a long line-candidate label; swatch and both text
+  lines should align, Close should sit top-right.
 - **Priority:** High (Karvi's own ruling, 2026-09-18, via Junior BA - 2 — she asked what this entry was,
   was reminded it is UIL-064's two carried-forward parts, and rated it High; the rationale below predates
   that ruling)
@@ -5483,7 +5512,18 @@ but needs something to show her first.
 
 - **Reported:** 2026-09-17 (Karvi, relayed by Junior BA - 2 — a generalization of UIL-039, not a
   separate defect). In her words: "The search throughout the app should be uniform."
-- **Status:** Open
+- **Status:** Open — **step 1 of the incremental plan shipped and deployed; five of six call sites still
+  use the text list.** PR [#212](https://github.com/viantihu/pokemon-tcg-tracker/pull/212) MERGED to
+  `develop` 2026-09-19 (squash `5e03a80`), QA-gated on the merged tree (805 tests, 14 new; the debounce
+  copy pinned byte-identical to `CardLookup`'s), confirmed **deployed** (Deploy and Vercel green on
+  `5e03a80`): a new shared `CardResultsGrid` keeps `CardLookup`'s exact `{ search, onPick, placeholder }`
+  contract — same debounce, 2-character minimum, loading / empty / failure states with the #168 "could not
+  search" honesty — and renders results as a grid of full `CardFace` tiles with name, set and full collector
+  number, image-first per her visual-search principle. Deliberately NOT a reuse of the builder page's
+  `CardSearchGrid` (coupled to bulk-add, multi-select and pagination none of the inline sites need). First
+  and only consumer: Collections' "Log a card" modal, a one-tag swap. Remaining, one PR each by their
+  owners: Lookup, Backfill (two sites), Sync, Haul Plan intake. Closes when all six use the grid. Awaiting
+  Karvi's look at Log a card when UAT resumes: search should show tiles, not a list.
 - **Priority:** High (Karvi's own ruling, 2026-09-18, via Junior BA - 2)
 - **Area:** Plan, Lookup, Backfill, Sync, Collections
 - **Env:** Testing
@@ -5799,10 +5839,14 @@ this up doesn't have to re-find them.
   (three sites) and the shared `CardLookup` type-ahead, which Collections' search inherits. A card whose set
   genuinely has no printed total (some promos and subsets; TCGdex reports null) shows the bare number by
   design, not by defect. Revert-checked: removing the adapter line fails 4 tests including her named
-  `099/182` case. **Two sites still bare, reported not reached into:** the Collections wishlist grid
-  (`CollHub.tsx` / `CardSearchGrid.tsx`, `WishlistCard` needs the same field — UX Dev's fence) and
-  `MoveOverlay.tsx` (mid-rework); each is a one-line call of the exported formatter and this entry stays
-  Fixed-not-Closed until both land. Awaiting Karvi's confirmation when UAT resumes.
+  `099/182` case. **Collections half landed 2026-09-19:** PR
+  [#212](https://github.com/viantihu/pokemon-tcg-tracker/pull/212) (squash `5e03a80`, QA-gated, Deploy and
+  Vercel green on `5e03a80`) threads `setCardCountOfficial` onto `CollectionCardView`, `BrowseCard` and
+  `WishlistCard` and calls the shared formatter at every Collections site — tiles, editor target list,
+  wishlist rows and ALT lists, the removal move sheet, the Log-a-card picked row, builder tiles;
+  revert-checked (bare numbers restored → 2 render tests fail). **One site still bare:** `MoveOverlay.tsx`,
+  a one-line call of the exported formatter, assigned inside the UIL-070 dev's fence; this entry stays
+  Fixed-not-Closed until it lands. Awaiting Karvi's confirmation when UAT resumes.
 - **Priority:** High (Karvi's own read)
 - **Area:** Lines, Plan, Lookup, Backfill, Collections
 - **Env:** Testing
