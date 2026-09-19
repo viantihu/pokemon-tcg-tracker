@@ -41,11 +41,13 @@ import {
   type StageFacts,
 } from "./decisions";
 import { buildLineJoinIndex, joinOptionsFor } from "./join-options";
+import { orderLineViews } from "./order";
 import { buildLineView, type SlotInput } from "./view";
 import type {
   CardIdentity,
   LineScreenData,
   LineView,
+  LineViewMode,
   MoveOptions,
   UnlinedCard,
   WishlistOption,
@@ -87,13 +89,23 @@ const EMPTY_FACTS: StageFacts = {
 
 /** Everything the loader assembles: view lines + the decisions (cards + server-side resolutions). */
 export interface ScreenModel {
+  view: LineViewMode;
+  /** Ordered per `view` (UIL-074; lib/line/order.ts). */
   lines: LineView[];
   derived: DerivedDecision[];
   moveOptions: MoveOptions;
   unlinedCards: UnlinedCard[];
 }
 
-export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
+export interface ScreenModelOptions {
+  /** Strip order (UIL-074). Defaults to colour + A–Z. */
+  view?: LineViewMode;
+}
+
+export async function buildScreenModel(
+  db: DbClient,
+  opts: ScreenModelOptions = {},
+): Promise<ScreenModel> {
   const [
     lineRows,
     slotRows,
@@ -423,8 +435,21 @@ export async function buildScreenModel(db: DbClient): Promise<ScreenModel> {
     });
   }
 
+  // UIL-074: `listAll` is unordered, so until now the strips rendered in whatever order Postgres
+  // returned them. Binder display order = creation order, which is the order the Move panel's binder
+  // chips and Settings already list them; ties (same instant) fall back to the name.
+  const view = opts.view ?? "color";
+  // `new Date(...)` on purpose: PostgREST serialises `created_at` as an ISO string, the raw pg wire
+  // (PGlite in tests) as a Date. Both parse; comparing the epoch keeps this honest under either.
+  const createdAt = (b: Row<"binder">) => new Date(b.created_at).getTime();
+  const binderOrder = [...binderRows]
+    .sort((a, b) => createdAt(a) - createdAt(b) || a.name.localeCompare(b.name))
+    .map((b) => b.id);
+  const lines = orderLineViews(lineViews, view, { bandOrder: bandKeys, binderOrder });
+
   return {
-    lines: lineViews,
+    view,
+    lines,
     derived: deriveAllDecisions(decisionInputs),
     moveOptions,
     unlinedCards,
@@ -477,9 +502,13 @@ export async function loadMoveOptions(db: DbClient): Promise<MoveOptions> {
 }
 
 /** The client-facing screen data (decisions flattened to their cards). */
-export async function loadLineScreen(db: DbClient): Promise<LineScreenData> {
-  const model = await buildScreenModel(db);
+export async function loadLineScreen(
+  db: DbClient,
+  opts: ScreenModelOptions = {},
+): Promise<LineScreenData> {
+  const model = await buildScreenModel(db, opts);
   return {
+    view: model.view,
     lines: model.lines,
     decisions: model.derived.map((d) => d.card),
     moveOptions: model.moveOptions,

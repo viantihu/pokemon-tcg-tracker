@@ -10,5 +10,6 @@ export * from "./view";
 export * from "./decisions";
 export * from "./move";
 export * from "./join-options";
+export * from "./order";
 export * from "./load";
 export * from "./write";

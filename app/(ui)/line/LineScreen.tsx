@@ -11,15 +11,20 @@
  * moved via the shared `MovePanel`. All writes go through server actions (move / resolve).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type {
   DecisionChoiceId,
   LineScreenData,
   LineView,
+  LineViewMode,
   MoveDestination,
   SlotView,
   UnlinedCard,
 } from "@/lib/line/types";
+// Leaf import: the "@/lib/line" barrel re-exports load.ts (server repos), which must stay out of
+// the browser bundle.
+import { binderGroups } from "@/lib/line/order";
 import { CardFace } from "../_components/CardFace";
 import { DecisionCard } from "../_components/DecisionCard";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
@@ -83,6 +88,56 @@ export function unlinedMoveTarget(card: UnlinedCard): MoveTargetCard {
   };
 }
 
+/**
+ * The strip of line tabs (UIL-074). Exported and PURE so the two orders are render-tested: in
+ * `"binder"` view a heading opens each binder's run and the run's last tab closes its border; in
+ * `"color"` view the tabs run flat. The lines arrive already ordered by the loader — this groups
+ * what it is given and never re-sorts.
+ */
+export function LineTabs({
+  lines,
+  view,
+  currentId,
+  onSelect,
+}: {
+  lines: LineView[];
+  view: LineViewMode;
+  currentId: string | null;
+  onSelect: (lineId: string) => void;
+}) {
+  const tab = (l: LineView, groupEnd: boolean) => {
+    const m = bandMeta(l.bandKey);
+    return (
+      <button
+        key={l.lineId}
+        type="button"
+        role="tab"
+        aria-selected={l.lineId === currentId}
+        className={"lt u" + (l.lineId === currentId ? " on" : "") + (groupEnd ? " gend" : "")}
+        onClick={() => onSelect(l.lineId)}
+      >
+        <span
+          className={"chip" + (m.dither ? " dither" : "")}
+          style={{ background: m.color, width: 16, height: 16 }}
+        />
+        {l.speciesLabel}
+      </button>
+    );
+  };
+  return (
+    <div className="linetabs" role="tablist" aria-label="Evolution lines">
+      {view === "binder"
+        ? binderGroups(lines).map((g) => (
+            <Fragment key={g.key}>
+              <span className="lgh u">{g.label}</span>
+              {g.lines.map((l, i) => tab(l, i === g.lines.length - 1))}
+            </Fragment>
+          ))
+        : lines.map((l) => tab(l, false))}
+    </div>
+  );
+}
+
 export function LineScreen() {
   const [data, setData] = useState<LineScreenData | null>(null);
   const [curId, setCurId] = useState<string | null>(null);
@@ -93,10 +148,25 @@ export function LineScreen() {
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Load the persisted lines + decisions once on mount, all catalog/DB access server-side.
+  // Strip order (UIL-074): her two views, read from and written to the URL (`?view=binder`) so the
+  // choice survives a reload and the round trip through a decision. The loader sorts; this only asks.
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  const view: LineViewMode = searchParams.get("view") === "binder" ? "binder" : "color";
+  function setView(next: LineViewMode) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "color") params.delete("view");
+    else params.set("view", next);
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname);
+  }
+
+  // Load the persisted lines + decisions on mount and whenever the order changes, all catalog/DB
+  // access server-side.
   useEffect(() => {
     let live = true;
-    loadLine()
+    loadLine(view)
       .then((d) => {
         if (!live) return;
         setData(d);
@@ -106,7 +176,7 @@ export function LineScreen() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [view]);
 
   const lines = useMemo(() => data?.lines ?? [], [data]);
   const curLine = useMemo(
@@ -138,7 +208,7 @@ export function LineScreen() {
     const label = decision?.choices.find((c) => c.id === choiceId)?.label ?? "Resolved";
     setBusy(true);
     setError(null);
-    const res = await resolveDecisionAction(decisionId, choiceId, pickedCatalogCardId);
+    const res = await resolveDecisionAction(decisionId, choiceId, pickedCatalogCardId, view);
     setBusy(false);
     if (res.ok) {
       setData(res.data);
@@ -175,7 +245,7 @@ export function LineScreen() {
     if (!move) return;
     setBusy(true);
     setError(null);
-    const res = await moveCardAction(move.copyId, dest);
+    const res = await moveCardAction(move.copyId, dest, view);
     setBusy(false);
     if (res.ok) {
       setData(res.data);
@@ -254,27 +324,29 @@ export function LineScreen() {
         )}
       </div>
 
-      <div className="linetabs" role="tablist" aria-label="Evolution lines">
-        {lines.map((l) => {
-          const m = bandMeta(l.bandKey);
-          return (
-            <button
-              key={l.lineId}
-              type="button"
-              role="tab"
-              aria-selected={l.lineId === curLine.lineId}
-              className={"lt u" + (l.lineId === curLine.lineId ? " on" : "")}
-              onClick={() => setCurId(l.lineId)}
-            >
-              <span
-                className={"chip" + (m.dither ? " dither" : "")}
-                style={{ background: m.color, width: 16, height: 16 }}
-              />
-              {l.speciesLabel}
-            </button>
-          );
-        })}
+      <div className="viewmode">
+        <span className="hk">ORDER</span>
+        <div className="modetoggle" role="group" aria-label="Line order">
+          <button
+            type="button"
+            className={"modebtn u" + (view === "color" ? " on" : "")}
+            aria-pressed={view === "color"}
+            onClick={() => setView("color")}
+          >
+            Colour + A–Z
+          </button>
+          <button
+            type="button"
+            className={"modebtn u" + (view === "binder" ? " on" : "")}
+            aria-pressed={view === "binder"}
+            onClick={() => setView("binder")}
+          >
+            By binder
+          </button>
+        </div>
       </div>
+
+      <LineTabs lines={lines} view={data.view} currentId={curLine.lineId} onSelect={setCurId} />
 
       <div className="linehead">
         <div className="linetitle panel">
