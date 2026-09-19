@@ -415,3 +415,50 @@ export const ARVEN_SV03_186 = card({
   trainerType: "Supporter",
   variants: { normal: true, reverse: true },
 });
+
+// --- Colour-band config, in the ONLY vocabulary production ever feeds the engine (UIL-013). ------
+
+/**
+ * The `type_color_map` rows migration 0003 ships, verbatim: card_type → band KEY. Production loads these
+ * rows and builds the map with the loop below (lib/plan/context.ts); the engine never sees a display
+ * name like "Red". The engine suite used to run on a display-form default map instead, which is how a
+ * literal "White" in the cascade passed 258 green tests while violating copy_color_band_fkey at commit
+ * (UIL-012). Feed THIS, so a display literal used as a band value is a visible mismatch here too.
+ */
+export const TYPE_COLOR_MAP_ROWS: readonly { card_type: string; band: string }[] = [
+  { card_type: "Fire", band: "red" },
+  { card_type: "Fighting", band: "orange" },
+  { card_type: "Lightning", band: "yellow" },
+  { card_type: "Dragon", band: "olive" },
+  { card_type: "Grass", band: "green" },
+  { card_type: "Darkness", band: "dark_blue" },
+  { card_type: "Water", band: "light_blue" },
+  { card_type: "Psychic", band: "purple" },
+  { card_type: "Fairy", band: "pink" },
+  { card_type: "Colorless", band: "white" },
+  { card_type: "Metal", band: "white" },
+  { card_type: "Trainer", band: "white" },
+  { card_type: "Supporter", band: "white" },
+  { card_type: "Item", band: "white" },
+];
+
+/** Built exactly as `loadPlanContext` builds `typeColorMap` from those rows. */
+export const KEY_FORM_TYPE_COLOR_MAP: Record<string, string> = (() => {
+  const map: Record<string, string> = {};
+  for (const t of TYPE_COLOR_MAP_ROWS) map[t.card_type] = t.band;
+  return map;
+})();
+
+/** The `color_band` keys, in rainbow order — what `assertBandConfig` checks the map against. */
+export const BAND_KEYS: readonly string[] = [
+  "red",
+  "orange",
+  "yellow",
+  "olive",
+  "green",
+  "dark_blue",
+  "light_blue",
+  "purple",
+  "pink",
+  "white",
+];

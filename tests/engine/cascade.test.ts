@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_TYPE_COLOR_MAP } from "@/lib/engine/bands";
 import { placeCard, type EngineContext } from "@/lib/engine/cascade";
 import type {
   Binder,
@@ -30,9 +29,11 @@ import {
   VAPOREON_SV035_134,
   VIBRAVA_XY3_75,
   VIBRAVA_XY5_109,
+  KEY_FORM_TYPE_COLOR_MAP,
 } from "./fixtures";
 
-const MAP = DEFAULT_TYPE_COLOR_MAP;
+// Key-form, as production feeds it (UIL-013) — see fixtures.ts.
+const MAP = KEY_FORM_TYPE_COLOR_MAP;
 
 const B1: Binder = {
   id: "B1",
@@ -81,7 +82,7 @@ const ownedCharmanderFront: OwnedCopy = {
   role: "shelved",
   binderId: "B1",
   binderHalf: "front",
-  colorBand: "Red",
+  colorBand: "red",
   lineSlotId: null,
 };
 
@@ -99,7 +100,7 @@ describe("cascade worked example 1: Charmeleon OBF-027 → capped Fire line", ()
     expect(res.step).toBe("line-new");
     expect(res.target).toMatchObject({
       kind: "back-half-line",
-      band: "Red",
+      band: "red",
       binderId: "B1",
       lineId: "new",
     });
@@ -124,7 +125,7 @@ describe("cascade worked example 2: a second, different-art Charmeleon → front
   const fireLine: EvolutionLine = {
     id: "line-fire-charmander",
     rootDexId: 4,
-    colorBand: "Red",
+    colorBand: "red",
     binderId: "B1",
     status: "capped",
     slots: [
@@ -161,7 +162,7 @@ describe("cascade worked example 2: a second, different-art Charmeleon → front
   it("routes the extra copy to the front half because the Stage-1 slot is already filled", () => {
     const res = placeCard(incoming(CHARMELEON_SV035_005), ctx({ lines: [fireLine] }));
     expect(res.step).toBe("line-existing");
-    expect(res.target).toMatchObject({ kind: "front-half", band: "Red" });
+    expect(res.target).toMatchObject({ kind: "front-half", band: "red" });
     expect(res.newLine ?? null).toBeNull();
   });
 });
@@ -174,7 +175,7 @@ describe("cascade worked example 3: Vaporeon non-viable → Light blue front hal
 
   it("goes to the front half in the Light blue (Water) band, with no line created", () => {
     expect(res.step).toBe("line-nonviable");
-    expect(res.target).toMatchObject({ kind: "front-half", band: "Light blue" });
+    expect(res.target).toMatchObject({ kind: "front-half", band: "light_blue" });
     expect(res.newLine ?? null).toBeNull();
   });
 });
@@ -192,7 +193,7 @@ describe("cascade worked example 4: collection-claimed Charmeleon → specialty,
   const openFireLine: EvolutionLine = {
     id: "line-fire-charmander",
     rootDexId: 4,
-    colorBand: "Red",
+    colorBand: "red",
     binderId: "B1",
     status: "open",
     slots: [
@@ -258,7 +259,7 @@ describe("cascade invariants", () => {
       ctx({ catalog: [SCYTHER_SV035_123, SCIZOR_SV03_141] }),
     );
     expect(res.step).toBe("line-nonviable");
-    expect(res.target).toMatchObject({ kind: "front-half", band: "White" }); // Metal → White
+    expect(res.target).toMatchObject({ kind: "front-half", band: "white" }); // Metal → White
     expect(res.newLine ?? null).toBeNull(); // terminated line has no page → nothing in the back half
   });
 
@@ -266,7 +267,7 @@ describe("cascade invariants", () => {
     const cat = [TRAPINCH_XY5_82, VIBRAVA_XY5_109, FLYGON_XY5_110, VIBRAVA_XY3_75, FLYGON_XY3_76];
     const res = placeCard(incoming(FLYGON_XY5_110, "normal", "inc-flygon"), ctx({ catalog: cat }));
     expect(res.step).toBe("line-new");
-    expect(res.newLine?.colorBand).toBe("Olive");
+    expect(res.newLine?.colorBand).toBe("olive");
     expect(res.newLine?.slots).toHaveLength(3); // no invented Stage-3 (Flygon is the top)
     expect(res.newLine?.slots.map((s) => s.state)).toEqual(["block", "placeholder", "filled"]);
     expect(res.proposals?.some((p) => p.kind === "root-block")).toBe(true);
@@ -286,7 +287,7 @@ describe("cascade invariants", () => {
       role: "shelved",
       binderId: "B1",
       binderHalf: "back",
-      colorBand: "Red",
+      colorBand: "red",
       lineSlotId: "slot-root",
     };
     const res = placeCard(incoming(CHARMANDER_SV03_026, "holo"), ctx({ owned: [owned] }));
@@ -299,7 +300,7 @@ describe("cascade invariants", () => {
   it("a Trainer routes to the front-half White band (step 6)", () => {
     const res = placeCard(incoming(NEST_BALL_SV01_181), ctx({ catalog: [NEST_BALL_SV01_181] }));
     expect(res.step).toBe("trainer");
-    expect(res.target).toMatchObject({ kind: "front-half", band: "White" });
+    expect(res.target).toMatchObject({ kind: "front-half", band: "white" });
   });
 
   it("every card gets a destination — the cascade is total", () => {

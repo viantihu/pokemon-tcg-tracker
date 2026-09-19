@@ -17,15 +17,17 @@
  * detection above the class check exposes specialty cards to a branch that never saw them before.
  */
 import { describe, expect, it } from "vitest";
-import { DEFAULT_TYPE_COLOR_MAP, placeCard, type Binder, type EngineContext } from "@/lib/engine";
+import { placeCard, type Binder, type EngineContext } from "@/lib/engine";
 import {
   CHARIZARD_EX_SV035_006,
   CHARIZARD_EX_SV035_183,
   CHARMANDER_SV03_026,
   CHARMELEON_SV03_027,
+  KEY_FORM_TYPE_COLOR_MAP,
 } from "./fixtures";
 
-const MAP = DEFAULT_TYPE_COLOR_MAP;
+// Key-form, as production feeds it (UIL-013) — see fixtures.ts.
+const MAP = KEY_FORM_TYPE_COLOR_MAP;
 const B1: Binder = {
   id: "B1",
   name: "Binder 1",

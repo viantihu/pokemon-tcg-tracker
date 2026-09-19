@@ -16,7 +16,7 @@ function copy(over: Partial<OwnedCopy> & Pick<OwnedCopy, "id" | "card">): OwnedC
     role: "shelved",
     binderId: "B1",
     binderHalf: "front",
-    colorBand: "Red",
+    colorBand: "red",
     lineSlotId: null,
     ...over,
   };
@@ -66,7 +66,7 @@ describe("duplicate: holo-swap (cascade step 3)", () => {
         role: "shelved",
         binderId: "B2",
         binderHalf: "back",
-        colorBand: "Red",
+        colorBand: "red",
         lineSlotId: "slot-charmander",
       }),
     ];
@@ -76,7 +76,7 @@ describe("duplicate: holo-swap (cascade step 3)", () => {
     expect(out.swap.incomingInherits).toEqual({
       binderId: "B2",
       binderHalf: "back",
-      colorBand: "Red",
+      colorBand: "red",
       lineSlotId: "slot-charmander", // inherits the line slot too
     });
     expect(out.swap.displacedCopyId).toBe("normal-copy"); // the normal is displaced (→ bulk)
