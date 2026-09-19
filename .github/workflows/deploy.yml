@@ -37,9 +37,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # DEPLOY_ENABLED is the kill switch for a workflow that touches Production, and it
+  # must stay one: 'false' skips every job below deliberately and quietly. What must
+  # NOT be quiet is the variable being ABSENT or misspelled — before this job existed,
+  # an unset var made every job skip and the run report GREEN having deployed nothing
+  # (docs/root-cause-analysis.md RC-6b: "a skipped job is green"). Now the only way to
+  # get a green Deploy that did nothing is to have written the word 'false' into the
+  # repo variable on purpose. Repo-level, not environment-scoped, because job `if:`s
+  # are evaluated before any environment loads (see NOTE above).
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: DEPLOY_ENABLED must be exactly 'true' or 'false'
+        env:
+          DEPLOY_ENABLED: ${{ vars.DEPLOY_ENABLED }}
+        run: |
+          set -euo pipefail
+          case "${DEPLOY_ENABLED:-}" in
+            true)  echo "DEPLOY_ENABLED=true: migrate, acceptance and smoke will run." ;;
+            false) echo "::warning::DEPLOY_ENABLED=false: deploy DELIBERATELY disabled. migrate, acceptance and smoke are skipped on purpose. Nothing was deployed by this run." ;;
+            "")    echo "::error::vars.DEPLOY_ENABLED is not set on this repository. Every deploy job would skip and this run would report green having deployed nothing. Set the REPO-level variable to 'true' to deploy, or to 'false' to switch deploys off on purpose." ; exit 1 ;;
+            *)     echo "::error::vars.DEPLOY_ENABLED is '${DEPLOY_ENABLED}', which is neither 'true' nor 'false'. Refusing to guess: every deploy job would skip on this value and the run would report green. Fix the repo variable." ; exit 1 ;;
+          esac
+
   migrate:
-    # Skips cleanly until deployment is wired, so pushes don't show a red deploy
-    # before Supabase/Vercel exist. Repo-level flag (see NOTE above).
+    # Skips cleanly when the kill switch is 'false' (preflight above guarantees the
+    # variable is one of the two legal values). Repo-level flag (see NOTE above).
+    needs: preflight
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'production' || 'testing' }}
