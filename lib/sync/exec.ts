@@ -19,6 +19,7 @@ import {
   presenceGroupRepo,
   unresolvedEntryRepo,
 } from "@/lib/repo";
+import { releaseSlotOps } from "@/lib/line/move";
 import { parseDexId } from "./resolve";
 import { applyOverrides, type SyncOverrides } from "./apply";
 import type { SyncPlanBundle } from "./pipeline";
@@ -252,11 +253,11 @@ export async function executeApply(
       const slot = await lineSlotRepo.getByPk(db, copy.line_slot_id);
       if (slot) {
         slotReverts.push({ id: slot.id, state: slot.state, copy_id: slot.copy_id });
-        ops.push({
-          op: "update_slot",
-          id: slot.id,
-          patch: { state: "placeholder", copy_id: null },
-        });
+        // Through the ONE slot-release path (UIL-062), not an inline update_slot: a slot the export
+        // vacates is as new a situation as one a move vacates, so UIL-078's "already answered" marker
+        // must be cleared here too or the slot would never ask again. No line demotion is requested —
+        // a sync retire has never demoted a `complete` line, and this change does not start to.
+        ops.push(...releaseSlotOps(slot.id, null));
       }
     }
     ops.push({ op: "delete_copy", id: copy.id });

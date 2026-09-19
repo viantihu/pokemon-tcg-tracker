@@ -22,6 +22,8 @@ import {
   moveNameLookups,
   releaseSlotOps,
 } from "@/lib/line";
+import { executeApply, type SyncPlanBundle } from "@/lib/sync";
+import type { ReconcilePlan } from "@/lib/sync/reconcile";
 import { asOwner, asSuperuser, freshRpcDb, OWNER, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -251,6 +253,80 @@ describe("UIL-078 · a released slot forgets its resolution", () => {
       resolved_decision_kind: null,
       resolved_decision_choice: null,
     });
+    await asOwner(db);
+    expect(await decisionIds()).toContain(`${LINE}:ex-only-cap:0`);
+  });
+
+  /** A sync plan that retires exactly one copy — what the reconciler emits when the export drops it. */
+  function retireBundle(copyId: string, catalogCardId: string): SyncPlanBundle {
+    return {
+      mode: "import",
+      plan: {
+        creates: [],
+        retires: [
+          {
+            kind: "retire",
+            copyId,
+            catalogCardId,
+            dexVariantRaw: "",
+            consequence: "line-slot-freed",
+            needsReview: false,
+          },
+        ],
+        variantUpdates: [],
+        unchanged: 0,
+        unresolved: [],
+        fastPath: false,
+        diff: { entries: [], migrations: [] } as unknown as ReconcilePlan["diff"],
+      },
+      current: [],
+      queue: { parks: [], archiveEntryIds: [], dropEntryIds: [], stillWaiting: 0 },
+      counts: {
+        creates: 0,
+        retires: 1,
+        variantUpdates: 0,
+        parks: 0,
+        drops: 0,
+        promotions: 0,
+        dedupeUpdates: 0,
+        unchanged: 0,
+      },
+    };
+  }
+
+  /**
+   * The third door: a sync RETIRE (the export no longer lists the card) frees the slot too, through
+   * lib/sync/exec.ts rather than the Line move. It must go through the same `releaseSlotOps`, or a slot
+   * vacated this way keeps its stale marker and never asks again.
+   */
+  it("a slot vacated by a sync retire asks afresh", async () => {
+    const client = pgliteClient(db);
+    await asOwner(db);
+    await applyDecision(client, OWNER, `${LINE}:ex-only-cap:0`, "confirm-cap");
+    expect(await decisionIds()).not.toContain(`${LINE}:ex-only-cap:0`);
+
+    await asSuperuser(db);
+    await db.exec(`
+      insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band, line_slot_id)
+        values ('${COPY}', '${OWNER}', 'refillmon-ex-a', 'shelved', '${B1}', 'back', 'red', '${SLOT}');
+      update line_slot set state = 'filled', copy_id = '${COPY}' where id = '${SLOT}';
+    `);
+    await asOwner(db);
+
+    await executeApply(client, retireBundle(COPY, "refillmon-ex-a"));
+
+    await asSuperuser(db);
+    const slot = await db.query<{
+      state: string;
+      copy_id: string | null;
+      resolved_decision_kind: string | null;
+    }>(`select state, copy_id, resolved_decision_kind from line_slot where id = $1`, [SLOT]);
+    expect(slot.rows[0]).toEqual({
+      state: "placeholder",
+      copy_id: null,
+      resolved_decision_kind: null,
+    });
+    expect((await db.query<{ n: number }>(`select count(*)::int n from copy`)).rows[0].n).toBe(0);
     await asOwner(db);
     expect(await decisionIds()).toContain(`${LINE}:ex-only-cap:0`);
   });
