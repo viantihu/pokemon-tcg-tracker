@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_TYPE_COLOR_MAP } from "@/lib/engine/bands";
 import { buildChain, generateSlots, rankAlternates, testViability } from "@/lib/engine/line";
+// `Band` is still the DISPLAY-name union, so a key-form band is cast here exactly as production casts
+// it (lib/line/load.ts `bandKey as Band`). Closing that gap is the branded-type work parked as RC-1.
+import type { Band } from "@/lib/engine/bands";
 import type { IncomingCard, OwnedCopy } from "@/lib/engine/types";
 import {
   CHARIZARD_EX_SV03_125_DARK,
@@ -22,9 +24,11 @@ import {
   VAPOREON_SV035_134,
   VIBRAVA_XY3_75,
   VIBRAVA_XY5_109,
+  KEY_FORM_TYPE_COLOR_MAP,
 } from "./fixtures";
 
-const MAP = DEFAULT_TYPE_COLOR_MAP;
+// Key-form, as production feeds it (UIL-013) — see fixtures.ts.
+const MAP = KEY_FORM_TYPE_COLOR_MAP;
 
 const incoming = (card: IncomingCard["card"], id = "inc"): IncomingCard => ({
   id,
@@ -69,7 +73,7 @@ describe("line: viability is a ≥2 same-colour-member threshold (system-design 
     const v = testViability(incoming(CHARMELEON_SV03_027), [], CHARMANDER_CATALOG, MAP);
     expect(v.viable).toBe(true);
     expect(v.members).toBe(3);
-    expect(v.band).toBe("Red");
+    expect(v.band).toBe("red");
   });
 
   it("Vaporeon is NOT viable: Eevee is Colorless, Vaporeon does not evolve (1 member)", () => {
@@ -81,7 +85,7 @@ describe("line: viability is a ≥2 same-colour-member threshold (system-design 
     );
     expect(v.viable).toBe(false);
     expect(v.members).toBe(1);
-    expect(v.band).toBe("Light blue");
+    expect(v.band).toBe("light_blue");
     expect(v.blockedStages).toContain(133); // Eevee has no Water printing
   });
 
@@ -119,7 +123,7 @@ describe("line: slot generation (system-design §6 table)", () => {
       role: "shelved",
       binderId: "B1",
       binderHalf: "front",
-      colorBand: "Red",
+      colorBand: "red",
       lineSlotId: null,
     };
     const v = testViability(
@@ -188,7 +192,7 @@ describe("line: slot generation (system-design §6 table)", () => {
 
 describe("line: alternates ranked by market price ascending, standard class, physical only", () => {
   it("ranks Fire Charmeleon printings cheapest-first and excludes the digital-only card", () => {
-    const alt = rankAlternates(5, "Red", CHARMANDER_CATALOG, MAP);
+    const alt = rankAlternates(5, "red" as Band, CHARMANDER_CATALOG, MAP);
     expect(alt.willLiveInSpecialty).toBe(false);
     // sv03-027 (0.30) < sv03.5-005 (0.45) < swsh4-24 (0.60) < xy12-10 (0.90); A1-034 is digital-only.
     expect(alt.chosenCatalogCardId).toBe("sv03-027");
@@ -197,13 +201,13 @@ describe("line: alternates ranked by market price ascending, standard class, phy
   });
 
   it("supports excluding a specific printing (used by the collection-claim path)", () => {
-    const alt = rankAlternates(5, "Red", CHARMANDER_CATALOG, MAP, undefined, ["xy12-10"]);
+    const alt = rankAlternates(5, "red" as Band, CHARMANDER_CATALOG, MAP, undefined, ["xy12-10"]);
     expect(alt.chosenCatalogCardId).toBe("sv03-027");
     expect(alt.alternateCatalogCardIds).toEqual(["sv03.5-005", "swsh4-24"]);
   });
 
   it("uses specialty printings only when no standard printing exists (ex-only cap)", () => {
-    const alt = rankAlternates(6, "Red", CHARMANDER_CATALOG, MAP);
+    const alt = rankAlternates(6, "red" as Band, CHARMANDER_CATALOG, MAP);
     expect(alt.willLiveInSpecialty).toBe(true);
     expect(alt.chosenCatalogCardId).toBe("sv03.5-006"); // 8.0 < 25.0
     expect(alt.alternateCatalogCardIds).toEqual(["sv03.5-183"]);

@@ -7,8 +7,8 @@
  * three stages already filled.
  *
  * Reproduces her real species (Dratini → Dragonair, Dragon type) and her real band (Olive) — but in
- * DB-KEY space (`Dragon: "olive"`), not the engine's own display-space DEFAULT_TYPE_COLOR_MAP
- * (`Dragon: "Olive"`) the rest of tests/engine/cascade.test.ts uses. Production feeds the cascade
+ * DB-KEY space (`Dragon: "olive"`), the only vocabulary production feeds the cascade (UIL-013 moved
+ * the rest of tests/engine onto the same key-form map; see fixtures.ts). Production feeds the cascade
  * key-form bands (UIL-012's lesson: "engine tests use display bands" hid a band bug behind 374 green
  * tests) — a band-space bug here would hide the same way if this test used display-space too.
  */

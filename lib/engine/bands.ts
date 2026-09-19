@@ -46,7 +46,7 @@ const WHITE_ABSORBED = ["Colorless", "Metal", "Trainer", "Supporter", "Item"] as
  * `"White"` returned into DB-key space is not a `color_band` row, so a stored `copy.color_band`
  * violates `copy_color_band_fkey` at commit. White absorbs Colorless/Metal/Trainer/Supporter/Item,
  * so the map's own entry for any of those names the white band in whatever space the map was loaded
- * — DB keys (`"white"`) in production, display names (`"White"`) in the pure default. Only when the
+ * — DB keys (`"white"`) in production, display names (`"White"`) in a hand-built display-space map. Only when the
  * map cannot resolve white at all (empty/broken config, surfaced separately by `assertBandConfig`)
  * do we fall back to the `WHITE` display constant.
  */
@@ -58,29 +58,14 @@ export function whiteKey(map: TypeColorMap): Band {
   return WHITE;
 }
 
-/**
- * The confirmed energy-type → band table (system-design §4). Callers normally inject their own map
- * (loaded from `type_color_map`); this is the verified default used when none is supplied and in
- * tests.
+/*
+ * There is deliberately NO default TypeColorMap here any more (UIL-013). The one that lived here was in
+ * display-name space (`Fire: "Red"`), a vocabulary production never uses — the engine is always fed the
+ * DB's `type_color_map` rows, key-form (`Fire: "red"`), by lib/plan/context.ts — and its only readers
+ * were the engine tests, which is how a display literal used as a band value passed a green suite
+ * while violating `copy_color_band_fkey` at commit (UIL-012). Tests build their map from the same
+ * rows migration 0003 ships: tests/engine/fixtures.ts `KEY_FORM_TYPE_COLOR_MAP`.
  */
-export const DEFAULT_TYPE_COLOR_MAP: TypeColorMap = {
-  Fire: "Red",
-  Fighting: "Orange",
-  Lightning: "Yellow",
-  Dragon: "Olive",
-  Grass: "Green",
-  Darkness: "Dark blue",
-  Water: "Light blue",
-  Psychic: "Purple",
-  Fairy: "Pink",
-  // White absorbs all of these:
-  Colorless: "White",
-  Metal: "White",
-  Trainer: "White",
-  Supporter: "White",
-  Item: "White",
-};
-
 /**
  * The single type used to look a card up in the `TypeColorMap`.
  *
