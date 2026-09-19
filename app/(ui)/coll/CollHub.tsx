@@ -24,6 +24,7 @@ import {
 } from "@/lib/surfaces";
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
+import { cardCaption } from "../_components/CardLightbox";
 import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { MoveOverlay } from "../_components/MoveOverlay";
 import type { LookupCard } from "../plan/plan-types";
@@ -601,7 +602,16 @@ export function CollectionCard(props: {
           <div className="cgrid">
             {c.cards.map((k) => (
               <div key={k.tcgdexId} className={"ccard" + (k.owned ? "" : " need")}>
-                <CardFace name={k.name} imageUrl={k.imageUrl} size="m" />
+                <CardFace
+                  name={k.name}
+                  imageUrl={k.imageUrl}
+                  size="m"
+                  zoomable
+                  caption={cardCaption(
+                    k.setName,
+                    formatCollectorNumber(k.localId, k.setCardCountOfficial),
+                  )}
+                />
                 <div className="cn u">{k.name}</div>
                 {formatCollectorNumber(k.localId, k.setCardCountOfficial) ? (
                   <div className="cno">
@@ -647,7 +657,16 @@ export function CollectionCard(props: {
             <div className="cgrid">
               {c.cards.map((k) => (
                 <div key={k.tcgdexId} className="ccard">
-                  <CardFace name={k.name} imageUrl={k.imageUrl} size="m" />
+                  <CardFace
+                    name={k.name}
+                    imageUrl={k.imageUrl}
+                    size="m"
+                    zoomable
+                    caption={cardCaption(
+                      k.setName,
+                      formatCollectorNumber(k.localId, k.setCardCountOfficial),
+                    )}
+                  />
                   <div className="cn u">{k.name}</div>
                   {formatCollectorNumber(k.localId, k.setCardCountOfficial) ? (
                     <div className="cno">
@@ -1157,7 +1176,16 @@ function LogCardModal(props: {
           {pick && (
             <div className="cerow own" style={{ marginTop: 10 }}>
               <span className="cet">
-                <CardFace name={pick.name} imageUrl={pick.imageUrl} size="s" />
+                <CardFace
+                  name={pick.name}
+                  imageUrl={pick.imageUrl}
+                  size="s"
+                  zoomable
+                  caption={cardCaption(
+                    pick.setName,
+                    formatCollectorNumber(pick.localId, pick.setCardCountOfficial),
+                  )}
+                />
               </span>
               <span className="cei">
                 <b>{pick.name}</b>

@@ -17,6 +17,7 @@ import { useState } from "react";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
 import type { LookupAnswer } from "@/lib/surfaces";
 import { CardFace } from "../_components/CardFace";
+import { cardCaption } from "../_components/CardLightbox";
 import { CardLookup } from "../_components/CardLookup";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { bandMeta } from "../_components/plan-meta";
@@ -203,7 +204,13 @@ export function AnswerPanel({
       </div>
 
       <div className="hand" style={{ padding: "12px 13px 0" }}>
-        <CardFace name={answer.card.name} imageUrl={answer.card.imageUrl} size="m" />
+        <CardFace
+          name={answer.card.name}
+          imageUrl={answer.card.imageUrl}
+          size="m"
+          zoomable
+          caption={cardCaption(answer.card.setName, answer.card.localId)}
+        />
         <div style={{ minWidth: 0 }}>
           <div className="nm">{answer.card.name}</div>
           {answer.card.localId ? (
