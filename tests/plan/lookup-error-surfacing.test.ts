@@ -6,7 +6,7 @@
  * local mirror." That tells her a card does not exist when the truth is that nothing was asked — and on
  * the night the database is down it is the single most misleading thing the app could say.
  *
- * The fix is a throw rather than a result union, because `CardLookup`'s `search` prop is
+ * The fix is a throw rather than a result union, because `CardResultsGrid`'s `search` prop is
  * `(q) => Promise<LookupCard[]>` and five screens across three owners inject their own implementation.
  * Widening the type would force edits into files this change has no business touching; throwing keeps
  * the signature identical and lets the shared component separate the two cases for every caller at once.
@@ -17,13 +17,13 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { CardLookup } from "@/app/(ui)/_components/CardLookup";
+import { CardResultsGrid } from "@/app/(ui)/_components/CardResultsGrid";
 import type { LookupCard } from "@/app/(ui)/plan/plan-types";
 
 describe("UIL-035 · an empty result means 'asked and found nothing'", () => {
   it("renders the ordinary no-match copy when search resolves empty", () => {
     const html = renderToStaticMarkup(
-      createElement(CardLookup, { search: async () => [] as LookupCard[], onPick: () => {} }),
+      createElement(CardResultsGrid, { search: async () => [] as LookupCard[], onPick: () => {} }),
     );
     // The dropdown only exists once she has typed 2+ chars, so the initial render shows the input only.
     expect(html).toContain("lookup");
@@ -32,7 +32,7 @@ describe("UIL-035 · an empty result means 'asked and found nothing'", () => {
 
   it("does not render the failure copy before anything has failed", () => {
     const html = renderToStaticMarkup(
-      createElement(CardLookup, {
+      createElement(CardResultsGrid, {
         search: async () => [{ tcgdexId: "sv03-026" } as LookupCard],
         onPick: () => {},
       }),
@@ -48,7 +48,7 @@ describe("UIL-035 · the copy itself distinguishes the two cases", () => {
    * stops the distinction being quietly collapsed back into one message later — which is exactly how
    * this bug existed in the first place.
    */
-  const src = new URL("../../app/(ui)/_components/CardLookup.tsx", import.meta.url);
+  const src = new URL("../../app/(ui)/_components/CardResultsGrid.tsx", import.meta.url);
 
   it("keeps a failure message that never claims the card is missing", async () => {
     const { readFileSync } = await import("node:fs");

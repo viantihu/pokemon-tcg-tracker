@@ -65,7 +65,7 @@ function toLookupCard(r: Row<"catalog_card">): LookupCard {
  * "No match in the local mirror" — telling her the card does not exist when the truth was that nothing
  * was asked. During an outage that is the single most misleading thing the app could say.
  *
- * Deliberately a throw and not a result union: `CardLookup`'s `search` prop is
+ * Deliberately a throw and not a result union: `CardResultsGrid`'s `search` prop is
  * `(q) => Promise<LookupCard[]>` and five screens across three different owners pass their own
  * implementation into it. Widening that type would force edits in files this change has no business
  * touching, whereas throwing keeps the signature identical and lets the shared component distinguish
