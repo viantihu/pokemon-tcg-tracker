@@ -29,27 +29,6 @@ const EXEC = readFileSync(path.join(process.cwd(), "lib/sync/exec.ts"), "utf8");
 const ACTIONS = readFileSync(path.join(process.cwd(), "app/(ui)/sync/actions.ts"), "utf8");
 
 describe("UIL-047 C3 · the alias guard", () => {
-  it("refuses to learn an alias for a non-English entry", () => {
-    // The guard is a positive check on `locale !== "en"`, ahead of the upsert.
-    expect(EXEC).toContain('if (locale !== "en")');
-    const guardIdx = EXEC.indexOf('if (locale !== "en")');
-    const upsertIdx = EXEC.indexOf('op: "upsert_set_alias"');
-    expect(guardIdx).toBeGreaterThan(-1);
-    expect(upsertIdx).toBeGreaterThan(-1);
-    // The guard precedes the upsert, so a non-English entry can never reach it.
-    expect(guardIdx).toBeLessThan(upsertIdx);
-  });
-
-  it("still resolves the entry — the pin is her decision and is always honoured", () => {
-    // The skip is scoped to the ALIAS only; nothing about it aborts the match.
-    const block = EXEC.slice(
-      EXEC.indexOf('if (locale !== "en")'),
-      EXEC.indexOf("} else if (rawCode"),
-    );
-    expect(block).not.toContain("throw");
-    expect(block).not.toContain("return");
-  });
-
   /**
    * The two cases below used to be source-text assertions on exact lines of `manualMatch`; they broke
    * the moment the match ops moved into a shared builder (0015, UIL-060) without any behaviour
@@ -65,11 +44,14 @@ describe("UIL-047 C3 · the alias guard", () => {
     `);
   beforeEach(async () => {
     db = await freshRpcDb();
-    await db.exec(
-      `insert into catalog_card (tcgdex_id, name, set_id, set_name, local_id) values ('swshp-001', 'Promo', 'swshp', 'SWSH Promos', '001')`,
-    );
+    await db.exec(`
+      insert into catalog_card (tcgdex_id, name, set_id, set_name, local_id, locale) values
+        ('swshp-001', 'Promo', 'swshp', 'SWSH Promos', '001', 'en'),
+        ('ja:s12a-083', 'ピカチュウ', 'ja:s12a', 'VSTARユニバース', '083', 'ja');
+    `);
     await seed("e0000000-0000-0000-0000-0000000000a1", "jpn_m6-14", "Japanese");
     await seed("e0000000-0000-0000-0000-0000000000a2", "ba22e-14", "English");
+    await seed("e0000000-0000-0000-0000-0000000000a3", "jpn_s12a-83", "Japanese");
     await asOwner(db);
   });
   afterEach(async () => {
@@ -85,6 +67,9 @@ describe("UIL-047 C3 · the alias guard", () => {
     );
     expect(res.learnedAlias).toBeNull();
     expect(res.aliasSkippedReason).toMatch(/was not learned/);
+    expect(res.aliasSkippedReason).toMatch(
+      /the entry is ja and the card you matched is an en printing/,
+    );
     expect(res.created).toBe(1); // the pin itself is honoured
     expect((await db.query(`select * from set_alias`)).rows).toEqual([]);
     expect(
@@ -94,6 +79,19 @@ describe("UIL-047 C3 · the alias guard", () => {
         )
       ).rows,
     ).toEqual([{ status: "RESOLVED" }]);
+  });
+
+  it("a Japanese entry matched to a JAPANESE printing learns (ja, code) → ja:set, like English does (UIL-047 / 0016)", async () => {
+    const res = await manualMatch(
+      pgliteClient(db),
+      "e0000000-0000-0000-0000-0000000000a3",
+      "ja:s12a-083",
+    );
+    expect(res.learnedAlias).toEqual({ locale: "ja", dexCode: "s12a", tcgdexSetId: "ja:s12a" });
+    expect(res.aliasSkippedReason).toBeNull();
+    expect(
+      (await db.query(`select locale, dex_code, tcgdex_set_id, source from set_alias`)).rows,
+    ).toEqual([{ locale: "ja", dex_code: "s12a", tcgdex_set_id: "ja:s12a", source: "manual" }]);
   });
 
   it("keeps learning aliases for English entries, which is the case that works", async () => {

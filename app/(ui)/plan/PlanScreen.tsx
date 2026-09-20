@@ -29,6 +29,7 @@ import type { LineJoinOptions } from "@/lib/line/join-options";
 // Leaf import of the pure move module (its only dependency is ./types; the `WriteOp` it names is a
 // type-only import), so bringing `describeMove` into the browser bundle drags in no server code.
 import { describeMove, moveNameLookups, type MoveNameLookups } from "@/lib/line/move";
+import { localeTag, stripLocaleNamespace } from "@/lib/catalog/locale";
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
 import { cardCaption } from "../_components/CardLightbox";
@@ -1654,7 +1655,12 @@ export function Spotlight(props: {
             </div>
           ) : null}
           <div className="sb u">
-            {(item.setId ?? "").toString()}
+            {stripLocaleNamespace(item.setId)}
+            {localeTag(item.tcgdexId) ? (
+              <span className="cpill u" style={{ marginLeft: 6 }}>
+                {localeTag(item.tcgdexId)}
+              </span>
+            ) : null}
             <br />
             {item.stage ?? "—"} · {item.variant}
           </div>

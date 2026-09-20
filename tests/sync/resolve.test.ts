@@ -63,7 +63,8 @@ describe("resolveSetId", () => {
 
   it("passes unknown set codes through unchanged for name-based resolution", () => {
     expect(resolveSetId("en", "sv10")).toEqual({ setId: "sv10", aliased: false });
-    expect(resolveSetId("ja", "mc")).toEqual({ setId: "mc", aliased: false });
+    // UIL-047: a Japanese passthrough is namespaced into the ja catalog space (0016).
+    expect(resolveSetId("ja", "mc")).toEqual({ setId: "ja:mc", aliased: false });
   });
 });
 
@@ -89,7 +90,7 @@ describe("resolveDexId (end-to-end deterministic resolve)", () => {
   it("resolves a Japanese row to the ja locale with padded candidate", () => {
     expect(resolveDexId({ Id: "jpn_sv11w-2", Locale: "Japanese" })).toEqual({
       locale: "ja",
-      setId: "sv11w",
+      setId: "ja:sv11w", // UIL-047: the ja catalog space, never the English `sv11w`
       aliased: false,
       localIdCandidates: ["2", "002"],
     });

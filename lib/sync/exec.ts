@@ -22,6 +22,7 @@ import {
 } from "@/lib/repo";
 import { releaseSlotOps } from "@/lib/line/move";
 import { parseDexId, resolveDexId } from "./resolve";
+import { localeOfId, normalizeLocale } from "@/lib/catalog/locale";
 import { entryAsDexRow, loadAliasMap } from "./pipeline";
 import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
@@ -508,13 +509,19 @@ async function matchOps(
   let learnedAlias: ManualMatchResult["learnedAlias"] = null;
   let aliasSkippedReason: string | null = null;
   if (entry.reason === "UNKNOWN_SET") {
-    const locale = entry.locale === "ja" || entry.locale === "Japanese" ? "ja" : "en";
+    const locale = normalizeLocale(entry.locale);
+    const targetLocale = localeOfId(target.tcgdexId);
     const { rawCode } = parseDexId(entry.dex_id);
-    if (locale !== "en") {
+    if (locale !== targetLocale) {
+      // UIL-047 C3, refined for 0016 (Senior BA): the guard is a locale MISMATCH, not "non-English".
+      // A Japanese entry matched to a Japanese printing learns its set like English does; matched to
+      // an English printing it still does not, because that cross-locale alias is exactly the
+      // confident-wrong-match hazard C3 closed and a Japanese mirror does not remove it.
       aliasSkippedReason =
-        `This card is pinned, but the set was not learned: the entry is ${locale} and the catalog ` +
-        `holds only English printings, so remembering this set would make every other ${locale} card ` +
-        `from it match an English card with the same number. Those rows stay in the queue instead.`;
+        `This card is pinned, but the set was not learned: the entry is ${locale} and the card you ` +
+        `matched is an ${targetLocale} printing, so remembering this set would make every other ` +
+        `${locale} card from it match an ${targetLocale} card with the same number. Those rows stay ` +
+        `in the queue; match one to a ${locale} printing to teach the set.`;
     } else if (rawCode && target.setId) {
       ops.push({
         op: "upsert_set_alias",

@@ -1,3 +1,4 @@
+import { namespaceId, normalizeLocale } from "@/lib/catalog/locale";
 import type { DexRow, Locale, ResolvedDexId } from "./types";
 
 /**
@@ -29,7 +30,7 @@ export const SET_ALIAS_SEED: Readonly<Record<string, string>> = {
 };
 
 export function detectLocale(row: Pick<DexRow, "Locale">): Locale {
-  return row.Locale === "Japanese" ? "ja" : "en";
+  return normalizeLocale(row.Locale);
 }
 
 /** Split a Dex `Id` into its raw set code (jpn_ stripped) and localId. */
@@ -80,7 +81,11 @@ export function resolveSetId(
   alias: Readonly<Record<string, string>> = SET_ALIAS_SEED,
 ): { setId: string; aliased: boolean } {
   const hit = alias[`${locale}:${rawCode}`];
-  return hit ? { setId: hit, aliased: true } : { setId: rawCode, aliased: false };
+  // UIL-047: an alias target is a STORED set id (en bare, ja namespaced), so it is used as-is. A raw
+  // passthrough code is TCGdex's own, so for a non-en row it is namespaced into that locale's space —
+  // a Japanese `sv11w` must never look inside the English `sv11w`.
+  if (hit === undefined) return { setId: namespaceId(locale, rawCode), aliased: false };
+  return { setId: hit, aliased: true };
 }
 
 /** Full deterministic resolve of a Dex row's `Id` (§1.3, steps that need no catalog). */
