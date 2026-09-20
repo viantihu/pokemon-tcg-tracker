@@ -67,3 +67,38 @@ describe("UIL-070 · moveTargetFor threads the line-join lookup onto the Move pa
     ).toBeNull();
   });
 });
+
+describe("UIL-030 · moveTargetFor attaches the open block needs ONLY for a card the engine offered as a block", () => {
+  const NEEDS = [
+    {
+      lineId: "L1",
+      slotId: "S2",
+      binderId: "b1",
+      binderName: "Binder 1",
+      speciesLabel: "CHARMANDER LINE",
+      stage: "Stage2",
+      bandKey: "red",
+    },
+  ];
+
+  it("offered (offerBlockRepurpose true) + open needs → the card carries blockNeeds, so the panel shows its block section", () => {
+    const card = moveTargetFor({ ...ITEM, offerBlockRepurpose: true }, null, INITIAL, NEEDS);
+    expect(card.blockNeeds).toEqual(NEEDS);
+  });
+
+  it("NOT offered, even with open needs → no blockNeeds: a card the engine did not offer never sees the section", () => {
+    expect(
+      moveTargetFor({ ...ITEM, offerBlockRepurpose: false }, null, INITIAL, NEEDS).blockNeeds,
+    ).toBeUndefined();
+    expect(moveTargetFor(ITEM, null, INITIAL, NEEDS).blockNeeds).toBeUndefined(); // field absent = not offered
+  });
+
+  it("offered but no open needs (or none passed) → no blockNeeds either", () => {
+    expect(
+      moveTargetFor({ ...ITEM, offerBlockRepurpose: true }, null, INITIAL, []).blockNeeds,
+    ).toBeUndefined();
+    expect(
+      moveTargetFor({ ...ITEM, offerBlockRepurpose: true }, null, INITIAL).blockNeeds,
+    ).toBeUndefined();
+  });
+});
