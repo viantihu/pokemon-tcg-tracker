@@ -1,3 +1,4 @@
+import type { BlockNeedCandidate } from "@/lib/line/types";
 /**
  * Client/server shared shapes for the plan screen (dev-spec §5 M6). No directive — safe to import
  * from both the server actions and the client screen; contains only serializable data types.
@@ -54,6 +55,8 @@ export interface DraftCard {
 /** What `runHaulPlan` returns for rendering. */
 export interface RunPlanResult {
   groups: PlanBandGroup[];
+  /** UIL-030: open binder-block needs, for the Move panel when an item is offered as a block. */
+  blockNeeds?: BlockNeedCandidate[];
   /** Per-band card counts, in rainbow order — drives the band headers (incl. empty bands). */
   bands: { key: string; count: number }[];
   summary: { total: number; decisions: number; byAction: Record<string, number> };

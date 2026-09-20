@@ -141,3 +141,27 @@ describe("describeMove + moveDecisionReason", () => {
     expect(reason).toMatch(/bulk box/i);
   });
 });
+
+describe("UIL-030 · the block destination", () => {
+  const dest = { kind: "block", lineId: "L1", slotId: "S2", binderId: "b1" } as const;
+  it("places the copy as a role-'block' card in the line's binder back half, no band, no slot link", () => {
+    expect(placementForMove(dest)).toEqual({
+      role: "block",
+      binder_id: "b1",
+      binder_half: "back",
+      color_band: null,
+      line_slot_id: null,
+    });
+  });
+  it("is complete only with line, slot and binder", () => {
+    expect(isMoveDestinationComplete(dest)).toBe(true);
+    expect(isMoveDestinationComplete({ ...dest, slotId: "" })).toBe(false);
+    expect(isMoveDestinationComplete({ ...dest, binderId: "" })).toBe(false);
+  });
+  it("is described and audited as a binder block", () => {
+    expect(describeMove(dest, names)).toBe("Binder 1 · Back · Binder block");
+    expect(moveDecisionReason(dest, "Binder 1 · Back · Binder block")).toContain(
+      "a reserved pocket, as a repurposed binder block",
+    );
+  });
+});

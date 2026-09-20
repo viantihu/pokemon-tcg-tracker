@@ -47,6 +47,8 @@ export interface PlanItem {
   reason: string;
   /** True when the cascade emitted proposals (cap / block / termination / swap / collection-vs-line). */
   needsDecision: boolean;
+  /** UIL-030: a bulk-bound duplicate the engine offers as a repurposed binder block (an open need exists). */
+  offerBlockRepurpose?: boolean;
 }
 
 /** A planned card paired with its full cascade result — the commit input (not sent to the client). */

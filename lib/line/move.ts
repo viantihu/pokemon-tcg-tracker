@@ -65,7 +65,43 @@ export function placementForMove(dest: MoveDestination): CopyPlacementPatch {
         color_band: dest.band,
         line_slot_id: null,
       };
+    case "block":
+      // A binder block lives in the line's binder back half, in a reserved pocket run — no band, and
+      // not "in" the slot the way a filled card is (the slot stays 'block'; binder_block tracks it).
+      return {
+        role: "block",
+        binder_id: dest.binderId,
+        binder_half: "back",
+        color_band: null,
+        line_slot_id: null,
+      };
   }
+}
+
+/**
+ * The writes that make a moved/overridden copy a BINDER BLOCK (UIL-030), emitted right after its copy
+ * write by both `buildMoveOps` and the Haul Plan's `writeOverriddenCard` so the two cannot drift: the
+ * `binder_block` row (line-terminated, a repurposed duplicate, pointing at the copy and the line) that
+ * closes the open need, and the slot's note. Backfill writes the same row shape (lib/backfill/plan.ts).
+ */
+export function blockOps(
+  dest: Extract<MoveDestination, { kind: "block" }>,
+  copyId: string,
+): WriteOp[] {
+  return [
+    {
+      op: "insert_binder_block",
+      id: crypto.randomUUID(),
+      binder_id: dest.binderId,
+      half: "back",
+      pocket_count: 1,
+      purpose: "line-terminated",
+      material: "repurposedDuplicate",
+      copy_id: copyId,
+      line_id: dest.lineId,
+    },
+    { op: "update_slot", id: dest.slotId, patch: { note: "repurposed duplicate block" } },
+  ];
 }
 
 /** Human destination label for the audit reason + the "MOVED → …" tag. */
@@ -84,6 +120,8 @@ export function describeMove(dest: MoveDestination, names: MoveNameLookups): str
       const band = names.bandDisplay(dest.band);
       return `${binder} · ${half} · ${band}`;
     }
+    case "block":
+      return `${names.binderName(dest.binderId)} · Back · Binder block`;
   }
 }
 
@@ -170,7 +208,9 @@ export function moveDecisionReason(dest: MoveDestination, destLabel: string): st
       ? "the bulk box"
       : dest.kind === "collection"
         ? "a collection in the specialty binder"
-        : "a binder half + band";
+        : dest.kind === "block"
+          ? "a reserved pocket, as a repurposed binder block"
+          : "a binder half + band";
   return `Manual placement override (your call, no rule applied): moved to ${where} — ${destLabel}.`;
 }
 
@@ -186,6 +226,8 @@ export function isMoveDestinationComplete(dest: MoveDestination): boolean {
       // choice, the same way a specialty binder is incomplete without a collection.
       if (dest.half === "back" && !dest.lineJoin) return false;
       return Boolean(dest.binderId && dest.half && dest.band);
+    case "block":
+      return Boolean(dest.lineId && dest.slotId && dest.binderId);
   }
 }
 
@@ -396,6 +438,9 @@ export function buildMoveOps(plan: MovePlan): WriteOp[] {
   // Moving a card OFF a line reopens the slot it filled, and a line that was complete no longer is.
   // Shared with the Haul Plan's override path (UIL-062) so the two cannot drift.
   ops.push(...releaseSlotOps(plan.reopenSlotId, plan.demoteLineId));
+
+  // Becoming a binder block writes the block row that closes the open need (UIL-030).
+  if (plan.destination.kind === "block") ops.push(...blockOps(plan.destination, plan.copyId));
 
   // Landing in a collection means joining ITS chase list, or the card is orphaned there (UIL-022).
   const join = collectionTargetJoinOp(plan.destination, plan.catalogCardId);

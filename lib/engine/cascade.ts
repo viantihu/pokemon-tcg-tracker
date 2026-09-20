@@ -115,6 +115,8 @@ export interface CascadeResult {
   reason: string;
   resolvedBy: "auto";
   target: PlacementTarget;
+  /** UIL-030: a bulk-bound duplicate the engine offers as a repurposed binder block (an open need exists). */
+  offerBlockRepurpose?: boolean;
   /** Holo-swap payload (step 3): incoming inherits the shelved role, normal → bulk. */
   swap?: HoloSwap | null;
   displacedToBulkCopyId?: string | null;
@@ -324,6 +326,7 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
       reason: `Duplicate of a shelved copy (shared artwork or same printing); to the bulk box.${
         dup.offerBlockRepurpose ? " Offered as a repurposed binder block." : ""
       }`,
+      offerBlockRepurpose: dup.offerBlockRepurpose,
       target: { kind: "bulk" },
     };
   }

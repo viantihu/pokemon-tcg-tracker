@@ -41,6 +41,7 @@ import {
   wishlistItemRepo,
   type DbClient,
   type WriteOp,
+  binderBlockRepo,
 } from "@/lib/repo";
 import { resolveDecisionWrites } from "./decisions";
 import { buildScreenModel } from "./load";
@@ -90,6 +91,7 @@ export async function applyMove(
   }
 
   await assertCollectionDestinationLives(db, req.destination);
+  await assertBlockDestinationOpen(db, req.destination);
 
   // Moving a card OUT of a line reopens the slot it filled and demotes a completed line.
   let reopenSlotId: string | null = null;
@@ -185,6 +187,32 @@ export async function applyMove(
   });
 
   return { copyId: req.copyId, destinationLabel };
+}
+
+/**
+ * Refuse a block destination that is not an OPEN need (UIL-030): the slot must exist, be a block slot of
+ * that line, the line must live in that binder, and no line-terminated binder_block may back it yet —
+ * otherwise a stale tab could stack a second block on a pocket run that is already filled.
+ */
+async function assertBlockDestinationOpen(
+  db: DbClient,
+  destination: MoveDestination,
+): Promise<void> {
+  if (destination.kind !== "block") return;
+  const slot = await lineSlotRepo.getByPk(db, destination.slotId);
+  if (!slot || slot.line_id !== destination.lineId || slot.state !== "block") {
+    throw new Error("That block slot no longer exists — reload the screen and pick again.");
+  }
+  const line = await evolutionLineRepo.getByPk(db, destination.lineId);
+  if (!line || line.binder_id !== destination.binderId) {
+    throw new Error("That line is not in that binder any more — reload the screen and pick again.");
+  }
+  const blocks = await binderBlockRepo.list(db);
+  if (blocks.some((b) => b.line_id === destination.lineId && b.purpose === "line-terminated")) {
+    throw new Error(
+      "That line's block pocket is already filled — reload the screen and pick again.",
+    );
+  }
 }
 
 /**

@@ -129,6 +129,7 @@ export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
 
   return {
     groups,
+    blockNeeds: pc.blockNeeds,
     bands: groups.map((g) => ({ key: g.bandKey, count: g.count })),
     summary: {
       total: items.length,
