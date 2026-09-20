@@ -4629,7 +4629,21 @@ convenience, not a defect.
 ## UIL-060 — Let her create a stand-in catalog record for a card the external database doesn't have yet, and swap it for the real one once it arrives
 
 - **Reported:** 2026-09-14 (Karvi, retesting Sync)
-- **Status:** Open — **part 1 of 2 deployed; the form is in flight.** Part 1, migration `0015` and the
+- **Status:** **Fixed** — Half 1 complete, both parts deployed; Karvi's go-live blocker is closed as she
+  defined it ("a manual override is necessary"). **Part 2, the form:** PR
+  [#275](https://github.com/viantihu/pokemon-tcg-tracker/pull/275) MERGED to `develop` 2026-09-20 (squash
+  `601cc7a`), QA-gated on the merged tree (1014 tests, build; 5 DOM click-path cases and 4 PGlite action
+  cases), confirmed **deployed** to Testing (Deploy, migrate, smoke, acceptance and Vercel green on
+  `601cc7a`). Under the Sync match overlay's search grid, "Not in the catalog? Create a stand-in and match
+  to it", prefilled from the entry (name, set name, number; set id derived server-side and kept only when
+  the mirror holds that set), one required choice of kind (Pokémon with type, stage and optional Pokédex
+  number, Trainer, Energy), one RPC via `manualMatchStandIn`, a twin refused in place with "Match to the
+  existing stand-in instead", success toast "Created a stand-in and matched — ready to place." **Step for
+  Karvi when UAT resumes:** Sync, a "Needs your match" or "Waiting on catalog" row, Match manually, open the
+  disclosure, pick a kind, Create; the row leaves the queue and the card appears in the Haul Plan as bulk.
+  The Tech Lead's next read should then show `source = user` 1 and catalog_card 23,549. **Half 2** (detect
+  the real record and swap the stand-in for it, repointing the seven referencing sites in one transaction)
+  remains the named follow-on; nothing in Half 1 forecloses it. **Part 1**, migration `0015` and the
   write path: PR [#272](https://github.com/viantihu/pokemon-tcg-tracker/pull/272) MERGED to `develop`
   2026-09-20 (squash `ecf34b6`), QA-gated (1005 tests; 0015's function is 0014's text plus the 31-line
   `insert_catalog_stand_in` branch; stamping a stand-in 'tcgdex' fails 4 tests on the check constraint;
