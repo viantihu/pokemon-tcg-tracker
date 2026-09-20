@@ -324,7 +324,7 @@ jobs:
               -H "Authorization: Bearer $SERVICE_KEY" \
               -w $'\n%{http_code}' \
               --max-time 300 \
-              "$base/api/catalog/sync?set=$set_id&locale=$LOCALE" || printf '\n000')
+              "$base/api/catalog/sync?set=$(jq -rn --arg s "$set_id" '$s|@uri')&locale=$LOCALE" || printf '\n000')
             code=${response##*$'\n'}
             body=${response%$'\n'*}
           }
