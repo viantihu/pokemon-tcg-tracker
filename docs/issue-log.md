@@ -3609,9 +3609,19 @@ tables. No pending flag, no migration, zero behaviour change.
 
 - **Reported:** 2026-09-14 (not from Karvi — a follow-up suggestion from QA and the UX Dev, on
   UIL-014's shipped behaviour)
-- **Status:** Open — **Karvi ruled 2026-09-20: build it.** Assigned to Full Stack Dev - 1: the owned-target
-  row in the collection editor offers the move inline, reusing the Move sheet with the collection's
-  binder pre-selected (a card is always movable); click path pinned with a `*.dom.test.ts` case.
+- **Status:** **Fixed** — PR [#273](https://github.com/viantihu/pokemon-tcg-tracker/pull/273) MERGED to
+  `develop` 2026-09-20 (squash `2850d20`), QA-gated on the merged tree (1011 tests, build; QA read the
+  whole CollHub diff: 84 added / 11 removed lines ignoring whitespace, all of them this feature; the
+  367-line stat is re-indentation), confirmed **deployed** to Testing (Deploy, migrate, smoke, acceptance
+  and Vercel green on `2850d20`). Karvi's ruling ("do not drop it, this is a must have") built as: an owned
+  card's row in the collection editor keeps exactly what UIL-014 shipped (no ✕, server-side refusal) and
+  gains a Move control beside the Owned pill; it opens the same shared move sheet the card's own Remove
+  uses, seeded on the collection's binder, performs the same removal-as-a-move, and the row leaves the
+  list when it lands; disabled, not hidden, until move options load or while a new draft has no binder.
+  The hint under the list now says to use Move on the row. Six-case DOM click-path test; mutations:
+  row-removal deleted → 1 fails, sheet seeded on bulk → 2 fail, Move made a no-op → 4 fail. Step for
+  Karvi when UAT resumes: open a collection's editor, press Move on an owned card's row, pick a
+  destination; the card should move and leave the list.
 - **Priority:** High (Karvi's own ruling, 2026-09-20: "do not drop it, this is a must have"). Was Low.
 - **Area:** Collections
 - **Env:** Testing
@@ -4619,11 +4629,22 @@ convenience, not a defect.
 ## UIL-060 — Let her create a stand-in catalog record for a card the external database doesn't have yet, and swap it for the real one once it arrives
 
 - **Reported:** 2026-09-14 (Karvi, retesting Sync)
-- **Status:** Open — **Karvi ruled 2026-09-20: build Half 1 now.** A user-created stand-in `catalog_card` so a
-  card TCGdex does not carry yet can be shelved today; migration `0015` is allocated to it (provenance
-  column, stand-in id scheme, any new op). Assigned to Full Stack Dev - 1, design proposal before code (id
-  shape, column, RLS, where the form lives, how Half 2 stays possible). Half 2 (swap for the real record
-  when it arrives) remains a follow-on, not dropped.
+- **Status:** Open — **part 1 of 2 deployed; the form is in flight.** Part 1, migration `0015` and the
+  write path: PR [#272](https://github.com/viantihu/pokemon-tcg-tracker/pull/272) MERGED to `develop`
+  2026-09-20 (squash `ecf34b6`), QA-gated (1005 tests; 0015's function is 0014's text plus the 31-line
+  `insert_catalog_stand_in` branch; stamping a stand-in 'tcgdex' fails 4 tests on the check constraint;
+  dropping the stand-in op from the payload fails 4), **deployed** (migrate applied 15 of 15; Tech Lead's
+  before/after read, runs 35478490060 → 35478598086: `catalog_card.source` absent → present
+  23,548/23,548, all 'tcgdex', zero 'user', every other count identical). Design as approved: stand-in ids
+  are `user:<uuid>` and a check ties that shape to `source = 'user'` both ways; insert/update RLS scoped to
+  `source = 'user'`, no delete; `manualMatchStandIn` emits the stand-in as the first op of the same RPC as
+  the match, so create-and-match is one transaction; a twin (same name, set name and number) is refused
+  with the existing stand-in offered; the required card kind (Pokémon with type and stage, Trainer,
+  Energy) exists because a bare row bands White. The mirror's resume count now filters `source=eq.tcgdex`
+  so a stand-in never makes a set look complete early. The check constraint becomes observable on
+  Karvi's first stand-in (expect `source = user` 1, catalog_card 23,549). **Part 2**, the form under the
+  Sync MatchOverlay's search grid, is on `feat/uil-060-stand-in-form`. Half 2 (swap for the real record
+  when it arrives) remains a follow-on.
 - **Priority:** High (Karvi's own ruling, 2026-09-20: a go-live blocker — "the catalog and the match are
   not always correct, so a manual override is necessary for users to accurately maintain their
   collection"). Was Medium, Claude's read.
