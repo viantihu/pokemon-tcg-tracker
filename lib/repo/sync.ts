@@ -41,6 +41,25 @@ export const unresolvedEntryRepo = {
     assertReadComplete("unresolved_entry", rows, count);
     return rows;
   },
+
+  /**
+   * Her manual matches: every RESOLVED entry that carries a `manual_match_id`. The import path
+   * (`lib/sync/pipeline.ts`) consults these BEFORE the catalog so a row the catalog cannot resolve
+   * keeps resolving to the card she pinned it to (UIL-082) — without this, the next import re-parked
+   * the row and proposed retiring the copies the match had created. Same complete-read guard as
+   * `listWaiting`: a truncated list would silently forget matches past the cap.
+   */
+  async listManualMatches(db: DbClient): Promise<Row<"unresolved_entry">[]> {
+    const { data, error, count } = await db
+      .from("unresolved_entry")
+      .select("*", { count: "exact" })
+      .eq("status", "RESOLVED")
+      .not("manual_match_id", "is", null);
+    if (error) throw error;
+    const rows = data ?? [];
+    assertReadComplete("unresolved_entry", rows, count);
+    return rows;
+  },
 };
 
 export const lastSyncSnapshotRepo = createRepo("last_sync_snapshot");

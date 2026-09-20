@@ -149,11 +149,21 @@ function entryAsDexRow(e: Row<"unresolved_entry">): Pick<DexRow, "Id" | "Locale"
  */
 export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): Promise<SyncRun> {
   const mode: SyncMode = bytes ? "import" : "retry";
-  const [aliasMap, waiting, current] = await Promise.all([
+  const [aliasMap, waiting, current, manualMatches] = await Promise.all([
     loadAliasMap(db),
     unresolvedEntryRepo.listWaiting(db),
     loadCurrentGroups(db),
+    bytes ? unresolvedEntryRepo.listManualMatches(db) : Promise.resolve([]),
   ]);
+  // UIL-082: a row she matched by hand resolves to that card FIRST, before the catalog is asked. The
+  // catalog could not resolve it when she matched it and usually still cannot; without this memory
+  // the next import re-parked the row as a fresh WAITING entry and, since no row then resolved to the
+  // matched card, proposed retiring the very copies the match created. The match also wins when the
+  // catalog later CAN resolve the row: it is her explicit override (a UIL-060 stand-in depends on
+  // exactly that), released by dismissing or forgetting the entry, never by a sync.
+  const manualByKey = new Map(
+    manualMatches.map((e) => [key(e.dex_id, e.dex_variant_raw), e.manual_match_id as string]),
+  );
   const resolvedRows: ResolvedRow[] = [];
   const archiveEntryIds: string[] = [];
   const dropEntryIds: string[] = [];
@@ -174,8 +184,9 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
     const resolvedCsvKeys = new Set<string>();
     for (const [i, r] of dexRows.entries()) {
       const resolved = resolvedIds[i];
-      const hit = await lookup(r, resolved);
       const rk = key(r.Id, r.Variant);
+      const manual = manualByKey.get(rk);
+      const hit = manual ? { catalogCardId: manual } : await lookup(r, resolved);
       csvKeys.add(rk);
       if (hit.catalogCardId) resolvedCsvKeys.add(rk);
       resolvedRows.push(toResolvedRow(r, hit.catalogCardId, hit.reason));
