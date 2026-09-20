@@ -2645,9 +2645,26 @@ test that string-compares a `timestamptz` off this shim doesn't pass or fail for
 ## UIL-030 — `openBlockNeeds` is never set, so the "repurposed binder block" offer is unreachable
 
 - **Reported:** 2026-09-14 (not from Karvi — found by the Senior Dev session while fixing UIL-017)
-- **Status:** Open — **Karvi ruled 2026-09-20: wire it, do not delete.** Assigned to Full Stack Dev - 1. The
-  entry never defined where the count of "open binder block needs" comes from, so a one-paragraph
-  definition (table, state, when it changes) comes first and is recorded here before code.
+- **Status:** **Fixed** — built end to end in two PRs, both deployed. Karvi's ruling 2026-09-20: "a must
+  have — the user must be able to track where ALL cards are, including blocks"; the field was never wired
+  because nothing behind it existed (no block destination, only Backfill ever wrote a `binder_block`).
+  **Definition, now recorded:** an open binder block need is a `line_slot` with state `block` and no
+  line-terminated `binder_block` backing it, counted once per plan run in `lib/plan/context.ts` into
+  `ctx.openBlockNeeds`. **PR A, the data path:** [#276](https://github.com/viantihu/pokemon-tcg-tracker/pull/276)
+  (squash `83fbe56`): the count and candidates, the engine's `offerBlockRepurpose` as a field, a
+  `MoveDestination` of kind `block`, and the commit and `applyMove` writes (the copy as role `block` in the
+  line's binder back half plus `insert_binder_block` line-terminated / repurposedDuplicate with the copy id,
+  so the need closes and the duplicate's location is tracked); 7 PGlite and 3 unit cases; nothing visible
+  changed. **PR B, the offer:** [#279](https://github.com/viantihu/pokemon-tcg-tracker/pull/279) (squash
+  `fe970db`), QA-gated (1047 tests; candidates passed but the section suppressed fails 3 DOM cases, the
+  offer-text guard dropped fails the spotlight case), confirmed **deployed** (all gates and Vercel green on
+  `fe970db`): the spotlight shows "Offered as a repurposed binder block — <species> LINE has a reserved
+  pocket with nothing in it"; the move sheet leads with "USE AS A BINDER BLOCK · FILLS A RESERVED POCKET"
+  chips only when the Plan passes candidates (Lines and Lookup never do, pinned); the override reads
+  "Block · <species> line · <binder> · Back". Test debt, not a hold: dropping only the `offerBlockRepurpose`
+  guard in moveTargetFor leaves every test green; b0 owes a plan-move-target case. Step for Karvi when UAT
+  resumes: on the Haul Plan, a second copy of a card whose line has a blocked stage shows the offer; Change
+  position, pick the line, Done; the Lines screen then shows that slot's block backed by the duplicate.
 - **Priority:** High (Karvi's own ruling, 2026-09-20: a must-have — "the user must be able to track where
   ALL cards are, including blocks"). Was Low, Senior BA's read.
 - **Area:** Plan / Engine
@@ -5530,10 +5547,19 @@ flake (previous update, PR #175) — re-run it; anything else red is real.
 - **Reported:** 2026-09-17 (Karvi, screenshot of a live "COLLECTION CLAIM VS LINE SLOT" decision for
   Charizard). In her words: "This UX is too crowded, and a lot of the information here is not helpful.
   I need something simpler."
-- **Status:** Open — **Karvi approved the shape 2026-09-20:** the proposal line; one line naming which of
-  the collection or the line physically ends up with this copy (the one fact the card never surfaced); one
-  sentence of why; the choice buttons. The CATALOG statistics and the wishlist-alternates grid move
-  behind a "details" disclosure. Assigned to Full Stack Dev - 1.
+- **Status:** **Fixed** — PR [#278](https://github.com/viantihu/pokemon-tcg-tracker/pull/278) MERGED to
+  `develop` 2026-09-20 (squash `81d1986`), QA-gated on the merged tree (1040 tests, build; removing the
+  Details disclosure fails 5 shape cases, deleting the outcome line fails its text case), confirmed
+  **deployed** to Testing (Deploy, migrate, smoke, acceptance and Vercel green on `81d1986`). The shape
+  Karvi approved 2026-09-20: the proposal; one line "WHAT HAPPENS TO THIS COPY" that says which of the
+  collection or the line physically ends up with it (and, for cap, block and termination, where the copy
+  lands or that nothing is placed), the one fact the old card never surfaced; one sentence of why; the
+  choice buttons. CATALOG, YOU OWN, the rest of the why and the priced alternates grid sit behind a closed
+  Details row, still one tap away and still pickable there; the wishlisting pick stays as one line under
+  PROPOSED. Measured on the merged tree with the harness at 375: the sheet 1,608.7 → 950.2 px and the first
+  choice button 1,391.4 → 677.9 px down, so on a phone the buttons sit at the fold instead of two screens
+  down (at 1440: 1,185.2 → 863 and 983.2 → 620.5). Step for Karvi when UAT resumes: Lines, Work the
+  decisions; the card should read proposal, what happens, why, buttons, and Details should open the rest.
 - **Priority:** Medium (Karvi's own ruling, 2026-09-18, via Junior BA - 2)
 - **Area:** Lines
 - **Env:** Testing
