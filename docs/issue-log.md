@@ -3961,11 +3961,30 @@ for the exact wording and what remains to close it (the Tech Lead's Testing read
 ## UIL-047 — Japanese cards are unfindable and can be confidently mis-matched, because the catalog mirror is English-only
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet — three separate reports, one root cause)
-- **Status:** Open — **C3 is covered end to end and deployed; Karvi ruled on C1/C2 2026-09-20: pull the
-  Japanese catalog this phase** ("user has a lot of Japanese cards"). Assigned to Full Stack Dev - 1,
-  proposal before code: what the mirror needs to fetch the `ja` locale, how a `ja` printing matches a Dex
-  export row given `set_alias` keys on (locale, dex_code), the fate of the 22 learned aliases and 8
-  unresolved rows on Testing, and the run-time and row-count cost.
+- **Status:** Open — **C1/C2 built and deployed; one mirror run away from Fixed.** Karvi ruled 2026-09-20:
+  pull the Japanese catalog this phase ("user has a lot of Japanese cards"). PR
+  [#280](https://github.com/viantihu/pokemon-tcg-tracker/pull/280) MERGED to `develop` 2026-09-20 (squash
+  `545759f`), migration `0016` (`locale` on `catalog_card`, default 'en'; non-en rows namespaced
+  `ja:<set>-<local>` / `ja:<set>` with a check tying the prefix to the locale both ways; the (set_id,
+  local_id) index replaced by (locale, set_id, local_id); DDL only), QA-gated (1056 tests; five mutations
+  bite: un-namespaced ja ids, locale-blind artwork clustering, a tautological namespace check, an
+  unscoped set-name fallback, a disabled guard refusal), **deployed** with the Senior BA's before/after read
+  (runs 35480409591 → 35480908041: `locale` absent → present 23,548/23,548, en 23,548, ja 0, every other
+  count identical, zero row deltas). What landed: the mirror workflow takes a `locale` input (en default,
+  one locale per run, the Tech Lead's patch verbatim, resume counts filtered by locale and source); the
+  route and `mirror.ts` thread the locale and namespace ja rows; artwork clustering is partitioned by
+  locale so a JP printing is never called its EN twin's duplicate; the resolver namespaces ja passthroughs
+  and scopes the set-name fallback; one `normalizeLocale()` maps the CSV's "Japanese" to the `ja` key;
+  the C3 guard became locale-mismatch based (a ja entry matched to a ja card learns (ja, code) → `ja:set`;
+  a ja entry matched to an en card still does not auto-learn and says so, because the cross-locale hazard
+  C3 closed is not removed by the mirror); tiles and the spotlight show a JA tag with the prefix stripped.
+  Her two existing ja aliases (ja:m6 → swshp among them) are left exactly as she set them, pinned by a
+  migration test. The largest ja set (MC, 774 cards) measured 5.1 s in one request, so no splitting.
+  **Remaining:** one plain `locale: ja` mirror dispatch (not force_all; ~184 sets / ~18,000 rows, about
+  doubling the catalog), held until Karvi lifts the UAT pause so Testing stays stable; then Sync → Retry
+  now should drain the five Japanese "Waiting on catalog" rows wherever the Dex code equals the ja set id,
+  and searching a Japanese card should show a JA-tagged tile. Fixed on that read; Closed on her
+  confirmation.
   C3 guard: PR [#183](https://github.com/viantihu/pokemon-tcg-tracker/pull/183) (squash `62fa838`,
   2026-09-18) — a manual match on a non-English entry never learns a cross-locale set alias, because the
   mirror is English-only so any such alias is wrong by construction. C3 remedy: PR
@@ -6458,7 +6477,18 @@ Plan or Lines, and no report of a wrong band has surfaced from it yet.
 
 - **Reported:** 2026-09-20 (Karvi, while closing UIL-054; body written by the Senior BA because no intake
   session was on the roster)
-- **Status:** Open
+- **Status:** **Fixed** — PR [#283](https://github.com/viantihu/pokemon-tcg-tracker/pull/283) MERGED to
+  `develop` 2026-09-20 (squash `82c5988`), QA-gated on the merged tree (1064 tests, build; dropping the
+  mirrored push fails 2, seeding from a constant instead of the name fails the 50-distinct case; a face with
+  a sigil and no art has no button role, so UIL-036's guard holds), confirmed **deployed** to Testing
+  (Deploy, migrate, smoke, acceptance and Vercel green on `82c5988`). The prototype's pixel sigil, ported:
+  `lib/catalog/sigil.ts` draws a 6×6 mirrored figure seeded from the card's name, in one of the brand's
+  eight band colours with translucent-ink depth cells, so two imageless cards never match and the same card
+  always looks the same; `CardFace` renders it wherever there is no art (worklist, spotlight, tiles, lines,
+  decision card, stand-ins), with the initials kept as a small legend; never zoomable. Harness at the three
+  face sizes: the sigil sits inside the face, the legend never overlaps. Step for Karvi when UAT resumes:
+  any card with no artwork, a stand-in or the `svp-203` promo, shows a small pixel figure with its initials
+  underneath instead of bare letters.
 - **Priority:** Medium (Karvi's own request — a brand decision on a state every screen can reach)
 - **Area:** all (CardFace)
 - **Env:** Testing
