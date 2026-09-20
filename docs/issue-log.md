@@ -3461,9 +3461,13 @@ inconvenient. Karvi's own priority read wasn't given for this one specifically; 
   strand"; the guard fires on presence in the old binder, as Karvi confirmed it, so this is a wording
   choice to revisit only if she trips on it. Step for Karvi: edit a collection whose cards are shelved in
   its binder, pick a different specialty binder; read the refusal, press the Move-and-rebind button; the
-  cards should show as owned in the new binder and the collection's chip settle there.
-**Step 1** closes the hazard: a rebind that would strand shelved
-  copies is now *refused*, with a message naming what would be orphaned.
+  cards should show as owned in the new binder and the collection's chip settle there. **Step 1** (PR
+  [#102](https://github.com/viantihu/pokemon-tcg-tracker/pull/102), squash `9497c6c`, deployed 2026-09-14;
+  **confirmed by Karvi on Testing 2026-09-18**): a rebind that would strand shelved copies is refused, with
+  a message naming what would be orphaned. Worth keeping on record because it bounds her always-movable
+  ethos (UIL-072): she explicitly endorsed a refusal here, so that ethos is about never gating a card
+  **move** behind another question; it is not a blanket rule that the app may never refuse an action, and
+  step 2 keeps the refusal while putting its remedy on the same screen.
 - **Priority:** High (Claude's read — this is a live orphan hazard, not just a missing feature; needs
   Karvi's confirmation)
 - **Area:** Collections
