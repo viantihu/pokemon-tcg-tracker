@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { MoveDestination } from "@/lib/line/types";
+import type { MoveDestination, MoveOptions } from "@/lib/line/types";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import {
   buildWishlistCopyText,
@@ -64,6 +64,9 @@ interface DraftTarget {
    * `saveCollection` refuses the drop regardless.
    */
   owned: boolean;
+  /** For the inline Move sheet (UIL-043): the face and the band the sheet shows. */
+  imageUrl: string | null;
+  bandKey: string;
 }
 
 /** The card whose new home she is picking, with the collection it is leaving. */
@@ -207,6 +210,8 @@ export function CollHub() {
         localId: k.localId,
         setCardCountOfficial: k.setCardCountOfficial,
         owned: k.owned,
+        imageUrl: k.imageUrl,
+        bandKey: k.bandKey,
       })),
     });
   }
@@ -314,6 +319,10 @@ export function CollHub() {
           onChange={setEditor}
           onClose={(deleteIfEmpty) => closeEditor(editor.id, deleteIfEmpty)}
           onSubmit={submitEditor}
+          moveOptions={data?.moveOptions ?? null}
+          onMoveOwned={(tcgdexId, dest) =>
+            run(() => removeCardFromCollection(editor.id, tcgdexId, dest))
+          }
         />
       )}
 
@@ -847,15 +856,24 @@ function resolvable(state: EditorState): boolean {
   return state.binderId !== "__new" || state.newBinderName.trim().length > 0;
 }
 
-function CollectionEditor(props: {
+export function CollectionEditor(props: {
   state: EditorState;
   binders: { id: string; name: string }[];
   busy: boolean;
   onChange: (s: EditorState) => void;
   onClose: (deleteIfEmpty: boolean) => void;
   onSubmit: () => void;
+  /**
+   * UIL-043: the inline Move from an owned target's row. `moveOptions` feeds the shared move sheet;
+   * `onMoveOwned` performs the same removal-as-a-move the card's own Remove button does (UIL-014) and
+   * resolves true when it landed, at which point the row leaves the list here too.
+   */
+  moveOptions: MoveOptions | null;
+  onMoveOwned: (tcgdexId: string, dest: MoveDestination) => Promise<boolean>;
 }) {
-  const { state, binders, busy, onChange, onClose, onSubmit } = props;
+  const { state, binders, busy, onChange, onClose, onSubmit, moveOptions, onMoveOwned } = props;
+  /** The owned target whose Move sheet is open (UIL-043). */
+  const [moveFor, setMoveFor] = useState<DraftTarget | null>(null);
   const isNew = state.isNewDraft;
   const router = useRouter();
   const [searchNavigating, setSearchNavigating] = useState(false);
@@ -982,166 +1000,221 @@ function CollectionEditor(props: {
 
   // No backdrop onClick: a click meant for something behind the modal shouldn't be able to close it.
   return (
-    <div className="veil on">
-      <div className="dsheet panel" role="dialog" aria-modal="true">
-        <div className="cap">
-          <span className="t u">{isNew ? "New collection" : "Edit collection"}</span>
-          <button className="btn u" onClick={requestClose} style={{ background: "var(--panel-2)" }}>
-            Close
-          </button>
-        </div>
-        <div className="body">
-          {inlineError && (
-            <div className="alertbar" role="alert" style={{ background: "#FFD9DF" }}>
-              <span>!</span>
-              <b>{inlineError}</b>
-            </div>
-          )}
-
-          <label className="orow">
-            <div className="ol u">Name</div>
-            <input
-              className="field"
-              value={state.name}
-              onChange={(e) => passiveChange({ ...state, name: e.target.value })}
-              placeholder="e.g. Matsuno illustrations"
-            />
-          </label>
-
-          <div className="orow">
-            <div className="ol u">Mode</div>
-            <div className="modetoggle" style={{ marginLeft: 0 }}>
-              <button
-                className={"modebtn u" + (state.mode === "finite" ? " on" : "")}
-                onClick={() => passiveChange({ ...state, mode: "finite" })}
-              >
-                Finite
-              </button>
-              <button
-                className={"modebtn u" + (state.mode === "open" ? " on" : "")}
-                onClick={() => passiveChange({ ...state, mode: "open" })}
-              >
-                Open
-              </button>
-            </div>
-          </div>
-
-          <div className="orow">
-            <div className="ol u">Specialty binder</div>
-            <div className="ochips">
-              {binders.map((b) => (
-                <button
-                  key={b.id}
-                  className={"ochip u" + (state.binderId === b.id ? " on" : "")}
-                  onClick={() => pickBinder(b.id)}
-                >
-                  {b.name}
-                </button>
-              ))}
-              <button
-                className={"ochip u" + (state.binderId === "__new" ? " on" : "")}
-                onClick={pickNewBinderChip}
-              >
-                + New binder
-              </button>
-            </div>
-          </div>
-
-          {state.binderId === "__new" && (
-            <label className="orow">
-              <div className="ol u">New binder name</div>
-              <input
-                className="field"
-                value={state.newBinderName}
-                onChange={(e) => newBinderNameChange(e.target.value)}
-                onBlur={newBinderNameBlur}
-                placeholder="e.g. Specialty Binder B"
-              />
-            </label>
-          )}
-
-          {state.mode === "finite" && (
-            <>
-              <div className="cerow-h u">
-                Set list — the cards you chase. Owned status is derived from your shelf.
-              </div>
-              <button
-                type="button"
-                className="btn u"
-                onClick={goSearchAndAdd}
-                disabled={searchNavigating}
-              >
-                {searchNavigating ? "Saving…" : "Search & add cards →"}
-              </button>
-              <div className="celist">
-                {state.targets.map((t) => (
-                  <div key={t.tcgdexId} className={"cerow" + (t.owned ? " own" : "")}>
-                    <span className="cei">
-                      <b>{t.name}</b>
-                      <i>
-                        {t.setName ?? ""}
-                        {formatCollectorNumber(t.localId, t.setCardCountOfficial)
-                          ? ` · ${formatCollectorNumber(t.localId, t.setCardCountOfficial)}`
-                          : ""}
-                      </i>
-                    </span>
-                    {t.owned ? (
-                      <span className="cpill have u" style={{ marginTop: 0 }}>
-                        Owned · remove on the card
-                      </span>
-                    ) : (
-                      <button
-                        className="cex"
-                        title={`Take ${t.name} off the list. You hold no copy of it here, so nothing moves.`}
-                        onClick={() => removeTarget(t.tcgdexId)}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                ))}
-                {state.targets.length === 0 && (
-                  <div className="cehint u">
-                    No cards yet. Search &amp; add cards above to build the set list.
-                  </div>
-                )}
-              </div>
-              {state.targets.some((t) => t.owned) && (
-                <div className="hint u">
-                  A card you own cannot be dropped from the list here — the physical card would stay
-                  in the binder with nothing tracking it. Close this and use Remove on the card to
-                  give it a new home.
-                </div>
-              )}
-            </>
-          )}
-
-          <div className="cesave">
-            <span className="hk u">
-              {state.mode === "open"
-                ? "Open collections log cards one at a time on the card."
-                : `${state.targets.length} card${state.targets.length === 1 ? "" : "s"} in the list`}
-            </span>
+    <>
+      <div className="veil on">
+        <div className="dsheet panel" role="dialog" aria-modal="true">
+          <div className="cap">
+            <span className="t u">{isNew ? "New collection" : "Edit collection"}</span>
             <button
-              className="btn btn-primary u"
-              style={{ marginLeft: "auto" }}
-              disabled={!valid || busy}
-              onClick={async () => {
-                await autosave.flush();
-                onSubmit();
-              }}
+              className="btn u"
+              onClick={requestClose}
+              style={{ background: "var(--panel-2)" }}
             >
-              {busy ? "Saving…" : "Save collection"}
+              Close
             </button>
           </div>
-          <div className="hint u">
-            Everything here is already saved as you go — Save collection just confirms you&rsquo;re
-            done. A new binder joins the binder list and this collection joins the placement picker
-            the moment it has a name.
+          <div className="body">
+            {inlineError && (
+              <div className="alertbar" role="alert" style={{ background: "#FFD9DF" }}>
+                <span>!</span>
+                <b>{inlineError}</b>
+              </div>
+            )}
+
+            <label className="orow">
+              <div className="ol u">Name</div>
+              <input
+                className="field"
+                value={state.name}
+                onChange={(e) => passiveChange({ ...state, name: e.target.value })}
+                placeholder="e.g. Matsuno illustrations"
+              />
+            </label>
+
+            <div className="orow">
+              <div className="ol u">Mode</div>
+              <div className="modetoggle" style={{ marginLeft: 0 }}>
+                <button
+                  className={"modebtn u" + (state.mode === "finite" ? " on" : "")}
+                  onClick={() => passiveChange({ ...state, mode: "finite" })}
+                >
+                  Finite
+                </button>
+                <button
+                  className={"modebtn u" + (state.mode === "open" ? " on" : "")}
+                  onClick={() => passiveChange({ ...state, mode: "open" })}
+                >
+                  Open
+                </button>
+              </div>
+            </div>
+
+            <div className="orow">
+              <div className="ol u">Specialty binder</div>
+              <div className="ochips">
+                {binders.map((b) => (
+                  <button
+                    key={b.id}
+                    className={"ochip u" + (state.binderId === b.id ? " on" : "")}
+                    onClick={() => pickBinder(b.id)}
+                  >
+                    {b.name}
+                  </button>
+                ))}
+                <button
+                  className={"ochip u" + (state.binderId === "__new" ? " on" : "")}
+                  onClick={pickNewBinderChip}
+                >
+                  + New binder
+                </button>
+              </div>
+            </div>
+
+            {state.binderId === "__new" && (
+              <label className="orow">
+                <div className="ol u">New binder name</div>
+                <input
+                  className="field"
+                  value={state.newBinderName}
+                  onChange={(e) => newBinderNameChange(e.target.value)}
+                  onBlur={newBinderNameBlur}
+                  placeholder="e.g. Specialty Binder B"
+                />
+              </label>
+            )}
+
+            {state.mode === "finite" && (
+              <>
+                <div className="cerow-h u">
+                  Set list — the cards you chase. Owned status is derived from your shelf.
+                </div>
+                <button
+                  type="button"
+                  className="btn u"
+                  onClick={goSearchAndAdd}
+                  disabled={searchNavigating}
+                >
+                  {searchNavigating ? "Saving…" : "Search & add cards →"}
+                </button>
+                <div className="celist">
+                  {state.targets.map((t) => (
+                    <div key={t.tcgdexId} className={"cerow" + (t.owned ? " own" : "")}>
+                      <span className="cei">
+                        <b>{t.name}</b>
+                        <i>
+                          {t.setName ?? ""}
+                          {formatCollectorNumber(t.localId, t.setCardCountOfficial)
+                            ? ` · ${formatCollectorNumber(t.localId, t.setCardCountOfficial)}`
+                            : ""}
+                        </i>
+                      </span>
+                      {t.owned ? (
+                        /* UIL-014 as Karvi chose it: no ✕ on an owned row, and the server refuses the
+                         drop regardless. UIL-043 adds the shortcut beside it — the same Move the card's
+                         Remove button opens, so she need not leave the editor to give it a new home. */
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <span className="cpill have u" style={{ marginTop: 0 }}>
+                            Owned
+                          </span>
+                          <button
+                            type="button"
+                            className="movebtn u"
+                            disabled={busy || !moveOptions || state.binderId === "__new"}
+                            title={`Give ${t.name} a new home. It leaves this list as it goes.`}
+                            onClick={() => setMoveFor(t)}
+                          >
+                            ↔ Move ▸
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          className="cex"
+                          title={`Take ${t.name} off the list. You hold no copy of it here, so nothing moves.`}
+                          onClick={() => removeTarget(t.tcgdexId)}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {state.targets.length === 0 && (
+                    <div className="cehint u">
+                      No cards yet. Search &amp; add cards above to build the set list.
+                    </div>
+                  )}
+                </div>
+                {state.targets.some((t) => t.owned) && (
+                  <div className="hint u">
+                    A card you own cannot be dropped from the list here — the physical card would
+                    stay in the binder with nothing tracking it. Use Move on its row to give it a
+                    new home; it leaves the list as it goes.
+                  </div>
+                )}
+              </>
+            )}
+
+            <div className="cesave">
+              <span className="hk u">
+                {state.mode === "open"
+                  ? "Open collections log cards one at a time on the card."
+                  : `${state.targets.length} card${state.targets.length === 1 ? "" : "s"} in the list`}
+              </span>
+              <button
+                className="btn btn-primary u"
+                style={{ marginLeft: "auto" }}
+                disabled={!valid || busy}
+                onClick={async () => {
+                  await autosave.flush();
+                  onSubmit();
+                }}
+              >
+                {busy ? "Saving…" : "Save collection"}
+              </button>
+            </div>
+            <div className="hint u">
+              Everything here is already saved as you go — Save collection just confirms
+              you&rsquo;re done. A new binder joins the binder list and this collection joins the
+              placement picker the moment it has a name.
+            </div>
           </div>
         </div>
       </div>
-    </div>
+      {moveFor && moveOptions && (
+        <MoveOverlay
+          card={{
+            copyId: "",
+            name: moveFor.name,
+            localId: moveFor.localId,
+            setCardCountOfficial: moveFor.setCardCountOfficial,
+            imageUrl: moveFor.imageUrl,
+            bandKey: moveFor.bandKey,
+            currentLabel: `${binders.find((b) => b.id === state.binderId)?.name ?? "No binder"} · ${state.name || "Untitled collection"}`,
+            // The collection's own binder pre-selected (Senior BA's call for UIL-043): she sees where the
+            // card is and changes only what she means to. Shelf-shaped only to carry the binder id; the
+            // panel derives the specialty binder's collection mode from the binder itself.
+            initial: {
+              kind: "shelf",
+              binderId: state.binderId,
+              half: "front",
+              band: moveFor.bandKey,
+            },
+          }}
+          options={moveOptions}
+          onClose={() => setMoveFor(null)}
+          onConfirm={async (dest: MoveDestination) => {
+            const ok = await onMoveOwned(moveFor.tcgdexId, dest);
+            if (ok) {
+              setMoveFor(null);
+              // The server subtracted the target as part of the move (lib/coll/remove.ts); mirror it.
+              onChange({
+                ...state,
+                targets: state.targets.filter((x) => x.tcgdexId !== moveFor.tcgdexId),
+              });
+            }
+          }}
+        />
+      )}
+    </>
   );
 }
 
