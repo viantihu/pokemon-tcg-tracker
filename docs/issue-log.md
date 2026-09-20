@@ -3961,8 +3961,20 @@ for the exact wording and what remains to close it (the Tech Lead's Testing read
 ## UIL-047 — Japanese cards are unfindable and can be confidently mis-matched, because the catalog mirror is English-only
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet — three separate reports, one root cause)
-- **Status:** Open — **C1/C2 built and deployed; one mirror run away from Fixed.** Karvi ruled 2026-09-20:
-  pull the Japanese catalog this phase ("user has a lot of Japanese cards"). PR
+- **Status:** **Fixed** — C1, C2 and C3 all built, deployed and mirrored; awaiting Karvi's confirmation on
+  her first import against the Japanese catalog. After UIL-083's fix the ja resume run (Tech Lead, run
+  35492136717, 05:37Z) went green, 73 of 73 sets, and the read afterwards (run 35492218209) shows
+  catalog_card 36,329 = en 23,548 + **ja 12,781** across 184 sets, set_alias 22 unchanged, source=user 0;
+  69 ja sets are served short of what TCGdex's own set list claims (versus 6 for en), which is upstream
+  and is re-requested on every ja run, cheap and safe. Because Karvi cleared Testing's card tables at
+  05:22Z (unresolved_entry is 0), the earlier "Retry now drains the five rows" step no longer applies;
+  the step is now the import itself. **Step for Karvi:** import your Dex export; Japanese cards should
+  resolve on the way in (each shows a JA tag on its tile, set id without the `ja:` prefix), and only cards
+  TCGdex carries in no locale should park in Sync, where the stand-in form (UIL-060) applies. Match one
+  Japanese card by hand where the set is unknown and the app should learn the alias (ja, code) → `ja:set`;
+  a Japanese card matched to an English printing still does not auto-learn, and says so. Closed on her
+  confirmation. **Earlier history:** Karvi ruled 2026-09-20: pull the Japanese catalog this phase ("user
+  has a lot of Japanese cards"). PR
   [#280](https://github.com/viantihu/pokemon-tcg-tracker/pull/280) MERGED to `develop` 2026-09-20 (squash
   `545759f`), migration `0016` (`locale` on `catalog_card`, default 'en'; non-en rows namespaced
   `ja:<set>-<local>` / `ja:<set>` with a check tying the prefix to the locale both ways; the (set_id,
@@ -6589,8 +6601,18 @@ export), reverses an explicit user decision, and the failure looks like a normal
 - **Reported:** 2026-09-20 (found by the Senior BA in the first `locale: ja` mirror run, 35490587409,
   dispatched on Karvi's "resume"; causes confirmed read-only against TCGdex by Full Stack Dev - 1; body
   by the Senior BA, no intake session on the roster)
-- **Status:** Open — fix in flight on `fix/uil-083-ja-mirror-plus-and-decimals` (Full Stack Dev - 1), no
-  migration; no merger on the roster at the time of writing (QA session gone), so the PR waits routed.
+- **Status:** **Fixed** — PR [#286](https://github.com/viantihu/pokemon-tcg-tracker/pull/286) MERGED to
+  `develop` 2026-09-20 (squash `3e2ffbd`), QA-gated on the merged tree (1074 tests, build; `toDexIds`
+  reverted fails 3 cases incl. the real PCG2-067 payload; the route is grepped for `rawQueryParam(request.url,
+  "set")` because reverting it to `searchParams.get` leaves the helper test green), confirmed **deployed**
+  (all gates and Vercel green on `3e2ffbd`), and **proven by the resume run** (Tech Lead, run 35492136717,
+  05:37Z): 73 of 73 sets that run needed, 0 failing; PCG2 82, PCG6 86, PCG7 52, PCG9 68 landed (+288 rows,
+  verified per set on Testing as `ja:PCG2` … `ja:PCG9`); SM1+ … SM5+ now reach TCGdex correctly, which
+  serves zero cards for each, reported as an upstream shortfall, not a failure. Fixes: the workflow
+  URI-encodes the set id on the sync POST and the route reads `set` through `rawQueryParam` so a literal
+  plus survives either dispatch form; `toDexIds` floors a fractional Pokédex id to its species and drops
+  non-numbers; hp coercion is integer-only while prices keep decimals. No migration. Nothing for Karvi to
+  test; closes on the run.
 - **Priority:** High (Senior BA's read) — it blocks UIL-047, Karvi's ruling for this phase: until these
   sets mirror, part of the Japanese catalog she asked for is missing and one card class fails loudly on
   every run.
