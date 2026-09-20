@@ -216,11 +216,11 @@ jobs:
               if [ "${KEY_IS_JWT:-0}" = "1" ]; then
                 page=$(curl -sS --retry 3 --retry-delay 5 \
                   -H "apikey: $SERVICE_KEY" -H "Authorization: Bearer $SERVICE_KEY" \
-                  "$rest?select=set_id&order=set_id.asc&limit=1000&offset=$offset")
+                  "$rest?select=set_id&source=eq.tcgdex&order=set_id.asc&limit=1000&offset=$offset")
               else
                 page=$(curl -sS --retry 3 --retry-delay 5 \
                   -H "apikey: $SERVICE_KEY" \
-                  "$rest?select=set_id&order=set_id.asc&limit=1000&offset=$offset")
+                  "$rest?select=set_id&source=eq.tcgdex&order=set_id.asc&limit=1000&offset=$offset")
               fi
               # A PostgREST error is an object, not an array; `length` on it would be a key
               # count and the loop would misread it as data.

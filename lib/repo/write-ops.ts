@@ -200,7 +200,25 @@ export type WriteOp =
    * matches no row is a silent no-op like `delete_copy`. Emitted together with the re-classification of
    * that set's WAITING entries (lib/sync/alias.ts) so the two land in one transaction.
    */
-  | { op: "delete_set_alias"; locale: string; dex_code: string };
+  | { op: "delete_set_alias"; locale: string; dex_code: string }
+  /**
+   * A user-created STAND-IN catalog card (0015, UIL-060 Half 1): a row of her own for a card TCGdex
+   * lacks, in the `user:` id namespace with `source = 'user'`. Emitted FIRST by lib/sync/exec.ts
+   * `manualMatchStandIn`, in the same transaction as the match that points at it, so a stand-in never
+   * exists without its match. `image_url` is always null (CardFace falls back).
+   */
+  | {
+      op: "insert_catalog_stand_in";
+      tcgdex_id: string;
+      name: string;
+      set_id: string | null;
+      set_name: string | null;
+      local_id: string | null;
+      dex_id?: number[];
+      types?: string[];
+      stage?: string | null;
+      card_class?: "standard" | "specialty";
+    };
 
 /** The full atomic write set for one commit. `ops` apply in order; groups resync last. */
 export interface WritePayload {

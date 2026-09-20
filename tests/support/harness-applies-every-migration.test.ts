@@ -54,6 +54,7 @@ describe("the PGlite harness applies every migration on disk", () => {
         `select pg_get_functiondef('apply_write_ops(jsonb)'::regprocedure) as def`,
       );
       expect(fn.rows[0].def).toContain("delete_set_alias");
+      expect(fn.rows[0].def).toContain("insert_catalog_stand_in");
       expect(fn.rows[0].def).toContain("resolved_decision_collection_id");
     } finally {
       await db.close();

@@ -17,9 +17,13 @@
  * It has already happened on her data (`ja:m6 → swshp`), and with no delete path for `set_alias` one
  * uncertain match is permanent.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import type { PGlite } from "@electric-sql/pglite";
+import { manualMatch } from "@/lib/sync";
+import { asOwner, freshRpcDb } from "../support/pglite-rpc";
+import { pgliteClient } from "../support/pglite-client";
 
 const EXEC = readFileSync(path.join(process.cwd(), "lib/sync/exec.ts"), "utf8");
 const ACTIONS = readFileSync(path.join(process.cwd(), "app/(ui)/sync/actions.ts"), "utf8");
@@ -46,17 +50,64 @@ describe("UIL-047 C3 · the alias guard", () => {
     expect(block).not.toContain("return");
   });
 
-  it("tells her the set was not learned, rather than silently learning nothing", () => {
-    // Without this she sees "one match drains the set" not happen and reads it as a broken retry.
-    expect(EXEC).toContain("aliasSkippedReason");
-    expect(EXEC).toContain("was not learned");
-    expect(EXEC).toContain("return { learnedAlias, aliasSkippedReason, created: qty }");
+  /**
+   * The two cases below used to be source-text assertions on exact lines of `manualMatch`; they broke
+   * the moment the match ops moved into a shared builder (0015, UIL-060) without any behaviour
+   * changing. Now they drive the real function on real Postgres and assert what she sees and what the
+   * table holds.
+   */
+  let db: PGlite;
+  const OWNER = "00000000-0000-0000-0000-000000000001";
+  const seed = async (id: string, dexId: string, locale: string) =>
+    db.exec(`
+      insert into unresolved_entry (id, owner_id, dex_id, dex_set_name, dex_variant_raw, quantity, locale, reason, status)
+        values ('${id}', '${OWNER}', '${dexId}', 'Some Set', '', 1, '${locale}', 'UNKNOWN_SET', 'WAITING');
+    `);
+  beforeEach(async () => {
+    db = await freshRpcDb();
+    await db.exec(
+      `insert into catalog_card (tcgdex_id, name, set_id, set_name, local_id) values ('swshp-001', 'Promo', 'swshp', 'SWSH Promos', '001')`,
+    );
+    await seed("e0000000-0000-0000-0000-0000000000a1", "jpn_m6-14", "Japanese");
+    await seed("e0000000-0000-0000-0000-0000000000a2", "ba22e-14", "English");
+    await asOwner(db);
+  });
+  afterEach(async () => {
+    await db.close();
   });
 
-  it("keeps learning aliases for English entries, which is the case that works", () => {
+  it("tells her the set was not learned, rather than silently learning nothing", async () => {
+    // Without this she sees "one match drains the set" not happen and reads it as a broken retry.
+    const res = await manualMatch(
+      pgliteClient(db),
+      "e0000000-0000-0000-0000-0000000000a1",
+      "swshp-001",
+    );
+    expect(res.learnedAlias).toBeNull();
+    expect(res.aliasSkippedReason).toMatch(/was not learned/);
+    expect(res.created).toBe(1); // the pin itself is honoured
+    expect((await db.query(`select * from set_alias`)).rows).toEqual([]);
+    expect(
+      (
+        await db.query(
+          `select status from unresolved_entry where id = 'e0000000-0000-0000-0000-0000000000a1'`,
+        )
+      ).rows,
+    ).toEqual([{ status: "RESOLVED" }]);
+  });
+
+  it("keeps learning aliases for English entries, which is the case that works", async () => {
     // A guard that blocked everything would 'fix' this by removing the feature.
-    expect(EXEC).toContain("} else if (rawCode && card.set_id) {");
-    expect(EXEC).toContain('source: "manual"');
+    const res = await manualMatch(
+      pgliteClient(db),
+      "e0000000-0000-0000-0000-0000000000a2",
+      "swshp-001",
+    );
+    expect(res.learnedAlias).toEqual({ locale: "en", dexCode: "ba22e", tcgdexSetId: "swshp" });
+    expect(res.aliasSkippedReason).toBeNull();
+    expect(
+      (await db.query(`select locale, dex_code, tcgdex_set_id, source from set_alias`)).rows,
+    ).toEqual([{ locale: "en", dex_code: "ba22e", tcgdex_set_id: "swshp", source: "manual" }]);
   });
 });
 

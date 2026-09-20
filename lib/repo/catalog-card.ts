@@ -72,6 +72,21 @@ export const catalogCardRepo = {
     return out;
   },
 
+  /**
+   * Every stand-in she has created (UIL-060: `source = 'user'`, ids in the `user:` namespace). Used to
+   * refuse a twin before creating another; complete-read guarded like every "all of them" read.
+   */
+  async listStandIns(db: DbClient): Promise<Row<"catalog_card">[]> {
+    const { data, error, count } = await db
+      .from("catalog_card")
+      .select("*", { count: "exact" })
+      .eq("source", "user");
+    if (error) throw error;
+    const rows = data ?? [];
+    assertReadComplete("catalog_card", rows, count);
+    return rows;
+  },
+
   /** Duplicate-key lookup half: cards sharing a (set_id, local_id). */
   async findBySetLocal(
     db: DbClient,
