@@ -3439,19 +3439,35 @@ inconvenient. Karvi's own priority read wasn't given for this one specifically; 
 ## UIL-040 — Rebinding a collection to a different specialty binder changes the record but silently orphans the cards already shelved in the old one
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009)
-- **Status:** **Fixed** — step 1 of 2, and **step 1 confirmed by Karvi on Testing 2026-09-18**: the
-  refusal fires and names what would be stranded. Step 2 (moving the copies so the rebind can succeed) is
-  **not built** and must land with UIL-032, so this entry stays open on step 2 rather than closing.
-  Worth recording because it bounds her always-movable ethos (UIL-072): she has explicitly endorsed a
-  **refusal** here, so that ethos is about never gating a card **move** behind another question — it is not
-  a blanket rule that the app may never refuse an action. A refusal that names the consequence, on an
-  operation that is not itself a move, is acceptable to her. — PR [#102](https://github.com/viantihu/pokemon-tcg-tracker/pull/102)
-  MERGED to `develop` 2026-09-14 (squash `9497c6c`), QA-reviewed, confirmed **deployed** to Testing (all
-  four conditions green on `7cb1a36`). **Step 1** closes the hazard: a rebind that would strand shelved
-  copies is now *refused*, with a message naming what would be orphaned. **Step 2** — moving the copies
-  into the new binder so the rebind can succeed — is not built, and must land together with UIL-032 (the
-  plan fingerprint has to cover `current_binder_ids`, or a cached plan survives the re-point). Step 2
-  stays with the UX Dev alongside the Collections rework (UIL-038/039).
+- **Status:** **Fixed** — both steps deployed. **Step 2** (move the stranded copies so the rebind can
+  succeed): PR [#289](https://github.com/viantihu/pokemon-tcg-tracker/pull/289) MERGED to `develop`
+  2026-09-20 (squash `f94e2cc`), **migration `0017`** (0015's `apply_write_ops` verbatim plus one
+  `set_collection_binders` branch, 16 lines; no DDL, no DML), QA-gated on the merged tree (1095 tests, build,
+  migration-order "added 0017 above 16"; mutations all biting: 0017 absent → 6 PGlite cases fail, the op
+  dropped → 4, the stays rule disabled → 1, the button never rendered → 7 DOM cases), confirmed **deployed**
+  (migrate applied 17 of 17; Vercel, smoke, acceptance green on `f94e2cc`; the Senior BA's AFTER read, run
+  35493539362: collection 11, binder 3, set_alias 22, catalog_card 36,329, card tables 0 since her 05:22Z
+  clear, zero row deltas). What she sees: the step-1 refusal stays and now ends "Move them with it, or keep
+  this collection in its current binder", and the alertbar gains one button whose label is the whole
+  action, "Move 3 cards to <binder> and rebind"; no second modal. Click → one `apply_write_ops` transaction:
+  each shelved copy of a card this collection chases moves to the new binder (`update_copy`), any slot it
+  defensively held is reopened and its line demoted, `set_collection_binders` re-points the collection, and
+  one `insert_decision` per copy records "moved with <collection>: your call, no rule applied". Nothing is
+  ever deleted. A card another collection still on the old binder also chases STAYS and is named under
+  the bar (Senior BA default, flagged to Karvi). The editor flushes its autosave before the move and
+  applies the current draft on success; Close is disabled while moving (Full Stack Dev - 1's review of the
+  CollHub hunk, ack in the PR). **Recorded limit:** when every blocked card is one that stays, nothing moves
+  and the button reads "Rebind and leave N cards in <old binder>", but the refusal above still says "would
+  strand"; the guard fires on presence in the old binder, as Karvi confirmed it, so this is a wording
+  choice to revisit only if she trips on it. Step for Karvi: edit a collection whose cards are shelved in
+  its binder, pick a different specialty binder; read the refusal, press the Move-and-rebind button; the
+  cards should show as owned in the new binder and the collection's chip settle there. **Step 1** (PR
+  [#102](https://github.com/viantihu/pokemon-tcg-tracker/pull/102), squash `9497c6c`, deployed 2026-09-14;
+  **confirmed by Karvi on Testing 2026-09-18**): a rebind that would strand shelved copies is refused, with
+  a message naming what would be orphaned. Worth keeping on record because it bounds her always-movable
+  ethos (UIL-072): she explicitly endorsed a refusal here, so that ethos is about never gating a card
+  **move** behind another question; it is not a blanket rule that the app may never refuse an action, and
+  step 2 keeps the refusal while putting its remedy on the same screen.
 - **Priority:** High (Claude's read — this is a live orphan hazard, not just a missing feature; needs
   Karvi's confirmation)
 - **Area:** Collections
@@ -3728,8 +3744,7 @@ hit on the same gap changes UIL-026's position in the queue; not asserting a pri
   what was written, or she is told it changed — never silently one then the other. The spotlight now
   reads "was … — now …" with the cascade's reason when the re-derivation differs, and Done is disabled
   ("Checking…") while the re-check is in flight. Overridden cards were already safe and are unchanged.
-  Test debt carried into UIL-061: the digest's fill/new-line/swap components are not yet pinned by tests
-  (only the target pocket is). Awaiting Karvi's confirmation on a second copy of an already-shelved card.
+  Test debt once carried into UIL-061, since paid: the digest's fill / new-line / swap components ARE pinned by `tests/plan/spotlight-drift.test.ts` (PR #151; dropping each fails 2 / 1 / 2 cases, audited 2026-09-20 in #287). Awaiting Karvi's confirmation on a second copy of an already-shelved card.
 - **Priority:** High (Senior BA's read)
 - **Area:** Plan
 - **Env:** Testing
@@ -4490,8 +4505,7 @@ The orientation fix is cosmetic and could ship separately as Low.
   Do this from the Lines page" rather than presenting a destination it can never confirm. **Not fixed here,
   by decision:** line-join from the Plan spotlight (owed with UIL-061), pulling other owned family members
   into a newly started line, and the picker on an already-lined card's move. **Test debt recorded rather
-  than logged as entries:** the destination-band override inside slot generation and the unlined-cards
-  filter are correct by reading but not pinned by a test, and "start a new line" reads the catalog uncached
+  than logged as entries:** the destination-band override inside slot generation IS pinned (`tests/line/manual-line-join.test.ts`, PR #146) and the unlined-cards filter is now pinned too (PR #287, 2026-09-20, which found and closed two real gaps: the shelved-role check and the Trainer/Energy guard each survived the suite until then), and "start a new line" reads the catalog uncached
   (~24 pages) where the plan path uses the cache — a rare manual action, not a blocker. Awaiting Karvi's
   confirmation.
 - **Priority:** High (Claude's read — needs Karvi's confirmation)
