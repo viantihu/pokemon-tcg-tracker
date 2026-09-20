@@ -192,6 +192,14 @@ export type WriteOp =
    * MOVE plus this list edit; the two must land in one transaction or the copy is orphaned (UIL-014).
    */
   | { op: "subtract_collection_targets"; collection_id: string; catalog_card_ids: string[] }
+  /**
+   * SET `collection.current_binder_ids` (0017, UIL-040 step 2). Emitted by lib/coll/rebind.ts AFTER the
+   * `update_copy` ops that carry the collection's shelved copies into the new binder, so the copies and
+   * the collection change binder in ONE transaction — two statements in either order leave a window in
+   * which they disagree, and that disagreement is the orphan step 1 (#102) refuses. A collection id that
+   * matches no row (or is not the caller's, per RLS) is a silent no-op like the two target-list ops.
+   */
+  | { op: "set_collection_binders"; collection_id: string; binder_ids: string[] }
   | { op: "delete_copy"; id: string }
   | { op: "delete_unresolved_entry"; id: string }
   | { op: "delete_snapshot"; id: string }

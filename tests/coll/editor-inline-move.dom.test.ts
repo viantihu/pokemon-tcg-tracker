@@ -86,6 +86,7 @@ function mount(over: Partial<Parameters<typeof CollectionEditor>[0]> = {}) {
       onSubmit: () => {},
       moveOptions: OPTIONS,
       onMoveOwned,
+      onRebindMove: vi.fn(async () => ({ ok: true }) as const),
       ...over,
     }),
   );

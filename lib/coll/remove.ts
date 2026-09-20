@@ -407,7 +407,6 @@ export function blockedBinderRebindMessage(blocked: BlockedTargetDrop[]): string
   const count = blocked.reduce((n, b) => n + b.copyCount, 0);
   return (
     `Moving to a new binder would strand ${count} shelved card${count === 1 ? "" : "s"} in the old ` +
-    `one, including ${named}${rest}. This app can't relocate a collection's cards yet — move them out ` +
-    `individually first, or keep this collection in its current binder.`
+    `one, including ${named}${rest}. Move them with it, or keep this collection in its current binder.`
   );
 }

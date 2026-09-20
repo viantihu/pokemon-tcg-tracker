@@ -33,6 +33,7 @@ import {
   blockedTargetDrops,
   blockedTargetDropsMessage,
 } from "./remove";
+import { rebindRemedyFor, type RebindRemedy } from "./rebind";
 
 export interface CollectionSaveInput {
   id?: string | null;
@@ -43,7 +44,13 @@ export interface CollectionSaveInput {
   targetTcgdexIds: string[];
 }
 
-export type CollectionSaveOutcome = { ok: true; id: string } | { ok: false; error: string };
+/**
+ * `remedy` rides on exactly one refusal — the UIL-040 rebind guard — and is what lets the editor offer
+ * "move them and rebind" on the same bar as the refusal (step 2) instead of a dead end. Every other
+ * refusal is a bare message, as before.
+ */
+export type CollectionSaveOutcome =
+  { ok: true; id: string } | { ok: false; error: string; remedy?: RebindRemedy };
 
 export async function applyCollectionSave(
   db: DbClient,
@@ -85,7 +92,15 @@ export async function applyCollectionSave(
 
     const blockedBinder = await blockedBinderRebind(db, existing, binderId ? [binderId] : []);
     if (blockedBinder.length > 0) {
-      return { ok: false, error: blockedBinderRebindMessage(blockedBinder) };
+      // Step 2 (UIL-040): the refusal stands, and names its remedy. `rebindRemedyFor` re-reads fresh
+      // state rather than reshaping `blockedBinder`, because it also has to know which of those cards
+      // another collection still in the old binder chases (those stay; the bar says so).
+      const remedy = binderId ? await rebindRemedyFor(db, existing, binderId) : null;
+      return {
+        ok: false,
+        error: blockedBinderRebindMessage(blockedBinder),
+        ...(remedy ? { remedy } : {}),
+      };
     }
   }
 

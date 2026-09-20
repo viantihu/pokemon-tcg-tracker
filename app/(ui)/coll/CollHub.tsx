@@ -33,6 +33,7 @@ import {
   deleteCollection,
   loadCollHub,
   logCardIntoCollection,
+  rebindCollectionWithMove,
   removeCardFromCollection,
   saveCollection,
   searchCatalog,
@@ -43,6 +44,8 @@ import type {
   CollectionCardView,
   CollectionInput,
   CollectionView,
+  RebindRemedy,
+  SaveResult,
   CollHubData,
 } from "./coll-types";
 
@@ -323,6 +326,18 @@ export function CollHub() {
           onMoveOwned={(tcgdexId, dest) =>
             run(() => removeCardFromCollection(editor.id, tcgdexId, dest))
           }
+          onRebindMove={async (toBinderId) => {
+            // Not through `run`: the refusal this remedies lives on the editor's own bar, so its
+            // outcome — success or the error that replaces it — belongs there too, not on the hub's.
+            setBusy(true);
+            try {
+              const res = await rebindCollectionWithMove(editor.id, toBinderId);
+              if (res.ok) await refresh();
+              return res;
+            } finally {
+              setBusy(false);
+            }
+          }}
         />
       )}
 
@@ -856,6 +871,19 @@ function resolvable(state: EditorState): boolean {
   return state.binderId !== "__new" || state.newBinderName.trim().length > 0;
 }
 
+/**
+ * The remedy button's label IS the confirmation (UIL-040 step 2), so it says exactly what the click
+ * does: how many cards, to which binder. When every blocked card stays (all chased by another
+ * collection still in the old binder) nothing moves and the label says so instead.
+ */
+export function rebindButtonLabel(remedy: RebindRemedy): string {
+  const n = remedy.copyCount;
+  if (n > 0) return `Move ${n} card${n === 1 ? "" : "s"} to ${remedy.toBinderName} and rebind`;
+  const s = remedy.staying.reduce((k, c) => k + c.copyCount, 0);
+  const from = remedy.fromBinderNames.join(", ") || "the old binder";
+  return `Rebind and leave ${s} card${s === 1 ? "" : "s"} in ${from}`;
+}
+
 export function CollectionEditor(props: {
   state: EditorState;
   binders: { id: string; name: string }[];
@@ -870,14 +898,42 @@ export function CollectionEditor(props: {
    */
   moveOptions: MoveOptions | null;
   onMoveOwned: (tcgdexId: string, dest: MoveDestination) => Promise<boolean>;
+  /**
+   * UIL-040 step 2: the remedy to a refused binder rebind — move the collection's shelved copies into
+   * the new binder and re-point the collection, as one transaction. Resolves with the server's own
+   * outcome so a failure's reason can replace the refusal on the same bar.
+   */
+  onRebindMove: (toBinderId: string) => Promise<SaveResult>;
 }) {
-  const { state, binders, busy, onChange, onClose, onSubmit, moveOptions, onMoveOwned } = props;
+  const {
+    state,
+    binders,
+    busy,
+    onChange,
+    onClose,
+    onSubmit,
+    moveOptions,
+    onMoveOwned,
+    onRebindMove,
+  } = props;
   /** The owned target whose Move sheet is open (UIL-043). */
   const [moveFor, setMoveFor] = useState<DraftTarget | null>(null);
   const isNew = state.isNewDraft;
   const router = useRouter();
   const [searchNavigating, setSearchNavigating] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
+  /**
+   * UIL-040 step 2: the refusal's remedy, when the server offered one. Only the binder it names is
+   * applied on success — to the editor's CURRENT state, never a snapshot from refusal time, because she
+   * can keep typing between the refusal and the click and those edits must survive (FSD-1's review; the
+   * same shape as the UIL-038 follow-up). `latest` is that current state, read at completion time.
+   */
+  const [remedy, setRemedy] = useState<RebindRemedy | null>(null);
+  const [rebinding, setRebinding] = useState(false);
+  const latest = useRef(state);
+  useEffect(() => {
+    latest.current = state;
+  }, [state]);
 
   // Captured once per mount (the editor remounts fresh each time it opens) — the baseline "untouched"
   // binder pick, for deciding on close whether a still-empty NEW draft is worth keeping.
@@ -914,13 +970,47 @@ export function CollectionEditor(props: {
     const res = await saveCollection(inputFrom(next), { draft: true });
     if (res.ok) {
       setInlineError(null);
+      setRemedy(null);
       onChange(next);
     } else {
       setInlineError(res.error);
+      // UIL-040 step 2: a refused rebind names its remedy. The binder she picked is NOT applied to the
+      // editor until the server has actually moved the cards and re-pointed the collection.
+      setRemedy(res.remedy ?? null);
+    }
+  }
+
+  /**
+   * The remedy's click (UIL-040 step 2). The button's label is the confirmation — it names the count and
+   * the destination — so there is no second question. On success the refusal clears and the editor
+   * settles on the binder she picked; on failure the server's reason replaces the refusal text and the
+   * button goes away (nothing moved — the write is one transaction), so a re-pick re-derives the offer.
+   */
+  async function confirmRebindMove() {
+    if (!remedy) return;
+    const toBinderId = remedy.toBinderId;
+    setRebinding(true);
+    try {
+      // Flush first, as `immediateChange` does: a passive edit still debounced from the last 600 ms
+      // carries the OLD binder, and landing after the rebind it would either re-point the collection
+      // back or trip the guard against the copies now in the new binder (FSD-1's review).
+      await autosave.flush();
+      const res = await onRebindMove(toBinderId);
+      if (res.ok) {
+        setInlineError(null);
+        // The current state with only the binder changed — never a snapshot from refusal time.
+        onChange({ ...latest.current, binderId: toBinderId, newBinderName: "" });
+      } else {
+        setInlineError(res.error);
+      }
+      setRemedy(null);
+    } finally {
+      setRebinding(false);
     }
   }
 
   const requestClose = useCallback(async () => {
+    if (rebinding) return; // UIL-040 step 2: a move-and-rebind is in flight; its outcome lands here
     await autosave.flush();
     const empty =
       state.isNewDraft &&
@@ -928,7 +1018,7 @@ export function CollectionEditor(props: {
       state.targets.length === 0 &&
       state.binderId === initialBinderId;
     onClose(empty);
-  }, [autosave, state, initialBinderId, onClose]);
+  }, [autosave, state, initialBinderId, onClose, rebinding]);
 
   /**
    * UIL-038 follow-up (QA on #155): a plain `<Link>` here navigated straight through any pending
@@ -1008,6 +1098,7 @@ export function CollectionEditor(props: {
             <button
               className="btn u"
               onClick={requestClose}
+              disabled={rebinding}
               style={{ background: "var(--panel-2)" }}
             >
               Close
@@ -1018,6 +1109,31 @@ export function CollectionEditor(props: {
               <div className="alertbar" role="alert" style={{ background: "#FFD9DF" }}>
                 <span>!</span>
                 <b>{inlineError}</b>
+                {remedy && (
+                  /* UIL-040 step 2: the remedy on the same bar as the refusal, never a dead end. The
+                     label carries the count and the destination, so the click IS the confirmation. */
+                  <button
+                    type="button"
+                    className="btn u"
+                    /* Shrinkable and left-aligned on purpose: at 375 the label wraps to two lines inside
+                       the bar; a non-shrinking button overflowed it by 43px (harness, 2026-09-20), and a
+                       wrapped <button> centres its text by default (the UIL-070 lesson). */
+                    style={{ marginLeft: "auto", maxWidth: "100%", textAlign: "left" }}
+                    disabled={busy || rebinding}
+                    onClick={confirmRebindMove}
+                  >
+                    {rebinding ? "Moving…" : rebindButtonLabel(remedy)}
+                  </button>
+                )}
+              </div>
+            )}
+            {remedy && remedy.staying.length > 0 && (
+              <div className="hint u">
+                Stays in {remedy.fromBinderNames.join(", ")}:{" "}
+                {remedy.staying
+                  .map((s) => `${s.name} (also chased by ${s.alsoChasedBy.join(", ")})`)
+                  .join("; ")}
+                .
               </div>
             )}
 
