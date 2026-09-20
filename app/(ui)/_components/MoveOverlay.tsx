@@ -8,6 +8,7 @@
 
 import { useEffect } from "react";
 import type {
+  BlockNeedCandidate,
   ExistingLineBlock,
   LineJoinCandidate,
   MoveDestination,
@@ -36,6 +37,9 @@ export interface MoveTargetCard {
   /** Line screen only (UIL-064 part 1): this card's own type-derived band — the default for "start a
    *  new line"'s one remaining pick. */
   naturalBandKey?: string;
+  /** UIL-030: open binder-block needs this card could fill — present only when the engine offered the
+   *  card as a repurposed block (Plan spotlight). The panel shows its block section only then. */
+  blockNeeds?: BlockNeedCandidate[];
 }
 
 export function MoveOverlay({
@@ -127,6 +131,7 @@ export function MoveOverlay({
             joinCandidates={card.joinCandidates}
             existingLineByBand={card.existingLineByBand}
             naturalBandKey={card.naturalBandKey}
+            blockNeeds={card.blockNeeds}
             onConfirm={onConfirm}
           />
           <div className="hint">Pick a new home. No rule applies here — it is your call.</div>

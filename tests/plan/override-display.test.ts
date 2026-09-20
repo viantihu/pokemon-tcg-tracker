@@ -209,3 +209,63 @@ describe("UIL-037 · when the name maps have not loaded yet", () => {
     expect(html).toContain("Specialty A"); // the fallback sentence
   });
 });
+
+describe("UIL-030 · the spotlight's offer text and the block override's sentence", () => {
+  const NEEDS = [
+    {
+      lineId: "L1",
+      slotId: "S2",
+      binderId: "b1",
+      binderName: "Binder 1",
+      speciesLabel: "CHARMANDER LINE",
+      stage: "Stage2",
+      bandKey: "red",
+    },
+  ];
+  const dup = () =>
+    item({
+      action: "BULK",
+      destination: "Bulk box",
+      reason: "Duplicate of a shelved copy; to the bulk box.",
+      offerBlockRepurpose: true,
+    });
+  const spot = (it: PlanItem, over: MoveDestination | undefined, needs = NEEDS) =>
+    renderToStaticMarkup(
+      createElement(Spotlight, {
+        item: it,
+        done: false,
+        onShelve: () => {},
+        onBackCard: () => {},
+        onSkip: () => {},
+        override: over,
+        overrideNames: {
+          ...NAMES,
+          lineLabel: (id) => needs.find((n) => n.lineId === id)?.speciesLabel ?? null,
+        },
+        blockNeeds: needs,
+        onMove: () => {},
+      }),
+    );
+
+  it("an offered duplicate with an open need shows the offer, naming the line, pointing at Change position", () => {
+    const html = spot(dup(), undefined);
+    expect(html).toContain("Offered as a repurposed binder block");
+    expect(html).toContain("CHARMANDER LINE has a reserved pocket with nothing in it.");
+    expect(html).toContain("Change position");
+  });
+
+  it("no offer text when the engine did not offer, when there are no open needs, or once she has overridden", () => {
+    expect(spot(item({ action: "BULK" }), undefined)).not.toContain("Offered as a repurposed");
+    expect(spot(dup(), undefined, [])).not.toContain("Offered as a repurposed");
+    expect(
+      spot(dup(), { kind: "block", lineId: "L1", slotId: "S2", binderId: "b1" }),
+    ).not.toContain("Offered as a repurposed");
+  });
+
+  it("a block override reads BLOCK · <species> line · <binder> back, with the BINDER BLOCK chip", () => {
+    const html = spot(dup(), { kind: "block", lineId: "L1", slotId: "S2", binderId: "b1" });
+    expect(html).toContain("Block · CHARMANDER LINE · Binder 1 · Back");
+    expect(html).toContain("Use as a binder block");
+    expect(html).toMatch(/class="movedtag u"[^>]*>Moved · Block · CHARMANDER LINE/);
+  });
+});

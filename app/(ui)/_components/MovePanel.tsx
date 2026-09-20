@@ -33,6 +33,7 @@
 
 import { useState } from "react";
 import type {
+  BlockNeedCandidate,
   ExistingLineBlock,
   LineJoinCandidate,
   LineJoinChoice,
@@ -52,6 +53,7 @@ export function MovePanel({
   joinCandidates,
   existingLineByBand,
   naturalBandKey,
+  blockNeeds,
   onConfirm,
 }: {
   options: MoveOptions;
@@ -66,6 +68,13 @@ export function MovePanel({
   /** This card's own type-derived band — the default for "start a new line"'s one remaining pick
    *  (UIL-064): the app's own answer, not ten empty chips. */
   naturalBandKey?: string;
+  /**
+   * UIL-030: open binder-block needs this card could fill. Present (non-empty) ONLY when the engine
+   * offered the card as a repurposed block — the Plan spotlight passes them, Lines and Lookup never do,
+   * so those surfaces are unchanged. When present the section leads: it is the reason she opened the
+   * sheet.
+   */
+  blockNeeds?: BlockNeedCandidate[];
   onConfirm: (dest: MoveDestination) => void;
 }) {
   const firstGeneral = options.binders.find((b) => b.type === "general");
@@ -86,23 +95,34 @@ export function MovePanel({
     initial?.kind === "shelf" ? initial.lineJoin : undefined,
   );
 
+  /** UIL-030: the block need she picked (by slot id). A manual binder/bulk pick clears it. */
+  const [blockPick, setBlockPick] = useState<string | null>(null);
+  const blockNeed = (blockNeeds ?? []).find((n) => n.slotId === blockPick) ?? null;
+
   const isBulk = binderId === BULK;
   const binder = options.binders.find((b) => b.id === binderId);
   const isSpecialty = binder?.type === "specialty";
   const collections = binder ? (options.collectionsByBinder[binder.id] ?? []) : [];
   const blockingLine = allowLineJoin && band ? existingLineByBand?.[band] : undefined;
 
-  const destination: MoveDestination = isBulk
-    ? { kind: "bulk" }
-    : isSpecialty
-      ? { kind: "collection", binderId: binder!.id, collectionId: collectionId ?? "" }
-      : {
-          kind: "shelf",
-          binderId: binder?.id ?? "",
-          half,
-          band: band ?? "",
-          ...(half === "back" && allowLineJoin ? { lineJoin } : {}),
-        };
+  const destination: MoveDestination = blockNeed
+    ? {
+        kind: "block",
+        lineId: blockNeed.lineId,
+        slotId: blockNeed.slotId,
+        binderId: blockNeed.binderId,
+      }
+    : isBulk
+      ? { kind: "bulk" }
+      : isSpecialty
+        ? { kind: "collection", binderId: binder!.id, collectionId: collectionId ?? "" }
+        : {
+            kind: "shelf",
+            binderId: binder?.id ?? "",
+            half,
+            band: band ?? "",
+            ...(half === "back" && allowLineJoin ? { lineJoin } : {}),
+          };
 
   const canConfirm = isMoveDestinationComplete(destination);
 
@@ -130,6 +150,9 @@ export function MovePanel({
     : "The back half holds lines. Move it from the Lines page to pick one. Or choose the front half, a collection, or bulk.";
 
   function summary(): string {
+    if (blockNeed) {
+      return `BINDER BLOCK · ${blockNeed.speciesLabel} · ${blockNeed.binderName.toUpperCase()} BACK`;
+    }
     if (isBulk) return "BULK BOX · NOT SHELVED";
     if (isSpecialty) {
       const c = collections.find((x) => x.id === collectionId);
@@ -147,6 +170,32 @@ export function MovePanel({
     return `${binder?.name ?? "BINDER"} · ${half.toUpperCase()} HALF · ${bandLabel}${joinLabel}`;
   }
 
+  /**
+   * UIL-030 — the offer the engine made ("Offered as a repurposed binder block") finally has an action.
+   * Each chip is an OPEN need: a line whose block slot has no physical block yet. Picking one makes the
+   * card that block, in that line's binder back half, and the need closes on confirm.
+   */
+  const blockSection =
+    (blockNeeds ?? []).length > 0 ? (
+      <div className="orow">
+        <div className="ol">USE AS A BINDER BLOCK · FILLS A RESERVED POCKET</div>
+        <div className="ochips">
+          {(blockNeeds ?? []).map((n) => (
+            <button
+              key={n.slotId}
+              type="button"
+              className={"ochip" + (blockPick === n.slotId ? " on" : "")}
+              aria-pressed={blockPick === n.slotId}
+              onClick={() => setBlockPick(n.slotId)}
+              title={`${n.speciesLabel} · ${n.stage} slot · ${n.binderName} back half`}
+            >
+              {n.speciesLabel} · {n.stage} · {n.binderName}
+            </button>
+          ))}
+        </div>
+      </div>
+    ) : null;
+
   const manualBody = (
     <>
       <div className="orow">
@@ -161,6 +210,7 @@ export function MovePanel({
               }
               aria-pressed={binderId === b.id}
               onClick={() => {
+                setBlockPick(null);
                 setBinderId(b.id);
                 setLineJoin(undefined); // a manually forced binder may no longer match the line's own
                 if (b.type !== "specialty") setCollectionId(null);
@@ -174,6 +224,7 @@ export function MovePanel({
             className={"ochip bulk" + (isBulk ? " on" : "")}
             aria-pressed={isBulk}
             onClick={() => {
+              setBlockPick(null);
               setBinderId(BULK);
               setLineJoin(undefined);
             }}
@@ -383,6 +434,14 @@ export function MovePanel({
         <span className="yc">NO RULE</span>
       </div>
       <div className="obody">
+        {blockSection ? (
+          <>
+            {blockSection}
+            <div className="orow" style={{ marginTop: 4 }}>
+              <div className="ol">OR PLACE IT MANUALLY</div>
+            </div>
+          </>
+        ) : null}
         {/*
           UIL-068, her report on the shipped UIL-064 rework: collapsing binder/half/band/collection/
           bulk behind "place it manually" made the plain "put this card where I say" case harder to
