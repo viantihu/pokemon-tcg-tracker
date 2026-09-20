@@ -157,3 +157,70 @@ describe("loadLineScreen's unlinedCards (UIL-056)", () => {
     expect(drake!.joinCandidates[1]).toMatchObject({ filledCount: 0, totalCount: 1 }); // B: 0
   });
 });
+
+/**
+ * The filter's OTHER two guards (UIL-056 test debt: "the unlined-cards filter is correct by reading
+ * but not pinned"). The first block above already kills the `|| c.line_slot_id` mutant; these two kill
+ * the `c.role !== "shelved"` mutant and the `if (!join) continue` (Trainer/Energy) mutant, each of
+ * which survives every other test in the repo with the filter's remaining guards intact.
+ */
+async function seedTrainer(id: string, name: string) {
+  // A Trainer has no species: `dex_id` is the empty array, `stage` is null. `joinOptionsFor` returns
+  // null for it, which is the branch the guard exists for.
+  await db.query(
+    `insert into catalog_card (tcgdex_id, name, dex_id, types, stage, evolve_from, card_class)
+       values ($1, $2, '{}', '{}', null, null, 'standard')`,
+    [id, name],
+  );
+}
+
+describe("loadLineScreen's unlinedCards filter — the role and species guards (UIL-056 debt)", () => {
+  const BULK_EMBERLING = "c0000000-0000-0000-0000-0000000000f4";
+  const BLOCK_EMBERLING = "c0000000-0000-0000-0000-0000000000f5";
+  const SHELVED_TRAINER = "c0000000-0000-0000-0000-0000000000f6";
+
+  it("lists ONLY shelved copies: a bulk copy and a binder-block copy have no line slot either, and still stay out", async () => {
+    await seedBinders(db, [{ id: GEN, type: "general", name: "Binder 1" }]);
+    await seedCard("emberling", "Emberling", EMBERLING_DEX, "Basic", null);
+    // The control: a shelved, line-less copy IS unlined — so an empty list would not pass this test.
+    await seedShelvedFront(UNLINED_EMBERDRAKE, "emberling");
+    // Same species, no `line_slot_id` — the only thing separating these from the control is `role`.
+    await db.query(
+      `insert into copy (id, owner_id, catalog_card_id, role) values ($1, $2, 'emberling', 'bulk')`,
+      [BULK_EMBERLING, OWNER],
+    );
+    await db.query(
+      `insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half)
+         values ($1, $2, 'emberling', 'block', $3, 'back')`,
+      [BLOCK_EMBERLING, OWNER, GEN],
+    );
+
+    const data = await loadLineScreen(pgliteClient(db));
+    const ids = data.unlinedCards.map((c) => c.copyId);
+
+    expect(ids).toContain(UNLINED_EMBERDRAKE);
+    // Dropping `c.role !== "shelved"` from the filter leaks both of these in: the bulk one labelled
+    // "Unshelved" with a way "into a line" the bulk box has no concept of, the block one as if it
+    // were a stranded card rather than a reserved pocket run.
+    expect(ids).not.toContain(BULK_EMBERLING);
+    expect(ids).not.toContain(BLOCK_EMBERLING);
+    expect(ids).toHaveLength(1);
+  });
+
+  it("skips a shelved Trainer rather than throwing on it — there is no line concept for a card with no species", async () => {
+    await seedBinders(db, [{ id: GEN, type: "general", name: "Binder 1" }]);
+    await seedCard("emberling", "Emberling", EMBERLING_DEX, "Basic", null);
+    await seedTrainer("nest-ball", "Nest Ball");
+    await seedShelvedFront(UNLINED_EMBERDRAKE, "emberling"); // control, see above
+    await seedShelvedFront(SHELVED_TRAINER, "nest-ball"); // a front-half Trainer, exactly as sync shelves them
+
+    // With `if (!join) continue` removed, `joinOptionsFor` returns null for the Trainer and the very
+    // next read (`join.dexId`) throws — the WHOLE Lines screen fails to load for one Trainer in the
+    // front half, which is the failure mode the guard exists to rule out.
+    const data = await loadLineScreen(pgliteClient(db));
+    const ids = data.unlinedCards.map((c) => c.copyId);
+
+    expect(ids).toEqual([UNLINED_EMBERDRAKE]);
+    expect(ids).not.toContain(SHELVED_TRAINER);
+  });
+});
