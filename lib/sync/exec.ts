@@ -21,7 +21,8 @@ import {
   unresolvedEntryRepo,
 } from "@/lib/repo";
 import { releaseSlotOps } from "@/lib/line/move";
-import { parseDexId } from "./resolve";
+import { parseDexId, resolveDexId } from "./resolve";
+import { entryAsDexRow, loadAliasMap } from "./pipeline";
 import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
 import type { SyncPlanBundle } from "./pipeline";
@@ -598,6 +599,22 @@ export async function manualMatch(
   );
   await applyWriteOps(db, { ops, resyncGroupIds: [groupId] });
   return result;
+}
+
+/**
+ * The TCGdex set id a stand-in for `entry` should carry, or null. The form prefills it rather than asking:
+ * the resolver already knows the set for an UNKNOWN_CARD entry (a passthrough code the mirror has, or a
+ * learned alias); for an UNKNOWN_SET entry nothing is known and null is the honest answer. "Known" means
+ * the mirror actually holds cards of that set, not merely that a code parsed.
+ */
+export async function knownSetIdForEntry(
+  db: DbClient,
+  entry: Row<"unresolved_entry">,
+): Promise<string | null> {
+  const aliasMap = await loadAliasMap(db);
+  const resolved = resolveDexId(entryAsDexRow(entry), aliasMap);
+  if (!resolved.setId) return null;
+  return (await catalogCardRepo.setExists(db, resolved.setId)) ? resolved.setId : null;
 }
 
 export interface StandInMatchResult extends ManualMatchResult {

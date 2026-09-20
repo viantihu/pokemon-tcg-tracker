@@ -38,6 +38,7 @@ function entry(over: Partial<QueueEntryView>): QueueEntryView {
 function state(over: Partial<SyncState>): SyncState {
   return {
     waiting: { unknownSet: [], unknownCard: [] },
+    cardTypes: [],
     dismissed: [],
     counts: { waiting: 0, dismissed: 0 },
     undo: { available: false, createdAt: null, summary: null },

@@ -21,6 +21,7 @@ export {
   executeUndo,
   manualMatch,
   manualMatchStandIn,
+  knownSetIdForEntry,
   newStandInId,
   isStandInId,
   STAND_IN_ID_PREFIX,
