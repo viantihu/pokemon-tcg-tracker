@@ -2,9 +2,10 @@
 
 /**
  * The decision card — the confirm-or-override moment (dev-spec §5 M7; system-design §8 screen 2;
- * design/prototype.html decision overlay). Shows evidence in three columns (CATALOG / YOU OWN /
- * WHY), the proposal, priced wishlist candidates, and the choices. The system PROPOSES (one choice
- * marked); she confirms or overrides; it NEVER auto-blocks.
+ * design/prototype.html decision overlay). UIL-067 shape, approved by Karvi: the proposal, what
+ * physically happens to this copy, one sentence of why, and the choices; the CATALOG / YOU OWN
+ * evidence, the rest of the reasoning and the priced alternates grid sit behind a Details disclosure.
+ * The system PROPOSES (one choice marked); she confirms or overrides; it NEVER auto-blocks.
  *
  * Placed in `_components/` so M9's sync UI reuses it. Presentational + callbacks only — it renders a
  * `DecisionCard` view-model and reports the chosen option; the write is a server action the host
@@ -106,88 +107,40 @@ export function DecisionCard({
 
         <div className="dq">{d.question}</div>
 
-        <div className="ev">
-          <div className="col">
-            <div className="h">CATALOG</div>
-            <div className="c">
-              <EvidenceList rows={d.catalog} />
-            </div>
-          </div>
-          <div className="col">
-            <div className="h">YOU OWN</div>
-            <div className="c">
-              <EvidenceList rows={d.owned} />
-            </div>
-          </div>
-          <div className="col">
-            <div className="h">WHY</div>
-            <div className="c" style={{ fontSize: 11, lineHeight: 1.75 }}>
-              {d.why.map((t, i) => (
-                <p key={i} style={{ marginBottom: 8 }}>
-                  {t}
-                </p>
-              ))}
-            </div>
-          </div>
-        </div>
-
+        {/*
+          UIL-067, Karvi: "This UX is too crowded, and a lot of the information here is not helpful. I
+          need something simpler." What she needs to confirm or override: the proposal, WHAT PHYSICALLY
+          HAPPENS to this copy (the one fact the old card never said plainly), one sentence of why, and
+          the buttons. The catalog statistics, the you-own list, the rest of the reasoning and the
+          alternates grid are still here — behind Details — for the times she wants to check the engine's
+          working. Same shape she approved 2026-09-20.
+        */}
         <div className="dprop">
           <div className="k">PROPOSED</div>
           <div className="t">{d.proposal}</div>
+          {d.wishlist.length > 0 ? (
+            <div className="wishline u" style={{ marginTop: 8 }}>
+              WISHLISTING ·{" "}
+              {(() => {
+                const picked = d.wishlist.find((w) => w.tcgdexId === pickedAlt) ?? d.wishlist[0];
+                return `${picked.name} ${formatCollectorNumber(picked.localId, picked.setCardCountOfficial) ?? ""} ${fmtPrice(picked.priceMarket) ?? ""}`;
+              })()}
+              {d.wishlist.length > 1 ? " · CHANGE UNDER DETAILS" : ""}
+            </div>
+          ) : null}
         </div>
 
-        {d.wishlist.length > 0 ? (
-          <div className="wish">
-            <div className="k">
-              <span>
-                {d.wishlist.length === 1 ? "WISHLIST TARGET" : "WISHLIST OPTIONS"} · CHEAPEST FIRST
-              </span>
-              <span className="sel">
-                WISHLISTING ·{" "}
-                {(() => {
-                  const picked = d.wishlist.find((w) => w.tcgdexId === pickedAlt) ?? d.wishlist[0];
-                  return `${picked.name} ${formatCollectorNumber(picked.localId, picked.setCardCountOfficial) ?? ""} ${fmtPrice(picked.priceMarket) ?? ""}`;
-                })()}
-              </span>
-            </div>
-            <div className="wcards">
-              {d.wishlist.map((w) => {
-                const isPicked = w.tcgdexId === pickedAlt;
-                return (
-                  <div
-                    key={w.tcgdexId}
-                    className={"wcard" + (isPicked ? " on" : "")}
-                    role={resolvedLabel ? undefined : "button"}
-                    tabIndex={resolvedLabel ? undefined : 0}
-                    aria-pressed={resolvedLabel ? undefined : isPicked}
-                    onClick={resolvedLabel ? undefined : () => setPickedAlt(w.tcgdexId)}
-                    onKeyDown={
-                      resolvedLabel
-                        ? undefined
-                        : (e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              setPickedAlt(w.tcgdexId);
-                            }
-                          }
-                    }
-                    style={resolvedLabel ? undefined : { cursor: "pointer" }}
-                  >
-                    <div className="top">
-                      <CardFace name={w.name} imageUrl={w.imageUrl} size="m" />
-                      {w.badge ? <span className="badge">{w.badge}</span> : null}
-                    </div>
-                    <div className="wn">{w.name}</div>
-                    <div className="wno">
-                      {formatCollectorNumber(w.localId, w.setCardCountOfficial) ?? ""}
-                    </div>
-                    <div className="wpx">{fmtPrice(w.priceMarket) ?? "—"}</div>
-                    {isPicked ? <span className="pill">WISHLISTING</span> : null}
-                  </div>
-                );
-              })}
-            </div>
+        {d.outcome ? (
+          <div className="dprop doutcome">
+            <div className="k">WHAT HAPPENS TO THIS COPY</div>
+            <div className="t">{d.outcome}</div>
           </div>
+        ) : null}
+
+        {d.why[0] ? (
+          <p className="dwhy" style={{ fontSize: 12, lineHeight: 1.7, marginBottom: 20 }}>
+            {d.why[0]}
+          </p>
         ) : null}
 
         {resolvedLabel ? (
@@ -256,6 +209,83 @@ export function DecisionCard({
             </div>
           </>
         )}
+
+        <details className="dmore">
+          <summary className="u">Details · catalog, what you own, alternates</summary>
+          <div className="dmorebody">
+            {d.why.length > 1 ? (
+              <div style={{ fontSize: 11, lineHeight: 1.75, marginBottom: 14 }}>
+                {d.why.slice(1).map((t, i) => (
+                  <p key={i} style={{ marginBottom: 8 }}>
+                    {t}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+            <div className="ev">
+              <div className="col">
+                <div className="h">CATALOG</div>
+                <div className="c">
+                  <EvidenceList rows={d.catalog} />
+                </div>
+              </div>
+              <div className="col">
+                <div className="h">YOU OWN</div>
+                <div className="c">
+                  <EvidenceList rows={d.owned} />
+                </div>
+              </div>
+            </div>
+
+            {d.wishlist.length > 0 ? (
+              <div className="wish">
+                <div className="k">
+                  <span>
+                    {d.wishlist.length === 1 ? "WISHLIST TARGET" : "WISHLIST OPTIONS"} · CHEAPEST
+                    FIRST
+                  </span>
+                </div>
+                <div className="wcards">
+                  {d.wishlist.map((w) => {
+                    const isPicked = w.tcgdexId === pickedAlt;
+                    return (
+                      <div
+                        key={w.tcgdexId}
+                        className={"wcard" + (isPicked ? " on" : "")}
+                        role={resolvedLabel ? undefined : "button"}
+                        tabIndex={resolvedLabel ? undefined : 0}
+                        aria-pressed={resolvedLabel ? undefined : isPicked}
+                        onClick={resolvedLabel ? undefined : () => setPickedAlt(w.tcgdexId)}
+                        onKeyDown={
+                          resolvedLabel
+                            ? undefined
+                            : (e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  setPickedAlt(w.tcgdexId);
+                                }
+                              }
+                        }
+                        style={resolvedLabel ? undefined : { cursor: "pointer" }}
+                      >
+                        <div className="top">
+                          <CardFace name={w.name} imageUrl={w.imageUrl} size="m" />
+                          {w.badge ? <span className="badge">{w.badge}</span> : null}
+                        </div>
+                        <div className="wn">{w.name}</div>
+                        <div className="wno">
+                          {formatCollectorNumber(w.localId, w.setCardCountOfficial) ?? ""}
+                        </div>
+                        <div className="wpx">{fmtPrice(w.priceMarket) ?? "—"}</div>
+                        {isPicked ? <span className="pill">WISHLISTING</span> : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </details>
       </div>
     </div>
   );

@@ -3210,3 +3210,45 @@ button.subhead.folded:hover {
 .linetabs .lt.gend {
   border-right-width: 3px;
 }
+
+/* ---------- UIL-067: the decision card's Details disclosure ----------
+   Karvi: "too crowded … I need something simpler." The catalog statistics, the you-own list and the
+   alternates grid move behind this; the summary reads as one more ink-bordered row of the sheet. */
+.dmore {
+  margin-top: 4px;
+}
+.dmore > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 8px 11px;
+  border: 3px solid var(--ink);
+  background: var(--panel-2);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+.dmore > summary::-webkit-details-marker {
+  display: none;
+}
+.dmore > summary::before {
+  content: "▸ ";
+}
+.dmore[open] > summary::before {
+  content: "▾ ";
+}
+.dmore[open] > summary {
+  background: var(--ink);
+  color: var(--panel);
+}
+.dmore .dmorebody {
+  border: 3px solid var(--ink);
+  border-top: 0;
+  padding: 14px 13px 0;
+}
+.dprop.doutcome {
+  background: var(--panel);
+}
+.dprop .wishline {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+}

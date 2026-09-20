@@ -158,6 +158,12 @@ export interface DecisionCard {
   why: string[];
   /** The proposed action, stated once. */
   proposal: string;
+  /**
+   * UIL-067: what PHYSICALLY happens to this copy if she confirms — which of the collection or the line
+   * ends up with it, or that nothing is placed and the slot stays a placeholder / becomes a block. The one
+   * fact the card never surfaced plainly; stated as its own line, above the choices.
+   */
+  outcome?: string;
   wishlist: WishlistOption[];
   choices: DecisionChoice[];
 }

@@ -347,3 +347,85 @@ describe("resolveDecisionWrites", () => {
     }
   });
 });
+
+describe("UIL-067 · every decision names what physically happens to this copy", () => {
+  const outcomes = (l: DecisionLineInput) =>
+    deriveDecisions(l).map((d) => [d.card.kind, d.card.outcome]);
+
+  it("collection vs line: the COLLECTION keeps the copy, the LINE's slot stays open", () => {
+    const claimedBy = new Map<number, string[]>([[6, ["coll-1"]]]);
+    const [[kind, outcome]] = outcomes(
+      line({
+        claimedBy,
+        slots: [
+          slot({ stageIndex: 0, state: "filled", card: ident("Charmander", "026") }),
+          slot({ stageIndex: 1, state: "filled", card: ident("Charmeleon", "027") }),
+          slot({
+            stageIndex: 2,
+            state: "placeholder",
+            speciesName: "Charizard",
+            card: ident("Charizard", "125"),
+          }),
+        ],
+      }),
+    );
+    expect(kind).toBe("collection-vs-line");
+    expect(outcome).toBe(
+      "The COLLECTION keeps this copy, in the specialty binder. The LINE does not get it: this slot stays open for a second printing.",
+    );
+  });
+
+  it("ex-only cap: nothing placed today; the wishlisted card lives in the specialty binder; line capped", () => {
+    const [[kind, outcome]] = outcomes(
+      line({
+        status: "capped",
+        slots: [
+          slot({ stageIndex: 0, state: "filled", card: ident("Charmander", "026") }),
+          slot({
+            stageIndex: 1,
+            state: "placeholder",
+            speciesName: "Charmeleon",
+            willLiveInSpecialty: true,
+            card: ident("Charmeleon", "027"),
+          }),
+        ],
+      }),
+    );
+    expect(kind).toBe("ex-only-cap");
+    expect(outcome).toContain("Nothing is placed today.");
+    expect(outcome).toContain("SPECIALTY binder");
+    expect(outcome).toContain("the line is capped here");
+  });
+
+  it("block: nothing placed; the slot becomes a reserved BLOCK pocket; the open hunt is named", () => {
+    const [[kind, outcome]] = outcomes(
+      line({
+        slots: [
+          slot({ stageIndex: 0, state: "filled", card: ident("Charmander", "026") }),
+          slot({ stageIndex: 1, state: "placeholder", card: ident("Charmeleon", "027") }),
+          slot({ stageIndex: 2, state: "block", speciesName: "Charizard" }),
+        ],
+      }),
+    );
+    expect(kind).toBe("block");
+    expect(outcome).toBe(
+      "Nothing is placed. This slot becomes a reserved BLOCK pocket, never a hunt; Charmeleon stays the line's open hunt.",
+    );
+  });
+
+  it("termination: the surviving card goes to the FRONT HALF; no line page is made", () => {
+    const [[kind, outcome]] = outcomes(
+      line({
+        status: "terminated",
+        slots: [
+          slot({ stageIndex: 0, state: "filled", card: ident("Charmander", "026") }),
+          slot({ stageIndex: 1, state: "block", speciesName: "Charmeleon" }),
+        ],
+      }),
+    );
+    expect(kind).toBe("termination");
+    expect(outcome).toBe(
+      "Charmander goes to the FRONT HALF with the basics. No line page is made.",
+    );
+  });
+});

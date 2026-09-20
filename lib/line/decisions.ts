@@ -236,6 +236,9 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
         proposal: survivor?.card
           ? `NO LINE · ${cap(survivor.card.name)} TO THE FRONT HALF`
           : "NO LINE · SURVIVING CARD TO THE FRONT HALF",
+        outcome: survivor?.card
+          ? `${survivor.card.name} goes to the FRONT HALF with the basics. No line page is made.`
+          : "The surviving card goes to the FRONT HALF with the basics. No line page is made.",
         wishlist: [],
         choices: [
           {
@@ -287,6 +290,7 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
           proposal: `PLACEHOLDER + WISHLIST ${cap(species)}${
             slot.priceMarket ? ` ${fmtPrice(slot.priceMarket)}` : ""
           } · TAG SPECIALTY · LINE CAPPED`,
+          outcome: `Nothing is placed today. This slot stays a placeholder; the wishlisted ${species} lives in the SPECIALTY binder when it arrives, and the line is capped here.`,
           wishlist: slot.card ? slot.alternates : [],
           choices: [
             {
@@ -348,6 +352,7 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
             "The collection needs one copy; a second printing fills the line for cheap.",
           ],
           proposal: `TO THE SPECIALTY BINDER · SLOT STAYS A PLACEHOLDER · WISHLIST ${cap(species)}`,
+          outcome: `The COLLECTION keeps this copy, in the specialty binder. The LINE does not get it: this slot stays open for a second printing.`,
           wishlist: slot.card ? slot.alternates : [],
           choices: [
             {
@@ -399,6 +404,9 @@ export function deriveDecisions(line: DecisionLineInput): DerivedDecision[] {
                 openStage.priceMarket ? ` ${fmtPrice(openStage.priceMarket)}` : ""
               } · LINE OPEN`
             : `BLOCK ${isRoot ? "THE ROOT" : "IT"} · LINE OPEN`,
+          outcome: `Nothing is placed. This slot becomes a reserved BLOCK pocket, never a hunt${
+            openStage?.card ? `; ${openStage.card.name} stays the line's open hunt` : ""
+          }.`,
           wishlist: [],
           choices: [
             {
