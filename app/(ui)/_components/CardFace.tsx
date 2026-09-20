@@ -1,9 +1,14 @@
 "use client";
 
 /**
- * A card thumbnail (design/prototype.html · `.face`). Shows the live TCGdex artwork over a text
- * fallback so a card is still identifiable when the image cannot load (offline / catalog gap). The
+ * A card thumbnail (design/prototype.html · `.face`). Shows the live TCGdex artwork over a fallback so
+ * a card is still identifiable when the image cannot load (offline / catalog gap / a stand-in). The
  * stored `image_url` is a TCGdex base path; the quality + extension are appended here.
+ *
+ * The fallback (UIL-081) is the prototype's pixel SIGIL — a deterministic, mirrored 6×6 pattern seeded
+ * from the card's name in a brand band colour (lib/catalog/sigil.ts) — with the initials kept as a
+ * small legend underneath so the name stays legible. Two imageless cards never look identical; the same
+ * card always looks the same. A sigil is not artwork, so it is never zoomable (UIL-036's guard).
  *
  * Presentational client component (needs the image `onError` fallback). Reused across intake, plan,
  * lookup, and line detail.
@@ -19,6 +24,7 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { CardLightbox } from "./CardLightbox";
+import { SIGIL_DARK, SIGIL_SIZE, sigilCells, sigilColor } from "@/lib/catalog/sigil";
 
 export type FaceSize = "s" | "m" | "l";
 
@@ -85,7 +91,27 @@ export function CardFace({
             onError={() => setErrored(true)}
           />
         ) : (
-          <span className="fallback u">{initials(name)}</span>
+          <span className="fallback" title={name} aria-label={name} role="img">
+            <svg
+              className="sigil"
+              viewBox={`0 0 ${SIGIL_SIZE} ${SIGIL_SIZE}`}
+              shapeRendering="crispEdges"
+              aria-hidden="true"
+              focusable="false"
+            >
+              {sigilCells(name).map((c) => (
+                <rect
+                  key={`${c.x}-${c.y}`}
+                  x={c.x}
+                  y={c.y}
+                  width={1}
+                  height={1}
+                  fill={c.shade === "dark" ? SIGIL_DARK : sigilColor(name)}
+                />
+              ))}
+            </svg>
+            <span className="init u">{initials(name)}</span>
+          </span>
         )}
       </span>
       {open && imageUrl && typeof document !== "undefined"
