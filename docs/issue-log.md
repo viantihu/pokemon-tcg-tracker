@@ -3980,11 +3980,16 @@ for the exact wording and what remains to close it (the Tech Lead's Testing read
   C3 closed is not removed by the mirror); tiles and the spotlight show a JA tag with the prefix stripped.
   Her two existing ja aliases (ja:m6 → swshp among them) are left exactly as she set them, pinned by a
   migration test. The largest ja set (MC, 774 cards) measured 5.1 s in one request, so no splitting.
-  **Remaining:** one plain `locale: ja` mirror dispatch (not force_all; ~184 sets / ~18,000 rows, about
-  doubling the catalog), held until Karvi lifts the UAT pause so Testing stays stable; then Sync → Retry
-  now should drain the five Japanese "Waiting on catalog" rows wherever the Dex code equals the ja set id,
-  and searching a Japanese card should show a JA-tagged tile. Fixed on that read; Closed on her
-  confirmation.
+  **First ja mirror run, 2026-09-20 05:01Z (run 35490587409, dispatched by the Senior BA on Karvi's
+  "resume"):** 175 of 184 sets mirrored; the Senior BA's read afterwards (run 35491315646): catalog_card
+  36,041 = en 23,548 (unchanged) + **ja 12,493**; set_alias 22, unresolved_entry 8 (WAITING 7), copy 706,
+  source=user 0, all unchanged. Nine sets never succeeded on two code causes, now UIL-083 (set ids with
+  "+" decoded as a space; a fractional Pokédex number on Rayquaza ★ rejected by an integer column); 64
+  further sets landed short of TCGdex's advertised count or got HTTP 503, which is upstream (UIL-004's
+  pattern) and is re-requested on every resume run. **Remaining:** UIL-083's fix, one resume dispatch
+  (`locale: ja`, never force_all), a read of the ja count, then Sync → Retry now should drain the five
+  Japanese "Waiting on catalog" rows wherever the Dex code equals the ja set id, and searching a Japanese
+  card should show a JA-tagged tile. Fixed on that read; Closed on her confirmation.
   C3 guard: PR [#183](https://github.com/viantihu/pokemon-tcg-tracker/pull/183) (squash `62fa838`,
   2026-09-18) — a manual match on a non-English entry never learns a cross-locale set alias, because the
   mirror is English-only so any such alias is wrong by construction. C3 remedy: PR
@@ -6578,3 +6583,41 @@ own is fatal under this bug, which is how it surfaced.
 
 **Priority rationale.** High: silent, reachable by the most routine action in the app (importing the
 export), reverses an explicit user decision, and the failure looks like a normal proposal.
+
+## UIL-083 — Nine Japanese sets cannot be mirrored: a "+" in the set id reaches TCGdex as a space, and a fractional Pokédex number is rejected by an integer column
+
+- **Reported:** 2026-09-20 (found by the Senior BA in the first `locale: ja` mirror run, 35490587409,
+  dispatched on Karvi's "resume"; causes confirmed read-only against TCGdex by Full Stack Dev - 1; body
+  by the Senior BA, no intake session on the roster)
+- **Status:** Open — fix in flight on `fix/uil-083-ja-mirror-plus-and-decimals` (Full Stack Dev - 1), no
+  migration; no merger on the roster at the time of writing (QA session gone), so the PR waits routed.
+- **Priority:** High (Senior BA's read) — it blocks UIL-047, Karvi's ruling for this phase: until these
+  sets mirror, part of the Japanese catalog she asked for is missing and one card class fails loudly on
+  every run.
+- **Area:** Catalog (mirror), Sync
+- **Env:** Testing
+
+**Two causes, one functional requirement (every Japanese set mirrors), so one entry.**
+
+1. **Set ids containing "+" (SM1+, sm2+, SM3+, SM4+, SM5+) fail with `TCGdex /ja/sets/SM1%20 -> HTTP 404`.**
+   The TCGdex client already percent-encodes path segments, so `SM1+` would reach TCGdex as `SM1%2B`
+   (200) if it arrived intact. It does not: the workflow sends `?set=SM1+` raw and the route reads it
+   with `URLSearchParams`, which decodes a bare `+` as a space per the URL spec, so the client encodes
+   "SM1 " as `%20`. Fix at both ends: the workflow URI-encodes the set id (sends `%2B`) and the route
+   reads `set` from the raw query with `decodeURIComponent`, which keeps a literal plus, so either form
+   works. Pinned by a client URL test for a set id containing "+". Note for the resume run: TCGdex's
+   `/ja/sets/SM1+` resource lists zero cards today, so after the fix these five land as upstream
+   shortfalls ("got 0 of N claimed"), not errors.
+2. **PCG2, PCG6, PCG7, PCG9 fail with `invalid input syntax for type integer: "384.1" [22P02]`.** One
+   card, PCG2-067 レイカザの星 (Rayquaza ★), carries `dexId: [384.1]`: TCGdex marks the star variant with
+   a fractional Pokédex number, and `catalog_card.dex_id` is `integer[]`; the whole set's upsert fails on
+   that one row, three passes running. Fix in `toCatalogRow`: floor a fractional dex id to the species
+   number (384.1 → 384; it is Rayquaza, which is what lines key on) and make the hp coercion
+   integer-only (a decimal hp becomes null). No column, no migration. Pinned with the real payload shape.
+
+**What the run did land.** 175 of 184 ja sets; catalog_card 36,041 = en 23,548 + ja 12,493 on the Senior
+BA's read; every non-catalog count unchanged. The 64 sets that came back short of TCGdex's advertised
+count, or 503'd, are upstream and resume on the next dispatch; they are not this entry.
+
+**Priority rationale.** High, Senior BA's read: not user-visible on its own, but it is the only thing
+between Karvi's "pull the Japanese catalog this phase" ruling and the catalog actually being there.
