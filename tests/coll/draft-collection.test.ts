@@ -253,7 +253,12 @@ describe("applyCollectionSave draft mode", () => {
       { draft: true },
     );
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toMatch(/relocate/i);
+    if (!res.ok) {
+      expect(res.error).toMatch(/move them with it/i);
+      // Step 2 (UIL-040): the refusal carries its remedy even in draft mode — the guard and the offer
+      // travel together, or the draft path would be a dead end the deliberate path is not.
+      expect(res.remedy).toMatchObject({ kind: "rebind-move", toBinderId: SPEC2, copyCount: 1 });
+    }
 
     await asSuperuser(db);
     const row = await collectionRepo.getByPk(pgliteClient(db), COL);

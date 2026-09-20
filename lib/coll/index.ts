@@ -10,5 +10,6 @@
 
 export * from "./browse";
 export * from "./log";
+export * from "./rebind";
 export * from "./remove";
 export * from "./save";

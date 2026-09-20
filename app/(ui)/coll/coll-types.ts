@@ -3,6 +3,7 @@
  * serializable data only, imported by both the server actions and the client screen.
  */
 
+import type { RebindRemedy } from "@/lib/coll";
 import type { MoveOptions } from "@/lib/line/types";
 import type { CollectionMode, WishlistBinderGroup, WishlistEntry } from "@/lib/surfaces";
 
@@ -83,7 +84,14 @@ export type SaveResult = { ok: true } | { ok: false; error: string };
  * `saveCollection`'s result — carries the id so the caller can keep autosaving into a row it just
  * created (UIL-038), rather than waiting on a full `loadCollHub` refresh to learn it.
  */
-export type SaveCollectionResult = { ok: true; id: string } | { ok: false; error: string };
+export type SaveCollectionResult =
+  | { ok: true; id: string }
+  /**
+   * `remedy` is present on exactly one refusal — the UIL-040 rebind guard — and is what the editor
+   * renders as the "move them and rebind" button on the same bar as the refusal (step 2).
+   */
+  | { ok: false; error: string; remedy?: RebindRemedy };
+export type { RebindRemedy };
 
 /* ------------------------------- card search (UIL-039) ------------------------------- */
 

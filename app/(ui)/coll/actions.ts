@@ -30,6 +30,7 @@ import {
   applyBulkAddTargets,
   applyCardBrowse,
   applyCollectionLog,
+  applyCollectionRebindMove,
   applyCollectionRemoval,
   applyCollectionSave,
 } from "@/lib/coll";
@@ -235,6 +236,27 @@ export async function saveCollection(
   try {
     const { db, ownerId } = await getOwnerContext();
     return await applyCollectionSave(db, ownerId, input, opts);
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * UIL-040 step 2 — the remedy to `saveCollection`'s rebind refusal: carry the collection's shelved
+ * copies into the new binder AND re-point the collection, in ONE transaction (`lib/coll/rebind.ts` →
+ * `apply_write_ops`, migration 0017). Only the collection and the destination binder cross the wire;
+ * which copies move, which stay (a card another collection still in the old binder chases), and which
+ * line slots they hold are all re-derived from fresh state server-side. Never deletes a copy or a
+ * placement decision.
+ */
+export async function rebindCollectionWithMove(
+  collectionId: string,
+  toBinderId: string,
+): Promise<SaveResult> {
+  try {
+    const { db } = await getOwnerContext();
+    await applyCollectionRebindMove(db, { collectionId, toBinderId });
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }
