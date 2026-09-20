@@ -6426,9 +6426,19 @@ state that several screens reach, and the change is contained to one component.
 - **Reported:** 2026-09-20 (found by Full Stack Dev - 1 while designing UIL-060's stand-in records and
   proven by a failing test before it was numbered; body written by the Senior BA, no intake session on
   the roster)
-- **Status:** Open — fix in flight on `fix/uil-082-manual-match-survives-reimport` (Full Stack Dev - 1),
-  ahead of migration 0015 because UIL-060 depends on it. **Until it deploys, re-importing a Dex export
-  will undo any manual match made since the previous import.**
+- **Status:** **Fixed** — PR [#270](https://github.com/viantihu/pokemon-tcg-tracker/pull/270) MERGED to
+  `develop` 2026-09-20 (squash `df33430`), QA-gated on the merged tree (997 tests, sync suite 117; ignoring
+  the manual match, or reverting `lib` to develop's, fails exactly the survives and precedence cases while
+  "a row gone from the export still retires" stays green), confirmed **deployed** to Testing (Deploy,
+  migrate, smoke, acceptance and Vercel green on `df33430`). The import path now loads RESOLVED entries
+  that carry a `manual_match_id` alongside the WAITING ones and resolves a row to its manual match BEFORE
+  the catalog lookup; re-importing the same export yields zero proposals of any kind for the matched row.
+  Precedence as ruled: the manual match wins even when the catalog can later resolve the row; she releases
+  it by dismissing or forgetting the entry, never by a sync. No migration. The Tech Lead's before-read
+  (run 35477651416) showed her one manual match on Testing intact and no copy retired, so nothing needed
+  recovering; the "do not re-import" warning is lifted with this deploy. Step for Karvi when UAT
+  resumes: import the same export twice; a card you matched by hand should stay where you put it, with no
+  new "waiting" row and no retire proposal.
 - **Priority:** High (Senior BA's read, to be confirmed by Karvi) — a silent wrong result on the app's
   core write path: her explicit match is reversed by the very next sync, with no error and a plausible
   looking proposal, the exact shape UIL-062 and UIL-063 were High for.
