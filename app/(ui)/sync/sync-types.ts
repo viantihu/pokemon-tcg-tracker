@@ -1,3 +1,4 @@
+import type { StandInInput } from "@/lib/sync";
 /**
  * Client/server shared view-models for the Sync screen (dev-spec §5 M9; sync-ui-spec §A.9, §B.6).
  * Plain serializable types only — no server imports — so the client component can hold them. The
@@ -46,6 +47,8 @@ export interface LearnedAliasView {
 /** The queue + undo status the screen loads on mount and after every mutation (sync-ui-spec §A.9). */
 export interface SyncState {
   waiting: { unknownSet: QueueEntryView[]; unknownCard: QueueEntryView[] };
+  /** Every card type the band map knows (type_color_map.card_type), for the stand-in form (UIL-060). */
+  cardTypes: string[];
   dismissed: QueueEntryView[];
   counts: { waiting: number; dismissed: number };
   undo: { available: boolean; createdAt: string | null; summary: SyncCounts | null };
@@ -65,3 +68,16 @@ export interface ApplyOutcome {
 }
 
 export type ActionError = { ok: false; error: string };
+
+/** What the stand-in form sends (UIL-060 Half 1). The set id is derived server-side, never typed. */
+export type StandInFormInput = Omit<StandInInput, "setId">;
+
+/** The stand-in action's answer: created and matched, a twin to match instead, or a plain failure. */
+export type StandInOutcome =
+  | { ok: true; standInId: string }
+  | {
+      ok: false;
+      twin: { tcgdexId: string; name: string; setName: string | null; localId: string | null };
+      error: string;
+    }
+  | ActionError;

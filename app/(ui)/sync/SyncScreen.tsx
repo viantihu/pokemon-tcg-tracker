@@ -18,6 +18,7 @@ import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { ProgressBar } from "../_components/ProgressBar";
 import {
   applySync,
+  createStandInAndMatch,
   dismissEntryAction,
   forgetSetAliasAction,
   loadSyncState,
@@ -28,7 +29,13 @@ import {
   undismissEntryAction,
   undoLastSync,
 } from "./actions";
-import type { LearnedAliasView, QueueEntryView, SyncState } from "./sync-types";
+import type {
+  LearnedAliasView,
+  QueueEntryView,
+  StandInFormInput,
+  StandInOutcome,
+  SyncState,
+} from "./sync-types";
 
 type Phase = "idle" | "parsing" | "preview" | "working";
 
@@ -250,7 +257,21 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
       {matching ? (
         <MatchOverlay
           entry={matching}
+          cardTypes={state.cardTypes}
           onClose={() => setMatching(null)}
+          onStandIn={async (input) => {
+            // UIL-060 Half 1: create the stand-in and match in one transaction. A twin comes back as a
+            // refusal the overlay renders with "match to it instead"; only a success closes it.
+            const r = await createStandInAndMatch(matching.id, input);
+            if (r.ok) {
+              setMatching(null);
+              setToast("Created a stand-in and matched — ready to place.");
+              await refresh();
+            } else if (!("twin" in r)) {
+              setError(r.error);
+            }
+            return r;
+          }}
           onPicked={async (tcgdexId) => {
             const entryId = matching.id;
             setMatching(null);
@@ -771,14 +792,21 @@ function AliasPanel({
   );
 }
 
-function MatchOverlay({
+export function MatchOverlay({
   entry,
+  cardTypes,
   onClose,
   onPicked,
+  onStandIn,
 }: {
   entry: QueueEntryView;
+  /** Every card type the band map knows — the Pokémon stand-in's type pick (UIL-060). */
+  cardTypes: string[];
   onClose: () => void;
   onPicked: (tcgdexId: string) => void;
+  /** UIL-060 Half 1: create a stand-in and match to it. Resolves with the outcome so a twin refusal
+   *  can be shown in place, with the existing stand-in offered. */
+  onStandIn: (input: StandInFormInput) => Promise<StandInOutcome>;
 }) {
   return (
     <div className="veil on" onClick={onClose}>
@@ -808,8 +836,205 @@ function MatchOverlay({
             onPick={(card) => onPicked(card.tcgdexId)}
             placeholder="Find the real card…"
           />
+          <StandInForm
+            entry={entry}
+            cardTypes={cardTypes}
+            onStandIn={onStandIn}
+            onPicked={onPicked}
+          />
         </div>
       </div>
     </div>
+  );
+}
+
+const STAGES = ["Basic", "Stage1", "Stage2"] as const;
+
+/**
+ * UIL-060 Half 1 — "the catalog and the match are not always correct, so a manual override is
+ * necessary." When the real card is not in the catalog, she creates a STAND-IN of her own and the
+ * entry is matched to it in the same transaction (lib/sync/exec.ts `manualMatchStandIn`).
+ *
+ * Prefilled from what the export already carries — name, set name, collector number — and the set id
+ * is derived server-side, never typed. The ONE thing the export cannot supply is what kind of card it
+ * is: a Pokémon needs its type and stage or the engine bands it White as a Trainer, so that choice is
+ * required. A twin (a stand-in she already made for this card) is refused with the existing one offered
+ * to match instead: the condition named, the remedy beside it.
+ */
+export function StandInForm({
+  entry,
+  cardTypes,
+  onStandIn,
+  onPicked,
+}: {
+  entry: QueueEntryView;
+  cardTypes: string[];
+  onStandIn: (input: StandInFormInput) => Promise<StandInOutcome>;
+  onPicked: (tcgdexId: string) => void;
+}) {
+  const [name, setName] = useState(entry.dexName || "");
+  const [setLabel, setSetLabel] = useState(entry.dexSetName || "");
+  const [localId, setLocalId] = useState(entry.dexNumber || "");
+  const [kind, setKind] = useState<"pokemon" | "trainer" | "energy">("pokemon");
+  const [type, setType] = useState<string>("");
+  const [stage, setStage] = useState<(typeof STAGES)[number]>("Basic");
+  const [dexId, setDexId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [twin, setTwin] = useState<Extract<StandInOutcome, { twin: unknown }>["twin"] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  const canSubmit = name.trim().length > 0 && (kind !== "pokemon" || type.length > 0) && !busy;
+
+  async function submit() {
+    if (!canSubmit) return;
+    setBusy(true);
+    setFailed(null);
+    setTwin(null);
+    const dex = Number.parseInt(dexId, 10);
+    const input: StandInFormInput = {
+      name: name.trim(),
+      setName: setLabel.trim() || null,
+      localId: localId.trim() || null,
+      kind:
+        kind === "pokemon"
+          ? { kind: "pokemon", type, stage, dexId: Number.isFinite(dex) && dex > 0 ? dex : null }
+          : { kind },
+    };
+    const r = await onStandIn(input);
+    setBusy(false);
+    if (r.ok) return;
+    if ("twin" in r) setTwin(r.twin);
+    else setFailed(r.error);
+  }
+
+  return (
+    <details className="standin">
+      <summary className="u" style={{ cursor: "pointer", fontSize: 11 }}>
+        Not in the catalog? Create a stand-in and match to it
+      </summary>
+      <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+        <p style={{ fontSize: 11, color: "var(--ink-2)", margin: 0 }}>
+          A stand-in is your own record for a card the catalog does not have yet. It can be placed
+          today, and it is marked so it can be swapped for the real record later.
+        </p>
+        <label className="orow">
+          <div className="ol u">Name</div>
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10 }}>
+          <label className="orow">
+            <div className="ol u">Set</div>
+            <input
+              className="field"
+              value={setLabel}
+              onChange={(e) => setSetLabel(e.target.value)}
+            />
+          </label>
+          <label className="orow">
+            <div className="ol u">Number</div>
+            <input
+              className="field"
+              style={{ width: 90 }}
+              value={localId}
+              onChange={(e) => setLocalId(e.target.value)}
+            />
+          </label>
+        </div>
+        <div className="orow">
+          <div className="ol u">What kind of card</div>
+          <div className="modetoggle" role="group" aria-label="Card kind">
+            {(["pokemon", "trainer", "energy"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                className={"modebtn u" + (kind === k ? " on" : "")}
+                aria-pressed={kind === k}
+                onClick={() => setKind(k)}
+              >
+                {k === "pokemon" ? "Pokémon" : k === "trainer" ? "Trainer" : "Energy"}
+              </button>
+            ))}
+          </div>
+        </div>
+        {kind === "pokemon" ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10 }}>
+            <label className="orow">
+              <div className="ol u">Type</div>
+              <select
+                className="field"
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+                aria-label="Type"
+              >
+                <option value="">Pick a type…</option>
+                {cardTypes.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="orow">
+              <div className="ol u">Stage</div>
+              <select
+                className="field"
+                value={stage}
+                onChange={(e) => setStage(e.target.value as (typeof STAGES)[number])}
+                aria-label="Stage"
+              >
+                {STAGES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="orow">
+              <div className="ol u">Pokédex # (optional)</div>
+              <input
+                className="field"
+                style={{ width: 90 }}
+                inputMode="numeric"
+                value={dexId}
+                onChange={(e) => setDexId(e.target.value)}
+                aria-label="Pokédex number"
+              />
+            </label>
+          </div>
+        ) : (
+          <p style={{ fontSize: 11, color: "var(--ink-2)", margin: 0 }}>
+            {kind === "trainer" ? "Trainers" : "Energy cards"} have no type or stage; the stand-in
+            files with the white band.
+          </p>
+        )}
+        {twin ? (
+          <div className="alertbar" role="alert" style={{ background: "#FFD9DF" }}>
+            <span>!</span>
+            <b>
+              A stand-in for &quot;{twin.name}&quot;
+              {twin.setName ? ` in ${twin.setName}` : ""}
+              {twin.localId ? ` · ${twin.localId}` : ""} already exists.
+            </b>
+            <button
+              type="button"
+              className="btn sm"
+              style={{ marginLeft: "auto" }}
+              onClick={() => onPicked(twin.tcgdexId)}
+            >
+              Match to the existing stand-in instead ▶
+            </button>
+          </div>
+        ) : null}
+        {failed ? (
+          <div className="alertbar" role="alert" style={{ background: "#FFD9DF" }}>
+            <span>!</span>
+            <b>{failed}</b>
+          </div>
+        ) : null}
+        <button type="button" className="oconfirm" disabled={!canSubmit} onClick={submit}>
+          Create the stand-in and match ▶
+        </button>
+      </div>
+    </details>
   );
 }

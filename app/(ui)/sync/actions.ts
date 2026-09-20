@@ -26,6 +26,9 @@ import {
   type SyncOverrides,
   type SyncPlanBundle,
   type SyncPreview,
+  manualMatchStandIn,
+  knownSetIdForEntry,
+  StandInTwinError,
 } from "@/lib/sync";
 import {
   applyWriteOps,
@@ -34,6 +37,7 @@ import {
   unresolvedEntryRepo,
   type DbClient,
   type Row,
+  typeColorMapRepo,
 } from "@/lib/repo";
 import type { AppliedSnapshot } from "@/lib/sync";
 import { errorMessage } from "@/lib/errors";
@@ -45,6 +49,8 @@ import type {
   LearnedAliasView,
   QueueEntryView,
   SyncState,
+  StandInFormInput,
+  StandInOutcome,
 } from "./sync-types";
 
 type PreviewOk = { ok: true; preview: SyncPreview; bundle: SyncPlanBundle };
@@ -220,10 +226,11 @@ function toAliasViews(
  */
 export async function loadSyncState(): Promise<SyncState> {
   const { db } = await getOwnerContext();
-  const [entries, snapshots, aliases] = await Promise.all([
+  const [entries, snapshots, aliases, typeRows] = await Promise.all([
     unresolvedEntryRepo.list(db),
     lastSyncSnapshotRepo.list(db),
     setAliasRepo.list(db),
+    typeColorMapRepo.list(db),
   ]);
 
   const waiting = entries.filter((e) => e.status === "WAITING").map(toEntryView);
@@ -243,7 +250,43 @@ export async function loadSyncState(): Promise<SyncState> {
       summary: snap?.counts ?? null,
     },
     aliases: toAliasViews(aliases, entries),
+    cardTypes: [...new Set(typeRows.map((t) => t.card_type))].sort(),
   };
+}
+
+/**
+ * UIL-060 Half 1: create a STAND-IN catalog card for a card TCGdex lacks and match the entry to it, in
+ * one transaction (lib/sync/exec.ts `manualMatchStandIn`). The set id is derived here from what the
+ * resolver already knows about the entry, never typed. A twin (a stand-in she already made for the same
+ * card) is refused with that stand-in returned, so the screen can offer "match to it instead" — Karvi's
+ * refusal rule: name the condition, show the remedy.
+ */
+export async function createStandInAndMatch(
+  entryId: string,
+  input: StandInFormInput,
+): Promise<StandInOutcome> {
+  try {
+    const { db } = await getOwnerContext();
+    const entry = await unresolvedEntryRepo.getByPk(db, entryId);
+    if (!entry) return { ok: false, error: "That queue entry is gone. Refresh and try again." };
+    const setId = await knownSetIdForEntry(db, entry);
+    const r = await manualMatchStandIn(db, entryId, { ...input, setId });
+    return { ok: true, standInId: r.standInId };
+  } catch (err) {
+    if (err instanceof StandInTwinError) {
+      return {
+        ok: false,
+        twin: {
+          tcgdexId: err.twin.tcgdex_id,
+          name: err.twin.name,
+          setName: err.twin.set_name,
+          localId: err.twin.local_id,
+        },
+        error: err.message,
+      };
+    }
+    return { ok: false, error: errorMessage(err) };
+  }
 }
 
 /**

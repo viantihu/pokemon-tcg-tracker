@@ -95,7 +95,7 @@ export function parseQuantity(raw: string): number {
 }
 
 /** SET_ALIAS_SEED plus persisted learned aliases, keyed `${locale}:${dexCode}`. */
-async function loadAliasMap(db: DbClient): Promise<Record<string, string>> {
+export async function loadAliasMap(db: DbClient): Promise<Record<string, string>> {
   const learned = await setAliasRepo.list(db);
   const map: Record<string, string> = { ...SET_ALIAS_SEED };
   for (const a of learned) map[`${a.locale}:${a.dex_code}`] = a.tcgdex_set_id;
@@ -135,7 +135,7 @@ export async function loadCurrentGroups(db: DbClient): Promise<CurrentGroup[]> {
 }
 
 /** Rebuild the minimal Dex row a WAITING entry needs to be re-resolved on a retry. */
-function entryAsDexRow(e: Row<"unresolved_entry">): Pick<DexRow, "Id" | "Locale" | "Set"> {
+export function entryAsDexRow(e: Row<"unresolved_entry">): Pick<DexRow, "Id" | "Locale" | "Set"> {
   return {
     Id: e.dex_id,
     Locale: e.locale === "ja" || e.locale === "Japanese" ? "Japanese" : (e.locale ?? ""),

@@ -87,6 +87,17 @@ export const catalogCardRepo = {
     return rows;
   },
 
+  /** Whether the mirror holds ANY card of `setId` — "the set is known" for a stand-in's set id (UIL-060). */
+  async setExists(db: DbClient, setId: string): Promise<boolean> {
+    const { data, error } = await db
+      .from("catalog_card")
+      .select("tcgdex_id")
+      .eq("set_id", setId)
+      .range(0, 0);
+    if (error) throw error;
+    return (data ?? []).length > 0;
+  },
+
   /** Duplicate-key lookup half: cards sharing a (set_id, local_id). */
   async findBySetLocal(
     db: DbClient,
