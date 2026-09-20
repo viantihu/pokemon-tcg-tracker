@@ -6420,3 +6420,60 @@ Backfill pickers. Not scoped here: fetching art from any other source.
 
 **Priority rationale.** Medium, Karvi's own request: not a defect, but it is a stated brand call on a
 state that several screens reach, and the change is contained to one component.
+
+## UIL-082 — A manual match does not survive the next import: the row parks again as WAITING and the copy she created is proposed for retirement
+
+- **Reported:** 2026-09-20 (found by Full Stack Dev - 1 while designing UIL-060's stand-in records and
+  proven by a failing test before it was numbered; body written by the Senior BA, no intake session on
+  the roster)
+- **Status:** Open — fix in flight on `fix/uil-082-manual-match-survives-reimport` (Full Stack Dev - 1),
+  ahead of migration 0015 because UIL-060 depends on it. **Until it deploys, re-importing a Dex export
+  will undo any manual match made since the previous import.**
+- **Priority:** High (Senior BA's read, to be confirmed by Karvi) — a silent wrong result on the app's
+  core write path: her explicit match is reversed by the very next sync, with no error and a plausible
+  looking proposal, the exact shape UIL-062 and UIL-063 were High for.
+- **Area:** Sync
+- **Env:** Testing (one RESOLVED entry with a manual match exists there today); reproduced on PGlite
+
+**Proven, not inferred.** `tests/sync/manual-match-survives-reimport.test.ts`, case "import → park →
+manual match → import again: the row resolves to her match, nothing parks or retires", on real PGlite
+with real RLS through `runSyncPipeline`, `executeApply` and `manualMatch`. The mirror holds `xy7-012`
+(Ancient Origins); the export carries one row `xy7-99` in that set, a number the mirror lacks. Import one
+parks it `UNKNOWN_CARD` (set resolved by name, card missing). `manualMatch(entry, "xy7-012")` marks the
+entry RESOLVED with `manual_match_id = xy7-012` and creates one bulk copy. Importing the same export again
+fails the assertion:
+
+```
+Expected { parks: [], retires: [], unchanged: 1 }
+Received { parks: ["xy7-99 UNKNOWN_CARD"],
+           retires: [{ kind: "retire", catalogCardId: "xy7-012", dexVariantRaw: "Normal",
+                       consequence: "bulk-removed", needsReview: false }],
+           unchanged: 0 }
+```
+
+So the next import (a) parks the row again as a fresh WAITING entry and (b), because no CSV row now
+resolves to `xy7-012`, the reconcile proposes **retiring the copy her match created**. Her decision is
+undone by the next sync, for real cards today, not only for stand-ins.
+
+**Mechanism, confirmed in code.** `runSyncPipeline`'s import path resolves every CSV row against the
+catalog only (`createPrefetchedCatalogLookup`) and loads WAITING entries only
+(`unresolvedEntryRepo.listWaiting`); a RESOLVED entry's `manual_match_id` is never read anywhere in
+`lib/sync` (`pipeline.ts`, `catalog-lookup.ts`, `reconcile.ts`, `diff.ts`: zero references). The column
+UIL-047 C3 and `manualMatch` write is write-only.
+
+**Fix, approved 2026-09-20.** The import resolver's first step becomes: a RESOLVED entry with this
+`(dex_id, dex_variant_raw)` and a `manual_match_id` resolves to that id, before the catalog lookup.
+Precedence ruling: **the manual match wins even when the catalog can later resolve the row itself**,
+because it is her explicit override and a UIL-060 stand-in depends on exactly that; she releases it by
+dismissing or forgetting the entry. Pinned by the test above (now the behaviour test), one for the
+precedence, one that a row gone from the export still retires normally (the memory never resurrects rows
+the export no longer has), and one that re-importing the same export yields zero proposals for the matched
+row.
+
+**Why it was never seen.** Every sync test imports once; UIL-047 C3's tests exercise the match and the
+Forget path, never a second import; and Karvi has imported her real export once on Testing since her one
+manual match. **Cross-reference UIL-060:** a stand-in record that the catalog will never resolve on its
+own is fatal under this bug, which is how it surfaced.
+
+**Priority rationale.** High: silent, reachable by the most routine action in the app (importing the
+export), reverses an explicit user decision, and the failure looks like a normal proposal.
