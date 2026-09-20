@@ -424,22 +424,61 @@ export interface ManualMatchResult {
 }
 
 /**
- * Manual-match a stubborn entry to a catalog card (A.8). Pins the identity (never a placement),
- * creates the unplaced copies, marks the entry RESOLVED, and — when the miss was UNKNOWN_SET —
- * learns the `(locale, dexCode) → tcgdexSetId` alias so the rest of that set drains on the next
- * retry ("one match drains the set"). Applied in one transaction.
+ * What a stand-in needs from her (UIL-060 Half 1). Everything the entry already carries (name, set
+ * name, collector number, the set id when an alias resolved it) is prefilled by the form; the one thing
+ * the export cannot supply is what KIND of card it is, because without a type and stage the engine
+ * classifies a card as a Trainer and bands it White (lib/plan/adapt.ts).
  */
-export async function manualMatch(
-  db: DbClient,
-  entryId: string,
-  tcgdexId: string,
-): Promise<ManualMatchResult> {
-  const entry = await unresolvedEntryRepo.getByPk(db, entryId);
-  if (!entry) throw new Error("Unresolved entry not found.");
-  const card = await catalogCardRepo.getByPk(db, tcgdexId);
-  if (!card) throw new Error("Catalog card not found.");
+export interface StandInInput {
+  name: string;
+  setName: string | null;
+  /** The TCGdex set id when the entry's set is known (UNKNOWN_CARD); null for UNKNOWN_SET. */
+  setId: string | null;
+  localId: string | null;
+  kind:
+    | { kind: "pokemon"; type: string; stage: "Basic" | "Stage1" | "Stage2"; dexId?: number | null }
+    | { kind: "trainer" }
+    | { kind: "energy" };
+  cardClass?: "standard" | "specialty";
+}
 
-  const now = nowIso();
+/** The id namespace a stand-in lives in; the schema check in 0015 ties it to `source = 'user'`. */
+export const STAND_IN_ID_PREFIX = "user:";
+export function newStandInId(): string {
+  return `${STAND_IN_ID_PREFIX}${crypto.randomUUID()}`;
+}
+export function isStandInId(tcgdexId: string): boolean {
+  return tcgdexId.startsWith(STAND_IN_ID_PREFIX);
+}
+
+/**
+ * Thrown instead of creating a second stand-in for the same card (Karvi's refusal rule: name the
+ * condition, show the remedy). The remedy is to match to `twin` instead; the caller offers it.
+ */
+export class StandInTwinError extends Error {
+  constructor(public readonly twin: Row<"catalog_card">) {
+    super(
+      `A stand-in for "${twin.name}"${twin.set_name ? ` in ${twin.set_name}` : ""}` +
+        `${twin.local_id ? ` · ${twin.local_id}` : ""} already exists. Match this entry to it instead ` +
+        `of creating a twin.`,
+    );
+    this.name = "StandInTwinError";
+  }
+}
+
+const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
+
+/**
+ * The ops that pin ONE entry to ONE catalog id — alias (when the set was unknown and the target has a
+ * set), presence group, N bulk copies, entry RESOLVED — shared by the real-card match and the stand-in
+ * match so the two can never drift.
+ */
+async function matchOps(
+  db: DbClient,
+  entry: Row<"unresolved_entry">,
+  target: { tcgdexId: string; setId: string | null },
+  now: string,
+): Promise<{ ops: WriteOp[]; groupId: string; result: ManualMatchResult }> {
   const ops: WriteOp[] = [];
 
   /**
@@ -475,20 +514,24 @@ export async function manualMatch(
         `This card is pinned, but the set was not learned: the entry is ${locale} and the catalog ` +
         `holds only English printings, so remembering this set would make every other ${locale} card ` +
         `from it match an English card with the same number. Those rows stay in the queue instead.`;
-    } else if (rawCode && card.set_id) {
+    } else if (rawCode && target.setId) {
       ops.push({
         op: "upsert_set_alias",
         locale,
         dex_code: rawCode,
-        tcgdex_set_id: card.set_id,
+        tcgdex_set_id: target.setId,
         source: "manual",
       });
-      learnedAlias = { locale, dexCode: rawCode, tcgdexSetId: card.set_id };
+      learnedAlias = { locale, dexCode: rawCode, tcgdexSetId: target.setId };
     }
   }
 
   // Promote as ADDED: unplaced copies for the routing cascade. Identity pin, not a placement.
-  const groupExisting = await presenceGroupRepo.findByKey(db, tcgdexId, entry.dex_variant_raw);
+  const groupExisting = await presenceGroupRepo.findByKey(
+    db,
+    target.tcgdexId,
+    entry.dex_variant_raw,
+  );
   let groupId: string;
   if (groupExisting) {
     groupId = groupExisting.id;
@@ -497,7 +540,7 @@ export async function manualMatch(
     ops.push({
       op: "insert_presence_group",
       id: groupId,
-      catalog_card_id: tcgdexId,
+      catalog_card_id: target.tcgdexId,
       dex_variant_raw: entry.dex_variant_raw,
       desired_count: 0,
     });
@@ -508,7 +551,7 @@ export async function manualMatch(
     ops.push({
       op: "insert_copy",
       id: crypto.randomUUID(),
-      catalog_card_id: tcgdexId,
+      catalog_card_id: target.tcgdexId,
       variant: "normal",
       dex_variant_raw: entry.dex_variant_raw,
       presence_group_id: groupId,
@@ -519,18 +562,92 @@ export async function manualMatch(
 
   ops.push({
     op: "update_unresolved_entry",
-    id: entryId,
+    id: entry.id,
     patch: {
       status: "RESOLVED",
-      manual_match_id: tcgdexId,
+      manual_match_id: target.tcgdexId,
       last_retry_sync: now,
       retry_count: entry.retry_count + 1,
     },
   });
 
-  await applyWriteOps(db, { ops, resyncGroupIds: [groupId] });
+  return { ops, groupId, result: { learnedAlias, aliasSkippedReason, created: qty } };
+}
 
-  return { learnedAlias, aliasSkippedReason, created: qty };
+/**
+ * Manual-match a stubborn entry to a catalog card (A.8). Pins the identity (never a placement),
+ * creates the unplaced copies, marks the entry RESOLVED, and — when the miss was UNKNOWN_SET —
+ * learns the `(locale, dexCode) → tcgdexSetId` alias so the rest of that set drains on the next
+ * retry ("one match drains the set"). Applied in one transaction.
+ */
+export async function manualMatch(
+  db: DbClient,
+  entryId: string,
+  tcgdexId: string,
+): Promise<ManualMatchResult> {
+  const entry = await unresolvedEntryRepo.getByPk(db, entryId);
+  if (!entry) throw new Error("Unresolved entry not found.");
+  const card = await catalogCardRepo.getByPk(db, tcgdexId);
+  if (!card) throw new Error("Catalog card not found.");
+
+  const { ops, groupId, result } = await matchOps(
+    db,
+    entry,
+    { tcgdexId, setId: card.set_id },
+    nowIso(),
+  );
+  await applyWriteOps(db, { ops, resyncGroupIds: [groupId] });
+  return result;
+}
+
+export interface StandInMatchResult extends ManualMatchResult {
+  /** The id the stand-in was created under (`user:<uuid>`). */
+  standInId: string;
+}
+
+/**
+ * Create a STAND-IN catalog card for a card TCGdex lacks and match the entry to it, in ONE transaction
+ * (UIL-060 Half 1). The stand-in is the first op; if anything after it fails, it never existed. A twin
+ * (a stand-in she already made with the same name, set and number) is refused with the existing one
+ * offered instead — see `StandInTwinError`.
+ */
+export async function manualMatchStandIn(
+  db: DbClient,
+  entryId: string,
+  input: StandInInput,
+): Promise<StandInMatchResult> {
+  const entry = await unresolvedEntryRepo.getByPk(db, entryId);
+  if (!entry) throw new Error("Unresolved entry not found.");
+  if (!input.name.trim()) throw new Error("A stand-in needs a name.");
+
+  const twin = (await catalogCardRepo.listStandIns(db)).find(
+    (c) =>
+      norm(c.name) === norm(input.name) &&
+      norm(c.set_name) === norm(input.setName) &&
+      norm(c.local_id) === norm(input.localId),
+  );
+  if (twin) throw new StandInTwinError(twin);
+
+  const standInId = newStandInId();
+  const k = input.kind;
+  const ops: WriteOp[] = [
+    {
+      op: "insert_catalog_stand_in",
+      tcgdex_id: standInId,
+      name: input.name.trim(),
+      set_id: input.setId,
+      set_name: input.setName,
+      local_id: input.localId,
+      dex_id: k.kind === "pokemon" && k.dexId ? [k.dexId] : [],
+      types: k.kind === "pokemon" ? [k.type] : [],
+      stage: k.kind === "pokemon" ? k.stage : null,
+      card_class: input.cardClass ?? "standard",
+    },
+  ];
+  const match = await matchOps(db, entry, { tcgdexId: standInId, setId: input.setId }, nowIso());
+  ops.push(...match.ops);
+  await applyWriteOps(db, { ops, resyncGroupIds: [match.groupId] });
+  return { ...match.result, standInId };
 }
 
 export interface ForgetAliasResult {
