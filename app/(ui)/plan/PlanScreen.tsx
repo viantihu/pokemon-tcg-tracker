@@ -24,7 +24,7 @@ import type { Variant } from "@/lib/engine";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { progressPips } from "@/lib/plan/progress";
 import type { BandMismatchChoice, PlanBandGroup, PlanItem, ProposedPull } from "@/lib/plan";
-import type { MoveDestination, MoveOptions } from "@/lib/line/types";
+import type { BlockNeedCandidate, MoveDestination, MoveOptions } from "@/lib/line/types";
 import type { LineJoinOptions } from "@/lib/line/join-options";
 // Leaf import of the pure move module (its only dependency is ./types; the `WriteOp` it names is a
 // type-only import), so bringing `describeMove` into the browser bundle drags in no server code.
@@ -367,6 +367,7 @@ export function PlanScreen({
           (gen
             ? { kind: "shelf", binderId: gen.id, half: "front", band: item.bandKey }
             : undefined),
+        plan?.blockNeeds,
       ),
     );
   }
@@ -532,7 +533,15 @@ export function PlanScreen({
 
   // Name maps for override destination sentences (UIL-037), null until the move options have loaded.
   const overrideNames = useMemo<MoveNameLookups | null>(
-    () => (moveOptions ? moveNameLookups(moveOptions) : null),
+    () =>
+      moveOptions
+        ? {
+            ...moveNameLookups(moveOptions),
+            // UIL-030: a block override's sentence names the line ("Block · CHARMANDER LINE · …").
+            lineLabel: (lineId: string) =>
+              plan?.blockNeeds?.find((n) => n.lineId === lineId)?.speciesLabel ?? null,
+          }
+        : null,
     [moveOptions],
   );
 
@@ -942,8 +951,11 @@ export function moveTargetFor(
   item: PlanItem,
   join: LineJoinOptions | null,
   initial: MoveDestination | undefined,
+  /** UIL-030: the plan's open block needs; attached only when the engine offered THIS card as a block. */
+  blockNeeds?: BlockNeedCandidate[],
 ): MoveTargetCard {
   return {
+    ...(item.offerBlockRepurpose && (blockNeeds ?? []).length > 0 ? { blockNeeds } : {}),
     copyId: item.incomingId,
     name: item.name,
     localId: item.localId,
@@ -1283,6 +1295,7 @@ function PlanView(props: {
               onSkip={() => setCur(Math.min(total - 1, cur + 1))}
               override={flatItems[cur] ? overrides[flatItems[cur].incomingId] : undefined}
               overrideNames={overrideNames}
+              blockNeeds={plan.blockNeeds}
               onMove={() => flatItems[cur] && onMove(flatItems[cur])}
               // Only when the reply belongs to the card actually in the spotlight (UIL-045).
               freshItem={
@@ -1569,6 +1582,8 @@ export function Spotlight(props: {
   override: MoveDestination | undefined;
   /** Name maps for the override sentence; null until options load (UIL-037). */
   overrideNames?: MoveNameLookups | null;
+  /** UIL-030: the plan's open block needs, so the offer can say what is open and lead to the sheet. */
+  blockNeeds?: BlockNeedCandidate[];
   onMove: () => void;
   /**
    * This card re-derived against current state (UIL-045), when it differs from the forecast row.
@@ -1597,6 +1612,7 @@ export function Spotlight(props: {
     onSkip,
     override,
     overrideNames,
+    blockNeeds,
     onMove,
     freshItem,
     refreshing = false,
@@ -1784,6 +1800,20 @@ export function Spotlight(props: {
       <div className="wy" style={{ marginTop: 11 }}>
         {item.reason}
       </div>
+
+      {item.offerBlockRepurpose && (blockNeeds ?? []).length > 0 && !override ? (
+        /* UIL-030: the offer, with its action. Text and action ship together on purpose. */
+        <div className="doit" style={{ background: "var(--panel-2)" }}>
+          <b style={{ fontSize: 13 }}>Offered as a repurposed binder block</b>
+          <span style={{ fontSize: 11, color: "var(--ink-2)" }}>
+            {(blockNeeds ?? []).length === 1
+              ? `${blockNeeds![0].speciesLabel} has a reserved pocket with nothing in it. `
+              : `${(blockNeeds ?? []).length} lines have a reserved pocket with nothing in it. `}
+            Pick one under ↔ Change position and this duplicate becomes the block instead of going
+            to bulk.
+          </span>
+        </div>
+      ) : null}
 
       {item.needsDecision ? (
         <div className="doit" style={{ background: "var(--note)" }}>

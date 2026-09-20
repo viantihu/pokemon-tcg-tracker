@@ -120,8 +120,13 @@ export function describeMove(dest: MoveDestination, names: MoveNameLookups): str
       const band = names.bandDisplay(dest.band);
       return `${binder} · ${half} · ${band}`;
     }
-    case "block":
-      return `${names.binderName(dest.binderId)} · Back · Binder block`;
+    case "block": {
+      // "BLOCK · <species> line · <binder> back" when the caller can name the line (the Plan can, from
+      // its candidates); the binder-only form otherwise.
+      const line = names.lineLabel?.(dest.lineId);
+      const binder = names.binderName(dest.binderId);
+      return line ? `Block · ${line} · ${binder} · Back` : `${binder} · Back · Binder block`;
+    }
   }
 }
 
@@ -129,6 +134,9 @@ export interface MoveNameLookups {
   binderName: (id: string | null) => string;
   collectionName: (id: string) => string | null;
   bandDisplay: (key: string) => string;
+  /** UIL-030: the species label of a line, for a block destination's sentence. Optional — only the
+   *  Plan holds the candidates that know it. */
+  lineLabel?: (lineId: string) => string | null;
 }
 
 /**
