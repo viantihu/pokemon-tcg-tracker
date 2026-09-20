@@ -13,7 +13,7 @@
  */
 import type { DbClient } from "@/lib/repo";
 import { catalogCardRepo, setAliasRepo } from "@/lib/repo";
-import type { DexRow, ResolvedDexId } from "./types";
+import type { DexRow, Locale, ResolvedDexId } from "./types";
 import type { UnresolvedReason } from "./reconcile";
 
 export interface CatalogLookupResult {
@@ -28,7 +28,7 @@ export interface CatalogPort {
   /** Cards at `(setId, localId)`; a set+localId maps to at most one printing in a healthy mirror. */
   findBySetLocal(setId: string, localId: string): Promise<{ tcgdexId: string }[]>;
   /** Distinct TCGdex set ids whose set name matches `setName` exactly. */
-  findSetIdsByName(setName: string): Promise<string[]>;
+  findSetIdsByName(setName: string, locale: Locale): Promise<string[]>;
   /** Persist a learned set-code alias (name-resolved source). */
   learnAlias(alias: { locale: string; dexCode: string; tcgdexSetId: string }): Promise<void>;
 }
@@ -40,8 +40,8 @@ export function catalogPortFromDb(db: DbClient): CatalogPort {
       const rows = await catalogCardRepo.findBySetLocal(db, setId, localId);
       return rows.map((r) => ({ tcgdexId: r.tcgdex_id }));
     },
-    findSetIdsByName(setName) {
-      return catalogCardRepo.findSetIdsByName(db, setName);
+    findSetIdsByName(setName, locale) {
+      return catalogCardRepo.findSetIdsByName(db, setName, locale);
     },
     async learnAlias(alias) {
       await setAliasRepo.upsert(db, {
@@ -107,7 +107,7 @@ export async function resolveAgainstCatalog(
   const setName = row.Set?.trim();
   if (!setName) return { catalogCardId: null, reason: "UNKNOWN_SET" };
 
-  const named = await port.findSetIdsByName(setName);
+  const named = await port.findSetIdsByName(setName, resolved.locale);
   if (named.length !== 1) {
     // No match, or ambiguous — never mis-learn an alias from an ambiguous name.
     return { catalogCardId: null, reason: "UNKNOWN_SET" };
@@ -163,12 +163,14 @@ export function prefetchedCatalogPort(
       liveHits.set(k, rows);
       return rows;
     },
-    async findSetIdsByName(setName) {
-      // Many rows share a set name, and a miss re-asks for every one of them.
-      const memo = namedSets.get(setName);
+    async findSetIdsByName(setName, locale) {
+      // Many rows share a set name, and a miss re-asks for every one of them. Keyed by locale too
+      // (UIL-047): the same set name exists in both catalogs and must not share an answer.
+      const key = `${locale}:${setName}`;
+      const memo = namedSets.get(key);
       if (memo) return memo;
-      const ids = await inner.findSetIdsByName(setName);
-      namedSets.set(setName, ids);
+      const ids = await inner.findSetIdsByName(setName, locale);
+      namedSets.set(key, ids);
       return ids;
     },
     learnAlias: (alias) => inner.learnAlias(alias),

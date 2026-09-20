@@ -306,11 +306,13 @@ export const catalogCardRepo = {
    * Dex `Set` column against the mirrored set names, then learns the alias. Returns every distinct
    * `set_id` seen; the caller treats a non-unique result as ambiguous rather than mis-learning.
    */
-  async findSetIdsByName(db: DbClient, setName: string): Promise<string[]> {
+  async findSetIdsByName(db: DbClient, setName: string, locale: string = "en"): Promise<string[]> {
     const { data, error } = await db
       .from("catalog_card")
       .select("set_id")
       .eq("set_name", setName)
+      // UIL-047: an English set name must never resolve a Japanese row, or the reverse.
+      .eq("locale", locale)
       .not("set_id", "is", null);
     if (error) throw error;
     const ids = new Set<string>();

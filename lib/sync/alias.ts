@@ -16,6 +16,7 @@
  * such, and the next import is what finds them (their rows stop resolving; the reconciler lists the
  * copies as removals in the gated preview).
  */
+import { normalizeLocale } from "@/lib/catalog/locale";
 import type { Row, WriteOp } from "@/lib/repo";
 import { parseDexId } from "./resolve";
 import type { Locale } from "./types";
@@ -35,7 +36,7 @@ type EntryKeyFields = Pick<Row<"unresolved_entry">, "locale" | "dex_id">;
  * retry sweep (`entryAsDexRow`) apply, so an alias learned from an entry matches that entry's key here.
  */
 export function entryLocale(e: Pick<Row<"unresolved_entry">, "locale">): Locale {
-  return e.locale === "ja" || e.locale === "Japanese" ? "ja" : "en";
+  return normalizeLocale(e.locale);
 }
 
 /** The alias-map key resolve.ts looks aliases up by: `${locale}:${dexCode}`. */

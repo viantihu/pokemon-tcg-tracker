@@ -60,6 +60,7 @@ export type Database = {
           price_low: number | null;
           price_market: number | null;
           source: string;
+          locale: string;
           set_card_count_official: number | null;
           set_release_date: string | null;
         };
@@ -87,6 +88,7 @@ export type Database = {
           price_low?: number | null;
           price_market?: number | null;
           source?: string;
+          locale?: string;
           set_card_count_official?: number | null;
           set_release_date?: string | null;
         };
@@ -114,6 +116,7 @@ export type Database = {
           price_low?: number | null;
           price_market?: number | null;
           source?: string;
+          locale?: string;
           set_card_count_official?: number | null;
           set_release_date?: string | null;
         };

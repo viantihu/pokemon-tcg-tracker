@@ -11,6 +11,7 @@
  *   - RETRY   (no CSV): each WAITING entry is re-resolved against the refreshed catalog + learned
  *     aliases; a hit is promoted as an ADDED (self-heal, A.5) and the entry archived.
  */
+import { normalizeLocale } from "@/lib/catalog/locale";
 import type { DbClient, Row } from "@/lib/repo";
 import {
   binderRepo,
@@ -138,7 +139,7 @@ export async function loadCurrentGroups(db: DbClient): Promise<CurrentGroup[]> {
 export function entryAsDexRow(e: Row<"unresolved_entry">): Pick<DexRow, "Id" | "Locale" | "Set"> {
   return {
     Id: e.dex_id,
-    Locale: e.locale === "ja" || e.locale === "Japanese" ? "Japanese" : (e.locale ?? ""),
+    Locale: normalizeLocale(e.locale) === "ja" ? "Japanese" : (e.locale ?? ""),
     Set: e.dex_set_name ?? "",
   };
 }

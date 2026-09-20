@@ -56,6 +56,11 @@ on:
         description: "Re-request every set, even ones already fully mirrored"
         type: boolean
         default: false
+      locale:
+        description: "Which TCGdex catalog to mirror. One locale per run; a ja run touches only ja rows."
+        type: choice
+        options: [en, ja]
+        default: en
 
 concurrency:
   group: catalog-mirror
@@ -173,16 +178,32 @@ jobs:
           APP_URL: ${{ vars.APP_URL }}
           PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
           FORCE_ALL: ${{ inputs.force_all }}
+          # A push to ops/run-catalog-mirror carries no inputs, so it mirrors en, as it always has.
+          LOCALE: ${{ inputs.locale || 'en' }}
           # Public community catalog, no key required.
           TCGDEX_BASE_URL: https://api.tcgdex.net/v2
         run: |
           set -euo pipefail
           base="${APP_URL%/}"
 
-          # Brief set list: GET /v2/en/sets (see lib/catalog/tcgdex.ts). `cardCount.total`
+          # ONE LOCALE PER RUN (UIL-047, migration 0016). Rows for a non-en locale are stored
+          # namespaced — tcgdex_id `ja:sv11w-002`, set_id `ja:sv11w` — and carry `locale`, so
+          # en rows stay byte-identical to TCGdex and the four Neo set ids the two catalogs
+          # share never collide. TCGdex itself knows only the bare ids, so this job speaks bare
+          # ids to TCGdex and to /api/catalog/sync, and strips the namespace when it reads back
+          # what is stored. The `choice` input already restricts the value; this guard is for
+          # the push trigger and for anyone editing the default.
+          case "$LOCALE" in
+            en|ja) ;;
+            *) echo "::error::LOCALE must be en or ja, got '$LOCALE'"; exit 1 ;;
+          esac
+          # Stored set ids carry this prefix for every locale but en.
+          if [ "$LOCALE" = "en" ]; then ns=""; else ns="$LOCALE:"; fi
+
+          # Brief set list: GET /v2/<locale>/sets (see lib/catalog/tcgdex.ts). `cardCount.total`
           # is how many cards TCGdex holds for the set, which is the target the resume
           # check below compares against.
-          curl -sS --retry 3 --retry-delay 5 "$TCGDEX_BASE_URL/en/sets" -o sets.json
+          curl -sS --retry 3 --retry-delay 5 "$TCGDEX_BASE_URL/$LOCALE/sets" -o sets.json
           jq -r '.[].id' sets.json > set-ids.txt
           total=$(wc -l < set-ids.txt | tr -d ' ')
 
@@ -208,6 +229,12 @@ jobs:
           # a response at its own `max-rows` regardless of `limit`, so advancing by the
           # request size skips rows whenever the cap is smaller — the same bug lib/repo's
           # `listAll` was fixed for in #39.
+          # Only rows the mirror itself wrote for THIS locale count towards "complete":
+          # `source=eq.tcgdex` keeps a user stand-in (0015) from making its set look done one
+          # card early, and `locale=eq.$LOCALE` keeps a ja run from being satisfied by en rows
+          # (or the reverse) on the Neo sets both catalogs name the same. Before 0015/0016 apply,
+          # either filter is a 42703 and this returns 1 — the fail-closed branch below — which
+          # is why the workflow change ships in the same PR as the migration, never ahead of it.
           read_stored_counts() {
             local rest="https://$PROJECT_REF.supabase.co/rest/v1/catalog_card"
             local offset=0 page n
@@ -216,11 +243,11 @@ jobs:
               if [ "${KEY_IS_JWT:-0}" = "1" ]; then
                 page=$(curl -sS --retry 3 --retry-delay 5 \
                   -H "apikey: $SERVICE_KEY" -H "Authorization: Bearer $SERVICE_KEY" \
-                  "$rest?select=set_id&source=eq.tcgdex&order=set_id.asc&limit=1000&offset=$offset")
+                  "$rest?select=set_id&source=eq.tcgdex&locale=eq.$LOCALE&order=set_id.asc&limit=1000&offset=$offset")
               else
                 page=$(curl -sS --retry 3 --retry-delay 5 \
                   -H "apikey: $SERVICE_KEY" \
-                  "$rest?select=set_id&source=eq.tcgdex&order=set_id.asc&limit=1000&offset=$offset")
+                  "$rest?select=set_id&source=eq.tcgdex&locale=eq.$LOCALE&order=set_id.asc&limit=1000&offset=$offset")
               fi
               # A PostgREST error is an object, not an array; `length` on it would be a key
               # count and the loop would misread it as data.
@@ -233,8 +260,9 @@ jobs:
               printf '%s' "$page" | jq -r '.[].set_id // empty' >> stored-set-ids.txt
               offset=$((offset + n))
             done
-            # "<set_id> <count>" per line.
-            sort stored-set-ids.txt | uniq -c | awk '{ print $2, $1 }' > stored-counts.txt
+            # "<set_id> <count>" per line, with the locale namespace stripped so the ids match
+            # TCGdex's bare ids in expected-counts.txt (`ja:sv11w` -> `sv11w`; en has no prefix).
+            sed "s/^$ns//" stored-set-ids.txt | sort | uniq -c | awk '{ print $2, $1 }' > stored-counts.txt
             return 0
           }
 
@@ -249,7 +277,7 @@ jobs:
             cp set-ids.txt remaining.txt
           elif read_stored_counts; then
             stored_rows=$(wc -l < stored-set-ids.txt | tr -d ' ')
-            echo "catalog_card currently holds $stored_rows rows across $(wc -l < stored-counts.txt | tr -d ' ') sets."
+            echo "catalog_card currently holds $stored_rows $LOCALE rows across $(wc -l < stored-counts.txt | tr -d ' ') sets."
             skipped=0
             while read -r set_id expected; do
               [ -n "$set_id" ] || continue
@@ -276,13 +304,13 @@ jobs:
           fi
 
           if [ ! -s remaining.txt ]; then
-            echo "Every set is already mirrored to its full TCGdex card count. Nothing to do."
+            echo "Every $LOCALE set is already mirrored to its full TCGdex card count. Nothing to do."
             exit 0
           fi
 
           ok=0
           attempting=$(wc -l < remaining.txt | tr -d ' ')
-          echo "Mirroring $attempting of $total sets into Testing."
+          echo "Mirroring $attempting of $total $LOCALE sets into Testing."
 
           # WHY BACKOFF AND NOT A FIXED PAUSE. Across the first three full runs every failure was an
           # upstream TCGdex 503 surfaced as our 502 — and the count GREW run over run (2, then 1, then
@@ -296,7 +324,7 @@ jobs:
               -H "Authorization: Bearer $SERVICE_KEY" \
               -w $'\n%{http_code}' \
               --max-time 300 \
-              "$base/api/catalog/sync?set=$set_id" || printf '\n000')
+              "$base/api/catalog/sync?set=$set_id&locale=$LOCALE" || printf '\n000')
             code=${response##*$'\n'}
             body=${response%$'\n'*}
           }

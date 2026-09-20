@@ -16,6 +16,7 @@
 import type { DbClient, Insert } from "@/lib/repo";
 import { catalogCardRepo } from "@/lib/repo";
 import type { Locale } from "@/lib/sync/types";
+import { LOCALES, namespaceId } from "./locale";
 import { classifyCard } from "./classify";
 import { clusterArtwork, hashArtworkPng, type ArtworkEntry } from "./artwork";
 import type { TcgdexCardFull, TcgdexClient } from "./tcgdex";
@@ -87,15 +88,19 @@ export function toCatalogRow(
     setSeries?: string | null;
     setCardCountOfficial?: number | null;
     setReleaseDate?: string | null;
+    /** UIL-047: the TCGdex locale the card came from. Non-en ids and set ids are namespaced (0016). */
+    locale?: Locale;
   },
 ): CatalogInsert {
   const { priceLow, priceMarket } = extractPrices(card.pricing);
   const evolveFrom = card.evolveFrom && card.evolveFrom !== "None" ? card.evolveFrom : null;
+  const locale: Locale = opts.locale ?? "en";
   return {
-    tcgdex_id: card.id,
+    tcgdex_id: namespaceId(locale, card.id),
+    locale,
     name: card.name,
     dex_id: card.dexId ?? [],
-    set_id: card.set?.id ?? null,
+    set_id: card.set?.id ? namespaceId(locale, card.set.id) : null,
     set_name: card.set?.name ?? null,
     set_series: opts.setSeries ?? null,
     local_id: card.localId ?? null,
@@ -189,7 +194,13 @@ export async function syncSet(
   );
   const rows = dedupeById(
     fulls.map((c) =>
-      toCatalogRow(c, { isDigitalOnly, setSeries, setCardCountOfficial, setReleaseDate }),
+      toCatalogRow(c, {
+        isDigitalOnly,
+        setSeries,
+        setCardCountOfficial,
+        setReleaseDate,
+        locale: opts.locale,
+      }),
     ),
   );
 
@@ -291,13 +302,23 @@ export async function regroupArtwork(
     await catalogCardRepo.update(db, id, { artwork_hash: hash });
   }
 
-  // 2. Cluster over all known hashes; locked rows pin their group.
-  const entries: ArtworkEntry[] = rows.map((r) => ({
-    id: r.tcgdex_id,
-    hash: newHash.get(r.tcgdex_id) ?? r.artwork_hash,
-    lockedGroupId: r.artwork_group_locked ? r.artwork_group_id : null,
-  }));
-  const groups = clusterArtwork(entries, threshold == null ? {} : { threshold });
+  // 2. Cluster over all known hashes; locked rows pin their group. PER LOCALE (UIL-047): a Japanese
+  // printing and its English twin usually share the artwork, but they are different cards with their
+  // own placements (sync-architecture L5) — and a shared artwork_group_id is what the duplicate rule
+  // keys on, so clustering across locales would call the JP copy a duplicate of the EN one.
+  const groups = new Map<string, string | null>();
+  for (const locale of LOCALES) {
+    const entries: ArtworkEntry[] = rows
+      .filter((r) => (r.locale ?? "en") === locale)
+      .map((r) => ({
+        id: r.tcgdex_id,
+        hash: newHash.get(r.tcgdex_id) ?? r.artwork_hash,
+        lockedGroupId: r.artwork_group_locked ? r.artwork_group_id : null,
+      }));
+    for (const [id, g] of clusterArtwork(entries, threshold == null ? {} : { threshold })) {
+      groups.set(id, g);
+    }
+  }
 
   let regrouped = 0;
   for (const r of rows) {

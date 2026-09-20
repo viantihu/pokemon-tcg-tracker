@@ -21,6 +21,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
+import { localeTag, stripLocaleNamespace } from "@/lib/catalog/locale";
 import { CardFace } from "./CardFace";
 import type { LookupCard } from "../plan/plan-types";
 
@@ -158,7 +159,10 @@ export function CardResultTiles({
               >
                 <CardFace name={c.name} imageUrl={c.imageUrl} size="m" />
                 <div className="cn u">{c.name}</div>
-                <div className="cno">{(c.setName ?? c.setId ?? "").toString()}</div>
+                <div className="cno">
+                  {c.setName ?? stripLocaleNamespace(c.setId)}
+                  {localeTag(c.tcgdexId) ? ` · ${localeTag(c.tcgdexId)}` : ""}
+                </div>
                 {number ? <div className="cno">{number}</div> : null}
                 {c.cardClass === "specialty" ? (
                   <span className="cpill wish u">Specialty</span>

@@ -93,14 +93,27 @@ describe("resolveAgainstCatalog — localId padding drift", () => {
 });
 
 describe("resolveAgainstCatalog — jpn_ locale namespacing", () => {
-  it("resolves jpn_sv11w-2 → sv11w-002 (ja locale, padded localId)", async () => {
-    const { port } = fakeCatalog([{ setId: "sv11w", localId: "002", tcgdexId: "sv11w-002" }]);
+  it("resolves jpn_sv11w-2 → ja:sv11w-002 (ja locale, padded localId) and NEVER the English sv11w-002", async () => {
+    // UIL-047 / 0016: Japanese rows live in the `ja:` namespace. An English card with the very same
+    // set code and number is a different card and must not be the answer.
+    const { port } = fakeCatalog([
+      { setId: "sv11w", localId: "002", tcgdexId: "sv11w-002" },
+      { setId: "ja:sv11w", localId: "002", tcgdexId: "ja:sv11w-002" },
+    ]);
     const row = dexRow({ Id: "jpn_sv11w-2", Locale: "Japanese", Set: "White Flare" });
     const resolved = resolveDexId(row, SET_ALIAS_SEED);
 
     expect(resolved.locale).toBe("ja");
     const result = await resolveAgainstCatalog(port, row, resolved);
-    expect(result.catalogCardId).toBe("sv11w-002");
+    expect(result.catalogCardId).toBe("ja:sv11w-002");
+  });
+
+  it("a Japanese row whose set only exists in English is UNKNOWN_SET, not a confident English match", async () => {
+    const { port } = fakeCatalog([{ setId: "sv11w", localId: "002", tcgdexId: "sv11w-002" }]);
+    const row = dexRow({ Id: "jpn_sv11w-2", Locale: "Japanese", Set: "White Flare" });
+    const result = await resolveAgainstCatalog(port, row, resolveDexId(row, SET_ALIAS_SEED));
+    expect(result.catalogCardId).toBeNull();
+    expect(result.reason).toBe("UNKNOWN_SET");
   });
 });
 
