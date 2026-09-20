@@ -242,7 +242,29 @@ export type MoveDestination =
       lineJoin?: LineJoinChoice;
     }
   | { kind: "collection"; binderId: string; collectionId: string }
-  | { kind: "bulk" };
+  | { kind: "bulk" }
+  /**
+   * UIL-030: use the card as the physical BINDER BLOCK for a line's block slot — a reserved run of
+   * pockets the engine decided can never be filled. The copy takes role 'block' in the line's binder
+   * back half and a `binder_block` row (line-terminated, repurposedDuplicate) is written with it, so the
+   * open need closes and the duplicate's location is tracked.
+   */
+  | { kind: "block"; lineId: string; slotId: string; binderId: string };
+
+/**
+ * An OPEN binder-block need (UIL-030): a line_slot in state 'block' with no line-terminated binder_block
+ * backing it yet. Computed server-side in lib/plan/context.ts; the Move panel lists these when a
+ * bulk-bound duplicate is offered as a repurposed block.
+ */
+export interface BlockNeedCandidate {
+  lineId: string;
+  slotId: string;
+  binderId: string;
+  binderName: string;
+  speciesLabel: string;
+  stage: string;
+  bandKey: string;
+}
 
 /** A move request from any surface that shows a card (plan spotlight, line slot, lookup). */
 export interface MoveRequest {

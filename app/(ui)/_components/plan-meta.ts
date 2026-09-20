@@ -101,11 +101,13 @@ export const ACTION_META: Record<PlanActionKind, ActionMeta> = {
  * line and the spotlight block; the chip is a fixed-width pill in a flex row, and long content in one
  * is exactly what blew the page to ~4,800px in UIL-007.
  */
-export const MOVE_META: Record<"bulk" | "collection" | "front" | "back", ActionMeta> = {
+export const MOVE_META: Record<"bulk" | "collection" | "front" | "back" | "block", ActionMeta> = {
   bulk: ACTION_META.BULK,
   collection: ACTION_META.SPEC,
   front: ACTION_META.FRONT,
   back: { label: "PLACE IN BACK HALF", big: "Place in the back half", color: "#EDDFF7" },
+  /** UIL-030: the duplicate fills a line's reserved block pocket instead of going to the bulk box. */
+  block: { label: "BINDER BLOCK", big: "Use as a binder block", color: "#E6E1D3" },
 };
 
 /** Chip + headline for an override destination. Total over `MoveDestination`. */
@@ -117,5 +119,7 @@ export function moveMeta(dest: MoveDestination): ActionMeta {
       return MOVE_META.collection;
     case "shelf":
       return dest.half === "front" ? MOVE_META.front : MOVE_META.back;
+    case "block":
+      return MOVE_META.block;
   }
 }

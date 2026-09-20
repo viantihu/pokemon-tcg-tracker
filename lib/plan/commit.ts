@@ -37,6 +37,7 @@ import {
 } from "@/lib/repo";
 // Leaf import (lib/line/move depends only on lib/line/types → lib/engine; no cycle back to lib/plan).
 import {
+  blockOps,
   buildExistingLineJoinOps,
   buildNewLineJoinOps,
   collectionTargetJoinOp,
@@ -52,6 +53,8 @@ import type { MoveDestination } from "@/lib/line/types";
  * One vocabulary: whichever screen she moved a card from, a stale pick reads the same way.
  */
 const REFUSE = {
+  blockSlotGone: "That block slot no longer exists — reload the plan and pick again.",
+  blockFilled: "That line's block pocket is already filled — reload the plan and pick again.",
   incomplete: "That destination is incomplete — reload the screen and pick again.",
   slotGone: "That line slot no longer exists — reload the screen and pick again.",
   slotFilled: "That slot has already been filled — reload the screen and pick again.",
@@ -636,6 +639,15 @@ function writeOverriddenCard(
     };
   }
 
+  // A block override must point at an OPEN need in this snapshot (UIL-030): a block slot of that line,
+  // with no line-terminated binder_block yet. Resolved from the context, never trusted from the client.
+  if (dest.kind === "block") {
+    const slot = pc.slotRowsByLine.get(dest.lineId)?.find((s) => s.id === dest.slotId);
+    if (!slot || slot.state !== "block") throw new Error(REFUSE.blockSlotGone);
+    if (!(pc.blockNeeds ?? []).some((n) => n.slotId === dest.slotId))
+      throw new Error(REFUSE.blockFilled);
+  }
+
   const copyId = emitIncomingCopy(
     ops,
     haulId,
@@ -650,6 +662,8 @@ function writeOverriddenCard(
     now,
     counts,
   );
+  // Becoming a binder block writes the row that closes the open need (UIL-030), same builder as applyMove.
+  if (dest.kind === "block") ops.push(...blockOps(dest, copyId));
 
   if (existingJoin) {
     ops.push(...buildExistingLineJoinOps({ copyId, ...existingJoin }).ops);

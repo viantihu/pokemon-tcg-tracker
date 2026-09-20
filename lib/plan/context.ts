@@ -1,3 +1,4 @@
+import type { BlockNeedCandidate } from "@/lib/line/types";
 /**
  * Load the M3 engine context from the DB and run the cascade over a haul draft (dev-spec §5 M6).
  *
@@ -30,6 +31,7 @@ import {
   typeColorMapRepo,
   type DbClient,
   type Row,
+  binderBlockRepo,
 } from "@/lib/repo";
 import { loadCatalogCached } from "./catalog-cache";
 import { toBinder, toCatalogCard, toCollection, toEvolutionLine, toOwnedCopy } from "./adapt";
@@ -57,6 +59,11 @@ export interface PlanContext {
   slotRowsByLine: Map<string, Row<"line_slot">[]>;
   orderedBandKeys: string[];
   lookups: AssembleLookups;
+  /**
+   * UIL-030: every OPEN binder-block need — a block slot with no line-terminated binder_block backing it
+   * — with what the Move panel needs to list it. `ctx.openBlockNeeds` is this list's length.
+   */
+  blockNeeds?: BlockNeedCandidate[];
 }
 
 export interface LoadPlanContextOptions {
@@ -88,6 +95,7 @@ export async function loadPlanContext(
     typeMapRows,
     bandRows,
     sectionRows,
+    blockRows,
   ] = await Promise.all([
     // `listAll`, not `list`: these tables scale with the collection and the mirror (~23.5k catalog
     // rows), and a single `select *` is silently capped at the server's `max-rows` (1000). A
@@ -106,6 +114,7 @@ export async function loadPlanContext(
     typeColorMapRepo.list(db),
     colorBandRepo.listOrdered(db),
     binderSectionRepo.list(db),
+    binderBlockRepo.list(db),
   ]);
 
   const catalogById = new Map<string, CatalogCard>();
@@ -166,6 +175,38 @@ export async function loadPlanContext(
     catalogRows.map((r) => [r.tcgdex_id, r.image_url]),
   );
 
+  /**
+   * OPEN binder-block needs (UIL-030). The engine decides a stage can never be filled by creating a
+   * block slot (lib/engine/line.ts); only Backfill has ever written the binder_block row that physically
+   * fills that pocket run. Every block slot with no line-terminated binder_block on its line is a
+   * reserved pocket with nothing in it — exactly when a bulk-bound duplicate is worth offering as the
+   * block. Only needs with a binder are listed: a line with no binder has nowhere to place anything.
+   */
+  const backedLineIds = new Set(
+    blockRows.filter((b) => b.purpose === "line-terminated" && b.line_id).map((b) => b.line_id),
+  );
+  const lineRowById = new Map(lineRows.map((l) => [l.id, l]));
+  const speciesName = (rootDexId: number) =>
+    catalogRows.find((r) => (r.dex_id ?? [])[0] === rootDexId)?.name?.toUpperCase() ??
+    `SPECIES #${rootDexId}`;
+  const blockNeeds: BlockNeedCandidate[] = slotRows
+    .filter((s) => s.state === "block" && !backedLineIds.has(s.line_id))
+    .flatMap((s) => {
+      const line = lineRowById.get(s.line_id);
+      if (!line?.binder_id) return [];
+      return [
+        {
+          lineId: line.id,
+          slotId: s.id,
+          binderId: line.binder_id,
+          binderName: binderNameById.get(line.binder_id) ?? "Binder",
+          speciesLabel: `${speciesName(line.root_dex_id)} LINE`,
+          stage: s.stage,
+          bandKey: line.color_band,
+        },
+      ];
+    });
+
   const ctx: EngineContext = {
     typeColorMap,
     catalog: [...catalogById.values()],
@@ -174,9 +215,11 @@ export async function loadPlanContext(
     lines,
     collections: collectionRows.map(toCollection),
     now: new Date().toISOString(),
+    openBlockNeeds: blockNeeds.length,
   };
 
   return {
+    blockNeeds,
     ctx,
     catalogById,
     copyRowById,

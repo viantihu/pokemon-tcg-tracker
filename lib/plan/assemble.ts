@@ -137,5 +137,6 @@ export function toPlanItem(
     destination: describeTarget(result.target, l),
     reason: describeReason(incoming, result, l),
     needsDecision: resultNeedsDecision(result),
+    offerBlockRepurpose: result.offerBlockRepurpose === true,
   };
 }
