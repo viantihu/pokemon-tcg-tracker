@@ -21,8 +21,10 @@ import { createTcgdexClient } from "@/lib/catalog/tcgdex";
 import { defaultArtworkHasher, regroupArtwork, syncAll, syncSet } from "@/lib/catalog/mirror";
 import { errorMessage } from "@/lib/errors";
 import { isLocale } from "@/lib/catalog/locale";
+import { rawQueryParam } from "@/lib/catalog/query";
 
 export const runtime = "nodejs";
+
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
@@ -34,7 +36,11 @@ export async function POST(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  const setId = searchParams.get("set");
+  // `set` is read from the RAW query, not URLSearchParams: TCGdex set ids can contain a literal "+"
+  // (SM1+, sm2+, SM3+, SM4+, SM5+), and URLSearchParams decodes a bare "+" as a space per the URL spec,
+  // which then reached TCGdex as `/ja/sets/SM1%20` → 404 (UIL-083). decodeURIComponent keeps a literal
+  // plus and still decodes a %2B, so both the old and the encoded dispatch forms work.
+  const setId = rawQueryParam(request.url, "set");
   const pass = searchParams.get("pass");
   // UIL-047: one locale per call. Absent or `en` is exactly today's behaviour; `ja` mirrors the
   // Japanese catalog into the `ja:` namespace (0016). Anything else is refused, not guessed.

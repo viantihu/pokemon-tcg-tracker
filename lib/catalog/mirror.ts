@@ -30,6 +30,25 @@ function num(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+/** An INTEGER column's value, or null. A decimal hp is not a number the schema can hold (UIL-083). */
+function int(v: unknown): number | null {
+  return typeof v === "number" && Number.isInteger(v) ? v : null;
+}
+
+/**
+ * Pokédex ids for `dex_id integer[]`. TCGdex marks a variant printing of a species with a FRACTIONAL
+ * Pokédex number — PCG2-067 レイカザの星 (Rayquaza ★) carries `dexId: [384.1]` — and Postgres rejected the
+ * whole row (22P02), which took the entire set down with it (UIL-083). The species IS Rayquaza, and the
+ * species number is what lines and duplicates key on, so the fraction is floored away rather than the
+ * card dropped. Anything that is not a finite number is skipped.
+ */
+export function toDexIds(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+    .map((v) => Math.floor(v));
+}
+
 /**
  * Best-effort price extraction from a TCGdex card's nested pricing. Prices are volatile, so this is
  * a snapshot for the alternates ranking (system-design §6), never asserted exactly in tests.
@@ -99,7 +118,7 @@ export function toCatalogRow(
     tcgdex_id: namespaceId(locale, card.id),
     locale,
     name: card.name,
-    dex_id: card.dexId ?? [],
+    dex_id: toDexIds(card.dexId),
     set_id: card.set?.id ? namespaceId(locale, card.set.id) : null,
     set_name: card.set?.name ?? null,
     set_series: opts.setSeries ?? null,
@@ -109,7 +128,7 @@ export function toCatalogRow(
     stage: card.stage ?? null,
     evolve_from: evolveFrom,
     illustrator: card.illustrator ?? null,
-    hp: num(card.hp),
+    hp: int(card.hp),
     variants: (card.variants ?? {}) as CatalogInsert["variants"],
     card_class: classifyCard(card),
     is_digital_only: opts.isDigitalOnly,
