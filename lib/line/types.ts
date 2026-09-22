@@ -60,8 +60,14 @@ export interface SlotView {
   note: string | null;
   /** Block: the wedge (repurposed duplicate) card label, or the "no page" note for a terminated line. */
   wedgeLabel: string | null;
-  /** Filled + shelved copy → offer the move panel (placement override on ALL cards). */
+  /** Filled + a copy → offer the move panel (placement override on ALL cards; UIL-087 dropped the
+   *  shelved requirement, which had hidden the control for exactly the broken rows). */
   moveable: boolean;
+  /**
+   * The slot says `filled` but its copy is not shelved — the app's own inconsistency (UIL-087), shown
+   * rather than hidden so she can see which slots are wrong and move the card to fix them.
+   */
+  copyNotShelved: boolean;
 }
 
 export interface LineInfoBox {

@@ -58,6 +58,7 @@ const slot = (over: Partial<SlotView>): SlotView => ({
   note: null,
   wedgeLabel: null,
   moveable: true,
+  copyNotShelved: false,
   ...over,
 });
 const render = (s: SlotView) =>

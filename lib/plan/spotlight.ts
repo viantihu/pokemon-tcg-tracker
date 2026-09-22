@@ -93,6 +93,18 @@ export function placementDigest(result: CascadeResult): string {
   }
   if (result.newLine) parts.push("newline");
   if (result.swap) parts.push(`swap:${result.swap.displacedCopyId}`);
+  /**
+   * Pulls of copies that are NOT shelved, listed distinctly (UIL-087, the Senior BA's ruling). These
+   * change what she has to physically DO before pressing Done — go and find the card in the bulk pile —
+   * so a set of them that differs from the one she was shown is exactly the kind of drift this digest
+   * exists to refuse. Sorted, because the engine's slot order is not a promise. A pull FROM A FRONT HALF
+   * is deliberately not here: it does not change the target pocket and it is a card she can already see.
+   */
+  const unplaced = (result.newLine?.slots ?? [])
+    .filter((s) => s.copyId && s.pullFrom === null && s.state === "filled")
+    .map((s) => s.copyId as string)
+    .sort();
+  if (unplaced.length > 0) parts.push(`unplaced:${unplaced.join(",")}`);
   return parts.join("|");
 }
 
@@ -113,6 +125,16 @@ export interface ProposedPull {
   stageIndex: number;
   /** True when it currently occupies another line's slot — worth saying, it leaves that line short. */
   fromLine: boolean;
+  /**
+   * The card is not shelved anywhere, so confirming this pull is an instruction to HER as much as a
+   * write: she has to find the card before the line holds it (UIL-087). A front-half pull is a card she
+   * can see on a page; this one is not.
+   *
+   * NOT called "in the bulk box": `role: 'bulk'` currently means both "filed in a bulk box" and "an
+   * import made this and it is not placed anywhere yet", and it is nearly always the second here
+   * (Karvi's ruling, 2026-09-22 — the conflation itself is UIL-088).
+   */
+  notYetPlaced: boolean;
 }
 
 /**
@@ -251,14 +273,27 @@ function proposedPullsFor(
       fromLabel: describeCurrentPlacement(row, pc),
       stageIndex: slot.stageIndex,
       fromLine: row.line_slot_id !== null,
+      notYetPlaced: row.role !== "shelved",
     });
   }
   return out;
 }
 
-/** Where a copy sits right now, in the screen's own vocabulary. */
+/**
+ * Where a copy sits right now, in the screen's own vocabulary.
+ *
+ * `role: 'bulk'` is AMBIGUOUS today and this label must not resolve the ambiguity by guessing (UIL-087
+ * follow-up): it means both "filed in a bulk box" and "an import created this and it is not placed
+ * anywhere yet", and for a proposed pull it is usually the second. Saying "Bulk box" would assert a
+ * placement she never made — the same false claim as the "already placed" slot note this entry removed.
+ * So it reads as the honest either/or until the two states are actually separated (UIL-088), and the
+ * row's `notYetPlaced` flag is what the consent step acts on.
+ *
+ * The other branches are unambiguous and unchanged. A bulk DESTINATION she chose is a different thing
+ * and still reads "Bulk box" (`describeMove`), correctly: that one she did choose.
+ */
 function describeCurrentPlacement(row: Row<"copy">, pc: PlanContext): string {
-  if (row.role === "bulk") return "Bulk box";
+  if (row.role === "bulk") return "Bulk box or still in the haul";
   if (row.role === "block") return "A binder block";
   const binder = (row.binder_id && pc.lookups.binderNameById.get(row.binder_id)) || "Binder";
   const half = row.binder_half === "front" ? "Front" : row.binder_half === "back" ? "Back" : null;

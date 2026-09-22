@@ -903,6 +903,18 @@ function writeNewLine(
           op: "update_copy",
           id: ownedCopyId,
           patch: {
+            /**
+             * `role: "shelved"` is the whole of UIL-087's live defect (3 rows on Testing, one of them
+             * Karvi's Toedscruel). This patch set binder, half, band and the slot pointer but NOT the
+             * role, so pulling a copy that was NOT already shelved — a bulk copy, which is exactly what
+             * a sync import leaves — wired it into the line and left its role `bulk`. The slot then read
+             * `filled` for a card that had never been shelved, and her invariant is that a filled slot
+             * points at a SHELVED copy. It stayed invisible because the pull the engine was designed
+             * around is a front-half copy, which is already `shelved`, so omitting the role changed
+             * nothing for it. A pull means the card now lives in the line: shelved is the only role
+             * consistent with that.
+             */
+            role: "shelved",
             binder_id: plan.binderId,
             binder_half: "back",
             color_band: plan.colorBand,

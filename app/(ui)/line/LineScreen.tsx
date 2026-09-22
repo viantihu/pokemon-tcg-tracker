@@ -566,7 +566,10 @@ export function Slot({
     <div className={`slot ${slot.state}`}>
       <div className="slotlabel u">
         <span>{slot.stage}</span>
-        <span>{SLOT_HEAD[slot.state]}</span>
+        {/* UIL-087: a slot reading FILLED whose card was never shelved says so, rather than looking
+            like every other filled stage. She can see which rows are wrong before she moves them, and
+            Move is now offered on exactly these (lib/line/view.ts). */}
+        <span>{slot.copyNotShelved ? "FILLED · CARD NOT SHELVED" : SLOT_HEAD[slot.state]}</span>
       </div>
       <div className="pocket">
         <div className="top u" style={topStyle}>
@@ -633,6 +636,15 @@ export function Slot({
             <div className="tagline">{slot.wedgeLabel}</div>
           ) : null}
 
+          {slot.copyNotShelved ? (
+            /* `.movedtag` rather than a new class: it is the styled tag slot in this exact position
+               (the prototype audit's L5 notes it existed but only the Plan rendered it), so this needs
+               no CSS of its own. */
+            <div className="movedtag u" role="status">
+              This stage reads as filled but the card is not shelved here. Move it to put the record
+              right.
+            </div>
+          ) : null}
           {slot.moveable ? (
             <button type="button" className="movebtn u" onClick={onMove}>
               ↔ Move
