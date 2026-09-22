@@ -44,11 +44,21 @@ const CARDS: Record<string, { tcgdexId: string }[]> = {
 const SET_NAMES: Record<string, string[]> = { "Mega Brave": ["me06"] };
 
 interface Counting extends CatalogPort {
-  calls: { findBySetLocal: number; findSetIdsByName: number; learnAlias: number };
+  calls: {
+    findBySetLocal: number;
+    findSetIdsByName: number;
+    learnAlias: number;
+    findSetIdsFoldingCase: number;
+  };
 }
 
 function countingPort(): Counting {
-  const calls = { findBySetLocal: 0, findSetIdsByName: 0, learnAlias: 0 };
+  const calls = {
+    findBySetLocal: 0,
+    findSetIdsByName: 0,
+    learnAlias: 0,
+    findSetIdsFoldingCase: 0,
+  };
   return {
     calls,
     async findBySetLocal(setId, localId) {
@@ -58,6 +68,13 @@ function countingPort(): Counting {
     async findSetIdsByName(setName) {
       calls.findSetIdsByName += 1;
       return SET_NAMES[setName] ?? [];
+    },
+    async findSetIdsFoldingCase(setId) {
+      calls.findSetIdsFoldingCase += 1;
+      const want = setId.toLowerCase();
+      return [...new Set(Object.keys(CARDS).map((k) => k.split(":")[0]))].filter(
+        (id) => id.toLowerCase() === want,
+      );
     },
     async learnAlias() {
       calls.learnAlias += 1;

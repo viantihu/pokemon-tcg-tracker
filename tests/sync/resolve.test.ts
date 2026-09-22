@@ -72,6 +72,8 @@ describe("resolveDexId (end-to-end deterministic resolve)", () => {
   it("resolves an English collection row", () => {
     expect(resolveDexId({ Id: "sv10-103", Locale: "English" })).toEqual({
       locale: "en",
+      // The code as her export wrote it, which is what a learned alias is keyed on (UIL-086).
+      rawCode: "sv10",
       setId: "sv10",
       aliased: false,
       localIdCandidates: ["103"],
@@ -81,6 +83,7 @@ describe("resolveDexId (end-to-end deterministic resolve)", () => {
   it("handles the me25 -> me02.5 Ascended Heroes case", () => {
     expect(resolveDexId({ Id: "me25-20", Locale: "English" })).toEqual({
       locale: "en",
+      rawCode: "me25",
       setId: "me02.5",
       aliased: true,
       localIdCandidates: ["20", "020"],
@@ -90,6 +93,8 @@ describe("resolveDexId (end-to-end deterministic resolve)", () => {
   it("resolves a Japanese row to the ja locale with padded candidate", () => {
     expect(resolveDexId({ Id: "jpn_sv11w-2", Locale: "Japanese" })).toEqual({
       locale: "ja",
+      // `jpn_` stripped and NOT namespaced — the alias table is keyed on this, not on `ja:sv11w`.
+      rawCode: "sv11w",
       setId: "ja:sv11w", // UIL-047: the ja catalog space, never the English `sv11w`
       aliased: false,
       localIdCandidates: ["2", "002"],
@@ -100,6 +105,7 @@ describe("resolveDexId (end-to-end deterministic resolve)", () => {
     // me2-112 404s against TCGdex; the card lives at me02-112.
     expect(resolveDexId({ Id: "me2-112", Locale: "English" })).toEqual({
       locale: "en",
+      rawCode: "me2",
       setId: "me02",
       aliased: true,
       localIdCandidates: ["112"],

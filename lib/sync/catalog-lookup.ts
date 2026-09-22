@@ -29,6 +29,8 @@ export interface CatalogPort {
   findBySetLocal(setId: string, localId: string): Promise<{ tcgdexId: string }[]>;
   /** Distinct TCGdex set ids whose set name matches `setName` exactly. */
   findSetIdsByName(setName: string, locale: Locale): Promise<string[]>;
+  /** Stored set ids in `locale` equal to `setId` ignoring case (UIL-086). */
+  findSetIdsFoldingCase(setId: string, locale: Locale): Promise<string[]>;
   /** Persist a learned set-code alias (name-resolved source). */
   learnAlias(alias: { locale: string; dexCode: string; tcgdexSetId: string }): Promise<void>;
 }
@@ -42,6 +44,9 @@ export function catalogPortFromDb(db: DbClient): CatalogPort {
     },
     findSetIdsByName(setName, locale) {
       return catalogCardRepo.findSetIdsByName(db, setName, locale);
+    },
+    findSetIdsFoldingCase(setId, locale) {
+      return catalogCardRepo.findSetIdsFoldingCase(db, setId, locale);
     },
     async learnAlias(alias) {
       await setAliasRepo.upsert(db, {
@@ -103,6 +108,40 @@ export async function resolveAgainstCatalog(
     return { catalogCardId: null, reason: "UNKNOWN_CARD" };
   }
 
+  /**
+   * CASE-FOLDED SET CODE (UIL-086), before the name fallback and for non-English rows only.
+   *
+   * Her Japanese export writes `sv9`, `mc`, `s12a`; TCGdex's ja set ids are `SV9`, `MC`, `S12a`. The
+   * passthrough is exact, so those three sets resolved to nothing and parked — while the name fallback
+   * below cannot rescue them either, because her export's set names are romanised and TCGdex's ja names
+   * are in Japanese script. So this runs FIRST: it is the same "learn the set once and drain the rest"
+   * mechanism, keyed on evidence (the stored id) rather than on a name that will not match.
+   *
+   * English is deliberately untouched: en ids are already lower case, her en sets resolve today, and
+   * widening the 23k-card English path is a risk this entry does not need to take.
+   *
+   * Ambiguity is refused exactly as the name path refuses it: two stored ids folding to one string are
+   * not evidence of anything, so nothing is learned.
+   */
+  if (resolved.locale !== "en") {
+    const folded = await port.findSetIdsFoldingCase(resolved.setId, resolved.locale);
+    const exact = folded.filter((id) => id !== resolved.setId);
+    if (exact.length === 1) {
+      const foldedAlias = {
+        locale: resolved.locale,
+        // The RAW code, because that is what the alias table is keyed on — see below.
+        dexCode: resolved.rawCode,
+        tcgdexSetId: exact[0],
+      };
+      await port.learnAlias(foldedAlias);
+      sessionAliases.set(sessionKey, exact[0]);
+      const foldedHit = await findByCandidates(port, exact[0], candidates);
+      if (foldedHit) return { catalogCardId: foldedHit, learnedAlias: foldedAlias };
+      // The set is real and now known; this particular card number is not in it.
+      return { catalogCardId: null, reason: "UNKNOWN_CARD", learnedAlias: foldedAlias };
+    }
+  }
+
   // Set-code miss: try to resolve the set by its human name and learn the mapping.
   const setName = row.Set?.trim();
   if (!setName) return { catalogCardId: null, reason: "UNKNOWN_SET" };
@@ -114,7 +153,11 @@ export async function resolveAgainstCatalog(
   }
 
   const learnedSetId = named[0];
-  const alias = { locale: resolved.locale, dexCode: resolved.setId, tcgdexSetId: learnedSetId };
+  // Keyed on the RAW Dex code (UIL-086). It was `resolved.setId`, which for a non-en row is the
+  // NAMESPACED id (`ja:sv9`) — and `resolveSetId` looks aliases up by `${locale}:${rawCode}`, so a
+  // Japanese alias learned here was written under a key nothing ever reads: the set re-resolved from
+  // scratch on every later import. English was unaffected, since there the two are the same string.
+  const alias = { locale: resolved.locale, dexCode: resolved.rawCode, tcgdexSetId: learnedSetId };
   await port.learnAlias(alias);
   sessionAliases.set(sessionKey, learnedSetId);
 
@@ -153,6 +196,7 @@ export function prefetchedCatalogPort(
 ): CatalogPort {
   const liveHits = new Map<string, { tcgdexId: string }[]>();
   const namedSets = new Map<string, string[]>();
+  const foldedSets = new Map<string, string[]>();
   return {
     async findBySetLocal(setId, localId) {
       const k = `${setId}:${localId}`;
@@ -171,6 +215,15 @@ export function prefetchedCatalogPort(
       if (memo) return memo;
       const ids = await inner.findSetIdsByName(setName, locale);
       namedSets.set(key, ids);
+      return ids;
+    },
+    async findSetIdsFoldingCase(setId, locale) {
+      // Every row of an unresolved set asks the same question, and the answer cannot change mid-pass.
+      const key = `${locale}:${setId}`;
+      const memo = foldedSets.get(key);
+      if (memo) return memo;
+      const ids = await inner.findSetIdsFoldingCase(setId, locale);
+      foldedSets.set(key, ids);
       return ids;
     },
     learnAlias: (alias) => inner.learnAlias(alias),

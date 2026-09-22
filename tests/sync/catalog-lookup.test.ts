@@ -29,6 +29,14 @@ function fakeCatalog(cards: FakeCard[], names: Record<string, string[]> = {}) {
     async findSetIdsByName(setName) {
       return names[setName] ?? [];
     },
+    async findSetIdsFoldingCase(setId) {
+      // UIL-086: the stored ids that differ from `setId` only by case. Derived from the same fixture
+      // cards, so a test cannot claim a folded set the fake catalog does not actually hold.
+      const want = setId.toLowerCase();
+      const ids = new Set<string>();
+      for (const c of cards) if (c.setId.toLowerCase() === want) ids.add(c.setId);
+      return [...ids];
+    },
     async learnAlias(alias) {
       learned.push(alias);
     },

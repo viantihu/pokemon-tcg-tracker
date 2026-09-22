@@ -96,5 +96,5 @@ export function resolveDexId(
   const locale = detectLocale(row);
   const { rawCode, localId } = parseDexId(row.Id);
   const { setId, aliased } = resolveSetId(locale, rawCode, alias);
-  return { locale, setId, aliased, localIdCandidates: localIdCandidates(localId) };
+  return { locale, rawCode, setId, aliased, localIdCandidates: localIdCandidates(localId) };
 }

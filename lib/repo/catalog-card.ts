@@ -319,4 +319,48 @@ export const catalogCardRepo = {
     for (const r of data ?? []) if (r.set_id) ids.add(r.set_id);
     return [...ids];
   },
+
+  /**
+   * Stored set ids in `locale` that equal `setId` ignoring case (UIL-086).
+   *
+   * Her Japanese Dex export writes set codes in lower case (`sv9`, `mc`, `s12a`) while TCGdex's ja set
+   * ids are mixed case (`SV9`, `MC`, `S12a`), and every catalog lookup matches `set_id` with `.eq` — so
+   * three of her five Japanese sets resolved to nothing and parked as UNKNOWN_SET. This answers "what is
+   * this set actually stored as", so the resolver can learn the real casing once and keep every
+   * downstream query exact. STORED IDS ARE NEVER REWRITTEN: the mirror's resume compares them to
+   * TCGdex's own strings, so the fix belongs here, at lookup time (the Tech Lead's constraint).
+   *
+   * `ilike` does the narrowing, and then every row is CONFIRMED in TypeScript with a plain lower-case
+   * equality. That second pass is not belt-and-braces padding: `_` and `%` are wildcards to `LIKE`, so a
+   * set id containing either could otherwise match a neighbour, and no escaping scheme has to be got
+   * exactly right for this to be correct.
+   *
+   * Cap-guarded (UIL-028's rule): the rows come back one per CARD of the set, so a set larger than the
+   * server's `max-rows` would return a partial view — and a partial view could hide a second set id that
+   * folds to the same string, which is the one thing that must not be silently mis-learned. It throws
+   * instead. ja's largest mirrored set is 774 cards today, so this is a guard, not a limit in practice.
+   */
+  async findSetIdsFoldingCase(db: DbClient, setId: string, locale: string): Promise<string[]> {
+    const pattern = setId.replace(/[\\%_]/g, (c) => `\\${c}`);
+    const { data, error, count } = await db
+      .from("catalog_card")
+      .select("set_id", { count: "exact" })
+      .eq("locale", locale)
+      .ilike("set_id", pattern)
+      .not("set_id", "is", null);
+    if (error) throw error;
+    const rows = data ?? [];
+    assertReadComplete(
+      "catalog_card",
+      rows,
+      count,
+      `findSetIdsFoldingCase(${setId}): the row cap truncated a case-folded set lookup, which could ` +
+        `hide a second set id folding to the same string — refusing to learn a set alias from a ` +
+        `partial view.`,
+    );
+    const want = setId.toLowerCase();
+    const ids = new Set<string>();
+    for (const r of rows) if (r.set_id && r.set_id.toLowerCase() === want) ids.add(r.set_id);
+    return [...ids];
+  },
 };
