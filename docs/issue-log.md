@@ -6657,3 +6657,62 @@ count, or 503'd, are upstream and resume on the next dispatch; they are not this
 
 **Priority rationale.** High, Senior BA's read: not user-visible on its own, but it is the only thing
 between Karvi's "pull the Japanese catalog this phase" ruling and the catalog actually being there.
+
+## UIL-084 — A card moved to the back half of a second binder cannot land when a line for its species and band already exists in another binder: the sheet accepts the pick, the row reads MOVED, and Done is refused with "reload and join it instead"
+
+- **Reported:** 2026-09-21 (Karvi, with a screenshot, during her first UAT pass after the 2026-09-20 data
+  refresh; body by the Senior BA, no intake session on the roster)
+- **Status:** Open — **critical for her; assigned to Full Stack Dev - 2, reproduction on PGlite first, then
+  the fix.** Product question put to Karvi 2026-09-21: is the rule one evolution line per species per
+  BINDER (so a second binder may hold its own Orange Toedscool line), rather than one per species
+  globally? Senior BA's recommended default: per binder.
+- **Priority:** High (Senior BA's read, to be confirmed by Karvi) — the app's core action fails for a card
+  she has explicitly placed, the refusal's remedy ("reload the screen and join it instead") reproduces
+  the same state, and the row shows MOVED while nothing moved: a silent-wrong-state plus a dead end, the
+  exact pair the always-movable ethos (UIL-072) forbids.
+- **Area:** Plan (Move sheet, override commit), Lines
+- **Env:** Testing, develop `703012b` (all of UIL-070 parts 1+2, UIL-030, UIL-040 step 2 deployed)
+
+In her words: "I keep getting this error: 'A line for this species and band already exists — reload the
+screen and join it instead.' I've already tried moving this card but it won't seem to land. In general,
+when I am switching to a non-active binder, the shelving job is quite buggy."
+
+**What the screenshot shows.** Haul Plan, 585 cards, 4 handled. Spotlight: Toedscruel 089/159 (SV09,
+STAGE1, ORANGE). The engine's own reason: "The Orange line already has this stage — the extra copy goes
+to the front half." She overrode it through the Move sheet to "Place in the back half · KB-002 · BACK ·
+ORANGE"; KB-002 is not the binder the engine is filling (Primeape's proposal is KB-001 FRONT), and she
+had just landed Gligar and Gliscor in KB-002 BACK ORANGE, so she is deliberately building lines in a
+second binder. The override display reads "MOVED · KB-002 · BACK · ORANGE" and the worklist row carries
+the MOVED chip, yet DONE fails with the pink bar quoted above, and reloading reproduces it.
+
+**Mechanism, read from `develop`, to be confirmed by the reproduction.** The refusal is
+`REFUSE.lineExists` in [`lib/plan/commit.ts:686`](../lib/plan/commit.ts:686) (and the same string in
+[`lib/line/write.ts:167`](../lib/line/write.ts:167) for `applyMove`), thrown when the join is `mode:
+"new"` and `findLineByRootAndBand(pc, rootDexId, band)` finds a line for that root and band **in any
+binder**; `lib/line/join-options.ts` keys `lineByRootBand` the same way, without the binder. The comment
+above the throw says the picker "already showed her this band as line exists, your stage is filled, so
+reaching here is a stale client", but she reaches it on a fresh reload: the sheet lets a back-half pick
+into KB-002 through when the only existing Orange line for the species lives in KB-001 with her stage
+already filled, and the server refuses it under a rule the sheet did not apply. Two defects in one
+requirement ("a card lands where she points it, or the screen says why and offers a way that works"):
+
+1. **Rule mismatch.** Line uniqueness is enforced globally on (species root, band) while the sheet and
+   her intent are per binder. If the rule is per binder, both the check and `lineByRootBand` need the
+   binder in the key, and the sheet should offer "start a line in KB-002" when the existing line is
+   elsewhere while still refusing a duplicate in the same binder. If the rule is truly global, the sheet
+   must not offer the pick, and the refusal must say what to do instead (the existing line is in KB-001
+   with the stage filled; the front half is the way).
+2. **MOVED before the write.** The override display and the row chip show MOVED from the client's pending
+   state; the commit then refuses. Nothing should read MOVED until the write has succeeded.
+
+**Her broader complaint** ("switching to a non-active binder, the shelving job is quite buggy") is
+recorded here, not as its own entry, until she gives a second concrete moment; the Senior BA has asked
+for one. Gligar and Gliscor landing correctly in KB-002 suggests the second-binder path works when no
+line for the species exists elsewhere.
+
+**Post-refresh baseline, taken 2026-09-21 by the Senior BA after her import (run 35683207610):** copy 708,
+presence_group 683, evolution_line 23, line_slot 60, placement_decision 140, unresolved_entry 10,
+set_alias 22, collection 11, binder 3.
+
+**Priority rationale.** High: reachable in the first minutes of a normal shelving pass, blocks a card she
+has decided about, shows a state that is false, and offers a remedy that does not work.
