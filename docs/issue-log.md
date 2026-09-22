@@ -6662,7 +6662,27 @@ between Karvi's "pull the Japanese catalog this phase" ruling and the catalog ac
 
 - **Reported:** 2026-09-21 (Karvi, with a screenshot, during her first UAT pass after the 2026-09-20 data
   refresh; body by the Senior BA, no intake session on the roster)
-- **Status:** Open — **part 1 of 2 deployed; part 2 in build.** Reproduced on PGlite by Full Stack Dev - 2
+- **Status:** **Fixed** — both parts deployed 2026-09-22; awaiting Karvi's confirmation on the move that
+  started it. **Part 2, the rule:** PR [#295](https://github.com/viantihu/pokemon-tcg-tracker/pull/295)
+  MERGED to `develop` (squash `4eef874`), QA-gated on the merged tree (1130 tests, build; twelve mutations
+  all biting: applyMove ignores the binder → 2, the plan's in-pass key drops the binder → 1, the repo
+  query unscoped → 4, the engine takes the first match → 3, the panel allows a same-binder duplicate → 1
+  DOM case), confirmed **deployed** (Deploy, migrate, smoke, acceptance and Vercel green on `4eef874`). The
+  rule is now **one evolution line per species per BINDER** (Senior BA's default; Karvi did not object
+  before QA's gate closed): uniqueness keyed (binderId, root, band) in both write paths including the
+  in-pass key; `findByRootBandAndBinder` is binder-scoped, matches a null binder with `is`, and no longer
+  `.maybeSingle()` (two lines across binders are now normal, and the old query threw a raw error on two
+  rows); one shared refusal, "That binder already has a line for this species in this band. Join its open
+  slot if it has one, or place this copy in the front half."; the sheet's band-only map replaced by one
+  keyed by binder and band, the "start a new line" chip names the binder it starts in, Confirm is disabled
+  for a same-binder duplicate so the panel refuses what the server refuses; when a species has lines in
+  two binders a new copy goes to the line in its natural band, then one with an open slot for its stage,
+  then the oldest, with `loadPlanContext` ordering lines by (created_at, id). No migration. **Step for
+  Karvi:** repeat the move that started this: Toedscruel, Move, KB-002 back half, Orange, Done. The card
+  should land as KB-002's own Orange Toedscool line and the row read "Moved"; a second attempt into the
+  SAME binder should be refused with the sentence above and the Confirm button greyed. Closed on her
+  confirmation. **Part 1 (deployed earlier, `bd11695`) and the reproduction that led here follow.**
+  **Earlier record:** Reproduced on PGlite by Full Stack Dev - 2
   before any fix, with two corrections to the first read: the Move sheet's candidates are NOT scoped to
   the destination binder (UIL-064 made the list flat); her list is empty because her stage's slot is
   already FILLED, so the only offer is "start a new line", and the server refuses that on a GLOBAL (root,
