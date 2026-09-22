@@ -10,7 +10,8 @@
  *
  * The refusal used here is a duplicate line in the SAME binder as the existing one. That is deliberate:
  * it is the case that stays refused under either line-uniqueness rule (globally, or one line per species
- * per binder), so this test keeps its meaning while the rule itself is settled.
+ * per binder), so this test kept its meaning when the rule was settled per binder — only the refusal's
+ * WORDING moved with it (UIL-084's second half, which also made its remedies ones that exist).
  *
  * Real Postgres (PGlite), real migrations, real `apply_write_ops`, as the authenticated owner.
  */
@@ -100,7 +101,7 @@ describe("UIL-084 · a refused manual placement writes nothing at all", () => {
     await asOwner(db);
     await expect(
       commitCardPlacement(pgliteClient(db), { source: "bulk-bin", card: DRAFT, override }),
-    ).rejects.toThrow(/A line for this species and band already exists/);
+    ).rejects.toThrow(/already has a line for this species in this band/);
     await asSuperuser(db);
 
     // Byte-for-byte the state we started from: no new copy for the card she is holding, no second

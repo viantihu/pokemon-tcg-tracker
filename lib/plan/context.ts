@@ -151,9 +151,24 @@ export async function loadPlanContext(
     list.push(s);
     slotsByLine.set(s.line_id, list);
   }
-  const lines: EvolutionLine[] = lineRows.map((l) =>
-    toEvolutionLine(l, slotsByLine.get(l.id) ?? [], dexIdForSlot),
-  );
+  /**
+   * OLDEST FIRST, and explicitly (UIL-084). `evolutionLineRepo.list` is a plain `select *` with no
+   * ORDER BY, so this arrived in whatever order Postgres chose. The engine's `existingLineSlot` breaks
+   * a tie between two lines of one family by falling back to list order — its documented contract —
+   * and two such lines are ordinary now that uniqueness is per binder, so an unordered list would send
+   * every future copy of that species to an arbitrary one of them, differing run to run.
+   *
+   * `new Date(...)` on purpose, as in `lib/line/load.ts`: PostgREST serialises `created_at` as an ISO
+   * string and the raw pg wire (PGlite in tests) as a Date. `id` breaks an exact timestamp tie so the
+   * order is total.
+   */
+  const lines: EvolutionLine[] = [...lineRows]
+    .sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime() ||
+        a.id.localeCompare(b.id),
+    )
+    .map((l) => toEvolutionLine(l, slotsByLine.get(l.id) ?? [], dexIdForSlot));
 
   const typeColorMap: Record<string, string> = {};
   for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;

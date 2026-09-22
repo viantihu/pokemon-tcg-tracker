@@ -12,6 +12,7 @@ import {
   sortJoinCandidates,
   type JoinIndexLine,
   type JoinIndexSlot,
+  lineKey,
 } from "@/lib/line/join-options";
 import type { LineJoinCandidate } from "@/lib/line/types";
 import {
@@ -28,7 +29,6 @@ const CATALOG: CatalogCard[] = [
   NEST_BALL_SV01_181,
 ];
 const TYPE_MAP = { Fire: "red", Water: "light_blue" };
-const BANDS = ["red", "green", "light_blue"];
 
 const CHARMANDER_DEX = CHARMANDER_SV03_026.dexId[0];
 
@@ -73,12 +73,17 @@ describe("buildLineJoinIndex", () => {
     });
     // The filled root is NOT offered.
     expect(index.openSlotsByDexId.has(CHARMANDER_DEX)).toBe(false);
-    // Every line is indexed by (root, band) regardless of open slots, and its chain is kept.
-    expect(index.lineByRootBand.get(`${CHARMANDER_DEX}:red`)).toEqual({
-      speciesLabel: "CHARMANDER LINE",
-      filledCount: 1,
-      totalCount: 3,
-    });
+    // Every line is indexed by its family root regardless of open slots, carrying its own binder and
+    // band (UIL-084 — the key the server refuses a duplicate on), and its chain is kept.
+    expect(index.linesByRoot.get(CHARMANDER_DEX)).toEqual([
+      {
+        speciesLabel: "CHARMANDER LINE",
+        filledCount: 1,
+        totalCount: 3,
+        binderId: "b1",
+        bandKey: "red",
+      },
+    ]);
     expect(index.chains.get("L1")?.map((n) => n.name)).toEqual([
       "Charmander",
       "Charmeleon",
@@ -92,7 +97,7 @@ describe("buildLineJoinIndex", () => {
       new Map([["L9", [slot("x", 0, "Basic", "placeholder")]]]),
       CATALOG,
     );
-    expect(index.lineByRootBand.get("99999:red")?.speciesLabel).toBe("EVOLUTION LINE");
+    expect(index.linesByRoot.get(99999)?.[0].speciesLabel).toBe("EVOLUTION LINE");
     expect(index.chains.get("L9")).toEqual([]);
     // No chain → no dexId for the slot → nothing to offer it under.
     expect(index.openSlotsByDexId.size).toBe(0);
@@ -109,32 +114,60 @@ describe("joinOptionsFor", () => {
     CATALOG,
   );
 
-  it("a Stage1 with an open slot in red and a filled one in green: red is a candidate, green is explained", () => {
-    const opts = joinOptionsFor(CHARMELEON_SV03_027, index, BANDS, TYPE_MAP, CATALOG)!;
+  it("a Stage1 with an open slot in red and a filled one in green: red is a candidate, and BOTH lines are reported where they live", () => {
+    const opts = joinOptionsFor(CHARMELEON_SV03_027, index, TYPE_MAP, CATALOG)!;
     expect(opts.dexId).toBe(CHARMELEON_SV03_027.dexId[0]);
     expect(opts.naturalBandKey).toBe("red");
     expect(opts.joinCandidates.map((c) => c.lineId)).toEqual(["L1"]);
-    expect(opts.existingLineByBand).toEqual({
-      green: { speciesLabel: "CHARMANDER LINE", filledCount: 2, totalCount: 2 },
+    // UIL-084: keyed by BINDER AND BAND, and NOT filtered to bands without a candidate — the server
+    // refuses a second line per (binder, band) whether or not this card could join the one there, so
+    // filtering red out here is what let the panel recommend a new line the write would reject.
+    expect(opts.existingLineByBinderBand).toEqual({
+      [lineKey("b1", "red")]: {
+        speciesLabel: "CHARMANDER LINE",
+        filledCount: 1,
+        totalCount: 2,
+        binderId: "b1",
+        bandKey: "red",
+      },
+      [lineKey("b2", "green")]: {
+        speciesLabel: "CHARMANDER LINE",
+        filledCount: 2,
+        totalCount: 2,
+        binderId: "b2",
+        bandKey: "green",
+      },
     });
-    // light_blue has no line for this family at all: neither a candidate nor an explanation.
-    expect(opts.existingLineByBand.light_blue).toBeUndefined();
+    // A binder with no line for this family at all is absent, in every band.
+    expect(opts.existingLineByBinderBand[lineKey("b3", "red")]).toBeUndefined();
+    expect(opts.existingLineByBinderBand[lineKey("b1", "light_blue")]).toBeUndefined();
   });
 
-  it("keys existingLineByBand on the CHAIN ROOT, not the card's own dexId (a Stage1 is not its own root)", () => {
+  it("the SAME band in a DIFFERENT binder is not reported as taken — the whole of UIL-084", () => {
+    // Red is taken in b1. b2 in red is free, and the server would accept a new line there.
+    const opts = joinOptionsFor(CHARMELEON_SV03_027, index, TYPE_MAP, CATALOG)!;
+    expect(opts.existingLineByBinderBand[lineKey("b1", "red")]).toBeDefined();
+    expect(opts.existingLineByBinderBand[lineKey("b2", "red")]).toBeUndefined();
+  });
+
+  it("keys on the CHAIN ROOT, not the card's own dexId (a Stage1 is not its own root)", () => {
     // Charmeleon's dexId is 5; the lines are rooted at Charmander (4). Keying on 5 would find nothing.
-    const opts = joinOptionsFor(CHARMELEON_SV03_027, index, BANDS, TYPE_MAP, CATALOG)!;
-    expect(Object.keys(opts.existingLineByBand)).toEqual(["green"]);
+    const opts = joinOptionsFor(CHARMELEON_SV03_027, index, TYPE_MAP, CATALOG)!;
+    expect(Object.keys(opts.existingLineByBinderBand).sort()).toEqual(
+      [lineKey("b1", "red"), lineKey("b2", "green")].sort(),
+    );
   });
 
-  it("a duplicate of the filled root gets no candidate and an explanation for BOTH bands", () => {
-    const opts = joinOptionsFor(CHARMANDER_SV03_026, index, BANDS, TYPE_MAP, CATALOG)!;
+  it("a duplicate of the filled root gets no candidate, and both existing lines are still reported", () => {
+    const opts = joinOptionsFor(CHARMANDER_SV03_026, index, TYPE_MAP, CATALOG)!;
     expect(opts.joinCandidates).toEqual([]);
-    expect(Object.keys(opts.existingLineByBand).sort()).toEqual(["green", "red"]);
+    expect(Object.keys(opts.existingLineByBinderBand).sort()).toEqual(
+      [lineKey("b1", "red"), lineKey("b2", "green")].sort(),
+    );
   });
 
   it("returns null for a Trainer — no species, no line concept", () => {
-    expect(joinOptionsFor(NEST_BALL_SV01_181, index, BANDS, TYPE_MAP, CATALOG)).toBeNull();
+    expect(joinOptionsFor(NEST_BALL_SV01_181, index, TYPE_MAP, CATALOG)).toBeNull();
   });
 });
 

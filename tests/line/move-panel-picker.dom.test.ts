@@ -61,6 +61,8 @@ function mount(over: Partial<Parameters<typeof MovePanel>[0]> = {}) {
 }
 
 const button = (name: string | RegExp) => screen.getByRole("button", { name }) as HTMLButtonElement;
+/** UIL-084: the chip names the binder the line would be started in, so match its stem. */
+const NEW_LINE = /^\+ Start a new line/;
 const pressed = (b: HTMLButtonElement) => b.getAttribute("aria-pressed") === "true";
 const candidate = () => button(/CHARMANDER LINE/);
 const backHalf = () => button("BACK HALF");
@@ -74,7 +76,7 @@ describe("UIL-073 · before any pick (the Line screen's opening state, line-firs
     expect(backHalf().disabled).toBe(true);
     expect(screen.getByText(/Pick a line above to enable/)).toBeTruthy();
     expect(pressed(candidate())).toBe(false);
-    expect(pressed(button("+ Start a new line"))).toBe(false);
+    expect(pressed(button(NEW_LINE))).toBe(false);
     expect(confirm().disabled).toBe(true);
     expect(screen.getByText(/PICK A LINE/)).toBeTruthy();
   });
@@ -111,8 +113,8 @@ describe("UIL-073 · clicking a line-candidate chip selects it and the reason fl
 
   it("'+ Start a new line' selects the new-line choice, flips the reason the same way, and confirms with mode new on her natural band", async () => {
     const { onConfirm, user } = mount();
-    await user.click(button("+ Start a new line"));
-    expect(pressed(button("+ Start a new line"))).toBe(true);
+    await user.click(button(NEW_LINE));
+    expect(pressed(button(NEW_LINE))).toBe(true);
     expect(pressed(candidate())).toBe(false);
     expect(screen.queryByText(HER_WORDS)).toBeNull();
     expect(screen.getByText(/Line picked above/)).toBeTruthy();
@@ -142,7 +144,7 @@ describe("UIL-073 · clicking a line-candidate chip selects it and the reason fl
   it("with nothing to join the picker sits below the manual controls, and the reason says so — before and after the pick", async () => {
     const { user } = mount({ joinCandidates: [] });
     expect(screen.getByText(/Pick a line below to enable/)).toBeTruthy();
-    await user.click(button("+ Start a new line"));
+    await user.click(button(NEW_LINE));
     expect(screen.getByText(/Line picked below/)).toBeTruthy();
     expect(backHalf().disabled).toBe(false);
   });

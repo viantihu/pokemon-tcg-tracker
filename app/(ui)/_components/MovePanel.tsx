@@ -41,6 +41,7 @@ import type {
   MoveOptions,
 } from "@/lib/line/types";
 import { defaultMoveHalf, isMoveDestinationComplete } from "@/lib/line/move";
+import { lineKey } from "@/lib/line/join-options";
 import { bandMeta } from "./plan-meta";
 
 const BULK = "__bulk__";
@@ -51,7 +52,7 @@ export function MovePanel({
   confirmLabel = "Place it here ▶",
   allowLineJoin = false,
   joinCandidates,
-  existingLineByBand,
+  existingLineByBinderBand,
   naturalBandKey,
   blockNeeds,
   onConfirm,
@@ -62,9 +63,12 @@ export function MovePanel({
   allowLineJoin?: boolean;
   /** Flat across every band (UIL-064) — present (even empty) turns the line-first flow on. */
   joinCandidates?: LineJoinCandidate[];
-  /** A line already exists for this band but has no open slot for this card (UIL-056 note 3) —
-   *  explains an otherwise-empty candidate list rather than leaving it looking broken. */
-  existingLineByBand?: Record<string, ExistingLineBlock>;
+  /**
+   * Every line this family already has, keyed by BINDER AND BAND (UIL-084) — the same key the server
+   * refuses a duplicate on. Band-keyed before, which could not answer the question that actually
+   * decides the write: does the binder SHE has picked already have one.
+   */
+  existingLineByBinderBand?: Record<string, ExistingLineBlock>;
   /** This card's own type-derived band — the default for "start a new line"'s one remaining pick
    *  (UIL-064): the app's own answer, not ten empty chips. */
   naturalBandKey?: string;
@@ -103,7 +107,22 @@ export function MovePanel({
   const binder = options.binders.find((b) => b.id === binderId);
   const isSpecialty = binder?.type === "specialty";
   const collections = binder ? (options.collectionsByBinder[binder.id] ?? []) : [];
-  const blockingLine = allowLineJoin && band ? existingLineByBand?.[band] : undefined;
+  /**
+   * The line already occupying the destination she has picked (UIL-084). Looked up by BINDER AND BAND
+   * through the shared `lineKey`, so this is the same question `applyMove` answers — a line in another
+   * binder is no longer treated as blocking, which is the whole of her report.
+   */
+  const blockingLine =
+    allowLineJoin && band && !isBulk && binder?.type === "general"
+      ? existingLineByBinderBand?.[lineKey(binder.id, band)]
+      : undefined;
+  /**
+   * She has asked to START a line where one already lives. The server refuses this, so Confirm does
+   * too — a client that offered it would be recommending the one action that cannot succeed, which is
+   * exactly the dead end UIL-084 reported. The remedies are on screen: join its open slot if it has
+   * one, pick another binder, or use the front half.
+   */
+  const newLineBlocked = half === "back" && lineJoin?.mode === "new" && blockingLine != null;
 
   const destination: MoveDestination = blockNeed
     ? {
@@ -124,7 +143,7 @@ export function MovePanel({
             ...(half === "back" && allowLineJoin ? { lineJoin } : {}),
           };
 
-  const canConfirm = isMoveDestinationComplete(destination);
+  const canConfirm = isMoveDestinationComplete(destination) && !newLineBlocked;
 
   const hasCandidates = (joinCandidates ?? []).length > 0;
 
@@ -386,7 +405,7 @@ export function MovePanel({
               setBand(naturalBandKey ?? options.bands[0]?.key ?? null);
             }}
           >
-            + Start a new line
+            + Start a new line{binder && !isBulk ? ` in ${binder.name}` : ""}
           </button>
         </div>
       </div>
@@ -416,10 +435,14 @@ export function MovePanel({
             })}
           </div>
           {blockingLine ? (
+            /* UIL-084: this used to say the opposite of what happens — "this one starts its own line
+               instead" — for a placement the server always refused. It now names the condition and the
+               remedies that exist. A line in ANOTHER binder is not blocking and says nothing here. */
             <div className="oskip" style={{ marginTop: 6 }}>
-              {blockingLine.speciesLabel} already exists here ({blockingLine.filledCount}/
-              {blockingLine.totalCount} filled), but this card&apos;s own stage is already filled by
-              another copy — lines are tracked once, so this one starts its own line instead.
+              {binder?.name ?? "This binder"} already has {blockingLine.speciesLabel} in this band (
+              {blockingLine.filledCount}/{blockingLine.totalCount} filled), and one binder tracks a
+              species once per band — so a second line here cannot be saved. Join its open slot
+              above if it has one, pick a different binder, or use the front half.
             </div>
           ) : null}
         </div>

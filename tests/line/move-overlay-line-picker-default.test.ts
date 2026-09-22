@@ -48,6 +48,7 @@ function render(card: Partial<MoveTargetCard>, allowLineJoin?: boolean): string 
   );
 }
 
+/** UIL-084: the chip names its destination binder ("… in Binder 1"), so match the stem. */
 const PICKER = "+ Start a new line";
 const NO_PICKER_REASON = "Move it from the Lines page to pick one.";
 

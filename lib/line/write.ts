@@ -46,6 +46,7 @@ import {
 import { resolveDecisionWrites } from "./decisions";
 import { buildScreenModel } from "./load";
 import {
+  LINE_EXISTS_IN_BINDER,
   buildExistingLineJoinOps,
   buildMoveOps,
   buildNewLineJoinOps,
@@ -157,15 +158,16 @@ export async function applyMove(
       // dexId — those differ whenever the card is not itself the chain's root (e.g. starting a line
       // from a Stage1 whose Basic exists in the catalog as a placeholder). Discarding `built.ops` on
       // a throw is safe: they are pure data, no I/O has happened yet.
-      const existing = await evolutionLineRepo.findByRootAndBand(
+      // Scoped to the DESTINATION BINDER (UIL-084): a line in another binder no longer owns this
+      // species-and-band, so she can start that binder's own line.
+      const existing = await evolutionLineRepo.findByRootBandAndBinder(
         db,
         built.rootDexId,
         req.destination.band,
+        req.destination.binderId,
       );
       if (existing) {
-        throw new Error(
-          "A line for this species and band already exists — reload the screen and join it instead.",
-        );
+        throw new Error(LINE_EXISTS_IN_BINDER);
       }
       lineJoinOps = built.ops;
       resolvedLineSlotId = built.slotId;
