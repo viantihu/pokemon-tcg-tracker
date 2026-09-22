@@ -6803,10 +6803,25 @@ the one that makes refresh-triggering bugs cheap instead of catastrophic.
 
 - **Reported:** 2026-09-22 (found by the Senior BA from the Tech Lead's post-import read and a Testing
   set-id read; body by the Senior BA, no intake session on the roster)
-- **Status:** Open — unassigned until a dev in the sync lane exists (Full Stack Dev - 1 is off the
-  roster; Full Stack Dev - 2 is on UIL-084, critical). Small fix: resolve a non-en passthrough set code
-  against the locale's stored set ids case-insensitively (or normalise to TCGdex's casing from the set
-  list), pinned with a fixture where the Dex code is `sv9` and the stored set is `ja:SV9`.
+- **Status:** **Fixed** — PR [#297](https://github.com/viantihu/pokemon-tcg-tracker/pull/297) MERGED to
+  `develop` 2026-09-22 (squash `7c48e02`), QA-gated on the merged tree (1147 tests, build; the fold step
+  never running fails 4, folding for English too fails 1, the folded alias keyed on the namespaced id fails
+  2; QA confirmed by grep that nothing under `lib` updates `set_id` or `tcgdex_id`), confirmed **deployed**
+  (Deploy, migrate, smoke, acceptance and Vercel green on `7c48e02`). Built to the Tech Lead's constraint:
+  stored ja set ids are never rewritten; on a set-code miss a non-en row asks the catalog what the set is
+  stored as (case-folded lookup) and learns `(ja, sv9) → ja:SV9` through the ordinary alias machinery, so
+  every later lookup is exact and the alias is visible and forgettable in Sync like any other; English is
+  untouched; `mem` and `mez` still park as UNKNOWN_SET because TCGdex carries neither under any spelling.
+  **Second cause found and fixed in the same PR:** the name-resolution path keyed the aliases it learned on
+  the namespaced id (`ja:sv9`) while `resolveSetId` reads `${locale}:${rawCode}`, so every Japanese alias
+  that path learned was written under a key nothing read and the set re-resolved from scratch on each
+  import; the manual-match path was already correct, which is why UIL-047's "one match drains the set"
+  worked. Two mutation disclosures recorded rather than a flattering count: the LIKE-escaping and the exact
+  lower-case confirmation are deliberately redundant, so their combination is pinned; the query's locale
+  filter cannot be mutated meaningfully because migration 0016's check constraint makes the breaking row
+  impossible to seed. Step for Karvi: Sync → Retry now; the `mc`, `s12a` and `sv9` rows should resolve
+  without a manual match and three new Japanese aliases should appear; the `mem` and `mez` rows stay
+  waiting for her match. Closed on her confirmation.
 - **Priority:** High (Senior BA's read) — it is the difference between Karvi's ruling for this phase
   ("pull the Japanese catalog") working on import and her having to hand-match one card per Japanese set;
   the fix is small and the data proves it.
