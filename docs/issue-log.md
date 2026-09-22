@@ -6848,3 +6848,56 @@ script.
 
 **Priority rationale.** High: three of five of her Japanese sets should have resolved without her doing
 anything; a one-place normalisation fixes it; and every future Japanese import hits the same wall.
+
+## UIL-087 — A line slot reads FILLED for a copy that was never shelved: three copies on Testing carry a slot while still in bulk, so the line claims a card that is not physically in it
+
+- **Reported:** 2026-09-22 (Karvi, on the Toedscool Orange line from UIL-084; body by the Senior BA, no
+  intake session on the roster)
+- **Status:** Open — **assigned to Full Stack Dev - 2, reproduction on PGlite first.** Measured on Testing
+  by the Senior BA (run 35780615486): `line_slot` 60 = filled 39 + block 1 + placeholders; filled slots
+  with a null `copy_id` 0; copies carrying a `line_slot_id` 39; **copies carrying a `line_slot_id` whose
+  `role` is not `shelved`: 3.** Her Toedscruel is one of the three.
+- **Priority:** High (Senior BA's read, to be confirmed by Karvi) — the record disagrees with the physical
+  shelf, the class UIL-062 was High for: a line says a stage is filled, the engine routes the next copy on
+  that basis ("the Orange line already has this stage — the extra copy goes to the front half"), and the
+  card it names is still in the bulk box. It is also the hidden first cause behind UIL-084's dead end.
+- **Area:** Plan (commit), Lines
+- **Env:** Testing, develop `e089fef`
+
+In her words: "I'm trying to fix this Toedscruel record. It's showing that the slot is already filled even
+though the record actually never got shelved. The root issue is that the app is not treating each card as
+a separate underlying object, which is integral to the app. There should've never been a line getting
+filled in that line if the card never got shelved there."
+
+**The requirement, in her framing, now written down as the invariant the fix must enforce and a test must
+hold after every write path:** a `line_slot` in state `filled` points at exactly one copy; that copy is
+`shelved`, its `line_slot_id` is that slot, and its binder and half are the line's. A slot is filled by the
+act of shelving a copy into it, never by a plan's expectation that a copy will be shelved.
+
+**Where the write happens, read from `develop` (to be confirmed by the reproduction).** A new line is
+inserted by `writeNewLine` ([`lib/plan/commit.ts`](../lib/plan/commit.ts), ~779–880) with every slot in
+the **plan's** state, `slotState = declinedPull ? "placeholder" : slot.state`, and
+`copyIdForSlot = isIncoming ? incomingCopyId : ownedCopyId`; only the incoming copy is wired back with
+`update_copy { line_slot_id }`. So when the engine plans a line whose other stage is to be **pulled** from
+her collection and she confirms the pull (UIL-061's consent) on the first card's Done, the sibling slot is
+written `filled` with the owned copy's id at that moment, before that copy has been shelved anywhere; if
+the copy's own row is not moved in the same transaction (role, binder, half, band, `line_slot_id`), the
+slot and the copy disagree from then on, and the copy still shows as bulk to her. Whether the copy side is
+half-written or not written is the reproduction's first question; the three Testing rows say the slot side
+is.
+
+**Consequences already seen.** UIL-084's screenshot: the engine refused Toedscruel's back-half placement
+because "the Orange line already has this stage"; the stage was "filled" by exactly such a copy. Any count
+of open slots, any "line complete" state, and the UIL-030 open-block-need count read the same wrong slot
+state.
+
+**Remedy for her today, until the fix lands:** on the Lines screen, open the Toedscool line, choose the
+Toedscruel slot and Move that copy to where it actually is (or to KB-002, now that UIL-084 allows a second
+line there); `applyMove` releases the slot as it moves the copy. If Move refuses, report the sentence.
+
+**Cross-reference UIL-062**, which released eight stale filled slots by measurement and named
+`writeOverriddenCard` as the route for overrides; this is the same invariant broken by the cascade's own
+new-line path.
+
+**Priority rationale.** High: silent, on the core write, and it feeds wrong routing to every later card of
+the species.
