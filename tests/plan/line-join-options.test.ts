@@ -80,7 +80,7 @@ describe("UIL-070 part 1 · the Plan's line picker agrees with the Line screen's
     const pc = await loadPlanContext(client);
     const plan = lineJoinOptionsFromContext(pc, "emberdrake")!;
     expect(plan.joinCandidates).toEqual(drake.joinCandidates);
-    expect(plan.existingLineByBand).toEqual(drake.existingLineByBand);
+    expect(plan.existingLineByBinderBand).toEqual(drake.existingLineByBinderBand);
     expect(plan.naturalBandKey).toBe(drake.naturalBandKey);
     expect(plan.dexId).toBe(drake.dexId);
     // And the candidate is the real open slot, carrying its line's binder.
@@ -102,8 +102,8 @@ describe("UIL-070 part 1 · the Plan's line picker agrees with the Line screen's
     const plan = lineJoinOptionsFromContext(await loadPlanContext(client), "emberling")!;
     expect(plan.joinCandidates).toEqual([]);
     expect(dupe.joinCandidates).toEqual([]);
-    expect(plan.existingLineByBand).toEqual(dupe.existingLineByBand);
-    expect(plan.existingLineByBand.red).toMatchObject({
+    expect(plan.existingLineByBinderBand).toEqual(dupe.existingLineByBinderBand);
+    expect(Object.values(plan.existingLineByBinderBand)[0]).toMatchObject({
       speciesLabel: "EMBERLING LINE",
       filledCount: 1,
       totalCount: 2,

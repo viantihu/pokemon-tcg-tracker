@@ -188,17 +188,41 @@ function newLineBinderId(ctx: EngineContext): string | null {
  * manually-banded line invisible to every future card of that species forever — silently defeating
  * UIL-063's fix for exactly the lines she built herself. The caller takes the LINE's own band for
  * placement (`existing.line.colorBand`), not the card's — she chose where the line physically lives.
+ *
+ * WHEN MORE THAN ONE LINE WANTS THE SPECIES (UIL-084). One line per species per band per BINDER means
+ * two lines for one family can legitimately exist — she is filling a second binder — and this lookup
+ * then has to choose. It used to take the first match in `ctx.lines`, which is whatever order the rows
+ * arrived in, so every future copy of that species routed to an arbitrary one of them. Note the
+ * ambiguity was already reachable before that rule, through two lines of the same family in DIFFERENT
+ * BANDS, which the app has always permitted.
+ *
+ * The order, decided by the Senior BA: a line whose band matches the card's own natural band wins;
+ * then one with an OPEN slot for this stage; then the oldest.
+ *
+ * CONTRACT: `ctx.lines` is supplied OLDEST FIRST (`loadPlanContext` sorts by created_at, then id), so
+ * "the oldest" is "the first still standing" here. `EvolutionLine` deliberately carries no timestamp —
+ * adding one would widen a type every fixture in the suite builds — so this function cannot re-derive
+ * that order itself, and a caller that shuffles its lines gets an arbitrary answer back.
  */
 function existingLineSlot(
   incoming: IncomingCard,
   ctx: EngineContext,
 ): { line: EvolutionLine; slot: LineSlotRecord } | null {
   const dexId = incoming.card.dexId[0];
+  const matches: { line: EvolutionLine; slot: LineSlotRecord }[] = [];
   for (const line of ctx.lines) {
     const slot = line.slots.find((s) => s.dexId === dexId);
-    if (slot) return { line, slot };
+    if (slot) matches.push({ line, slot });
   }
-  return null;
+  if (matches.length < 2) return matches[0] ?? null;
+  const own = band(incoming.card, ctx.typeColorMap);
+  const open = (m: { slot: LineSlotRecord }) => m.slot.state !== "filled";
+  return (
+    matches.find((m) => m.line.colorBand === own && open(m)) ??
+    matches.find((m) => m.line.colorBand === own) ??
+    matches.find(open) ??
+    matches[0]
+  );
 }
 
 // --- The cascade. -------------------------------------------------------------------------------

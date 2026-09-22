@@ -12,12 +12,28 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
-import { clearCatalogCache, commitCardPlacement, type DraftItem } from "@/lib/plan";
+import {
+  buildHaulCommitPayload,
+  clearCatalogCache,
+  commitCardPlacement,
+  loadPlanContext,
+  planFromDraft,
+  type DraftItem,
+} from "@/lib/plan";
 import type { MoveDestination } from "@/lib/line/types";
-import { OWNER, asOwner, asSuperuser, freshRpcDb, seedBinders } from "../support/pglite-rpc";
+import {
+  OWNER,
+  applyOps,
+  asOwner,
+  asSuperuser,
+  freshRpcDb,
+  seedBinders,
+} from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
 const GEN = "b0000000-0000-0000-0000-0000000000b1";
+/** A SECOND general binder — the one she was filling by hand (UIL-084). */
+const GEN2 = "b0000000-0000-0000-0000-0000000000b9";
 const LINE = "10000000-0000-0000-0000-0000000000b1";
 const SLOT_ROOT = "50000000-0000-0000-0000-0000000000b1";
 const SLOT_NEXT = "50000000-0000-0000-0000-0000000000b2";
@@ -35,7 +51,10 @@ let db: PGlite;
 beforeEach(async () => {
   db = await freshRpcDb();
   clearCatalogCache();
-  await seedBinders(db, [{ id: GEN, type: "general", name: "Binder 1" }]);
+  await seedBinders(db, [
+    { id: GEN, type: "general", name: "Binder 1" },
+    { id: GEN2, type: "general", name: "Binder 2" },
+  ]);
   for (const [id, name, dex, stage, from] of [
     ["emberling", "Emberling", EMBERLING_DEX, "Basic", null],
     ["emberdrake", "Emberdrake", EMBERDRAKE_DEX, "Stage1", "Emberling"],
@@ -67,6 +86,50 @@ async function seedOpenLine(): Promise<void> {
       values ('${SLOT_NEXT}', '${OWNER}', '${LINE}', 1, 'Stage1', 'placeholder', 'emberdrake');
     update copy set line_slot_id = '${SLOT_ROOT}' where id = '${OWNED_EMBERLING}';
   `);
+}
+
+/**
+ * A red Emberling line in Binder 1 whose EVERY stage is filled — so a second Emberdrake has no slot to
+ * join anywhere, which is the state that made her refusal unactionable (UIL-084).
+ */
+async function seedFilledLine(): Promise<void> {
+  await db.query(
+    `insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band)
+       values ($1, $2, 'emberling', 'shelved', $3, 'back', 'red'),
+              ($4, $2, 'emberdrake', 'shelved', $3, 'back', 'red')`,
+    [OWNED_EMBERLING, OWNER, GEN, OTHER_DRAKE],
+  );
+  await db.exec(`
+    insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+      values ('${LINE}', '${OWNER}', ${EMBERLING_DEX}, 'red', '${GEN}', 'back', 'complete');
+    insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+      values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OWNED_EMBERLING}'),
+             ('${SLOT_NEXT}', '${OWNER}', '${LINE}', 1, 'Stage1', 'filled', '${OTHER_DRAKE}');
+    update copy set line_slot_id = '${SLOT_ROOT}' where id = '${OWNED_EMBERLING}';
+    update copy set line_slot_id = '${SLOT_NEXT}' where id = '${OTHER_DRAKE}';
+  `);
+}
+
+/** Lines with their binder, oldest first — the binder is the point now (UIL-084). */
+async function linesWithBinder() {
+  return (
+    await db.query<{
+      id: string;
+      root_dex_id: number;
+      color_band: string;
+      binder_id: string | null;
+    }>(`select id, root_dex_id, color_band, binder_id from evolution_line order by created_at`)
+  ).rows;
+}
+
+/** The real loaded context, so the builder runs against production shapes rather than a hand-built map. */
+async function planContext() {
+  await asOwner(db);
+  try {
+    return await loadPlanContext(pgliteClient(db));
+  } finally {
+    await asSuperuser(db);
+  }
 }
 
 async function commit(override: MoveDestination, card: DraftItem = DRAFT) {
@@ -220,13 +283,122 @@ describe("UIL-070 part 1 · starting a NEW line from the Haul Plan", () => {
     expect(copy.line_slot_id).not.toBeNull();
   });
 
-  it("REFUSES a new line when one for this species and band already exists, in applyMove's words", async () => {
-    await seedOpenLine(); // a red Emberling line exists, with Emberdrake's own slot OPEN
+  it("REFUSES a new line when one for this species and band already exists IN THE SAME BINDER, in applyMove's words", async () => {
+    await seedOpenLine(); // a red Emberling line exists in Binder 1, with Emberdrake's own slot OPEN
     await expect(commit({ ...BACK_RED, lineJoin: { mode: "new" } })).rejects.toThrow(
-      "A line for this species and band already exists — reload the screen and join it instead.",
+      "That binder already has a line for this species in this band.",
     );
     expect(await lines()).toHaveLength(1);
     expect(await drakeCopies()).toHaveLength(0);
+  });
+});
+
+describe("UIL-084 · one line per species per band per BINDER, from the Haul Plan", () => {
+  it("ALLOWS the same species and band in a DIFFERENT binder, and the card lands there", async () => {
+    // Her case exactly: a line for this family already holds this band in Binder 1, and the copy she is
+    // placing has no slot to join there because that line's matching stage is already filled. She
+    // overrides into Binder 2's back half. Pre-fix the commit refused it and the card never landed —
+    // with a remedy ("join it instead") naming a slot that does not exist.
+    await seedFilledLine();
+    await commit({ ...BACK_RED, binderId: GEN2, lineJoin: { mode: "new" } });
+
+    const rows = await linesWithBinder();
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({
+      binder_id: GEN2,
+      root_dex_id: EMBERLING_DEX,
+      color_band: "red",
+    });
+    // The copy is in Binder 2's back half, pointing at a slot of the line it just started.
+    const drakes = await drakeCopies();
+    const placed = drakes[drakes.length - 1];
+    expect(placed).toMatchObject({
+      role: "shelved",
+      binder_id: GEN2,
+      binder_half: "back",
+      color_band: "red",
+    });
+    expect(placed.line_slot_id).not.toBeNull();
+    expect((await slot(placed.line_slot_id as string)).copy_id).toBe(placed.id);
+  });
+
+  it("still REFUSES a second line in the binder that already has one, so the rule is per binder and not simply dropped", async () => {
+    await seedFilledLine();
+    await expect(commit({ ...BACK_RED, lineJoin: { mode: "new" } })).rejects.toThrow(
+      "That binder already has a line for this species in this band.",
+    );
+    expect(await linesWithBinder()).toHaveLength(1);
+  });
+});
+
+/**
+ * The IN-PASS key (UIL-084). `buildHaulCommitPayload` carries a `passLines` mirror so a later card in
+ * the SAME payload joins a line an earlier card just created instead of duplicating it — and that key
+ * has to be scoped to the binder for the same reason the DB lookup is, or two cards she sent to two
+ * different binders would collapse into one line in whichever binder came first.
+ *
+ * `commitCardPlacement` sends one card per payload, so this is unreachable through it; the multi-card
+ * contract belongs to the exported builder, which is what this drives. Written because the mutation
+ * "drop the binder from the in-pass key" survived every other test in the suite.
+ */
+describe("UIL-084 · two cards, one payload, two binders — the in-pass key is per binder too", () => {
+  it("gives each binder its own new line instead of folding the second card into the first's line", async () => {
+    const pc = await planContext();
+    const cards: DraftItem[] = [
+      { id: "d-drake-1", tcgdexId: "emberdrake", variant: "normal" },
+      { id: "d-drake-2", tcgdexId: "emberdrake", variant: "normal" },
+    ];
+    const { planned } = planFromDraft(pc, cards);
+    const built = buildHaulCommitPayload(pc, planned, {
+      source: "bulk-bin",
+      draft: cards,
+      // Each copy is sent to a DIFFERENT binder's back half, each starting a line there.
+      overrides: {
+        "d-drake-1": { ...BACK_RED, lineJoin: { mode: "new" } },
+        "d-drake-2": { ...BACK_RED, binderId: GEN2, lineJoin: { mode: "new" } },
+      },
+    });
+
+    const inserts = built.payload.ops.filter((o) => o.op === "insert_line");
+    expect(inserts).toHaveLength(2);
+    expect(inserts.map((o) => (o as { binder_id: string | null }).binder_id).sort()).toEqual(
+      [GEN, GEN2].sort(),
+    );
+
+    // And it really applies: two lines, one per binder, each holding its own copy.
+    await asOwner(db);
+    await applyOps(db, built.payload);
+    await asSuperuser(db);
+    const rows = await linesWithBinder();
+    expect(rows.map((r) => r.binder_id).sort()).toEqual([GEN, GEN2].sort());
+    const drakes = await drakeCopies();
+    expect(drakes).toHaveLength(2);
+    expect(drakes.map((d) => d.binder_id).sort()).toEqual([GEN, GEN2].sort());
+    for (const d of drakes) expect(d.line_slot_id).not.toBeNull();
+    // Two DISTINCT slots: folding them together is exactly what the unscoped key did.
+    expect(new Set(drakes.map((d) => d.line_slot_id)).size).toBe(2);
+  });
+
+  it("still REFUSES the second of two cards sent to the SAME binder, inside the one payload", async () => {
+    // The in-pass mirror is the only thing that can catch this: neither card's line exists in the
+    // database yet when the other is built. She asked twice for a line in one binder, so the second
+    // ask is refused in the same words a stale client gets — the rule is per binder, not per payload.
+    const pc = await planContext();
+    const cards: DraftItem[] = [
+      { id: "d-drake-1", tcgdexId: "emberdrake", variant: "normal" },
+      { id: "d-drake-2", tcgdexId: "emberdrake", variant: "normal" },
+    ];
+    const { planned } = planFromDraft(pc, cards);
+    expect(() =>
+      buildHaulCommitPayload(pc, planned, {
+        source: "bulk-bin",
+        draft: cards,
+        overrides: {
+          "d-drake-1": { ...BACK_RED, lineJoin: { mode: "new" } },
+          "d-drake-2": { ...BACK_RED, lineJoin: { mode: "new" } },
+        },
+      }),
+    ).toThrow("That binder already has a line for this species in this band.");
   });
 });
 

@@ -41,8 +41,9 @@ export interface JoinIndexSlot {
 export interface LineJoinIndex {
   /** Every OPEN (not filled) slot across every line, by the dexId it wants. */
   openSlotsByDexId: Map<number, LineJoinCandidate[]>;
-  /** Every line by `${rootDexId}:${band}`, whether or not any of its slots is open. */
-  lineByRootBand: Map<string, ExistingLineBlock>;
+  /** Every line for a family, by chain-root dexId — each carrying its own binder and band, so a
+   *  caller can ask the question the server actually answers: is there already one HERE (UIL-084). */
+  linesByRoot: Map<number, ExistingLineBlock[]>;
   /** Each line's chain rebuilt from its root, by line id — so the caller never walks it twice. */
   chains: Map<string, ChainNode[]>;
 }
@@ -54,8 +55,25 @@ export interface LineJoinOptions {
   naturalBandKey: string;
   /** Flat across every band, closest-to-complete first; each carries its own binder + band. */
   joinCandidates: LineJoinCandidate[];
-  /** Bands with a line for this family but no open slot for this card (UIL-056 note 3). */
-  existingLineByBand: Record<string, ExistingLineBlock>;
+  /**
+   * Every line this family already has, keyed by BINDER AND BAND (`lineKey`) — UIL-084.
+   *
+   * It was keyed by band alone AND filtered to bands with no open candidate, which is two ways of
+   * disagreeing with the server: the refusal is keyed on the binder, and it fires whether or not the
+   * card has an open slot in that line. So a back-half pick into a second binder looked allowed and
+   * was refused, and a band with a joinable line showed no warning yet refused a NEW line there.
+   * Unfiltered and binder-keyed, this answers exactly the question `applyMove` asks.
+   */
+  existingLineByBinderBand: Record<string, ExistingLineBlock>;
+}
+
+/**
+ * The key both sides of the line-uniqueness question use: one line per species per band per BINDER
+ * (UIL-084). Defined once here so the panel's lookup and the index's population cannot drift — a
+ * bulk/unbindered line keys on the empty string, matching `binder_id is null` on the server.
+ */
+export function lineKey(binderId: string | null, bandKey: string): string {
+  return `${binderId ?? ""}|${bandKey}`;
 }
 
 /** Closest-to-complete first (UIL-064 part 1) — finishing a nearly-done line is the more satisfying
@@ -74,7 +92,7 @@ export function buildLineJoinIndex(
   catalog: CatalogCard[],
 ): LineJoinIndex {
   const openSlotsByDexId = new Map<number, LineJoinCandidate[]>();
-  const lineByRootBand = new Map<string, ExistingLineBlock>();
+  const linesByRoot = new Map<number, ExistingLineBlock[]>();
   const chains = new Map<string, ChainNode[]>();
 
   for (const line of lines) {
@@ -93,11 +111,15 @@ export function buildLineJoinIndex(
     const speciesLabel = rootName ? `${rootName.toUpperCase()} LINE` : "EVOLUTION LINE";
     const filledCount = slots.filter((s) => s.state === "filled").length;
     const totalCount = slots.length;
-    lineByRootBand.set(`${line.rootDexId}:${line.colorBand}`, {
+    const forRoot = linesByRoot.get(line.rootDexId) ?? [];
+    forRoot.push({
       speciesLabel,
       filledCount,
       totalCount,
+      binderId: line.binderId,
+      bandKey: line.colorBand,
     });
+    linesByRoot.set(line.rootDexId, forRoot);
     for (const s of slots) {
       if (s.state === "filled") continue;
       const dexId = chain[s.stage_index]?.dexId;
@@ -117,7 +139,7 @@ export function buildLineJoinIndex(
     }
   }
 
-  return { openSlotsByDexId, lineByRootBand, chains };
+  return { openSlotsByDexId, linesByRoot, chains };
 }
 
 /**
@@ -127,7 +149,6 @@ export function buildLineJoinIndex(
 export function joinOptionsFor(
   card: CatalogCard,
   index: LineJoinIndex,
-  bandKeys: readonly string[],
   typeColorMap: TypeColorMap,
   catalog: CatalogCard[],
 ): LineJoinOptions | null {
@@ -140,18 +161,18 @@ export function joinOptionsFor(
   // would REFUSE a new line explains why here rather than showing an empty candidate list.
   const cardChain = buildChain({ id: "u", card, variant: "normal" } as IncomingCard, catalog);
   const cardRootDexId = cardChain[0]?.dexId ?? dexId;
-  const existingLineByBand: Record<string, ExistingLineBlock> = {};
-  const candidateBands = new Set(joinCandidates.map((cand) => cand.bandKey));
-  for (const band of bandKeys) {
-    if (candidateBands.has(band)) continue; // already has an open slot
-    const existing = index.lineByRootBand.get(`${cardRootDexId}:${band}`);
-    if (existing) existingLineByBand[band] = existing;
+  // Every line this family already has, wherever it is — keyed the way the server refuses (UIL-084).
+  // Not filtered by "has an open slot for this card": that filter is what let the panel recommend a
+  // new line the write would reject.
+  const existingLineByBinderBand: Record<string, ExistingLineBlock> = {};
+  for (const line of index.linesByRoot.get(cardRootDexId) ?? []) {
+    existingLineByBinderBand[lineKey(line.binderId, line.bandKey)] = line;
   }
 
   return {
     dexId,
     naturalBandKey: bandOf(card, typeColorMap),
     joinCandidates,
-    existingLineByBand,
+    existingLineByBinderBand,
   };
 }

@@ -209,6 +209,22 @@ export function releaseSlotOps(
   return ops;
 }
 
+/**
+ * The refusal when she asks for a SECOND line for one species, in one band, in one binder (UIL-084).
+ *
+ * One string, shared by `applyMove` and the Haul Plan's commit, so a stale pick reads the same way
+ * whichever screen she moved from (the "one vocabulary" rule the other refusals already follow).
+ *
+ * Its predecessor — "A line for this species and band already exists — reload the screen and join it
+ * instead." — was unactionable in the case she actually hit: the existing line's matching stage was
+ * already FILLED, so there was no slot to join, and the refusal named the one remedy that did not
+ * exist. This names the condition (this binder, this species, this band) and two remedies that do:
+ * join the line's open slot IF it has one, or use the front half, which needs no line at all.
+ */
+export const LINE_EXISTS_IN_BINDER =
+  "That binder already has a line for this species in this band. Join its open slot if it has one, " +
+  "or place this copy in the front half.";
+
 /** The `PlacementDecision.reason` recorded for a manual move (always `resolved_by: 'user'`). */
 export function moveDecisionReason(dest: MoveDestination, destLabel: string): string {
   const where =

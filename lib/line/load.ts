@@ -417,7 +417,7 @@ export async function buildScreenModel(
     if (c.role !== "shelved" || c.line_slot_id) continue;
     const cc = catalogById.get(c.catalog_card_id);
     if (!cc) continue;
-    const join = joinOptionsFor(cc, joinIndex, bandKeys, typeColorMap, catalog);
+    const join = joinOptionsFor(cc, joinIndex, typeColorMap, catalog);
     if (!join) continue; // Trainer/Energy: no species, no line concept
     const bandKey = c.color_band ?? join.naturalBandKey;
 
@@ -431,7 +431,7 @@ export async function buildScreenModel(
       binderHalf: (c.binder_half as "front" | "back" | null) ?? null,
       naturalBandKey: join.naturalBandKey,
       joinCandidates: join.joinCandidates,
-      existingLineByBand: join.existingLineByBand,
+      existingLineByBinderBand: join.existingLineByBinderBand,
     });
   }
 

@@ -83,7 +83,7 @@ export function unlinedMoveTarget(card: UnlinedCard): MoveTargetCard {
     bandKey: card.card.bandKey,
     currentLabel: card.currentLabel,
     joinCandidates: card.joinCandidates,
-    existingLineByBand: card.existingLineByBand,
+    existingLineByBinderBand: card.existingLineByBinderBand,
     naturalBandKey: card.naturalBandKey,
   };
 }

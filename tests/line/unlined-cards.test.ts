@@ -11,6 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import { loadLineScreen } from "@/lib/line";
+import { lineKey } from "@/lib/line/join-options";
 import { OWNER, freshRpcDb, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -99,7 +100,15 @@ describe("loadLineScreen's unlinedCards (UIL-056)", () => {
       filledCount: 1,
       totalCount: 2,
     });
-    expect(drake!.existingLineByBand.red).toBeUndefined(); // it HAS an open candidate — not blocked
+    // UIL-084: the map is keyed by BINDER AND BAND and reports every line this family has, whether or
+    // not this card can join it — the question the server actually answers. The red line in GEN is
+    // reported here even though the drake has an open slot in it, because a SECOND red line in GEN is
+    // what would be refused.
+    expect(drake!.existingLineByBinderBand[lineKey(GEN, "red")]).toMatchObject({
+      speciesLabel: "EMBERLING LINE",
+      binderId: GEN,
+      bandKey: "red",
+    });
     // Data fields UIL-064 added: CURRENT half (not parsed from the display label) and this card's
     // own type-derived band (the "start a new line" default).
     expect(drake!.binderHalf).toBe("front");
@@ -109,11 +118,13 @@ describe("loadLineScreen's unlinedCards (UIL-056)", () => {
     expect(dupe).toBeDefined();
     // No open candidate for the duplicate — its own (Basic) stage is already filled by the FIRST copy.
     expect(dupe!.joinCandidates).toHaveLength(0);
-    // But it's explained, not just silently empty (note 3).
-    expect(dupe!.existingLineByBand.red).toMatchObject({
+    // But it's explained, not just silently empty (note 3) — and says WHERE that line lives (UIL-084).
+    expect(dupe!.existingLineByBinderBand[lineKey(GEN, "red")]).toMatchObject({
       speciesLabel: "EMBERLING LINE",
       filledCount: 1,
       totalCount: 2,
+      binderId: GEN,
+      bandKey: "red",
     });
   });
 

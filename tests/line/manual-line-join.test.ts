@@ -30,6 +30,8 @@ import {
 import { pgliteClient } from "../support/pglite-client";
 
 const GEN = "b0000000-0000-0000-0000-0000000000e1";
+/** A SECOND general binder — she is deliberately filling one (UIL-084). */
+const GEN2 = "b0000000-0000-0000-0000-0000000000e9";
 const CARD = "c0000000-0000-0000-0000-0000000000e1"; // the copy being moved
 const OTHER = "c0000000-0000-0000-0000-0000000000e2"; // an existing owned copy of the sibling stage
 const LINE = "10000000-0000-0000-0000-0000000000e1";
@@ -44,7 +46,7 @@ const EMBERDRAKE_DEX = 9102;
 const ONLYMON_DEX = 9201; // single-stage: nothing evolves from it, nothing it evolves from
 
 const names: MoveNameLookups = {
-  binderName: () => "Binder 1",
+  binderName: (id) => (id === GEN2 ? "Binder 2" : "Binder 1"),
   collectionName: () => null,
   bandDisplay: (key) => key.toUpperCase(),
 };
@@ -98,7 +100,10 @@ async function copyRow(id: string): Promise<{
 
 async function ensureBinder(): Promise<void> {
   if (binderSeeded) return;
-  await seedBinders(db, [{ id: GEN, type: "general", name: "Binder 1" }]);
+  await seedBinders(db, [
+    { id: GEN, type: "general", name: "Binder 1" },
+    { id: GEN2, type: "general", name: "Binder 2" },
+  ]);
   binderSeeded = true;
 }
 
@@ -238,7 +243,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     expect((await copyRow(CARD)).line_slot_id).not.toBeNull();
   });
 
-  it("REFUSES a new line when one for this species + band already exists — join it instead", async () => {
+  it("REFUSES a new line when one for this species + band already exists IN THE SAME BINDER", async () => {
     await seedCard({
       id: "onlymon",
       name: "Onlymon",
@@ -272,11 +277,71 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
         },
         names,
       ),
-    ).rejects.toThrow(/already exists/i);
+    ).rejects.toThrow(/already has a line for this species in this band/i);
 
     await asSuperuser(db);
     expect(await q(`select 1 from evolution_line`)).toHaveLength(1); // no second line inserted
     expect((await copyRow(CARD)).line_slot_id).toBeNull(); // nothing moved
+  });
+
+  it("ALLOWS that same species and band in a DIFFERENT binder — one line per species per band per BINDER (UIL-084)", async () => {
+    // Her report: an Orange Toedscool line lived in KB-001 with her stage already filled, and she was
+    // filling KB-002 by hand. Every back-half destination in KB-002 was refused, because the key
+    // ignored the binder — and the refusal's remedy ("join it instead") named a slot that did not
+    // exist. Pre-fix this throws; the copy never lands anywhere.
+    await seedCard({
+      id: "onlymon",
+      name: "Onlymon",
+      dexId: ONLYMON_DEX,
+      stage: "Basic",
+      evolveFrom: null,
+    });
+    await seedShelvedFront(CARD, "onlymon");
+    await seedShelvedFront(OTHER, "onlymon");
+    await db.exec(`
+      insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+        values ('${LINE}', '${OWNER}', ${ONLYMON_DEX}, 'red', '${GEN}', 'back', 'complete');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+        values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OTHER}');
+      update copy set line_slot_id = '${SLOT_ROOT}', binder_half = 'back' where id = '${OTHER}';
+    `);
+    await asOwner(db);
+
+    await applyMove(
+      pgliteClient(db),
+      {
+        copyId: CARD,
+        destination: {
+          kind: "shelf",
+          binderId: GEN2,
+          half: "back",
+          band: "red",
+          lineJoin: { mode: "new" },
+        },
+      },
+      names,
+    );
+
+    await asSuperuser(db);
+    // Two lines now: the original in Binder 1, and hers in Binder 2, same species and band.
+    const lines = await q<{ binder_id: string; root_dex_id: number; color_band: string }>(
+      `select binder_id, root_dex_id, color_band from evolution_line order by created_at`,
+    );
+    expect(lines).toEqual([
+      { binder_id: GEN, root_dex_id: ONLYMON_DEX, color_band: "red" },
+      { binder_id: GEN2, root_dex_id: ONLYMON_DEX, color_band: "red" },
+    ]);
+    // And the card actually LANDED — in Binder 2's back half, filling its own new line's slot.
+    const moved = await copyRow(CARD);
+    expect(moved.binder_id).toBe(GEN2);
+    expect(moved.binder_half).toBe("back");
+    expect(moved.color_band).toBe("red");
+    expect(moved.line_slot_id).not.toBeNull();
+    // The original line is untouched: its slot still holds the copy it always held.
+    const rootSlot = await q<{ copy_id: string }>(
+      `select copy_id from line_slot where id = '${SLOT_ROOT}'`,
+    );
+    expect(rootSlot[0].copy_id).toBe(OTHER);
   });
 
   it("REFUSES using the CHAIN'S root, not the moved card's own dexId — a Stage1 is not its own root", async () => {
@@ -329,7 +394,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
         },
         names,
       ),
-    ).rejects.toThrow(/already exists/i);
+    ).rejects.toThrow(/already has a line for this species in this band/i);
 
     await asSuperuser(db);
     expect(await q(`select 1 from evolution_line`)).toHaveLength(1); // no colliding second line

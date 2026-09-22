@@ -42,6 +42,7 @@ import {
   buildNewLineJoinOps,
   collectionTargetJoinOp,
   isMoveDestinationComplete,
+  LINE_EXISTS_IN_BINDER,
   lineJoinOf,
   placementForMove,
   releaseSlotOps,
@@ -58,8 +59,8 @@ const REFUSE = {
   incomplete: "That destination is incomplete — reload the screen and pick again.",
   slotGone: "That line slot no longer exists — reload the screen and pick again.",
   slotFilled: "That slot has already been filled — reload the screen and pick again.",
-  lineExists:
-    "A line for this species and band already exists — reload the screen and join it instead.",
+  /** UIL-084: keyed on the BINDER too, and its remedies both exist. Shared string, see lib/line/move.ts. */
+  lineExists: LINE_EXISTS_IN_BINDER,
   catalogMissing: "That card's catalog entry is missing — reload and try again.",
 } as const;
 import { copyPlacementFromTarget } from "./placement";
@@ -679,10 +680,12 @@ function writeOverriddenCard(
       destinationBand: dest.band,
     });
     // Keyed on the line's ACTUAL root, not the card's own dexId (a Stage1 is not its own root) —
-    // the same check, and the same key, `applyMove` uses. The picker already showed her this band
-    // as "line exists, your stage is filled", so reaching here is a stale client.
-    const key = `${built.rootDexId}:${dest.band}`;
-    if (passLines.has(key) || findLineByRootAndBand(pc, built.rootDexId, dest.band)) {
+    // the same check, and the same key, `applyMove` uses. Scoped to the DESTINATION BINDER as of
+    // UIL-084: a line in another binder no longer owns this species-and-band, so she can start this
+    // binder's own line. A duplicate in the SAME binder is still refused, and the panel now disables
+    // Confirm for exactly that case, so reaching here is a stale client.
+    const key = passLineKey(dest.binderId, built.rootDexId, dest.band);
+    if (passLines.has(key) || findLineInBinder(pc, built.rootDexId, dest.band, dest.binderId)) {
       throw new Error(REFUSE.lineExists);
     }
     ops.push(...built.ops);
@@ -783,13 +786,17 @@ function writeNewLine(
   counts: CommitCounts,
 ): void {
   const plan = p.result.newLine!;
-  const key = `${plan.rootDexId}:${plan.colorBand}`;
+  // Binder-scoped as of UIL-084, like every other reading of the uniqueness key: "the same line"
+  // means the same species and band IN THE SAME BINDER.
+  const key = passLineKey(plan.binderId, plan.rootDexId, plan.colorBand);
   const incomingStageIndex =
     p.result.target.kind === "back-half-line" ? p.result.target.stageIndex : -1;
 
   // Same line already created this pass, or already in the DB → fill instead of duplicating.
   const passLine = passLines.get(key);
-  const dbLine = passLine ? null : findLineByRootAndBand(pc, plan.rootDexId, plan.colorBand);
+  const dbLine = passLine
+    ? null
+    : findLineInBinder(pc, plan.rootDexId, plan.colorBand, plan.binderId);
   if (passLine || dbLine) {
     const lineId = passLine?.lineId ?? dbLine!;
     const slots = slotsByLine.get(lineId) ?? [];
@@ -965,13 +972,30 @@ function touchSlot(
 }
 
 /** Existing line id for a (rootDexId, colorBand), read from the loaded snapshot (was a live query). */
-function findLineByRootAndBand(
+/**
+ * The line that already occupies (binder, species, band) — the uniqueness key as of UIL-084, keyed on
+ * the BINDER too. `pc.ctx.lines` is ordered oldest-first (see `loadPlanContext`), so when duplicates
+ * exist from before this rule the answer is the original rather than an arbitrary row.
+ */
+function findLineInBinder(
   pc: PlanContext,
   rootDexId: number,
   colorBand: string,
+  binderId: string | null,
 ): string | null {
   for (const line of pc.ctx.lines) {
-    if (line.rootDexId === rootDexId && line.colorBand === colorBand) return line.id;
+    if (
+      line.rootDexId === rootDexId &&
+      line.colorBand === colorBand &&
+      (line.binderId ?? null) === binderId
+    ) {
+      return line.id;
+    }
   }
   return null;
+}
+
+/** The in-pass key for a line created earlier in THIS payload — the same (binder, species, band). */
+function passLineKey(binderId: string | null, rootDexId: number, colorBand: string): string {
+  return `${binderId ?? ""}:${rootDexId}:${colorBand}`;
 }

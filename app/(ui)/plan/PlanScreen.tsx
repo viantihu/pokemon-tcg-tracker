@@ -989,7 +989,7 @@ export function moveTargetFor(
     bandKey: item.bandKey,
     currentLabel: item.destination,
     joinCandidates: join?.joinCandidates,
-    existingLineByBand: join?.existingLineByBand,
+    existingLineByBinderBand: join?.existingLineByBinderBand,
     naturalBandKey: join?.naturalBandKey,
     initial,
   };

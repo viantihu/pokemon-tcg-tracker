@@ -69,7 +69,7 @@ const unlined = (card: CardIdentity): UnlinedCard => ({
   binderHalf: "front",
   naturalBandKey: "red",
   joinCandidates: [],
-  existingLineByBand: {},
+  existingLineByBinderBand: {},
 });
 
 const answer = (setCardCountOfficial: number | null): LookupAnswer => ({

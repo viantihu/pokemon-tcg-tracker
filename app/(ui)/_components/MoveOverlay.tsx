@@ -33,7 +33,7 @@ export interface MoveTargetCard {
    *  slot elsewhere) keeps today's plain binder/half/band flow. */
   joinCandidates?: LineJoinCandidate[];
   /** Line screen only (UIL-056): a band whose only matching line has this card's stage filled. */
-  existingLineByBand?: Record<string, ExistingLineBlock>;
+  existingLineByBinderBand?: Record<string, ExistingLineBlock>;
   /** Line screen only (UIL-064 part 1): this card's own type-derived band — the default for "start a
    *  new line"'s one remaining pick. */
   naturalBandKey?: string;
@@ -129,7 +129,7 @@ export function MoveOverlay({
             initial={card.initial}
             allowLineJoin={lineJoinOn}
             joinCandidates={card.joinCandidates}
-            existingLineByBand={card.existingLineByBand}
+            existingLineByBinderBand={card.existingLineByBinderBand}
             naturalBandKey={card.naturalBandKey}
             blockNeeds={card.blockNeeds}
             onConfirm={onConfirm}

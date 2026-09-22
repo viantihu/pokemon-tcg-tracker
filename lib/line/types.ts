@@ -320,6 +320,10 @@ export interface ExistingLineBlock {
   speciesLabel: string;
   filledCount: number;
   totalCount: number;
+  /** Which binder it lives in, and in which band — the uniqueness key as of UIL-084, so a caller can
+   *  say "THAT binder already has one" rather than "this band is taken everywhere". */
+  binderId: string | null;
+  bandKey: string;
 }
 
 /** The client-facing line-screen payload (loaded server-side, rendered client-side). */
@@ -359,7 +363,7 @@ export interface UnlinedCard {
    * ever appeared.
    */
   joinCandidates: LineJoinCandidate[];
-  /** Set for a band with no open candidate BECAUSE a line for this family already exists there
-   *  (see `ExistingLineBlock`) — absent, not just empty, when no line exists there at all. */
-  existingLineByBand: Record<string, ExistingLineBlock>;
+  /** Every line this family already has, keyed by BINDER AND BAND (`lineKey`) — the same key the
+   *  server refuses a duplicate on (UIL-084). Absent, not just empty, where no line exists. */
+  existingLineByBinderBand: Record<string, ExistingLineBlock>;
 }

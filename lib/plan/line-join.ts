@@ -17,5 +17,5 @@ export function lineJoinOptionsFromContext(
   const card = pc.catalogById.get(tcgdexId);
   if (!card) return null;
   const index = buildLineJoinIndex(pc.ctx.lines, pc.slotRowsByLine, pc.ctx.catalog);
-  return joinOptionsFor(card, index, pc.orderedBandKeys, pc.ctx.typeColorMap, pc.ctx.catalog);
+  return joinOptionsFor(card, index, pc.ctx.typeColorMap, pc.ctx.catalog);
 }
