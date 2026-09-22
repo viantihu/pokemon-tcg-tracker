@@ -6716,3 +6716,79 @@ set_alias 22, collection 11, binder 3.
 
 **Priority rationale.** High: reachable in the first minutes of a normal shelving pass, blocks a card she
 has decided about, shows a state that is false, and offers a remedy that does not work.
+
+## UIL-085 — The Testing backup's restore SQL lives outside the repo, so nothing verifies it against the migrations it must restore into, and its table list can silently miss a new owner-scoped table
+
+- **Reported:** 2026-09-22 (found by Karvi's "Database Engineer" session while turning the backup-restore
+  verification into a tracked test at QA's request; body by the Senior BA, no intake session on the roster)
+- **Status:** Open — assigned to the Database Engineer session: track the restore SQL under
+  `scripts/backup/` as the single source of truth (external wrappers read it), add a PGlite test under
+  `tests/ops/` that reads the same file, with the headline assertion that every `public` table carrying
+  `owner_id` is in the backup's table list; the refuse-on-non-empty guard gets its own test; no workflow
+  may invoke it (grep-pinned). No migration.
+- **Priority:** Medium (Senior BA's read) — nothing user-visible, but the backup is now the only thing
+  standing between a refresh and redoing a whole placement pass, and an unverified restore that has
+  drifted from the migrations is a false guarantee at exactly the moment it is needed.
+- **Area:** all (Testing operations, test infrastructure)
+- **Env:** Testing (snapshot schema `backup_20260922_0332z`, taken 2026-09-22 03:32Z, additive only)
+
+**Context.** Since 2026-09-22 Karvi's collection on Testing is snapshotted into a schema named
+`backup_<date>_<time>z` in the same project, with a restore path verified on PGlite against migrations
+0001–0017 (FK ordering, the copy↔line_slot cycle, array/jsonb/date fidelity, a guard that refuses to
+restore onto non-empty tables). She asked for it because she is about to add a haul she expects to surface
+bugs and does not want to redo inventory entry if a refresh becomes necessary. Before this, the only
+recovery from a refresh was a CSV re-import, which returns cards but not `placement_decision`,
+`evolution_line` or `line_slot`.
+
+**The gap.** The restore SQL is untracked, at `~/pokemon-tcg-backups/restore.sql`, outside the repo by
+design (untracked files in the shared worktree have blocked git operations before). A test-only PR
+therefore has nothing real to verify: it either reads an external path (fails in CI on any other checkout)
+or inlines a copy that drifts from the script that actually runs. Separately, the backup's table list is
+hand-kept; a future migration adding an owner-scoped table would not be captured and nothing would say so.
+
+**Decision (Senior BA, 2026-09-22).** Track the SQL that actually runs under `scripts/backup/`; wrappers
+stay external and read it; the test reads the same file. Declined: tracking the wrappers too (a
+restore-capable script in the repo needs a deliberate case) and leaving it external (it rots as migrations
+land). Constraints carried into the PR: the snapshot schemas stay outside `public` and
+`supabase_migrations` (verified by measurement: 17 migration rows, no `%backup%` objects in `public`, the
+schema outside config.toml's exposed list); a restore on Testing needs Karvi's go-ahead and the Senior
+BA's re-baseline; a restore moves `collection.updated_at` (the bump triggers fire on delete and insert) and
+nothing else.
+
+**Priority rationale.** Medium: infrastructure, no defect in the app, but the guarantee it protects is
+the one that makes refresh-triggering bugs cheap instead of catastrophic.
+
+## UIL-086 — Japanese Dex set codes differ from TCGdex's ja set ids only by letter case, and the passthrough lookup is exact, so three of Karvi's five Japanese sets park as UNKNOWN_SET instead of resolving on import
+
+- **Reported:** 2026-09-22 (found by the Senior BA from the Tech Lead's post-import read and a Testing
+  set-id read; body by the Senior BA, no intake session on the roster)
+- **Status:** Open — unassigned until a dev in the sync lane exists (Full Stack Dev - 1 is off the
+  roster; Full Stack Dev - 2 is on UIL-084, critical). Small fix: resolve a non-en passthrough set code
+  against the locale's stored set ids case-insensitively (or normalise to TCGdex's casing from the set
+  list), pinned with a fixture where the Dex code is `sv9` and the stored set is `ja:SV9`.
+- **Priority:** High (Senior BA's read) — it is the difference between Karvi's ruling for this phase
+  ("pull the Japanese catalog") working on import and her having to hand-match one card per Japanese set;
+  the fix is small and the data proves it.
+- **Area:** Sync (resolver), Catalog
+- **Env:** Testing, develop `2e1d349`
+
+**Measured on Testing, 2026-09-22 (Senior BA reads, runs 35684011291 and 35684299691).** After her import
+against the mirrored ja catalog, `unresolved_entry` holds 10 = WAITING 8 + RESOLVED 2, UNKNOWN_SET 8, of
+which 7 are Japanese; her Japanese Dex set codes are `mc`, `mem`, `mez`, `s12a`, `sv9`. Stored ja set ids:
+`ja:MC` 774 rows, `ja:mc` 0; `ja:S12a` 258, `ja:s12a` 0; `ja:SV9` 132, `ja:sv9` 0; `ja:mem` / `ja:MEM` /
+`ja:mez` / `ja:MEZ` 0 (those two sets are not in TCGdex's ja catalog under either spelling, so they need
+the alias-learning path regardless).
+
+**Mechanism.** `resolveSetId` (`lib/sync/resolve.ts`) namespaces a non-en passthrough code verbatim
+(`ja:` + rawCode) and every catalog lookup uses `.eq("set_id", setId)` (`lib/repo/catalog-card.ts`), an
+exact, case-sensitive match. TCGdex's ja set ids are mixed case (`MC`, `S12a`, `SV9`, `PCG2`, `XY1b`,
+`sm2+`); her export's codes are lowercase. So `ja:mc` never finds `ja:MC`. The set-name fallback cannot
+rescue it either: her export's set names are romanised English while TCGdex's ja names are Japanese
+script.
+
+**What still works.** The approved UIL-047 path: matching ONE card of a set by hand learns the
+`(ja, mc) → ja:MC` alias and the rest of that set drains on Retry; that remains the way for `mem` and
+`mez`, which TCGdex does not carry under those codes at all.
+
+**Priority rationale.** High: three of five of her Japanese sets should have resolved without her doing
+anything; a one-place normalisation fixes it; and every future Japanese import hits the same wall.
