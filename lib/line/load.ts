@@ -12,8 +12,10 @@
  * query to the lines' dexId neighbourhoods. Flagged, not premature-optimised. SERVER ONLY.
  */
 
+import type { Locale } from "@/lib/sync/types";
 import {
   band as bandOf,
+  lineLocaleOf,
   rankAlternates,
   type Band,
   type CatalogCard,
@@ -199,14 +201,32 @@ export async function buildScreenModel(
     bandKey,
   });
 
-  function stageFacts(dexId: number | null, bandKey: string): StageFacts {
+  /** A line's locale, by the shared rule (UIL-090) — filled copies first, then the lowest target. */
+  function localeOfLine(lineId: string): Locale {
+    const rows = slotsByLine.get(lineId) ?? [];
+    return lineLocaleOf(
+      rows.map((s) => ({
+        id: s.id,
+        stageIndex: s.stage_index,
+        stage: s.stage,
+        // `state` is unread by the derivation; carried only to satisfy the record shape.
+        state: "placeholder" as const,
+        copyId: s.copy_id,
+        dexId: null,
+        targetCatalogCardId: s.target_catalog_card_id,
+      })),
+      (copyId: string) => copyById.get(copyId)?.catalog_card_id ?? null,
+    );
+  }
+
+  function stageFacts(dexId: number | null, bandKey: string, locale: Locale): StageFacts {
     if (dexId === null) return EMPTY_FACTS;
     const phys = catalog.filter((c) => !c.isDigitalOnly && c.dexId.includes(dexId));
     const sameBand = phys.filter((c) => bandOf(c, typeColorMap) === bandKey);
     const std = sameBand.filter((c) => c.cardClass === "standard");
     const spec = sameBand.filter((c) => c.cardClass === "specialty");
     const other = phys.find((c) => bandOf(c, typeColorMap) !== bandKey);
-    const alt = rankAlternates(dexId, bandKey as Band, catalog, typeColorMap);
+    const alt = rankAlternates(dexId, bandKey as Band, locale, catalog, typeColorMap);
     const chosen = alt.chosenCatalogCardId ? catalogById.get(alt.chosenCatalogCardId) : null;
     return {
       totalPrintings: phys.length,
@@ -221,9 +241,9 @@ export async function buildScreenModel(
     };
   }
 
-  function altOptions(dexId: number | null, bandKey: string): WishlistOption[] {
+  function altOptions(dexId: number | null, bandKey: string, locale: Locale): WishlistOption[] {
     if (dexId === null) return [];
-    const alt = rankAlternates(dexId, bandKey as Band, catalog, typeColorMap);
+    const alt = rankAlternates(dexId, bandKey as Band, locale, catalog, typeColorMap);
     const ids = [alt.chosenCatalogCardId, ...alt.alternateCatalogCardIds].filter((x): x is string =>
       Boolean(x),
     );
@@ -258,10 +278,13 @@ export async function buildScreenModel(
     })),
     slotsByLine,
     catalog,
+    (id) => copyById.get(id)?.catalog_card_id ?? null,
   );
 
   for (const line of lineRows) {
     const bandKey = line.color_band;
+    /** This line's own locale (UIL-090): what its wishlist ranks and what its slots belong to. */
+    const lineLocale = localeOfLine(line.id);
     const slots = (slotsByLine.get(line.id) ?? [])
       .slice()
       .sort((a, b) => a.stage_index - b.stage_index);
@@ -298,7 +321,7 @@ export async function buildScreenModel(
         const targetCc = s.target_catalog_card_id
           ? catalogById.get(s.target_catalog_card_id)
           : null;
-        const alt = altOptions(dexId, bandKey);
+        const alt = altOptions(dexId, bandKey, lineLocale);
         alternates = alt;
         const chosen = targetCc ?? (alt[0] ? catalogById.get(alt[0].tcgdexId) : null);
         if (chosen) {
@@ -316,7 +339,7 @@ export async function buildScreenModel(
         card = null;
       }
 
-      const facts = s.state === "filled" ? EMPTY_FACTS : stageFacts(dexId, bandKey);
+      const facts = s.state === "filled" ? EMPTY_FACTS : stageFacts(dexId, bandKey, lineLocale);
       const wedgeLabel =
         s.state === "block"
           ? line.status === "terminated"

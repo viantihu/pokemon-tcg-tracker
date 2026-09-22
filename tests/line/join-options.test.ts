@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { CatalogCard } from "@/lib/engine";
 import {
   buildLineJoinIndex,
+  candidateKey,
   joinOptionsFor,
   sortJoinCandidates,
   type JoinIndexLine,
@@ -36,7 +37,9 @@ function line(id: string, band: string, binderId = "b1"): JoinIndexLine {
   return { id, rootDexId: CHARMANDER_DEX, colorBand: band, binderId };
 }
 function slot(id: string, stageIndex: number, stage: string, state: string): JoinIndexSlot {
-  return { id, stage_index: stageIndex, stage, state };
+  // A target on every slot so the line's locale derives (UIL-090) without needing copy ids: these
+  // fixtures are all English printings.
+  return { id, stage_index: stageIndex, stage, state, target_catalog_card_id: "sv03-027" };
 }
 
 describe("buildLineJoinIndex", () => {
@@ -54,9 +57,10 @@ describe("buildLineJoinIndex", () => {
         ],
       ]),
       CATALOG,
+      () => null, // no filled-copy ids in these fixtures
     );
     // Charmeleon's stage is open → a candidate; Charizard's stage is a block → also open (not filled).
-    expect(index.openSlotsByDexId.get(CHARMELEON_SV03_027.dexId[0])).toEqual([
+    expect(index.openSlotsByDexId.get(candidateKey("en", CHARMELEON_SV03_027.dexId[0]))).toEqual([
       {
         lineId: "L1",
         slotId: "s1",
@@ -68,11 +72,13 @@ describe("buildLineJoinIndex", () => {
         totalCount: 3,
       },
     ]);
-    expect(index.openSlotsByDexId.get(CHARIZARD_BASE1_4.dexId[0])?.[0]).toMatchObject({
+    expect(
+      index.openSlotsByDexId.get(candidateKey("en", CHARIZARD_BASE1_4.dexId[0]))?.[0],
+    ).toMatchObject({
       slotId: "s2",
     });
     // The filled root is NOT offered.
-    expect(index.openSlotsByDexId.has(CHARMANDER_DEX)).toBe(false);
+    expect(index.openSlotsByDexId.has(candidateKey("en", CHARMANDER_DEX))).toBe(false);
     // Every line is indexed by its family root regardless of open slots, carrying its own binder and
     // band (UIL-084 — the key the server refuses a duplicate on), and its chain is kept.
     expect(index.linesByRoot.get(CHARMANDER_DEX)).toEqual([
@@ -82,6 +88,7 @@ describe("buildLineJoinIndex", () => {
         totalCount: 3,
         binderId: "b1",
         bandKey: "red",
+        locale: "en",
       },
     ]);
     expect(index.chains.get("L1")?.map((n) => n.name)).toEqual([
@@ -96,6 +103,7 @@ describe("buildLineJoinIndex", () => {
       [{ id: "L9", rootDexId: 99999, colorBand: "red", binderId: null }],
       new Map([["L9", [slot("x", 0, "Basic", "placeholder")]]]),
       CATALOG,
+      () => null, // no filled-copy ids in these fixtures
     );
     expect(index.linesByRoot.get(99999)?.[0].speciesLabel).toBe("EVOLUTION LINE");
     expect(index.chains.get("L9")).toEqual([]);
@@ -112,6 +120,7 @@ describe("joinOptionsFor", () => {
       ["L2", [slot("b0", 0, "Basic", "filled"), slot("b1", 1, "Stage1", "filled")]],
     ]),
     CATALOG,
+    () => null, // no filled-copy ids in these fixtures
   );
 
   it("a Stage1 with an open slot in red and a filled one in green: red is a candidate, and BOTH lines are reported where they live", () => {
@@ -123,38 +132,41 @@ describe("joinOptionsFor", () => {
     // refuses a second line per (binder, band) whether or not this card could join the one there, so
     // filtering red out here is what let the panel recommend a new line the write would reject.
     expect(opts.existingLineByBinderBand).toEqual({
-      [lineKey("b1", "red")]: {
+      [lineKey("b1", "red", "en")]: {
         speciesLabel: "CHARMANDER LINE",
         filledCount: 1,
         totalCount: 2,
         binderId: "b1",
         bandKey: "red",
+        // UIL-090: each line carries the regional variant it belongs to.
+        locale: "en",
       },
-      [lineKey("b2", "green")]: {
+      [lineKey("b2", "green", "en")]: {
         speciesLabel: "CHARMANDER LINE",
         filledCount: 2,
         totalCount: 2,
         binderId: "b2",
         bandKey: "green",
+        locale: "en",
       },
     });
     // A binder with no line for this family at all is absent, in every band.
-    expect(opts.existingLineByBinderBand[lineKey("b3", "red")]).toBeUndefined();
-    expect(opts.existingLineByBinderBand[lineKey("b1", "light_blue")]).toBeUndefined();
+    expect(opts.existingLineByBinderBand[lineKey("b3", "red", "en")]).toBeUndefined();
+    expect(opts.existingLineByBinderBand[lineKey("b1", "light_blue", "en")]).toBeUndefined();
   });
 
   it("the SAME band in a DIFFERENT binder is not reported as taken — the whole of UIL-084", () => {
     // Red is taken in b1. b2 in red is free, and the server would accept a new line there.
     const opts = joinOptionsFor(CHARMELEON_SV03_027, index, TYPE_MAP, CATALOG)!;
-    expect(opts.existingLineByBinderBand[lineKey("b1", "red")]).toBeDefined();
-    expect(opts.existingLineByBinderBand[lineKey("b2", "red")]).toBeUndefined();
+    expect(opts.existingLineByBinderBand[lineKey("b1", "red", "en")]).toBeDefined();
+    expect(opts.existingLineByBinderBand[lineKey("b2", "red", "en")]).toBeUndefined();
   });
 
   it("keys on the CHAIN ROOT, not the card's own dexId (a Stage1 is not its own root)", () => {
     // Charmeleon's dexId is 5; the lines are rooted at Charmander (4). Keying on 5 would find nothing.
     const opts = joinOptionsFor(CHARMELEON_SV03_027, index, TYPE_MAP, CATALOG)!;
     expect(Object.keys(opts.existingLineByBinderBand).sort()).toEqual(
-      [lineKey("b1", "red"), lineKey("b2", "green")].sort(),
+      [lineKey("b1", "red", "en"), lineKey("b2", "green", "en")].sort(),
     );
   });
 
@@ -162,7 +174,7 @@ describe("joinOptionsFor", () => {
     const opts = joinOptionsFor(CHARMANDER_SV03_026, index, TYPE_MAP, CATALOG)!;
     expect(opts.joinCandidates).toEqual([]);
     expect(Object.keys(opts.existingLineByBinderBand).sort()).toEqual(
-      [lineKey("b1", "red"), lineKey("b2", "green")].sort(),
+      [lineKey("b1", "red", "en"), lineKey("b2", "green", "en")].sort(),
     );
   });
 

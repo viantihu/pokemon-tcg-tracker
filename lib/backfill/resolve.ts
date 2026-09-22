@@ -8,6 +8,7 @@
  * collector marks each stage; this only surfaces the facts.
  */
 
+import { localeOfId } from "@/lib/catalog/locale";
 import {
   buildChain,
   rankAlternates,
@@ -54,7 +55,9 @@ export function resolveBackLine(
   const b = bandKey as Band;
 
   const stages: BackLineStageInfo[] = chain.map((node, stageIndex) => {
-    const alt = rankAlternates(node.dexId, b, catalog, map, priceOf);
+    // The seed card's locale scopes the wishlist: an English line never ranks Japanese printings
+    // (UIL-090).
+    const alt = rankAlternates(node.dexId, b, localeOfId(picked.tcgdexId), catalog, map, priceOf);
     return {
       stageIndex,
       stage: node.stage,

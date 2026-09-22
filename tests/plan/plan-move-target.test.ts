@@ -28,15 +28,17 @@ const ITEM: PlanItem = {
 };
 const JOIN: LineJoinOptions = {
   dexId: 5,
+  locale: "en",
   naturalBandKey: "red",
   joinCandidates: [],
   existingLineByBinderBand: {
-    [lineKey("b2", "green")]: {
+    [lineKey("b2", "green", "en")]: {
       speciesLabel: "CHARMANDER LINE",
       filledCount: 2,
       totalCount: 2,
       binderId: "b2",
       bandKey: "green",
+      locale: "en",
     },
   },
 };

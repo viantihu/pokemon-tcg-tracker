@@ -22,12 +22,12 @@ export const evolutionLineRepo = {
    * error the screen cannot explain. Verified against PGlite. Taking the first row keeps the check
    * answering the question it was asked: does a line already live here.
    */
-  async findByRootBandAndBinder(
+  async findAllByRootBandAndBinder(
     db: DbClient,
     rootDexId: number,
     colorBand: string,
     binderId: string | null,
-  ): Promise<Row<"evolution_line"> | null> {
+  ): Promise<Row<"evolution_line">[]> {
     const base = db
       .from("evolution_line")
       .select("*")
@@ -37,6 +37,13 @@ export const evolutionLineRepo = {
       ? base.is("binder_id", null)
       : base.eq("binder_id", binderId));
     if (error) throw error;
-    return data?.[0] ?? null;
+    /**
+     * EVERY match, not the first (UIL-090). One binder and band can now legitimately hold two lines for
+     * a species — an English one and a Japanese one — and which of them occupies the caller's key can
+     * only be judged from each line's SLOTS, because `root_dex_id` is a species key shared by both
+     * regional variants. So the caller derives each candidate's locale; this returns the shortlist.
+     * Normally zero or one row.
+     */
+    return data ?? [];
   },
 };

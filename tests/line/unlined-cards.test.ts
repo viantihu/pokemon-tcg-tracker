@@ -104,7 +104,7 @@ describe("loadLineScreen's unlinedCards (UIL-056)", () => {
     // not this card can join it — the question the server actually answers. The red line in GEN is
     // reported here even though the drake has an open slot in it, because a SECOND red line in GEN is
     // what would be refused.
-    expect(drake!.existingLineByBinderBand[lineKey(GEN, "red")]).toMatchObject({
+    expect(drake!.existingLineByBinderBand[lineKey(GEN, "red", "en")]).toMatchObject({
       speciesLabel: "EMBERLING LINE",
       binderId: GEN,
       bandKey: "red",
@@ -119,7 +119,7 @@ describe("loadLineScreen's unlinedCards (UIL-056)", () => {
     // No open candidate for the duplicate — its own (Basic) stage is already filled by the FIRST copy.
     expect(dupe!.joinCandidates).toHaveLength(0);
     // But it's explained, not just silently empty (note 3) — and says WHERE that line lives (UIL-084).
-    expect(dupe!.existingLineByBinderBand[lineKey(GEN, "red")]).toMatchObject({
+    expect(dupe!.existingLineByBinderBand[lineKey(GEN, "red", "en")]).toMatchObject({
       speciesLabel: "EMBERLING LINE",
       filledCount: 1,
       totalCount: 2,
