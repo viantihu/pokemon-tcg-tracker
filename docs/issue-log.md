@@ -6662,10 +6662,31 @@ between Karvi's "pull the Japanese catalog this phase" ruling and the catalog ac
 
 - **Reported:** 2026-09-21 (Karvi, with a screenshot, during her first UAT pass after the 2026-09-20 data
   refresh; body by the Senior BA, no intake session on the roster)
-- **Status:** Open — **critical for her; assigned to Full Stack Dev - 2, reproduction on PGlite first, then
-  the fix.** Product question put to Karvi 2026-09-21: is the rule one evolution line per species per
-  BINDER (so a second binder may hold its own Orange Toedscool line), rather than one per species
-  globally? Senior BA's recommended default: per binder.
+- **Status:** Open — **part 1 of 2 deployed; part 2 in build.** Reproduced on PGlite by Full Stack Dev - 2
+  before any fix, with two corrections to the first read: the Move sheet's candidates are NOT scoped to
+  the destination binder (UIL-064 made the list flat); her list is empty because her stage's slot is
+  already FILLED, so the only offer is "start a new line", and the server refuses that on a GLOBAL (root,
+  band) key; a control override into KB-001, the binder the line is already in, is refused identically,
+  and a control override into the WRONG band (GREEN) succeeds and writes a mis-banded second line, the
+  only escape the app allowed. Both entry points (`lib/plan/commit.ts:684-687`, `lib/line/write.ts:160-168`)
+  throw the same sentence and write nothing. **Part 1, MOVED means moved:** PR
+  [#292](https://github.com/viantihu/pokemon-tcg-tracker/pull/292) MERGED to `develop` 2026-09-22 (squash
+  `bd11695`), QA-gated (1106 tests; row chip always "Moved" → 4 fail, spotlight ignores the write → 4,
+  refusal keeps the override → 1, message lost → 1), confirmed **deployed** (all gates green on `bd11695`).
+  Client-only: the row chip reads "Will move" and the spotlight "Your call · <destination> · not saved
+  until you press Done" until the write succeeds, then "Moved"; a returned refusal drops the override so
+  the row reverts to the cascade's destination, the parked sitting no longer carries it, and the bar adds
+  "Your manual placement was not saved — pick a destination again"; a transport error keeps it, because
+  the server never rejected her pick. **Part 2, the rule**, in build under the Senior BA's default pending
+  Karvi's answer (one evolution line per species per BINDER): uniqueness keyed (binderId, root, band) at
+  both entry points; `findByRootAndBand` binder-scoped (its `.maybeSingle()` throws with two rows, a live
+  hazard); the sheet offers "start a line in <destination binder>" when the species' line is elsewhere or
+  its stage is filled, and refuses a same-binder duplicate with a remedy that exists; the MovePanel
+  sentence rewritten to say what will happen; `existingLineSlot`'s pick among two lines made
+  deterministic (natural band, then an open slot for this stage, then oldest). Step for Karvi now: repeat
+  the Toedscruel move; the row should read "Will move", Done should refuse with the same sentence, and
+  the row should fall back to the engine's destination with the "not saved" message instead of a stuck
+  MOVED. Part 2 makes the move itself land.
 - **Priority:** High (Senior BA's read, to be confirmed by Karvi) — the app's core action fails for a card
   she has explicitly placed, the refusal's remedy ("reload the screen and join it instead") reproduces
   the same state, and the row shows MOVED while nothing moved: a silent-wrong-state plus a dead end, the
