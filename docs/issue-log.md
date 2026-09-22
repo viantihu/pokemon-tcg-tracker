@@ -6907,9 +6907,7 @@ the species.
 - **Reported:** 2026-09-22 (Karvi, in her own words below, while working UIL-087; body by the Senior BA, no
   intake session on the roster)
 - **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-087 lands; design proposal before code.**
-  Migration `0018` is allocated to this entry (the state itself is a schema fact). Two questions put to
-  Karvi 2026-09-22 before the design is fixed: does a card stay "in haul" across later imports until she
-  places it, and what should Lookup and Collections say about an in-haul card.
+  Migration `0018` is allocated to this entry (the state itself is a schema fact). **Karvi's rulings 2026-09-22, which fix the design:** Dex is the source of truth for her inventory, so a card is in her collection, and stays in haul, exactly as long as it appears in the import; when a later import no longer has it, it leaves the haul (the retire path, not a placement). Lookup shows an in-haul card as "in haul"; Collections does not show a card until it is shelved.
 - **Priority:** High (Karvi's own report; Senior BA agrees) — a modelling error at the root of the app that
   has already produced UIL-087 (an unplaced copy read as "already placed" and pulled into a line) and the
   false premise under UIL-084 ("the extra copy goes to the front half"), and that makes every count of
@@ -6944,9 +6942,7 @@ shelf twice this week.
 ## UIL-089 — There is no way to remove a copy from the app: a card misidentified as owned in Dex stays "owned" until a later import happens to retire it, and a card that was traded or went missing has no lifecycle at all
 
 - **Reported:** 2026-09-22 (Karvi; body by the Senior BA, no intake session on the roster)
-- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-088; design proposal before code.** Two
-  questions put to Karvi 2026-09-22: whether a traded or missing card should keep a visible history (a
-  "gone" list with the reason) or simply disappear, and whether the reason should be required.
+- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-088; design proposal before code.** **Karvi's ruling 2026-09-22: no reason is necessary.** So this is one plain action, remove this copy from the app, for both cases; the app releases what the copy holds, records a `placement_decision` for the removal (UIL-042: history is never deleted), shows no reason field and no "gone" list, and remembers the removal keyed on the Dex row so the next import does not recreate it until Dex no longer lists it, since Dex is the source of truth (UIL-088).
 - **Priority:** High (Karvi's own report; Senior BA's read pending her confirmation) — the app's record of
   what she owns is the point of the app; a copy she knows is not hers, or is no longer hers, that the app
   keeps counting, placing and proposing is a wrong record with no remedy.
