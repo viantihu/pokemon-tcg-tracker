@@ -6853,10 +6853,29 @@ anything; a one-place normalisation fixes it; and every future Japanese import h
 
 - **Reported:** 2026-09-22 (Karvi, on the Toedscool Orange line from UIL-084; body by the Senior BA, no
   intake session on the roster)
-- **Status:** Open — **assigned to Full Stack Dev - 2, reproduction on PGlite first.** Measured on Testing
-  by the Senior BA (run 35780615486): `line_slot` 60 = filled 39 + block 1 + placeholders; filled slots
-  with a null `copy_id` 0; copies carrying a `line_slot_id` 39; **copies carrying a `line_slot_id` whose
-  `role` is not `shelved`: 3.** Her Toedscruel is one of the three.
+- **Status:** **Fixed** — PR [#301](https://github.com/viantihu/pokemon-tcg-tracker/pull/301) MERGED to
+  `develop` 2026-09-22 (squash `d0f3c25`), QA-gated on the merged tree (1170 tests, build, no migration;
+  mutations: the pull write without `role: shelved` fails the whole-state invariant case, `ownedAt`
+  proposing a block copy fails 1, undo deleting without the slot release fails 1, the Lines label never
+  reading "CARD NOT SHELVED" fails the DOM remedy case, the bare "Bulk box" label restored fails the
+  either/or case), confirmed **deployed** (Deploy, migrate, smoke, acceptance and Vercel green on
+  `d0f3c25`). **Cause, reproduced before the fix, two together:** `ownedAt` (`lib/engine/line.ts`) matched
+  an owned copy on species and band with no role filter, so an imported copy still in bulk counted as
+  filling a stage ("already placed"); and `writeNewLine`'s confirmed-pull `update_copy` set binder, half,
+  band and `line_slot_id` but never `role`, so the slot read filled while the copy stayed bulk. A shelved
+  front-half pull, the case the design was built around, was clean, which is why every test passed. **Fix:**
+  the pull write sets `role: shelved`; bulk copies stay proposable but the consent row, the digest and the
+  slot note say "not yet placed (still in the haul)" and the pull's current-placement label reads "Bulk
+  box or still in the haul" until UIL-088 separates the states; `ownedAt` excludes `block` copies (a block
+  is referenced by a `binder_block` row; un-blocking belongs to UIL-030's flow); Sync **Undo** (not the
+  retire path, which UIL-062's emitter already covered) now releases the slot and demotes a completed
+  line when it deletes a copy; the Lines screen labels a filled slot whose copy is not shelved "FILLED ·
+  CARD NOT SHELVED" and offers Move on it (Move was hidden for exactly these rows, so no remedy existed);
+  `tests/plan/filled-slot-invariant.test.ts` asserts over the whole state after every write path that no
+  filled slot lacks its shelved copy and no filled slot has a null copy (the latent shape from a bare
+  delete). **Step for Karvi:** on Lines, the three affected rows read "FILLED · CARD NOT SHELVED" with a Move
+  button; move each card to where it really is and the slot releases. Closed on her confirmation. Her
+  principle, "each card is a separate underlying object", is the invariant the test now holds.
 - **Priority:** High (Senior BA's read, to be confirmed by Karvi) — the record disagrees with the physical
   shelf, the class UIL-062 was High for: a line says a stage is filled, the engine routes the next copy on
   that basis ("the Orange line already has this stage — the extra copy goes to the front half"), and the
@@ -7023,3 +7042,31 @@ English line; a second en Toedscruel into the same binder is still refused with 
 
 **Priority rationale.** High: the third day in a row the same physical card has been un-placeable for a
 rule she never asked for.
+
+## UIL-091 — Picking a wishlist alternative on a line decision records the choice in the wishlist row but the slot keeps displaying the old target, because the stored target wins at load
+
+- **Reported:** 2026-09-22 (found by Full Stack Dev - 2 while tracing UIL-090's repair; body by the Senior
+  BA, no intake session on the roster)
+- **Status:** Open — unassigned; after UIL-090 and UIL-088 in Full Stack Dev - 2's queue unless Karvi sees
+  it first.
+- **Priority:** Medium (Senior BA's read) — a decision she made is honoured in the data she is charged for
+  (the wishlist) but not in the picture she reads (the line), so the Lines screen shows a card she has
+  already replaced; not a placement error, but a false display on the screen UIL-067 just simplified.
+- **Area:** Lines
+- **Env:** Testing, develop `d0f3c25`
+
+**Mechanism, read from `develop`.** `line_slot.target_catalog_card_id` is written only at slot insert time,
+from the engine's plan. UIL-057's "pick an alternate instead of the cheapest" writes the choice as a
+wishlist row (`wishlistUpsertFor` → `insert_wishlist.chosen_catalog_card_id`), never the slot's target.
+At load, [`lib/line/load.ts:303`](../lib/line/load.ts:303) resolves a placeholder as
+`const chosen = targetCc ?? (alt[0] …)`: the stored target wins and the alternates are only the fallback.
+So after she picks an alternative the slot still shows the original target.
+
+**What a fix needs to decide.** Either the pick also re-points the slot's stored target in the same
+transaction, or the load prefers the wishlist's chosen card over the stored target when one exists. The
+first keeps one source of truth on the slot; the second keeps the stored target as the plan's record and
+the wishlist as hers. UIL-090's migration `0019` deliberately releases, never re-points, stored targets
+because none of them was her choice; this entry is about the case where one IS.
+
+**Priority rationale.** Medium: a display disagreement with her own decision, recoverable, on a screen she
+uses often.
