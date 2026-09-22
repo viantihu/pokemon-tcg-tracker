@@ -27,6 +27,10 @@ function fakePort(): CatalogPort {
       // The set name is not yet in the mirror either — name resolution can't save it pre-match.
       return [];
     },
+    async findSetIdsFoldingCase() {
+      // UIL-086's step never fires for these en fixtures (it is non-en only) and has nothing to find.
+      return [];
+    },
     async learnAlias() {
       /* persistence is exercised by exec.manualMatch; irrelevant to the resolve mechanism. */
     },

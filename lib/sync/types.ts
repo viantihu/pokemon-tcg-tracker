@@ -36,6 +36,15 @@ export type DexRow = Record<DexColumn, string>;
  */
 export interface ResolvedDexId {
   locale: Locale;
+  /**
+   * The set code exactly as her export wrote it (`jpn_` stripped) — NOT namespaced and NOT alias-mapped.
+   *
+   * The alias table is keyed `(locale, dex_code)` on this raw code (`resolveSetId` looks up
+   * `${locale}:${rawCode}`), so anything that LEARNS an alias has to carry it. Without it the
+   * name-resolution path keyed a learned Japanese alias on the namespaced id (`ja:sv9`), which
+   * `resolveSetId` never looks up — so the alias was written and then never read (UIL-086).
+   */
+  rawCode: string;
   /** Best-guess TCGdex set id: alias-mapped when known, else the raw Dex code. */
   setId: string;
   /** True when `setId` came from the verified alias table, not a passthrough. */
