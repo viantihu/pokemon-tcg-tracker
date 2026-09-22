@@ -483,7 +483,31 @@ export function PlanScreen({
           setError(res.error);
           return false;
         }
-        setError(res.error);
+        /**
+         * THE SERVER REFUSED THIS PLACEMENT, so her override was never written and must not survive
+         * (UIL-084). It is what the row's chip, the spotlight's tag and the PARKED SESSION all read
+         * from, so keeping it left the screen promising a destination the server had rejected — and
+         * surviving a reload, which is why her refusal reproduced instead of clearing. Dropped here,
+         * on the one path a refusal comes back, so the row falls back to the cascade's own destination
+         * and she can pick again.
+         *
+         * Only on a RETURNED refusal, never in the `catch` below: a transport failure is not the
+         * server rejecting her pick, and throwing her choice away for a dropped connection would be
+         * its own small data loss.
+         */
+        const refused = overrides[item.incomingId];
+        if (refused) {
+          setOverrides((prev) => {
+            const next = { ...prev };
+            delete next[item.incomingId];
+            return next;
+          });
+        }
+        setError(
+          refused
+            ? `${res.error} Your manual placement was not saved — pick a destination again.`
+            : res.error,
+        );
         return false;
       }
       // Roll the cache forward rather than letting the write invalidate it (see shelveCardAction).
@@ -1561,8 +1585,12 @@ export function PlanRow(props: {
         >
           {disp.label}
         </span>
-        {/* She overrode this one: mark it so she can pick out her own decisions at a glance (UIL-037). */}
-        {override ? <span className="moved u">Moved</span> : null}
+        {/* She overrode this one: mark it so she can pick out her own decisions at a glance (UIL-037).
+            MOVED MEANS MOVED (UIL-084). `done` is "written to the database", so before it this reads
+            "Will move" — a past-tense chip on a placement the server has not accepted yet is the claim
+            that made her hunt a card she was told had landed. The DESTINATION text is unchanged either
+            way: she needs to know which pocket to use BEFORE she presses Done. */}
+        {override ? <span className="moved u">{done ? "Moved" : "Will move"}</span> : null}
         {item.needsDecision ? <span className="needs u">Decide</span> : null}
       </div>
     </div>
@@ -1774,8 +1802,17 @@ export function Spotlight(props: {
       ) : null}
 
       {/* "Moved" as its own label because Done is now the commit (UIL-027) — there is no separate
-          commit step for the override to be "at". The `.movedtag u` styling is preserved. */}
-      {override ? <div className="movedtag u">Moved · {disp.destination}</div> : null}
+          commit step for the override to be "at". The `.movedtag u` styling is preserved.
+          Gated on `done` (UIL-084): until the write lands this is her INTENT, not a fact, and saying
+          "Moved" made a refused placement read as a completed one — across reloads, because the
+          override rides in the parked session. */}
+      {override ? (
+        <div className="movedtag u">
+          {done
+            ? `Moved · ${disp.destination}`
+            : `Your call · ${disp.destination} · not saved until you press Done`}
+        </div>
+      ) : null}
 
       {/* An earlier card in this haul changed where this one goes (UIL-045). Saying so is the whole
           point: a silent correction would leave her trusting the worklist row she read a moment ago,

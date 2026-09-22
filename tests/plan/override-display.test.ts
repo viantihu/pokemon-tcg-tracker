@@ -69,13 +69,13 @@ function item(over: Partial<PlanItem> = {}): PlanItem {
   };
 }
 
-/** Same shape the screen passes to the row. */
-function renderRow(over: MoveDestination | undefined) {
+/** Same shape the screen passes to the row. `done` = the write landed (UIL-027 / UIL-084). */
+function renderRow(over: MoveDestination | undefined, done = false) {
   return renderToStaticMarkup(
     createElement(PlanRow, {
       item: item(),
       current: false,
-      done: false,
+      done,
       onSelect: () => {},
       onShelve: () => {},
       override: over,
@@ -84,11 +84,11 @@ function renderRow(over: MoveDestination | undefined) {
   );
 }
 
-function renderSpotlight(over: MoveDestination | undefined) {
+function renderSpotlight(over: MoveDestination | undefined, done = false) {
   return renderToStaticMarkup(
     createElement(Spotlight, {
       item: item(),
-      done: false,
+      done,
       onShelve: () => {},
       onBackCard: () => {},
       onSkip: () => {},
@@ -115,8 +115,11 @@ describe("UIL-037 · the spotlight panel names the OVERRIDE, not the suggestion"
     expect(html).toContain("Bulk box");
     // The big instruction shifted with it — "To the specialty binder" is gone.
     expect(html).not.toContain("To the specialty binder");
-    // The "MOVED" badge exists AND names the destination (was generic before the fix).
-    expect(html).toMatch(/class="movedtag u"[^>]*>Moved · Bulk box/);
+    // The badge exists AND names the destination (was generic before UIL-037's fix) — but it does NOT
+    // yet say "Moved", because nothing has been written (UIL-084).
+    expect(html).toMatch(/class="movedtag u"[^>]*>Your call · Bulk box/);
+    expect(html).toContain("not saved until you press Done");
+    expect(html).not.toContain("Moved · Bulk box");
   });
 
   it("with a shelf override into a general binder, the sentence carries binder · half · band", () => {
@@ -145,8 +148,10 @@ describe("UIL-037 · the worklist row names the OVERRIDE too", () => {
     // And the row's meta line follows — this was the gap that made the row lie to her.
     expect(html).toContain("Bulk box");
     expect(html).not.toContain(">Specialty A<");
-    // A short "Moved" pill so a scroll picks out her decisions from the cascade-proposed ones.
-    expect(html).toContain(">Moved<");
+    // A short pill so a scroll picks out her decisions from the cascade-proposed ones — reading
+    // "Will move" until the write lands (UIL-084).
+    expect(html).toContain(">Will move<");
+    expect(html).not.toContain(">Moved<");
   });
 
   it("a shelf override into the back half labels the row as a back-half placement", () => {
@@ -157,6 +162,66 @@ describe("UIL-037 · the worklist row names the OVERRIDE too", () => {
     expect(html).not.toContain("PLACE IN FRONT HALF");
     expect(html).not.toContain("SPECIALTY BINDER");
     expect(html).toContain("Binder 1 · Back · Green grass");
+  });
+});
+
+/**
+ * UIL-084 — "MOVED" is a claim about the DATABASE, not about the sheet she just closed.
+ *
+ * Her report: she overrode Toedscruel to KB-002 BACK ORANGE, the spotlight read "MOVED · KB-002 ·
+ * BACK · ORANGE" and the row showed the Moved chip, and Done then failed with a refusal every time —
+ * so the screen said the card had been moved while the server had rejected the placement and written
+ * nothing. The override lives in client state and rides in the parked session, so a reload restored
+ * the same false claim rather than clearing it.
+ *
+ * The distinction both surfaces now draw is exactly `done`, which already means "written to the
+ * database" (UIL-027). The destination TEXT is deliberately unchanged in both states: she needs to
+ * read the pocket off the screen before she presses Done, which is the whole point of the override.
+ */
+describe("UIL-084 · MOVED means moved: the past tense waits for the write", () => {
+  const BULK: MoveDestination = { kind: "bulk" };
+
+  it("before the write, the row says 'Will move' and the spotlight says 'Your call', never 'Moved'", () => {
+    const row = renderRow(BULK, false);
+    expect(row).toContain(">Will move<");
+    expect(row).not.toContain(">Moved<");
+
+    const spot = renderSpotlight(BULK, false);
+    expect(spot).toContain("Your call · Bulk box");
+    expect(spot).toContain("not saved until you press Done");
+    expect(spot).not.toContain("Moved · Bulk box");
+  });
+
+  it("after the write, both surfaces say 'Moved' — the claim is now true", () => {
+    const row = renderRow(BULK, true);
+    expect(row).toContain(">Moved<");
+    expect(row).not.toContain(">Will move<");
+
+    const spot = renderSpotlight(BULK, true);
+    expect(spot).toMatch(/class="movedtag u"[^>]*>Moved · Bulk box/);
+    expect(spot).not.toContain("Your call · Bulk box");
+    expect(spot).not.toContain("not saved until you press Done");
+  });
+
+  it("the DESTINATION she has to act on is the same in both states — only the tense changes", () => {
+    for (const done of [false, true]) {
+      const row = renderRow({ kind: "shelf", binderId: "b1", half: "back", band: "green" }, done);
+      const spot = renderSpotlight(
+        { kind: "shelf", binderId: "b1", half: "back", band: "green" },
+        done,
+      );
+      expect(row).toContain("Binder 1 · Back · Green grass");
+      expect(spot).toContain("Binder 1 · Back · Green grass");
+      expect(row).toContain("PLACE IN BACK HALF");
+    }
+  });
+
+  it("a card with NO override says neither thing, written or not", () => {
+    for (const done of [false, true]) {
+      expect(renderRow(undefined, done)).not.toContain(">Will move<");
+      expect(renderRow(undefined, done)).not.toContain(">Moved<");
+      expect(renderSpotlight(undefined, done)).not.toContain('class="movedtag u"');
+    }
   });
 });
 
@@ -266,6 +331,7 @@ describe("UIL-030 · the spotlight's offer text and the block override's sentenc
     const html = spot(dup(), { kind: "block", lineId: "L1", slotId: "S2", binderId: "b1" });
     expect(html).toContain("Block · CHARMANDER LINE · Binder 1 · Back");
     expect(html).toContain("Use as a binder block");
-    expect(html).toMatch(/class="movedtag u"[^>]*>Moved · Block · CHARMANDER LINE/);
+    // Not yet written, so the tag is her call rather than a completed move (UIL-084).
+    expect(html).toMatch(/class="movedtag u"[^>]*>Your call · Block · CHARMANDER LINE/);
   });
 });
