@@ -6901,3 +6901,79 @@ new-line path.
 
 **Priority rationale.** High: silent, on the core write, and it feeds wrong routing to every later card of
 the species.
+
+## UIL-088 — A copy has three placement states in Karvi's model (in haul, bulk, shelved) but the app has two: an imported card that has not been placed anywhere is stored as "bulk", which is not the same thing
+
+- **Reported:** 2026-09-22 (Karvi, in her own words below, while working UIL-087; body by the Senior BA, no
+  intake session on the roster)
+- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-087 lands; design proposal before code.**
+  Migration `0018` is allocated to this entry (the state itself is a schema fact). Two questions put to
+  Karvi 2026-09-22 before the design is fixed: does a card stay "in haul" across later imports until she
+  places it, and what should Lookup and Collections say about an in-haul card.
+- **Priority:** High (Karvi's own report; Senior BA agrees) — a modelling error at the root of the app that
+  has already produced UIL-087 (an unplaced copy read as "already placed" and pulled into a line) and the
+  false premise under UIL-084 ("the extra copy goes to the front half"), and that makes every count of
+  "bulk" wrong by the number of cards she has simply not got to yet.
+- **Area:** all (schema, engine, Plan, Lines, Lookup, Collections, Backfill, Sync)
+- **Env:** Testing, develop `d19be30`
+
+In her words: "The app treats each card as either shelved or bulk, but that is not how it should be.
+Shelved → has been placed in a bulk box or a binder. Bulk → has been placed in a bulk box. In haul → in a
+haul but has not been placed anywhere. This is NOT the same as a card being in bulk."
+
+**Confirmed in the schema and the import.** `copy.role` is `check (role in ('shelved', 'bulk', 'block'))`
+([`supabase/migrations/0002_domain.sql:156`](../supabase/migrations/0002_domain.sql:156)); the sync
+import creates every new copy with `role: "bulk"` and says why in its own comment, "unplaced: not shelved
+anywhere until the cascade routes it" ([`lib/sync/exec.ts:243`](../lib/sync/exec.ts:243), and again at
+`:566` for a manual match). So "not yet placed" and "placed in the bulk box" are the same value, and every
+reader that filters on `bulk` (Lookup hides it, the engine's `ownedAt` counts it as placed, the Plan's
+band footer counts it, Collections' owned/needed logic) cannot tell her haul from her box.
+
+**What the requirement implies, for the proposal.** A third placement state (whether a new `role` value
+such as `haul`, or a separate column, is the dev's call to argue) with: the import writing it for every new
+copy and for a stand-in match; the Plan's Done writing `bulk` or `shelved` as today; the engine treating an
+in-haul copy as *available to place*, never as *already placed* (this is UIL-087's cause (a) fixed at the
+model rather than the symptom); Lookup, Collections and the Plan footer naming the three states in her
+words; Backfill and the block path unchanged in meaning. The migration must classify the existing rows: a
+copy with `role = 'bulk'` and no `placement_decision` has never been placed and is in-haul; one with a
+decision that routed it to bulk is in the box. That rule is checkable on Testing before it runs.
+
+**Priority rationale.** High: the states are the app's subject, and the conflation has already reached her
+shelf twice this week.
+
+## UIL-089 — There is no way to remove a copy from the app: a card misidentified as owned in Dex stays "owned" until a later import happens to retire it, and a card that was traded or went missing has no lifecycle at all
+
+- **Reported:** 2026-09-22 (Karvi; body by the Senior BA, no intake session on the roster)
+- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-088; design proposal before code.** Two
+  questions put to Karvi 2026-09-22: whether a traded or missing card should keep a visible history (a
+  "gone" list with the reason) or simply disappear, and whether the reason should be required.
+- **Priority:** High (Karvi's own report; Senior BA's read pending her confirmation) — the app's record of
+  what she owns is the point of the app; a copy she knows is not hers, or is no longer hers, that the app
+  keeps counting, placing and proposing is a wrong record with no remedy.
+- **Area:** Sync, Plan, Lines, Collections
+- **Env:** Testing, develop `d19be30`
+
+In her words: "There should be an option to remove a card from a haul. The use case for this is that a
+card may have been misidentified as owned in Dex, so it needs to be moved out. The user will fix this in
+Dex manually, but I need to make sure that the app does not keep thinking that the card exists. The other
+case we need to account for is how cards that have been moved out of the collection (through a trade or
+went missing) are managed."
+
+**One requirement, two cases: a copy leaves, from the app, with a reason.** (1) *Misidentified*: the copy
+never existed; remove it now, release anything it holds, and record the decision. (2) *Traded or missing*:
+the copy existed and is gone; retire it with the reason, release its slot or block, record the decision,
+and keep the history she may want. Today the only exit is indirect: fix Dex, re-import, and accept the
+retire proposal the reconcile produces (`lib/sync/reconcile.ts`, consequences `line-slot-freed` /
+`bulk-removed` / `block-review`). Until she does that the app keeps counting the card, and nothing records
+why it left.
+
+**The part that needs care: the next import.** If she removes a copy in the app before fixing Dex, the
+next import of the same export would recreate it. The removal therefore needs a memory keyed on the Dex
+row, the same shape UIL-082 gave manual matches, that suppresses re-adding a removed row and is cleared
+when the row leaves the export (Dex fixed). Without it the feature silently undoes itself.
+
+**Not in scope here:** UIL-088's state model (this entry depends on it for what "in haul" means when
+removing an unplaced copy) and Dex itself.
+
+**Priority rationale.** High, pending her confirmation: not a crash, but the record is wrong for as long as
+she has no way to correct it, and the wrong record drives placement.
