@@ -6973,3 +6973,53 @@ removing an unplaced copy) and Dex itself.
 
 **Priority rationale.** High, pending her confirmation: not a crash, but the record is wrong for as long as
 she has no way to correct it, and the wrong record drives placement.
+
+## UIL-090 — Regional variants of a species are one line to the app: a Japanese Toedscool line in a binder blocks an English Toedscruel from starting its own line there
+
+- **Reported:** 2026-09-22 (Karvi, with a screenshot, minutes after UIL-084's per-binder rule deployed; body
+  by the Senior BA, no intake session on the roster)
+- **Status:** Open — **assigned to Full Stack Dev - 2, ahead of the UIL-088 proposal because it blocks a
+  placement now; reproduction on PGlite first, then one PR.** Design question left to the dev, argued in
+  the PR: derive a line's locale from its root card (no migration) or add a column (migration `0019`
+  would be allocated).
+- **Priority:** High (Karvi's own rule; Senior BA agrees) — a card she has decided to place cannot be
+  placed, the refusal offers no remedy that matches her intent, and the rule the app enforces contradicts
+  the architecture's own statement that a JP and an EN printing are different cards.
+- **Area:** Lines, Plan (Move sheet, commit), Engine
+- **Env:** Testing, develop `d19be30` (UIL-084 part 2 deployed)
+
+In her words: "Regional variants of a pokemon should be tracked separately. This Toedscruel should be
+able to get placed in the back half."
+
+**What the screenshot shows.** Move a shelved card: Toedscruel 089/159, now KB-001 · FRONT · ORANGE. She
+picks KB-002, BACK HALF, Orange, "+ Start a new line in KB-002". The sheet answers: "KB-002 already has
+ノノクラゲ LINE in this band (2/2 filled), and one binder tracks a species once per band — so a second
+line here cannot be saved. Join its open slot above if it has one, pick a different binder, or use the
+front half." PLACE IT HERE is disabled. The existing line carries the Japanese species name because its
+root is a Japanese printing; her Toedscruel is the other regional variant of the same species.
+
+**The rule, as she states it.** An English line and a Japanese line of one species are different lines,
+in the same binder and the same band. The app already knows this about cards:
+[`docs/sync-architecture.md:389`](../docs/sync-architecture.md:389) says a JP and an EN printing "are
+legitimately two different cards with two placements", and UIL-047 partitioned artwork clustering by
+locale for that reason. The line key never got it: after UIL-084 it is (binderId, rootDexId, band)
+([`lib/repo/evolution-line.ts:8`](../lib/repo/evolution-line.ts:8), `lineKey` in
+[`lib/line/join-options.ts:75`](../lib/line/join-options.ts:75), `passLineKey` and `findLineInBinder`
+in [`lib/plan/commit.ts:687`](../lib/plan/commit.ts:687)), so the species root alone identifies the
+line and a ja line satisfies the check for an en card.
+
+**What the fix must cover.** The uniqueness key gains the locale at both write paths and in the picker's
+map; join candidates, `existingLineSlot` and `ownedAt` match only lines of the copy's own locale (a
+Japanese copy is never offered an English line's slot, and never counted as filling one); the Lines
+screen and the Move sheet label a line with its locale, as tiles already do with the JA tag, so two
+same-species lines read apart. `evolution_line` has no locale column; every slot of a line shares its
+root card's locale, so the locale can be derived from the root card (the Senior BA's preference if the
+join is cheap and a line can never mix locales) or stored (then a migration). A same-locale duplicate in
+the same binder stays refused.
+
+**Reproduction to write first:** a ja Toedscool line in binder B, band orange, both slots filled; an en
+Toedscruel copy overridden to B back orange with mode new; refused today; after the fix it starts B's
+English line; a second en Toedscruel into the same binder is still refused with the UIL-084 sentence.
+
+**Priority rationale.** High: the third day in a row the same physical card has been un-placeable for a
+rule she never asked for.
