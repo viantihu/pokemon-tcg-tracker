@@ -136,3 +136,78 @@ describe("buildLineView", () => {
     expect(view.slots[0].wedgeLabel).toBe("NO PAGE, SO NO POCKET.");
   });
 });
+
+/**
+ * UIL-087 — the view mapping for a slot reading `filled` whose copy was never shelved.
+ *
+ * `moveable` used to require `copyShelved`, which hid the one control that can release a slot for
+ * exactly the slots that are wrong: the Lines page offered no Move, the "not in a line yet" list
+ * excludes them (it wants a shelved copy with NO slot), and Lookup filters unshelved copies out of the
+ * location it shows — so there was no route to fix them from anywhere in the app.
+ */
+describe("buildLineView · a filled slot whose copy is not shelved (UIL-087)", () => {
+  const wrongSlot = () =>
+    buildLineView({
+      lineId: "L1",
+      rootDexId: 4,
+      bandKey: "red",
+      binderId: "b1",
+      binderLabel: "Binder 1 · BACK",
+      status: "open",
+      slots: [
+        slot({
+          stageIndex: 0,
+          state: "filled",
+          card: card("Charmander", "026"),
+          copyId: "c1",
+          variant: "normal",
+          copyShelved: false, // the card was never shelved into this slot
+        }),
+      ],
+    }).slots[0];
+
+  it("is MOVEABLE, so she has a way to fix it — pre-fix the control was hidden", () => {
+    expect(wrongSlot().moveable).toBe(true);
+  });
+
+  it("is flagged as not-shelved, so the screen can say which rows are wrong", () => {
+    expect(wrongSlot().copyNotShelved).toBe(true);
+  });
+
+  it("a filled slot whose copy IS shelved is moveable and NOT flagged", () => {
+    const ok = buildLineView({
+      lineId: "L1",
+      rootDexId: 4,
+      bandKey: "red",
+      binderId: "b1",
+      binderLabel: "Binder 1 · BACK",
+      status: "open",
+      slots: [
+        slot({
+          stageIndex: 0,
+          state: "filled",
+          card: card("Charmander", "026"),
+          copyId: "c1",
+          variant: "normal",
+          copyShelved: true,
+        }),
+      ],
+    }).slots[0];
+    expect(ok.moveable).toBe(true);
+    expect(ok.copyNotShelved).toBe(false);
+  });
+
+  it("a slot with no copy is neither moveable nor flagged — there is no card to move", () => {
+    const empty = buildLineView({
+      lineId: "L1",
+      rootDexId: 4,
+      bandKey: "red",
+      binderId: "b1",
+      binderLabel: "Binder 1 · BACK",
+      status: "open",
+      slots: [slot({ stageIndex: 1, state: "placeholder" })],
+    }).slots[0];
+    expect(empty.moveable).toBe(false);
+    expect(empty.copyNotShelved).toBe(false);
+  });
+});

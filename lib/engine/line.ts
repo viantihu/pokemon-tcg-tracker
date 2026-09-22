@@ -112,9 +112,22 @@ function sameColour(node: ChainNode, b: Band, map: TypeColorMap) {
   };
 }
 
-/** An owned same-colour copy sitting at a node (used to fill slots and emit pull actions). */
+/**
+ * An owned same-colour copy sitting at a node (used to fill slots and emit pull actions).
+ *
+ * BULK copies count (UIL-087, the Senior BA's ruling): a card in the pile is still hers, and pulling it
+ * into its line is exactly the work a haul sitting is for — the write now shelves it and the disclosure
+ * says to fetch it. `role: "block"` is the one exclusion, and not as a general role filter: a block copy
+ * is a card deliberately sacrificed as a physical spacer and is REFERENCED BY a `binder_block` row, so
+ * shelving it into a line would leave that row naming a copy which is now in a line slot — the same
+ * half-written shape this entry exists to close. Un-blocking a line is a real action, but it is the
+ * UIL-030 flow's to offer, with the block row removed in the same transaction, not a side effect of
+ * filling a slot.
+ */
 function ownedAt(node: ChainNode, b: Band, owned: OwnedCopy[], map: TypeColorMap) {
-  return owned.find((o) => o.card.dexId.includes(node.dexId) && band(o.card, map) === b);
+  return owned.find(
+    (o) => o.role !== "block" && o.card.dexId.includes(node.dexId) && band(o.card, map) === b,
+  );
 }
 
 export interface Viability {
@@ -291,7 +304,23 @@ export function generateSlots(
         copyId: ownedCopy.id,
         targetCatalogCardId: ownedCopy.card.tcgdexId,
         pullFrom: fromFront ? { binderId: ownedCopy.binderId, half: "front" } : null,
-        note: fromFront ? "pull from front half" : "already placed",
+        /**
+         * UIL-087: "already placed" was asserted for every copy that was not in a front half, which
+         * quietly included copies that are placed NOWHERE. Karvi has to find that card before the line
+         * really holds it, so the note says so instead of claiming it is already where it belongs.
+         *
+         * The wording is "not yet placed (still in the haul)", not "in the bulk box", on her ruling
+         * (2026-09-22): the app conflates two different states in `role: 'bulk'` — a card deliberately
+         * filed in a bulk box, and a card an import created that has not been placed anywhere yet. Only
+         * the second is what a pulled copy usually is. Calling it "the bulk box" would assert a placement
+         * she never made. That conflation is UIL-088; this wording is true under today's data and under
+         * the model that replaces it.
+         */
+        note: fromFront
+          ? "pull from front half"
+          : ownedCopy.role === "bulk"
+            ? "not yet placed (still in the haul)"
+            : "already placed",
       });
       return;
     }

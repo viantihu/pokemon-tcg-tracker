@@ -15,6 +15,7 @@ import {
   catalogCardRepo,
   copyRepo,
   lastSyncSnapshotRepo,
+  evolutionLineRepo,
   lineSlotRepo,
   presenceGroupRepo,
   setAliasRepo,
@@ -399,8 +400,34 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
       },
     });
   }
-  // Remove the copies the sync created.
-  for (const id of undo.deleteCopyIds) ops.push({ op: "delete_copy", id });
+  /**
+   * Remove the copies the sync created — RELEASING any line slot they have since been shelved into
+   * (UIL-087's latent shape).
+   *
+   * `line_slot.copy_id` is `on delete set null`, so a bare delete frees the POINTER and leaves
+   * `state = 'filled'`: a slot holding nothing, which nothing detects — migration 0010's one-time
+   * repair explicitly required `copy_id is not null`, so this shape was never in its predicate. It is
+   * reachable because a sync-created copy starts unplaced and she can shelve it into a line from the
+   * Haul Plan (UIL-003's whole flow) before undoing that sync.
+   *
+   * The retire path above already does this through the same shared emitter; only this one was bare.
+   * It DOES request the demotion, unlike the retire path: a `complete` line is not complete once a
+   * stage empties, and every non-sync release (`applyMove`, the collection removal, the Haul Plan
+   * override) demotes. The retire path's `null` is documented as a deliberate choice and is left alone
+   * rather than changed here under a different entry.
+   */
+  for (const id of undo.deleteCopyIds) {
+    const copy = await copyRepo.getByPk(db, id);
+    if (copy?.line_slot_id) {
+      const slot = await lineSlotRepo.getByPk(db, copy.line_slot_id);
+      // Positive match only: a crossed pointer must not evict a card that never moved (UIL-062).
+      if (slot && slot.copy_id === id) {
+        const line = await evolutionLineRepo.getByPk(db, slot.line_id);
+        ops.push(...releaseSlotOps(slot.id, line?.status === "complete" ? line.id : null));
+      }
+    }
+    ops.push({ op: "delete_copy", id });
+  }
 
   // Undo consumed the snapshot: the undo point is now gone.
   ops.push({ op: "delete_snapshot", id: snapshots[0].id });

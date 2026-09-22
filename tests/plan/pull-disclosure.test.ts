@@ -38,8 +38,18 @@ const PULLS: ProposedPull[] = [
     fromLabel: "Binder 1 · Front · Red",
     stageIndex: 0,
     fromLine: false,
+    // A front-half pull: a card she can see on a page, nothing to find (UIL-087).
+    notYetPlaced: false,
   },
-  { copyId: "c2", name: "Charizard", fromLabel: "Bulk box", stageIndex: 2, fromLine: true },
+  {
+    copyId: "c2",
+    name: "Charizard",
+    // The honest either/or production now produces for an ambiguous `role: 'bulk'` (UIL-087).
+    fromLabel: "Bulk box or still in the haul",
+    stageIndex: 2,
+    fromLine: true,
+    notYetPlaced: true,
+  },
 ];
 
 function render(over: Record<string, unknown> = {}): string {
@@ -68,7 +78,8 @@ describe("UIL-061 · the pulls are disclosed by name", () => {
     expect(html).toContain("Charmander");
     expect(html).toContain("Binder 1 · Front · Red");
     expect(html).toContain("Charizard");
-    expect(html).toContain("Bulk box");
+    // Honest either/or for an ambiguous `role: 'bulk'`, never a bare "Bulk box" (UIL-087).
+    expect(html).toContain("Bulk box or still in the haul");
   });
 
   it("renders one checkbox per pull, all UNCHECKED", () => {

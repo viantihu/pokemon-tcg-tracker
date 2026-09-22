@@ -1779,6 +1779,10 @@ export function Spotlight(props: {
               Starting this line can pull {proposedPulls.length} card
               {proposedPulls.length === 1 ? "" : "s"} you already own. Nothing moves unless you tick
               it.
+              {proposedPulls.some((p) => p.notYetPlaced)
+                ? " One or more of these is not placed anywhere yet — still in the haul, not in a binder" +
+                  " or a bulk box — so find the card before you press Done."
+                : ""}
             </span>
           </div>
           {proposedPulls.map((pull) => {
@@ -1795,6 +1799,11 @@ export function Spotlight(props: {
                 <span className="pullfrom u">from {pull.fromLabel}</span>
                 {/* Worth saying on its own: taking it leaves the OTHER line a card short. */}
                 {pull.fromLine ? <span className="pullwarn u">in another line</span> : null}
+                {/* UIL-087: this card is shelved nowhere, so ticking it is also a job for HER — the
+                    line will record it as shelved in the back half, and it has to actually be there. */}
+                {pull.notYetPlaced ? (
+                  <span className="pullwarn u">not placed yet — find it first</span>
+                ) : null}
               </label>
             );
           })}

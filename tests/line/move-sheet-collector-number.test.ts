@@ -45,6 +45,7 @@ const slot = (card: CardIdentity): SlotView => ({
   note: null,
   wedgeLabel: null,
   moveable: true,
+  copyNotShelved: false,
 });
 
 const line = (s: SlotView): LineView => ({

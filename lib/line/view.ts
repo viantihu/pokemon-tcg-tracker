@@ -63,8 +63,20 @@ function toSlotView(s: SlotInput): SlotView {
     alternates: s.alternates,
     note: s.note,
     wedgeLabel: s.wedgeLabel,
-    // Placement override applies to ANY owned/shelved card (memory-confirmed, dev-spec §5 M7).
-    moveable: s.state === "filled" && Boolean(s.copyId) && s.copyShelved,
+    /**
+     * Placement override applies to ANY owned card (memory-confirmed, dev-spec §5 M7).
+     *
+     * `copyShelved` used to be required here, which made the ONE control that can release a slot
+     * unavailable for exactly the slots that are wrong (UIL-087): a slot reading `filled` whose copy was
+     * never shelved offered no Move, the "not in a line yet" list excludes it (that list wants a shelved
+     * copy with NO slot), and Lookup filters bulk copies out of the location it shows — so she had no
+     * route to fix it from anywhere in the app. `applyMove` already releases the slot correctly for this
+     * case (its positive-match guard holds), so widening this needs no new write path and makes the
+     * always-movable rule true of the app's own mistakes too.
+     */
+    moveable: s.state === "filled" && Boolean(s.copyId),
+    /** A filled slot whose card is not actually shelved — she needs to see WHICH rows are wrong. */
+    copyNotShelved: s.state === "filled" && Boolean(s.copyId) && !s.copyShelved,
   };
 }
 
