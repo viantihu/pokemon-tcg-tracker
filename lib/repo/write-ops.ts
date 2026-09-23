@@ -124,6 +124,13 @@ export type WriteOp =
       decision: string;
       reason: string;
       resolved_by: string;
+      /**
+       * Traceability only (0013, UIL-078) — nothing reads these back to decide behaviour. Carried by the op
+       * since 0021 so `applyDecision` could move inside the transaction WITHOUT dropping them (UIL-095);
+       * absent reads as NULL, so every earlier caller is unchanged.
+       */
+      line_id?: string | null;
+      line_slot_id?: string | null;
     }
   /** M5 backfill only — a reserved pocket run (0007). `copy_id` is set iff a duplicate was sacrificed. */
   | {
@@ -223,6 +230,29 @@ export type WriteOp =
    * like `delete_copy`.
    */
   | { op: "forget_removed_presence"; catalog_card_id: string; dex_variant_raw: string }
+  /**
+   * Mark a slot's OPEN wishlist row resolved (0021, UIL-095). Keyed on the slot, not on a wishlist row id:
+   * finding the row first is what made `applyDecision` read the whole table before deciding what to write.
+   * A slot with no open row is a silent no-op, and a second run matches nothing, so it is idempotent.
+   */
+  | { op: "resolve_wishlist_for_slot"; line_slot_id: string }
+  /**
+   * Create or refresh a slot's OPEN wishlist row (0021, UIL-095). One statement, conflicting on 0021's
+   * partial unique index `(owner_id, line_slot_id) where resolved_at is null`, so "update the open row, else
+   * insert" is decided by the row Postgres locks rather than by an earlier read. A RESOLVED row does not
+   * participate in the conflict, so it is never resurrected — a new open row is inserted beside it.
+   */
+  | {
+      op: "upsert_wishlist_for_slot";
+      line_slot_id: string;
+      required_dex_id: number | null;
+      required_type: string | null;
+      required_stage: string | null;
+      chosen_catalog_card_id: string | null;
+      alternate_catalog_card_ids: string[];
+      will_live_in_specialty: boolean;
+      held_for_binder_id: string | null;
+    }
   /**
    * Forget a learned set alias (0014, UIL-047 C3). Keyed on `set_alias`'s primary key; a key that
    * matches no row is a silent no-op like `delete_copy`. Emitted together with the re-classification of
