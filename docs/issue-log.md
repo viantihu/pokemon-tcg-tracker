@@ -7373,3 +7373,64 @@ ever TypeScript. The engine's oldest-first tie-break for two lines in one binder
 
 **Priority rationale.** High: a placement she has decided on is impossible, and it is the third report on
 the same card.
+
+## UIL-097 — A magic-link sign-in opened in a different browser (or app) fails, and two failed tries lock her out for an hour
+
+- **Reported:** 2026-09-23 (Karvi). In her words: "I tried logging into the app on Chrome on my
+  iPad. When I opened the "magic link" from the gmal app, it opened a chrome tab asking me to enter
+  my email again. At that point, I'd exhausted my attempts, so I was unable to log in from my iPad."
+- **Status:** Open — **config half assigned to Tech Lead (new), code half to Full Stack Dev - 2 after
+  UIL-096.** Config: change Testing's hosted Magic Link email template to link to
+  `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email` (the callback already verifies
+  that shape with `verifyOtp`, which needs no cookie, so the link works in any browser); confirm the Site
+  URL and redirect allow-list cover Testing's domain; report whether the project uses the built-in email
+  service (2 emails per hour for the whole project) and what raising it would take (a custom SMTP
+  provider); mirror the template into `supabase/config.toml` by PR so local and Production match, and add
+  it to the cutover runbook. Code: a six-digit code field on `/login` as a fallback that works across
+  devices (the email already carries `{{ .Token }}`, `otp_length = 6`), and a readable message when the
+  email limit is hit in place of Supabase's raw text. **Workaround today:** sign in on the laptop; on the
+  iPad, wait for the limit to reset, request the link in Chrome and paste the copied link into that same
+  tab.
+- **Priority:** High (Karvi's report; Senior BA agrees) — she cannot sign in on the device she uses at
+  the shelf, and two failed tries lock her out for up to an hour; a workaround exists and the fix is
+  mostly configuration, so it does not jump UIL-096.
+- **Area:** Auth, Login
+- **Env:** Testing, `develop` `d239d52`, Chrome on iPad via the Gmail app
+
+**One functional requirement, two symptoms — she cannot sign in on a second device.** The link failing
+and the lockout are the same underlying gap (opening a magic link in a browser other than the one that
+requested it), not two separate defects.
+
+**Root cause: the default PKCE flow ties the link to the cookie jar that requested it.**
+`signIn` ([`app/login/actions.ts:46-49`](<../app/login/actions.ts>:46)) calls `supabase.auth.signInWithOtp`
+via the `@supabase/ssr` server client, which uses PKCE by default: the code verifier is written as a
+cookie in whatever browser she typed her email into. The hosted Magic Link email template sends her to
+Supabase's verify endpoint, which redirects to `/auth/callback?code=…`. The callback
+([`app/auth/callback/route.ts:37-40`](<../app/auth/callback/route.ts>:37)) exchanges that code for a
+session via `exchangeCodeForSession`, which needs the verifier cookie. When the link opens in a
+different cookie jar — the Gmail app's in-app browser, a different browser, an incognito tab, or a
+home-screen app — the exchange fails and the callback redirects to `/login?error=auth`
+([`route.ts:47`](<../app/auth/callback/route.ts>:47)). The login page's error copy
+([`app/login/page.tsx:14`](<../app/login/page.tsx>:14)), "That sign-in link was invalid or has expired.
+Request a new one below.", is what reads to her as "asking me to enter my email again."
+
+**The callback already supports the cross-browser path — this is a configuration gap, not a missing
+feature.** The same handler accepts a `token_hash` + `type` link and verifies it with `verifyOtp`
+([`route.ts:41-43`](<../app/auth/callback/route.ts>:41)), which needs no cookie and works from any
+browser. Nothing currently sends that link shape: the hosted Magic Link template would need to point at
+`{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email`, the pattern Supabase documents for
+server-side auth, in place of its default `?code=` link.
+
+**"Exhausted my attempts" is Supabase's project-wide email rate limit, working as configured, on a
+limit that's too tight for a real retry.** `supabase/config.toml:198` sets `email_sent = 2` — two magic
+links per hour for the whole project, mirroring the hosted project's own setting. Two failed cross-device
+tries exhausts it, and the error she sees at that point is Supabase's own rate-limit message, not
+anything this app renders.
+
+**Suggested fix.** Switch the Magic Link template to the `token_hash` link shape above, which fixes the
+cross-browser failure outright — a configuration change to the hosted Supabase project, not application
+code. The rate limit is a separate, smaller call: raising `email_sent` (and its hosted-project
+equivalent) gives a real retry margin, but the `token_hash` fix removes most of the reason she'd need a
+second attempt at all.
+
+**Cross-reference:** none — first report of this mechanism.
