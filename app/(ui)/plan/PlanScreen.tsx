@@ -56,10 +56,20 @@ const SOURCES: { v: "bulk-bin" | "pack-rip" | "show" | "trade"; l: string }[] = 
   { v: "trade", l: "Trade" },
 ];
 
+/**
+ * A draft row's id. ALWAYS a uuid, because the server uses a typed row's id AS ITS COPY ID — that is the
+ * idempotency key that stops a retry writing a second copy (UIL-092 part 2, lib/plan/commit.ts
+ * `copyIdForTypedRow`). The old fallback emitted `d-<random>`, which is not a uuid and so would have had
+ * to be replaced server-side, giving up idempotency on exactly the browsers least likely to hold a
+ * connection. The fallback now shapes a v4 uuid by hand; it is not cryptographically strong, and does not
+ * need to be — it needs to be unique within one sitting and valid for a uuid column.
+ */
 function newId(): string {
-  return typeof crypto !== "undefined" && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `d-${Math.random().toString(36).slice(2)}`;
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  const hex = (n: number) =>
+    Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+  const variant = ((Math.floor(Math.random() * 4) + 8) & 0xf).toString(16); // 8, 9, a or b
+  return `${hex(8)}-${hex(4)}-4${hex(3)}-${variant}${hex(3)}-${hex(12)}`;
 }
 
 /* ------------------------- resuming a plan in progress (UIL-006) ------------------------- */
@@ -84,7 +94,15 @@ interface ResumeState {
   source: (typeof SOURCES)[number]["v"];
   notes: string;
   draft: DraftCard[];
-  plan: RunPlanResult;
+  /**
+   * Null when she has typed rows but not run the plan yet (UIL-092).
+   *
+   * It used to be required, and the parking effect skipped — and actively CLEARED — any state with no
+   * plan, on the reasoning that "a bare draft has nothing worth resuming". That is the one thing on this
+   * screen she cannot get back by pressing a button: a typed row exists nowhere but here until it is
+   * committed. Typing ten cards and reloading before pressing Run lost all ten.
+   */
+  plan: RunPlanResult | null;
   /** Check-off progress — the part whose loss actually hurts, mid-stack at the binder. */
   done: string[];
   cur: number;
@@ -114,22 +132,88 @@ export function subgroupKey(bandKey: string, kind: "basic" | "nonbasic"): string
   return `${bandKey}:${kind}`;
 }
 
-function readResume(stamp: string): ResumeState | null {
+/**
+ * What was parked, and whether the PLAN in it is still trustworthy (UIL-092).
+ *
+ * The stamp used to be all-or-nothing: any drift and the whole payload went in the bin, typed rows
+ * included. Two different things were being conflated. A plan computed against state that has since moved
+ * is genuinely worthless — that is what the stamp is for, and UIL-006 was fixed twice for showing one. A
+ * row she TYPED is not a derivation of anything; it is her input, and no amount of DB drift makes it stale.
+ * So drift now invalidates the derived half and keeps the typed half.
+ *
+ * Karvi lost a hand-typed haul this way: migration 0018 rewrote 545 copies from `bulk` to `haul`, the copy
+ * placement multiset is part of the stamp, so her next page load dropped everything she had typed.
+ */
+interface ParkedRun {
+  state: ResumeState;
+  /** False when the DB has moved under the parked run: the plan is stale, the typed rows are not. */
+  stampMatches: boolean;
+}
+
+function readResume(stamp: string): ParkedRun | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.sessionStorage.getItem(RESUME_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ResumeState;
-    // Any drift in the underlying state, or a shape we do not recognise, and we start clean.
-    if (!parsed || parsed.stamp !== stamp || !parsed.plan || !Array.isArray(parsed.draft)) {
+    // A shape we do not recognise is unusable and cannot be salvaged. Drift is NOT that: it is reported,
+    // and the blob is left in place for `restoreDraft` to rescue her typed rows from.
+    if (!parsed || !Array.isArray(parsed.draft)) {
       window.sessionStorage.removeItem(RESUME_KEY);
       return null;
     }
-    return parsed;
+    return { state: parsed, stampMatches: parsed.stamp === stamp };
   } catch {
     // Corrupt entry, quota error, or storage disabled — never break the screen over a cache.
     return null;
   }
+}
+
+/**
+ * The draft to open with: everything when the stamp holds, her typed rows plus fresh server rows when it
+ * does not (UIL-092 part 1).
+ *
+ * Exported and pure so the rescue is testable without a browser. Three rules:
+ *
+ *  - A DB-BACKED row (`existingCopyId`) is re-read from `initialPending`, and dropped if it is no longer
+ *    there. Those rows ARE derived state: the copy may have been placed, or removed, since she parked.
+ *  - A TYPED row is kept verbatim. It exists nowhere else.
+ *  - A typed row she ALREADY COMMITTED is dropped, and this is the subtle one: keeping it would put an
+ *    actionable row back on screen for a card already in a binder, so the reset itself would manufacture
+ *    the double it is meant to prevent. `done` only ever gains a row after the server confirmed the write,
+ *    so it is exactly the right filter. (Its DB-backed equivalent needs no rule: a committed pending copy
+ *    has a `placement_decision` and so has already left `initialPending`.)
+ *
+ * Her parked ORDER is preserved, with rows new since she parked appended — she works a physical stack in
+ * the order it sits, and re-sorting it mid-sitting would cost her her place.
+ */
+export function restoreDraft(
+  parked: ParkedRun | null,
+  initialPending: DraftCard[],
+): { draft: DraftCard[]; keptTyped: number } {
+  if (!parked) return { draft: initialPending, keptTyped: 0 };
+  if (parked.stampMatches) {
+    return {
+      draft: parked.state.draft,
+      keptTyped: parked.state.draft.filter((d) => !d.existingCopyId).length,
+    };
+  }
+  const committed = new Set(parked.state.done ?? []);
+  const pendingById = new Map(initialPending.map((p) => [p.id, p]));
+  const kept: DraftCard[] = [];
+  for (const row of parked.state.draft) {
+    if (row.existingCopyId) {
+      const fresh = pendingById.get(row.id);
+      if (fresh) kept.push(fresh);
+    } else if (!committed.has(row.id)) {
+      kept.push(row);
+    }
+  }
+  const keptIds = new Set(kept.map((d) => d.id));
+  return {
+    draft: [...kept, ...initialPending.filter((p) => !keptIds.has(p.id))],
+    keptTyped: kept.filter((d) => !d.existingCopyId).length,
+  };
 }
 
 function writeResume(state: ResumeState): void {
@@ -169,21 +253,33 @@ export function PlanScreen({
 }) {
   // Read once, during the first render, so a resumed plan is there in the first paint rather than
   // flashing an empty form and swapping. Safe in a lazy initializer: no effect, no cascading render.
-  const [resumed] = useState<ResumeState | null>(() => readResume(stateStamp));
+  const [parked] = useState<ParkedRun | null>(() => readResume(stateStamp));
+  /**
+   * The parked run, but only as far as it is still TRUSTWORTHY (UIL-092).
+   *
+   * Everything derived from DB state — the plan, the overrides she set against it, her cursor, her folds —
+   * reads from here, so a stamp mismatch drops all of it. The typed draft, her notes, the source and the
+   * haul id do not: they are her input and the sitting's identity, neither of which the database can
+   * invalidate. Keeping `haulId` matters concretely — dropping it would open a second haul mid-sitting.
+   */
+  const resumed = parked?.stampMatches ? parked.state : null;
+  const [restored] = useState(() => restoreDraft(parked, initialPending));
 
   const [source, setSource] = useState<(typeof SOURCES)[number]["v"]>(
-    resumed?.source ?? "bulk-bin",
+    parked?.state.source ?? "bulk-bin",
   );
-  const [notes, setNotes] = useState(resumed?.notes ?? "");
-  const [draft, setDraft] = useState<DraftCard[]>(resumed?.draft ?? initialPending);
+  const [notes, setNotes] = useState(parked?.state.notes ?? "");
+  const [draft, setDraft] = useState<DraftCard[]>(restored.draft);
   const [plan, setPlan] = useState<RunPlanResult | null>(resumed?.plan ?? null);
   // Whether the plan CURRENTLY on screen is the restored one. `resumed` stays non-null for the life of
   // the component, so using it directly would keep claiming "resumed" after she re-runs.
-  const [planIsResumed, setPlanIsResumed] = useState(resumed !== null);
+  const [planIsResumed, setPlanIsResumed] = useState(resumed?.plan != null);
   const [running, setRunning] = useState(false);
   // The id of the haul this sitting opened, threaded through every card so the sitting stays one haul
   // in the audit trail even though each card is its own transaction (UIL-027).
-  const [haulId, setHaulId] = useState<string | null>(resumed?.haulId ?? null);
+  // `parked`, not `resumed`: the sitting's identity survives DB drift. Dropping it on a stamp mismatch
+  // would open a SECOND haul for one sitting (UIL-027), splitting the audit trail she reads it from.
+  const [haulId, setHaulId] = useState<string | null>(parked?.state.haulId ?? null);
   /**
    * The stamp the parked run is keyed to. Shelving a card changes the copy count, which is part of the
    * stamp by design (UIL-006), so without rolling it forward the resume cache would be thrown away on
@@ -250,11 +346,17 @@ export function PlanScreen({
   const [pendingState, setPendingState] = useState<"loading" | "ready">("ready");
   const [seededCount, setSeededCount] = useState(initialPending.length);
 
-  // Park the run whenever it changes. Writing to sessionStorage is exactly what an effect is for —
-  // syncing React state out to an external system — and it sets no state, so it cannot cascade.
-  // Nothing is parked until a plan exists: a bare draft has nothing worth resuming.
+  /**
+   * Park the run whenever it changes. Writing to sessionStorage is exactly what an effect is for — syncing
+   * React state out to an external system — and it sets no state, so it cannot cascade.
+   *
+   * PARKED WITH OR WITHOUT A PLAN (UIL-092 part 1). This used to open with `if (!plan) { clearResume() }`,
+   * justified as "a bare draft has nothing worth resuming". It was backwards: the plan is the one part she
+   * can rebuild by pressing a button, and the typed rows are the part that exists nowhere else. So a bare
+   * draft is parked, and the only state that clears the key is having genuinely nothing to keep.
+   */
   useEffect(() => {
-    if (!plan) {
+    if (!plan && draft.length === 0) {
       clearResume();
       return;
     }

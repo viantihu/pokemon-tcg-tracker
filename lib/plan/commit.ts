@@ -131,6 +131,12 @@ export interface CommitResult {
   /** Null when the pass only routed existing copies, so no acquisition event happened. */
   haulId: string | null;
   counts: CommitCounts;
+  /**
+   * True when this exact draft row had already been committed, so nothing was written (UIL-092 part 2).
+   * Every count is zero. The caller treats it as success — the card IS shelved — rather than as an error,
+   * which is the point: the failure mode being fixed is a successful write reported as a failure.
+   */
+  alreadyCommitted?: boolean;
 }
 
 /**
@@ -140,6 +146,29 @@ export interface CommitResult {
  */
 export function existingCopyIds(draft: DraftItem[]): string[] {
   return draft.map((d) => d.existingCopyId).filter((id): id is string => !!id);
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The copy id a TYPED draft row writes: the row's own id, not a fresh uuid (UIL-092 part 2).
+ *
+ * This is the whole idempotency key. A typed row has no `existingCopyId` to route, so every attempt used
+ * to mint a new uuid — and the one attempt that matters is the SECOND one. The per-card commit's `catch`
+ * leaves the row actionable after a transport failure, so a write that succeeded server-side but lost its
+ * response was re-pressed and inserted a second copy. Karvi hit exactly that: two hand-added Meditite
+ * copies for one card she typed once. Deriving the id from the row makes the retry collide with itself
+ * instead, and `commitCardPlacement` turns that collision into "already done" before writing anything.
+ *
+ * Keyed on the ROW, never on the catalog card: she legitimately owns duplicates, and two typed rows of the
+ * same printing must still become two copies. Two presses of ONE row must not.
+ *
+ * A row id that is not a uuid falls back to a fresh one. The client generates uuids, but its pre-UIL-092
+ * fallback did not, and a parked draft from such a build would otherwise fail the whole transaction on a
+ * uuid column — losing the card to save the retry. That path gives up idempotency, and only that path.
+ */
+export function copyIdForTypedRow(incomingId: string): string {
+  return UUID_RE.test(incomingId) ? incomingId : crypto.randomUUID();
 }
 
 /**
@@ -262,6 +291,32 @@ export async function commitCardPlacement(
 
   const draft = [input.card];
   const pc = await loadPlanContext(db, { excludeOwnedCopyIds: existingCopyIds(draft) });
+
+  /**
+   * ALREADY COMMITTED, so write nothing (UIL-092 part 2).
+   *
+   * A typed row writes its copy at its OWN id (`copyIdForTypedRow`), so a copy already sitting at that id
+   * means this exact row was already committed — a retry after a lost response, or a second press. The
+   * write is not repeated and, crucially, no second copy is minted. Costs no I/O: `loadPlanContext` has
+   * already read every copy, and `copyRowById` is built before the `excludeOwnedCopyIds` filter.
+   *
+   * The existing row's `haul_id` goes back rather than the caller's: a client whose response was lost has
+   * no haul id, and returning null would let the next card open a SECOND haul for one sitting (UIL-027).
+   *
+   * Only for a typed row. A routed copy (`existingCopyId`) re-runs `update_copy` with the same patch,
+   * which is already idempotent, and its id belongs to a copy that legitimately existed beforehand.
+   */
+  if (!input.card.existingCopyId) {
+    const already = pc.copyRowById.get(copyIdForTypedRow(input.card.id));
+    if (already) {
+      return {
+        haulId: already.haul_id ?? input.haulId ?? null,
+        counts: { copies: 0, routed: 0, lines: 0, slots: 0, wishlist: 0, decisions: 0 },
+        alreadyCommitted: true,
+      };
+    }
+  }
+
   const { planned } = planFromDraft(pc, draft);
   // Consent rides on the planned card, so `writeNewLine` never has to guess (UIL-061).
   const withConsent = planned.map((pl) => ({ ...pl, confirmedPulls: input.confirmedPulls ?? [] }));
@@ -757,7 +812,7 @@ function emitIncomingCopy(
     return p.existingCopyId;
   }
 
-  const copyId = crypto.randomUUID();
+  const copyId = copyIdForTypedRow(p.incomingId);
   ops.push({
     op: "insert_copy",
     id: copyId,
