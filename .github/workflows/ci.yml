@@ -94,7 +94,10 @@ jobs:
       - name: supabase/config.toml loads the way migrate will load it
         run: |
           set -uo pipefail
-          out=$(supabase db push --db-url "postgresql://ci:ci@127.0.0.1:1/ci" --dry-run 2>&1)
+          # The dry run ALWAYS exits non-zero (the connect is refused by design), and Actions
+          # runs `run:` under `bash -e`, which would end the step at this assignment before
+          # the output is inspected. `|| true` keeps the captured output; the verdict is below.
+          out=$(supabase db push --db-url "postgresql://ci:ci@127.0.0.1:1/ci" --dry-run 2>&1) || true
           printf '%s\n' "$out" | tail -5
           if printf '%s' "$out" | grep -q 'LegacyDbConnectError'; then
             echo "config.toml loaded; the connect refusal is the expected end of this check."
