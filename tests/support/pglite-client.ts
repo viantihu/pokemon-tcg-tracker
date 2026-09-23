@@ -36,7 +36,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { DbClient } from "@/lib/repo";
 
 type Filter =
-  | { kind: "eq" | "in"; col: string; value: unknown }
+  | { kind: "eq" | "neq" | "in"; col: string; value: unknown }
   | { kind: "is"; col: string }
   | { kind: "not-null"; col: string }
   | { kind: "ilike"; col: string; pattern: string }
@@ -211,6 +211,20 @@ class PgQuery {
     return this;
   }
 
+  /**
+   * `<> value`. PostgREST's `neq`, added for `copyRepo.ownedCatalogCardIdSet`'s "every role except the
+   * one that is not a card" (UIL-093) — asking it as a list of the roles that DO count is what went
+   * stale when UIL-088 added a third one.
+   *
+   * SQL's three-valued logic is the same here as in production: `col <> v` is NULL, not true, for a NULL
+   * column, so a nullable column's NULL rows do not match. Every caller so far uses it on `role`, which
+   * is NOT NULL.
+   */
+  neq(col: string, value: unknown): this {
+    this.filters.push({ kind: "neq", col, value });
+    return this;
+  }
+
   /** `IS NULL` — narrow to that one shape, the only one `listShelvedInSection`'s `half: null` needs;
    * `= NULL` is never true in SQL, so this cannot be `eq()` with a `null` value. */
   is(col: string, value: null): this {
@@ -294,6 +308,9 @@ class PgQuery {
       if (f.kind === "eq") {
         params.push(f.value);
         where.push(`${quoteIdent(f.col)} = $${params.length}`);
+      } else if (f.kind === "neq") {
+        params.push(f.value);
+        where.push(`${quoteIdent(f.col)} <> $${params.length}`);
       } else if (f.kind === "is") {
         where.push(`${quoteIdent(f.col)} is null`);
       } else if (f.kind === "not-null") {

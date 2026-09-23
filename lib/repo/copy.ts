@@ -36,18 +36,28 @@ export const copyRepo = {
   },
 
   /**
-   * Every catalog card she holds ANYWHERE, at least once — shelved or bulk (a `block` marks a slot
-   * no card can ever fill, not a physical card she owns, same exclusion as UIL-048's
-   * `findExistingCopy`). Paged past the row cap: the search grid (UIL-039) uses this both to badge
-   * "owned" on a page of results and, as an id list, to filter to owned/unowned at the DB level so
-   * pagination stays correct (excluding after the fact would make a page's count a lie).
+   * Every catalog card she holds ANYWHERE, at least once. Paged past the row cap: the search grid
+   * (UIL-039) uses this both to badge "owned" on a page of results and, as an id list, to filter to
+   * owned/unowned at the DB level so pagination stays correct (excluding after the fact would make a
+   * page's count a lie).
+   *
+   * ASKED AS "NOT A BLOCK", not as a list of the roles that count (UIL-093). It was
+   * `.in("role", ["shelved", "bulk"])`, which silently stopped meaning "anywhere" the moment UIL-088
+   * added a third place a card can be: 545 cards sitting in her haul badged as NOT OWNED on the one
+   * screen she uses to check. Dex is the source of truth for what she owns, and a card an import
+   * created is owned — it simply has not been placed yet.
+   *
+   * `block` stays excluded, and it is the only exclusion, because it is the only role that is not a
+   * card: it marks a pocket run no card can ever fill (system-design §4). Same exclusion as UIL-048's
+   * `findExistingCopy`, and phrasing both as "not a block" is what keeps them from drifting apart
+   * again the next time a role is added.
    */
   async ownedCatalogCardIdSet(db: DbClient): Promise<Set<string>> {
     const rows = await pageFiltered<{ catalog_card_id: string }>("copy", (from, to) =>
       db
         .from("copy")
         .select("catalog_card_id")
-        .in("role", ["shelved", "bulk"])
+        .neq("role", "block")
         .order("id", { ascending: true })
         .range(from, to),
     );

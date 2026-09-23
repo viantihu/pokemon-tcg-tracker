@@ -12,8 +12,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
-import type { DbClient } from "@/lib/repo";
-import { applyCollectionLog } from "@/lib/coll";
+import type { DbClient, Row } from "@/lib/repo";
+import {
+  ALREADY_OWNED_IN_HAUL_MESSAGE,
+  applyCollectionLog,
+  describeExistingCopyLocation,
+} from "@/lib/coll";
 import {
   asOwner,
   asSuperuser,
@@ -120,6 +124,60 @@ describe("applyCollectionLog", () => {
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toContain("bulk box");
     expect(await copyCountFor("cardA")).toBe(1);
+  });
+
+  it("refuses when the copy she owns is IN HER HAUL, and sends her to the Haul Plan not to Move", async () => {
+    /**
+     * UIL-093, a UIL-088 regression. `findExistingCopy` filtered `role === "shelved" || role === "bulk"`,
+     * so an unplaced copy came back as `kind: "none"` and this path INSERTED A SECOND COPY of a card she
+     * already owns — the exact duplicate the function exists to refuse, and the same class of double she
+     * reported on the Haul Plan.
+     *
+     * The wording is its own sentence, not the "it's in <place>" one: a card in the haul is not anywhere,
+     * so "Use Move to bring it here" would send her to the wrong screen for a card the app has never filed.
+     */
+    await seedCatalogCards(db, ["cardA"]);
+    await seedBinders(db, [{ id: SPEC, type: "specialty", name: "Specialty A" }]);
+    await seedCollections(db, [
+      { id: COL, name: "Matsuno", targetCatalogCardIds: [], currentBinderIds: [SPEC] },
+    ]);
+    await db.exec(`
+      insert into copy (id, owner_id, catalog_card_id, role)
+        values ('${CA1}', '${OWNER}', 'cardA', 'haul');
+    `);
+
+    await asOwner(db);
+    const res = await applyCollectionLog(pgliteClient(db), OWNER, COL, "cardA");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error).toBe(ALREADY_OWNED_IN_HAUL_MESSAGE);
+      expect(res.error).toContain("waiting to be placed");
+      expect(res.error).not.toMatch(/bulk box/); // it is NOT in the box; she never put it there
+      expect(res.error).not.toMatch(/Move/);
+    }
+    expect(await copyCountFor("cardA")).toBe(1); // pre-fix: 2
+    expect(await targetsOf(COL)).toEqual([]); // and the tag is untouched, like every other refusal
+  });
+
+  it("describeExistingCopyLocation never calls the haul the bulk box, for any caller", async () => {
+    /**
+     * `applyCollectionLog` answers the haul case before reaching this helper, so this branch has no
+     * caller that can reach it today — a mutation removing it survives the suite through that path. It is
+     * pinned directly instead, because the helper is EXPORTED: without the branch, the first future caller
+     * gets "the bulk box" for a card she never put in a box, which is the whole class of false-placement
+     * claim UIL-087, UIL-088 and this entry are about.
+     */
+    await seedCatalogCards(db, ["cardA"]);
+    await asSuperuser(db);
+    await db.exec(`
+      insert into copy (id, owner_id, catalog_card_id, role)
+        values ('${CA1}', '${OWNER}', 'cardA', 'haul');
+    `);
+    const rows = await db.query<Row<"copy">>(`select * from copy where id = '${CA1}'`);
+    await asOwner(db);
+    const where = await describeExistingCopyLocation(pgliteClient(db), rows.rows[0]);
+    expect(where).toBe("your haul, waiting to be placed");
+    expect(where).not.toContain("bulk");
   });
 
   it("inserts a real copy when she owns none, exactly as before", async () => {

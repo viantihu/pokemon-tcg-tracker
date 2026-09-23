@@ -185,6 +185,31 @@ describe("shim contract · it refuses shapes it does not model, rather than gues
     const { data } = await loose().from("catalog_card").select("tcgdex_id").in("tcgdex_id", []);
     expect(data).toEqual([]);
   });
+
+  it("neq() is SQL's `<>`, so a NULL column does NOT match — three-valued logic, not JS", async () => {
+    /**
+     * Added with `copyRepo.ownedCatalogCardIdSet`'s "every role except the one that is not a card"
+     * (UIL-093). The trap worth pinning is that `<>` against NULL is NULL, not true: on a nullable
+     * column `neq` silently drops the NULL rows, where a reader expecting JS `!==` would count them.
+     * `role` is NOT NULL so the repo is safe, but the next caller's column may not be.
+     */
+    await pg.exec(`
+      insert into catalog_card (tcgdex_id, name, set_id)
+        values ('neq-a', 'Has a set', 'sv09'), ('neq-b', 'No set at all', null);
+    `);
+    const { data } = await loose()
+      .from("catalog_card")
+      .select("tcgdex_id")
+      .neq("set_id", "sv09")
+      .in("tcgdex_id", ["neq-a", "neq-b"]);
+    expect(data).toEqual([]); // 'neq-a' excluded by value; 'neq-b' excluded because NULL <> 'sv09' is NULL
+    const kept = await loose()
+      .from("catalog_card")
+      .select("tcgdex_id")
+      .neq("set_id", "other")
+      .in("tcgdex_id", ["neq-a", "neq-b"]);
+    expect(kept.data).toEqual([{ tcgdex_id: "neq-a" }]);
+  });
 });
 
 // Keep the OWNER import meaningful for readers: RLS-scoped reads above run under it via asOwner().
