@@ -313,6 +313,14 @@ export async function applyDecision(
     const patch: Record<string, unknown> = {};
     if (p.state !== undefined) patch.state = p.state;
     if (p.copyId !== undefined) patch.copy_id = p.copyId;
+    /**
+     * UIL-091: a pick re-points this. THE COLUMN'S MEANING, stated here because it is the write site and
+     * because 0019 and every future reader depend on it: a NULL target means "the cheapest at load" — the
+     * loader resolves it from `altOptions` each time, so it follows prices and new printings — and a STORED
+     * target means "she chose this". That is why migration 0019 RELEASED foreign-locale targets instead of
+     * re-pointing them (none was her choice), and why `pickedTargetPatch` emits only on a validated explicit
+     * pick: stamping the engine's current default would freeze a live answer into a decision nobody made.
+     */
     if (p.targetCatalogCardId !== undefined) patch.target_catalog_card_id = p.targetCatalogCardId;
     if (p.note !== undefined) patch.note = p.note;
     if (p.resolvedDecisionKind !== undefined) patch.resolved_decision_kind = p.resolvedDecisionKind;
