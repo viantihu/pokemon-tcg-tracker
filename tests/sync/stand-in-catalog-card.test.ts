@@ -111,7 +111,7 @@ describe("0015 · the migration", () => {
 });
 
 describe("UIL-060 · create a stand-in and match the entry to it, in one transaction", () => {
-  it("stand-in row + presence group + N bulk copies + entry RESOLVED pointing at it", async () => {
+  it("stand-in row + presence group + N in-haul copies + entry RESOLVED pointing at it", async () => {
     const res = await manualMatchStandIn(pgliteClient(db), ENTRY, FOSSIL);
     expect(isStandInId(res.standInId)).toBe(true);
     expect(res.created).toBe(2);
@@ -132,9 +132,15 @@ describe("UIL-060 · create a stand-in and match the entry to it, in one transac
       image_url: null,
       card_class: "standard",
     });
+    // UIL-088: identifying a card is not placing it. Both copies land IN HAUL — not `'bulk'`, which would
+    // claim she had filed them in the bulk box, and which is what made the Haul Plan read an imported card
+    // as "already placed" (UIL-087). Running through the real schema also proves 0018's `copy_role_check`
+    // admits the new value.
     expect(
-      await q(`select count(*)::int as n from copy where catalog_card_id = '${res.standInId}'`),
-    ).toEqual([{ n: 2 }]);
+      await q(
+        `select role, count(*)::int as n from copy where catalog_card_id = '${res.standInId}' group by role`,
+      ),
+    ).toEqual([{ role: "haul", n: 2 }]);
     expect(
       await q(
         `select desired_count from presence_group where catalog_card_id = '${res.standInId}'`,

@@ -126,15 +126,15 @@ export interface ProposedPull {
   /** True when it currently occupies another line's slot — worth saying, it leaves that line short. */
   fromLine: boolean;
   /**
-   * The card is not shelved anywhere, so confirming this pull is an instruction to HER as much as a
-   * write: she has to find the card before the line holds it (UIL-087). A front-half pull is a card she
-   * can see on a page; this one is not.
+   * The card is in the BULK BOX, so confirming this pull is an instruction to HER as much as a write: she
+   * has to dig the card out before the line holds it (UIL-087). A front-half pull is a card she can see on
+   * a page; this one is in a pile.
    *
-   * NOT called "in the bulk box": `role: 'bulk'` currently means both "filed in a bulk box" and "an
-   * import made this and it is not placed anywhere yet", and it is nearly always the second here
-   * (Karvi's ruling, 2026-09-22 — the conflation itself is UIL-088).
+   * It said "not yet placed (still in the haul)" until UIL-088, because `role: 'bulk'` meant both "filed
+   * in a box" and "imported, never placed", and naming the box would have asserted a placement she never
+   * made. With the states separated, an in-haul copy is never proposed as a pull, so this is the box.
    */
-  notYetPlaced: boolean;
+  needsFetching: boolean;
 }
 
 /**
@@ -250,9 +250,14 @@ function bandMismatchChoiceFor(result: CascadeResult, pc: PlanContext): BandMism
  * uses, which is the drift UIL-045 exists to prevent.
  *
  * Deliberately NOT filtered by `pullFrom`. `pullFrom` is only set for a front-half shelved copy, but the
- * writer moves ANY owned copy the slot names — `ownedAt` matches species + band with no role filter — so
- * a copy in bulk, a block, a specialty binder or another line's slot is equally in scope. Disclosing only
- * the `pullFrom` ones would under-report exactly the cases nobody expected (UIL-061, UIL-062).
+ * writer moves ANY owned copy the slot names — `ownedAt` matches on species + band, and the only roles it
+ * refuses are a block and an in-haul copy (UIL-088) — so a copy in bulk, in a specialty binder or in
+ * another line's slot is equally in scope. Disclosing only the `pullFrom` ones would under-report exactly
+ * the cases nobody expected (UIL-061, UIL-062).
+ *
+ * Which is why `needsFetching` and the in-haul branch of `describeCurrentPlacement` are asked as precise
+ * questions rather than as "anything that is not shelved": the roles that can arrive here are shelved and
+ * bulk today, and a row that cannot arrive must still be labelled honestly if the engine ever widens.
  */
 function proposedPullsFor(
   result: CascadeResult,
@@ -273,7 +278,7 @@ function proposedPullsFor(
       fromLabel: describeCurrentPlacement(row, pc),
       stageIndex: slot.stageIndex,
       fromLine: row.line_slot_id !== null,
-      notYetPlaced: row.role !== "shelved",
+      needsFetching: row.role === "bulk",
     });
   }
   return out;
@@ -282,18 +287,13 @@ function proposedPullsFor(
 /**
  * Where a copy sits right now, in the screen's own vocabulary.
  *
- * `role: 'bulk'` is AMBIGUOUS today and this label must not resolve the ambiguity by guessing (UIL-087
- * follow-up): it means both "filed in a bulk box" and "an import created this and it is not placed
- * anywhere yet", and for a proposed pull it is usually the second. Saying "Bulk box" would assert a
- * placement she never made — the same false claim as the "already placed" slot note this entry removed.
- * So it reads as the honest either/or until the two states are actually separated (UIL-088), and the
- * row's `notYetPlaced` flag is what the consent step acts on.
- *
- * The other branches are unambiguous and unchanged. A bulk DESTINATION she chose is a different thing
- * and still reads "Bulk box" (`describeMove`), correctly: that one she did choose.
+ * This read "Bulk box or still in the haul" under UIL-087, because `role: 'bulk'` meant both things and
+ * naming either would have been a guess. UIL-088 separated them, so each answer is exact again — and an
+ * in-haul copy never reaches here as a pull, because the engine no longer proposes one.
  */
 function describeCurrentPlacement(row: Row<"copy">, pc: PlanContext): string {
-  if (row.role === "bulk") return "Bulk box or still in the haul";
+  if (row.role === "haul") return "In haul (not placed yet)";
+  if (row.role === "bulk") return "Bulk box";
   if (row.role === "block") return "A binder block";
   const binder = (row.binder_id && pc.lookups.binderNameById.get(row.binder_id)) || "Binder";
   const half = row.binder_half === "front" ? "Front" : row.binder_half === "back" ? "Back" : null;

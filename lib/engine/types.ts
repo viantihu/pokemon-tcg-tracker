@@ -15,8 +15,32 @@ export type CardClass = "standard" | "specialty";
 /** Physical printing variant (system-design §4 `variants`). */
 export type Variant = "normal" | "holo" | "reverse" | "firstEdition" | "wPromo";
 
-/** Where a physical copy currently lives (system-design §4 `Copy.role`). */
-export type Role = "shelved" | "bulk" | "block";
+/**
+ * Where a physical copy currently lives (system-design §4 `Copy.role`), including "nowhere yet".
+ *
+ * `'haul'` (UIL-088) is Karvi's third state: a card an import created that she has NOT placed anywhere.
+ * It used to be written as `'bulk'`, which conflated two different things — a card she deliberately filed
+ * in a bulk box, and a card the app has never put anywhere — and that conflation was UIL-087's cause (a):
+ * the engine read an unplaced copy as "already placed".
+ *
+ * A NOTE ON VOCABULARY, because her word and this value differ in scope and the difference is deliberate.
+ * She says SHELVED for "placed anywhere, including a bulk box"; this value has always meant "in a binder"
+ * and 67 sites read it that way, so renaming it would be churn without benefit. `isPlaced` below is the
+ * single expression of HER word, and every site that wants "is this card anywhere yet" goes through it.
+ */
+export type Role = "haul" | "shelved" | "bulk" | "block";
+
+/**
+ * Her SHELVED: the card is somewhere — a binder, a bulk box, or a reserved pocket run as a block.
+ *
+ * The bridge between her vocabulary and the column's (see `Role`). ONE definition, so no site re-derives
+ * "not placed" from a conjunction of columns: `copyRepo.listUnplaced` used to spell it as
+ * `role = 'bulk' AND binder_id IS NULL AND line_slot_id IS NULL`, which is the same question asked in a
+ * way that could drift from every other asking of it.
+ */
+export function isPlaced(role: Role): boolean {
+  return role !== "haul";
+}
 
 /** General binders have two halves; specialty binders are treated as a single section. */
 export type BinderHalf = "front" | "back";

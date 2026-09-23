@@ -70,7 +70,8 @@ describe("UIL-031 — copyRepo.listUnplaced pages past a single page", () => {
     // timestamps would never exercise the tiebreaker the ordering contract depends on.
     const unplaced: Row[] = Array.from({ length: COUNT }, (_, i) => ({
       id: `c${String(i).padStart(5, "0")}`,
-      role: "bulk",
+      // UIL-088: "unplaced" is its own role now, not `'bulk'` with null columns.
+      role: "haul",
       binder_id: null,
       line_slot_id: null,
       created_at: `2026-01-${String(1 + Math.floor(i / 24)).padStart(2, "0")}`,
@@ -91,7 +92,7 @@ describe("UIL-031 — copyRepo.listUnplaced pages past a single page", () => {
     const out = await copyRepo.listUnplaced(db);
 
     expect(out).toHaveLength(COUNT);
-    expect(out.every((r) => r.role === "bulk")).toBe(true);
+    expect(out.every((r) => r.role === "haul")).toBe(true);
     // The point of this fix: multiple pages walked, not one capped page.
     expect(rangeCalls.length).toBeGreaterThan(1);
 

@@ -17,6 +17,7 @@
  */
 
 import { band, type Band } from "./bands";
+import { isPlaced } from "./types";
 import type {
   CatalogCard,
   IncomingCard,
@@ -126,7 +127,16 @@ function sameColour(node: ChainNode, b: Band, map: TypeColorMap) {
  */
 function ownedAt(node: ChainNode, b: Band, owned: OwnedCopy[], map: TypeColorMap) {
   return owned.find(
-    (o) => o.role !== "block" && o.card.dexId.includes(node.dexId) && band(o.card, map) === b,
+    (o) =>
+      o.role !== "block" &&
+      // IN-HAUL IS PLACEABLE, BULK IS PLACED (UIL-088). A bulk copy has a home she chose, so offering to
+      // pull it into a line is a real proposal. An in-haul copy has no home at all: it is the Haul Plan's
+      // queue, and proposing it here would be the app placing a card behind her back — the role filter
+      // that was rightly declined for UIL-087 becomes expressible once the two states are separate.
+      // Asked through `isPlaced`, which is her SHELVED, so this reads as the question it is.
+      isPlaced(o.role) &&
+      o.card.dexId.includes(node.dexId) &&
+      band(o.card, map) === b,
   );
 }
 
@@ -316,10 +326,15 @@ export function generateSlots(
          * she never made. That conflation is UIL-088; this wording is true under today's data and under
          * the model that replaces it.
          */
+        // UIL-088 makes this exact again. UIL-087 had to say "not yet placed (still in the haul)" because
+        // `role: 'bulk'` meant either "filed in a box" or "imported, unplaced", and asserting the box
+        // would have claimed a placement she never made. Now the two are separate values and an in-haul
+        // copy is never proposed as a pull at all, so a bulk pull really is in the bulk box, and saying so
+        // is both true and more useful: it tells her where to go and get it.
         note: fromFront
           ? "pull from front half"
           : ownedCopy.role === "bulk"
-            ? "not yet placed (still in the haul)"
+            ? "from the bulk box"
             : "already placed",
       });
       return;

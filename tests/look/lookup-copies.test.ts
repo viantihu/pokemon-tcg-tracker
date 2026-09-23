@@ -67,6 +67,21 @@ describe("UIL-051 · a copy's present home, labelled and as a destination", () =
     expect(copyHomeDestination(c, NAMES)).toEqual({ kind: "bulk" });
   });
 
+  it("in-haul is NOT the bulk box, and the picker opens on nothing (UIL-088)", () => {
+    // Pre-UIL-088 an import stored this copy as `'bulk'`, so this row read "Bulk box (not shelved)" and
+    // the picker opened pre-selected on bulk — a placement she never made, offered back to her as fact.
+    const c = home({ role: "haul", binderId: null, binderHalf: null, colorBand: null });
+    expect(copyHomeLabel(c, NAMES)).toBe("In haul (not placed yet)");
+    expect(copyHomeDestination(c, NAMES)).toBeUndefined();
+    // Still movable — the whole point of the row (always-movable).
+    expect(toMovableCopy(c, NAMES)).toEqual({
+      copyId: "c1",
+      role: "haul",
+      currentLabel: "In haul (not placed yet)",
+      initial: undefined,
+    });
+  });
+
   it("a binder block is named as one and has no destination — the row carries the remedy instead", () => {
     const c = home({ role: "block", binderHalf: null, colorBand: null });
     expect(copyHomeLabel(c, NAMES)).toBe("Main · binder block");

@@ -241,7 +241,10 @@ export async function executeApply(
       variant: c.variant,
       dex_variant_raw: c.dexVariantRaw,
       presence_group_id: groupId,
-      role: "bulk", // unplaced: not shelved anywhere until the cascade routes it
+      // UIL-088: `'haul'`, not `'bulk'`. An import has not PLACED this card anywhere — the bulk box is a
+      // real place she chooses, and calling this "bulk" was the conflation that let the engine read an
+      // unplaced copy as "already placed" (UIL-087's cause (a)).
+      role: "haul",
       acquired_at: now,
     });
     createdCopyIds.push(id);
@@ -590,7 +593,8 @@ async function matchOps(
       variant: "normal",
       dex_variant_raw: entry.dex_variant_raw,
       presence_group_id: groupId,
-      role: "bulk",
+      // A manual or stand-in match identifies the card; it does not place it (UIL-088).
+      role: "haul",
       acquired_at: now,
     });
   }

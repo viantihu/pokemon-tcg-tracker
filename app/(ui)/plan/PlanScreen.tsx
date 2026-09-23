@@ -1160,6 +1160,23 @@ function PlanView(props: {
     .map((g) => g.bandKey);
   const curBandKey = flatItems[cur]?.bandKey ?? null;
 
+  /**
+   * Her three states for the cards in THIS sitting, in her own words (UIL-088): a card is in the haul
+   * until she places it, and then it is in a binder or in the bulk box. `done` is the written set
+   * (UIL-027), so "in haul" is simply what she has not got to yet — no new read, and it cannot disagree
+   * with the queue, which is the same fact from the other side.
+   */
+  const placedByKind = flatItems.reduce(
+    (acc, it) => {
+      if (!done.has(it.incomingId)) return acc;
+      const over = overrides[it.incomingId];
+      const toBulk = over ? over.kind === "bulk" : it.action === "BULK" || it.action === "SWAP";
+      return toBulk ? { ...acc, bulk: acc.bulk + 1 } : { ...acc, binder: acc.binder + 1 };
+    },
+    { binder: 0, bulk: 0 },
+  );
+  const haulCounts = `In haul ${total - doneCount} · In a binder ${placedByKind.binder} · In the bulk box ${placedByKind.bulk}`;
+
   const a = plan.summary.byAction;
   const back = (a.FILL ?? 0) + (a.NEWLINE ?? 0) + (a.PULL ?? 0);
   const destSummary = `Front ${a.FRONT ?? 0} · Back ${back} · Specialty ${a.SPEC ?? 0} · Bulk ${
@@ -1362,6 +1379,8 @@ function PlanView(props: {
       </div>
 
       <div className="foot">BAND → BASIC / NON-BASIC → A–Z · WORK TOP TO BOTTOM</div>
+      {/* UIL-088: the three states she named, for this sitting. A card is IN HAUL until placed. */}
+      <div className="foot u">{haulCounts}</div>
     </>
   );
 }
@@ -1779,9 +1798,9 @@ export function Spotlight(props: {
               Starting this line can pull {proposedPulls.length} card
               {proposedPulls.length === 1 ? "" : "s"} you already own. Nothing moves unless you tick
               it.
-              {proposedPulls.some((p) => p.notYetPlaced)
-                ? " One or more of these is not placed anywhere yet — still in the haul, not in a binder" +
-                  " or a bulk box — so find the card before you press Done."
+              {proposedPulls.some((p) => p.needsFetching)
+                ? " One or more is in the bulk box rather than on a page, so dig the card out before you" +
+                  " press Done."
                 : ""}
             </span>
           </div>
@@ -1801,8 +1820,8 @@ export function Spotlight(props: {
                 {pull.fromLine ? <span className="pullwarn u">in another line</span> : null}
                 {/* UIL-087: this card is shelved nowhere, so ticking it is also a job for HER — the
                     line will record it as shelved in the back half, and it has to actually be there. */}
-                {pull.notYetPlaced ? (
-                  <span className="pullwarn u">not placed yet — find it first</span>
+                {pull.needsFetching ? (
+                  <span className="pullwarn u">in the bulk box — dig it out first</span>
                 ) : null}
               </label>
             );
