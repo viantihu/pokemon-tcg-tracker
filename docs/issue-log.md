@@ -7507,3 +7507,73 @@ it is scoped as its own PR with a design proposal first rather than folded into 
 **Cross-reference UIL-088** (Dex as source of truth, the ruling this entry applies), **UIL-089** (the
 removed-presence merge that is the only current cleanup for a hand-created duplicate), and **UIL-092**
 (the Meditite incident that surfaced this for the Haul Plan specifically).
+
+## UIL-099 — The legitimate card-entry paths (import, Retry, manual match) can still create more copies than Dex lists: a re-applied import bundle doubles everything, and a manual match adds on top of what the key already holds and ignores a removal
+
+- **Reported:** 2026-09-23 (not from Karvi — found by the Tech Lead's card-entry audit, the audit her
+  UIL-098 ruling charged)
+- **Status:** Open — **assigned to Full Stack Dev - 2; E5 first, right after UIL-095, because her first
+  import after the 2026-09-23 wipe is imminent; E1 and E2 after UIL-098 parts 2 and 3; E3 and E4 are
+  tests, fixed only if they fail.** E5: the apply re-checks freshness server-side and refuses a stale or
+  already-applied bundle in the same transaction, the second apply of one preview writes nothing; E1: a
+  manual match inserts desired minus current for the key; E2: a manual match honours the removal memory
+  and the Sync screen says so, with a way to forget it. The Tech Lead reviews each PR against its audit
+  before QA. **Until E5 ships:** apply an import once, from one tab, and wait for the result before
+  pressing anything again.
+- **Priority:** High (Senior BA's read) — E5 can double her entire collection with one extra click on
+  the import she is about to run; E1 and E2 create inventory Dex does not list, the class UIL-098 exists
+  to close.
+- **Area:** Sync
+- **Env:** Testing, `develop` `c255c65`
+
+**Even the paths that are supposed to create copies can still create too many — a different failure mode
+from UIL-098's, which was about paths that should create none.** Five findings from the Tech Lead's
+audit, confirmed independently against source at `c255c65`:
+
+**E5 — applying a sync preview twice writes everything twice, because nothing checks it wasn't already
+applied.** `applySync` ([`app/(ui)/sync/actions.ts:77-83`](<../app/(ui)/sync/actions.ts>:77)) calls
+`executeApply` ([`lib/sync/exec.ts:151-156`](../lib/sync/exec.ts:151)), which inserts one copy per entry
+in `plan.creates` unconditionally ([`exec.ts:234-249`](../lib/sync/exec.ts:234)) — there is no check
+anywhere in the function that this exact bundle hasn't already been committed. Two tabs applying the
+same preview, a double-submit, or a retry after a lost response on one fast-path all re-run the same
+creates.
+
+**E1 — a manual match adds its full quantity on top of whatever the key already holds, never the
+difference.** `matchOps` ([`lib/sync/exec.ts:520-611`](../lib/sync/exec.ts:520)) finds or creates the
+presence group for `(catalogCardId, dexVariantRaw)` and then inserts
+`Math.max(1, entry.quantity)` copies into it ([`exec.ts:597-611`](../lib/sync/exec.ts:597)) with no read
+of how many copies that group already holds. If the group already exists — because another Dex row
+resolved to the same key first — the match adds its quantity to whatever is already there rather than
+reconciling to it, and the key briefly holds more copies than Dex lists until a later retire preview
+catches the excess.
+
+**E2 — a manual match has no idea a removal happened, and doesn't ask.** `forget_removed_presence`
+(the op that clears UIL-089's removal memory) appears exactly once in `exec.ts`
+([`:339`](../lib/sync/exec.ts:339)), inside `executeApply`'s regular import path, driven by
+`plan.forgetRemoved` — a full export's own reconcile diff. `matchOps` never references
+`removed_presence` at all: a manual match on a row for a printing she previously removed re-creates the
+card, silently, with no forget and no warning that this is exactly the case UIL-089's memory exists to
+suppress on a normal import.
+
+**E3 (test debt, not yet a live defect) — the case-insensitive set lookup must not corrupt the key it
+returns.** UIL-086's fix resolves a Japanese set code case-insensitively; the entry stays open only if
+`catalogCardId` comes back as `catalog_card.tcgdex_id` exactly as stored, not the lowercased input used
+to find it — a wrong case in the key would fragment or twin every import for that set. No test currently
+pins this at the `matchOps`/reconcile boundary.
+
+**E4 (test debt, not yet a live defect) — a promoted stand-in must keep resolving to the entry's own
+match, not TCGdex's later real card.** UIL-082 fixed re-parking; the remaining gap is that once TCGdex
+adds the real card behind a stand-in (migration 0015), the import must keep routing that row to the
+`manual_match_id` already recorded, not silently switch keys underneath an existing presence group. No
+test currently pins this transition.
+
+**Suggested fix, as split in the status line above.** E5 needs a server-side freshness or
+already-applied check inside `executeApply`'s own transaction, not a client-side guard a second tab or a
+retry can bypass. E1 and E2 both belong in `matchOps`: read the group's current count before inserting
+(desired minus current, the same shape `executeApply`'s own creates step should arguably use too) and
+check `removed_presence` the same way a full import's reconcile already does. E3 and E4 are regression
+tests over existing fixes, not new code.
+
+**Cross-reference UIL-098** (the paths that should create no copy at all; this entry is the paths that
+legitimately do, creating too many), **UIL-089** (the removed-presence memory E2 bypasses), **UIL-086**
+(the case-insensitive lookup E3 guards), and **UIL-082** (the stand-in-promotion resolution E4 guards).
