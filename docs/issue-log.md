@@ -6992,7 +6992,7 @@ shelf twice this week.
 ## UIL-089 — There is no way to remove a copy from the app: a card misidentified as owned in Dex stays "owned" until a later import happens to retire it, and a card that was traded or went missing has no lifecycle at all
 
 - **Reported:** 2026-09-22 (Karvi; body by the Senior BA, no intake session on the roster)
-- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-088; design proposal before code.** **Karvi's ruling 2026-09-22: no reason is necessary.** So this is one plain action, remove this copy from the app, for both cases; the app releases what the copy holds, records a `placement_decision` for the removal (UIL-042: history is never deleted), shows no reason field and no "gone" list, and remembers the removal keyed on the Dex row so the next import does not recreate it until Dex no longer lists it, since Dex is the source of truth (UIL-088). **2026-09-23, moved up:** UIL-092's incident left four duplicate copies on Testing (two Meditite, one Pikachu, one Raichu: a hand-typed copy now shelved in a line beside its Dex twin waiting in the haul), and nothing in the app can remove or merge either one, so she has been told to leave those queue rows unplaced until this lands. The proposal must cover that shape explicitly: two records for one physical card, one Dex-backed. Removing the Dex twin must not let the next import recreate it (already in the brief); removing the hand-typed one must not undo her placement; the cleanest answer is probably a merge, the surviving copy adopting the Dex presence, argued in the proposal. Next in Full Stack Dev - 2's queue after UIL-092 and UIL-093, ahead of UIL-091. **2026-09-23, built:** PR [#311](https://github.com/viantihu/pokemon-tcg-tracker/pull/311) open (head `531f546`, 30 files, migration `0020` = a `removed_presence` table keyed like `presence_group` with a server-side increment computed from the column and a GC when the key leaves the import, plus `apply_write_ops` verbatim plus two ops; no existing row rewritten), Dev 2's gate green, 9 mutants killed, Senior BA's BEFORE taken (run 35817873803: every count recorded, `removed_presence` absent); **waiting on QA, which is off the roster.** Rulings applied: a table, not a tombstone (a tombstone is a fourth state every read would have to learn, the class UIL-093 just charged us for); Remove on every copy surface and Merge on Lookup, both shipped, Merge the smaller of the two because the survivor adopts the twin's presence group and no memory row is needed; removal does NOT subtract a collection's chase tag (a want, not an ownership record; Karvi can overturn); on Collections the action shows only on single-copy rows, Lookup handles the rest (Dev 2's judgement, accepted). Traded or missing cards use the same action with no reason. Accepted edges, documented in the migration: Dex's count rising after a removal creates one (she bought another); a hand re-add does not touch the memory.
+- **Status:** **Fixed** — PR [#311](https://github.com/viantihu/pokemon-tcg-tracker/pull/311) MERGED to `develop` 2026-09-23 (squash `5dca984`), QA-gated (all nine routed mutants killed, the not-remembered one by 6; the op-set test bit on the slot, line and memory mutants; `0020`'s function text is the prior body plus the two new branches with zero removed lines, and outside the function only create table, RLS, policy and grants, no DML), confirmed **deployed** (Deploy run 35873607621: migrate applied `0020`, smoke, acceptance and Vercel green). **Migration `0020` verified on Testing** (BEFORE run 35871580959 after the 14:02Z wipe, AFTER run 35874070425): `removed_presence` present with 0 rows, every other count unchanged. It was assigned to Full Stack Dev - 2 after UIL-088, design proposal before code. **Karvi's ruling 2026-09-22: no reason is necessary.** So this is one plain action, remove this copy from the app, for both cases; the app releases what the copy holds, records a `placement_decision` for the removal (UIL-042: history is never deleted), shows no reason field and no "gone" list, and remembers the removal keyed on the Dex row so the next import does not recreate it until Dex no longer lists it, since Dex is the source of truth (UIL-088). **2026-09-23, moved up:** UIL-092's incident left four duplicate copies on Testing (two Meditite, one Pikachu, one Raichu: a hand-typed copy now shelved in a line beside its Dex twin waiting in the haul), and nothing in the app can remove or merge either one, so she has been told to leave those queue rows unplaced until this lands. The proposal must cover that shape explicitly: two records for one physical card, one Dex-backed. Removing the Dex twin must not let the next import recreate it (already in the brief); removing the hand-typed one must not undo her placement; the cleanest answer is probably a merge, the surviving copy adopting the Dex presence, argued in the proposal. Next in Full Stack Dev - 2's queue after UIL-092 and UIL-093, ahead of UIL-091. **2026-09-23, built:** PR [#311](https://github.com/viantihu/pokemon-tcg-tracker/pull/311) open (head `531f546`, 30 files, migration `0020` = a `removed_presence` table keyed like `presence_group` with a server-side increment computed from the column and a GC when the key leaves the import, plus `apply_write_ops` verbatim plus two ops; no existing row rewritten), Dev 2's gate green, 9 mutants killed, Senior BA's BEFORE taken (run 35817873803: every count recorded, `removed_presence` absent), then re-taken after the wipe as above. Rulings applied: a table, not a tombstone (a tombstone is a fourth state every read would have to learn, the class UIL-093 just charged us for); Remove on every copy surface and Merge on Lookup, both shipped, Merge the smaller of the two because the survivor adopts the twin's presence group and no memory row is needed; removal does NOT subtract a collection's chase tag (a want, not an ownership record; Karvi can overturn); on Collections the action shows only on single-copy rows, Lookup handles the rest (Dev 2's judgement, accepted). Traded or missing cards use the same action with no reason. Accepted edges, documented in the migration: Dex's count rising after a removal creates one (she bought another); a hand re-add does not touch the memory. The four duplicates it was moved up for were cleared by the 2026-09-23 wipe, so Merge has no live case on Testing yet. **Step for Karvi:** on Lookup, a card you own shows "Not mine" on each copy row; removing one frees any slot it held, and your next Dex import does not bring it back while Dex still lists it. If a card ever shows two records for one physical card, Merge on Lookup folds them into one. Closed on your confirmation.
 - **Priority:** High (Karvi's own report; Senior BA's read pending her confirmation) — the app's record of
   what she owns is the point of the app; a copy she knows is not hers, or is no longer hers, that the app
   keeps counting, placing and proposing is a wrong record with no remedy.
@@ -7109,9 +7109,12 @@ rule she never asked for.
 
 - **Reported:** 2026-09-22 (found by Full Stack Dev - 2 while tracing UIL-090's repair; body by the Senior
   BA, no intake session on the roster)
-- **Status:** Open — **assigned to Full Stack Dev - 2 2026-09-23 after UIL-089; built.** PR
-  [#312](https://github.com/viantihu/pokemon-tcg-tracker/pull/312) open (head `1092c7c`, three files, no
-  migration), Dev 2's gate green (1235 tests), 3 mutants killed; **waiting on QA, which is off the roster.**
+- **Status:** **Fixed** — PR [#312](https://github.com/viantihu/pokemon-tcg-tracker/pull/312) MERGED to
+  `develop` 2026-09-23 (squash `5bc38f0`), QA re-gated on the tree merged onto UIL-089's `5dca984` (1265
+  tests, build; mutants: the write site dropped fails 1, the patch never emitted fails 1, the engine's
+  default stamped fails 2, an unvalidated id fails 3; the UIL-057 suite unchanged), confirmed **deployed**
+  (Deploy green on `5bc38f0`). Assigned to Full Stack Dev - 2 2026-09-23 after UIL-089; three files, no
+  migration.
   Design settled as **re-point the stored target on the pick**, in the same slot update that already carries
   the resolved-decision marker, because `target_catalog_card_id` is not a display field: the Plan's
   `dexIdForSlot`, the plan stamp, `toEvolutionLine` and migration `0019` all read it, so "the load prefers
@@ -7121,7 +7124,7 @@ rule she never asked for.
   means "she chose this"; the first cut stamped the engine's default and its own regression test caught it.
   The option she moved away from lands in the wishlist row's alternates; the decision is audited.
   **Step for Karvi**, once deployed: on a line decision pick an alternative instead of the suggested card;
-  the slot shows the card you picked, on Lines and after a reload.
+  the slot shows the card you picked, on Lines and after a reload. Closed on your confirmation.
 - **Priority:** Medium (Senior BA's read) — a decision she made is honoured in the data she is charged for
   (the wishlist) but not in the picture she reads (the line), so the Lines screen shows a card she has
   already replaced; not a placement error, but a false display on the screen UIL-067 just simplified.
@@ -7331,8 +7334,14 @@ separate statements, and UIL-091 gave that gap one more thing to lose.
 ## UIL-096 — Starting a new line is refused when the binder already has a line for the species and band; Karvi wants a warning that names every existing line across her ENTIRE collection and lets her join it or start a new one anyway
 
 - **Reported:** 2026-09-23 (Karvi, in her own words below; body by the Senior BA)
-- **Status:** Open — **assigned to Full Stack Dev - 2, first in the queue ahead of UIL-095; plan approved
-  2026-09-23, no migration.** The `lineExists` refusal (`lib/plan/commit.ts`, text `LINE_EXISTS_IN_BINDER`
+- **Status:** **Fixed** — PR [#316](https://github.com/viantihu/pokemon-tcg-tracker/pull/316) MERGED to
+  `develop` 2026-09-23 (squash `c255c65`), QA-gated on the merged tree (1270 tests, build, no migration;
+  pre-fix `second-line-in-binder` fails 2 of 2; mutants: the `applyMove` refusal restored fails 4, the
+  Plan commit refusal restored fails 7, the warning turned back into a block fails 1, the per-binder
+  match no longer leading fails 2, and the existing-lines list collapsed back to one line per
+  binder + band + locale, a survivor on the first head, now fails 2 through the real join index driven
+  into the real panel), confirmed **deployed** (Deploy run 35877558020 green). It was assigned to Full
+  Stack Dev - 2 first in the queue, plan approved 2026-09-23. The `lineExists` refusal (`lib/plan/commit.ts`, text `LINE_EXISTS_IN_BINDER`
   in `lib/line/move.ts`: "That binder already has a line for this species in this band. Join its open slot
   if it has one, or place this copy in the front half.") and the same rule wherever a new line is started
   (Move's "Start a new line", the Lines sheet, the Haul Plan) becomes a WARNING and never a block. The
@@ -7342,7 +7351,14 @@ separate statements, and UIL-091 gave that gap one more thing to lose.
   an English Toedscruel against an English Toedscool line in the same binder and band gets the warning with
   both choices and, on "start new", a second line in that binder; a `*.dom.test.ts` for the sheet. Fence:
   `lib/plan/commit.ts`, `lib/plan/*`, `lib/line/join-options.ts`, `lib/line/move.ts`, `lib/line/write.ts`,
-  `app/(ui)/plan/*`, `app/(ui)/line/*`, `app/(ui)/_components/*`, tests.
+  `app/(ui)/plan/*`, `app/(ui)/line/*`, `app/(ui)/_components/*`, tests. **Built as specified:** the existing-lines view is a list, not a record
+  keyed by binder + band + locale (a record would silently drop the second line in one binder and band,
+  the exact shape this creates); each line is tagged "this binder, this band", "same band, another
+  binder" or "another band", and by locale; "Join that line" is offered only where a slot is open for the
+  card; "Start a new line anyway" is the confirm. Ten tests that pinned the refusal now pin its absence
+  and cite this entry. **Step for Karvi:** place an English Toedscruel into KB-002's back half beside the
+  English Toedscool line: you get the warning naming that line, and "Start a new line anyway" makes a
+  second line there. Closed on your confirmation.
 - **Priority:** High (Karvi's own report, twice: UIL-084's screenshot and today) — a card she has decided
   to place is refused, and her standing principle is that a card must always be movable; the rule the app
   enforces is one she has now overruled.
@@ -7379,18 +7395,26 @@ the same card.
 - **Reported:** 2026-09-23 (Karvi). In her words: "I tried logging into the app on Chrome on my
   iPad. When I opened the "magic link" from the gmal app, it opened a chrome tab asking me to enter
   my email again. At that point, I'd exhausted my attempts, so I was unable to log in from my iPad."
-- **Status:** Open — **config half assigned to Tech Lead (new), code half to Full Stack Dev - 2 after
-  UIL-096.** Config: change Testing's hosted Magic Link email template to link to
-  `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email` (the callback already verifies
-  that shape with `verifyOtp`, which needs no cookie, so the link works in any browser); confirm the Site
-  URL and redirect allow-list cover Testing's domain; report whether the project uses the built-in email
-  service (2 emails per hour for the whole project) and what raising it would take (a custom SMTP
-  provider); mirror the template into `supabase/config.toml` by PR so local and Production match, and add
-  it to the cutover runbook. Code: a six-digit code field on `/login` as a fallback that works across
-  devices (the email already carries `{{ .Token }}`, `otp_length = 6`), and a readable message when the
-  email limit is hit in place of Supabase's raw text. **Workaround today:** sign in on the laptop; on the
-  iPad, wait for the limit to reset, request the link in Chrome and paste the copied link into that same
-  tab.
+- **Status:** Open — **re-scoped 2026-09-23: code fix assigned to Full Stack Dev - 2 (after UIL-099's E5
+  and UIL-098 parts 2 and 3); config half merged.** Config half: PR
+  [#315](https://github.com/viantihu/pokemon-tcg-tracker/pull/315) MERGED (`07ff166`) with the token_hash
+  Magic Link template for local dev and the Production cutover checklist; PR
+  [#318](https://github.com/viantihu/pokemon-tcg-tracker/pull/318) MERGED (`cfebc0b`) pins the Supabase
+  CLI and fails CI if `supabase/config.toml` or that template cannot load, because Deploy's `db push`
+  loads both (found by QA). **Why the plan changed:** the deploy token now gets 401 from the Management
+  API, so no session can edit the hosted template, and Karvi found that Supabase locks template edits on
+  the built-in email service until custom SMTP is configured. So the fix must work with the DEFAULT
+  template: `@supabase/ssr` forces the PKCE flow, so the login action will request the link with a plain
+  `supabase-js` client in the implicit flow, and a new `/auth/confirm` page will read the session from the
+  URL fragment, clear it at once, set the session and enforce the allow-list; `/auth/callback` stays for
+  the token_hash link; the login page gets a readable message when the email limit is hit. The six-digit
+  code field is dropped for now (the default template carries no code). **Step for Karvi before it ships:**
+  in the Testing project `cpmwdcmokbgcpmkvbtsw`, Authentication → URL Configuration, add
+  `https://pokemon-tcg-tracker-git-develop-viantihus-projects.vercel.app/**` under Redirect URLs, or
+  Supabase silently sends the link to the Site URL and the fix looks broken. **Custom SMTP is required
+  before cutover** (two emails per hour and locked templates), recorded in the runbook as her decision.
+  **Workaround today:** sign in on the laptop; on the iPad, request the link in Safari and open it from
+  Gmail in Safari at mail.google.com; the email limit resets on the hour.
 - **Priority:** High (Karvi's report; Senior BA agrees) — she cannot sign in on the device she uses at
   the shelf, and two failed tries lock her out for up to an hour; a workaround exists and the fix is
   mostly configuration, so it does not jump UIL-096.
@@ -7464,7 +7488,21 @@ second attempt at all.
   a queued copy; Backfill is re-pointed to pick existing haul copies instead of creating them. (4) **Tech
   Lead (new)**: audits every path that can create a copy, confirms the Sync manual-match and stand-in
   paths carry the Dex row's presence group, adds a database-level guard and an invariant test, and
-  reviews Dev 2's PRs against that list before QA.
+  reviews Dev 2's PRs against that list before QA. **Progress 2026-09-23:** (1) DONE: PR
+  [#319](https://github.com/viantihu/pokemon-tcg-tracker/pull/319) MERGED (`404b79c`) and deployed; "Log a
+  card" became "Add a card", and a card she does not own joins the chase list and her wishlist in one
+  write, the same wishlist row the Collections "Wishlist" button writes, with no copy and no decision
+  (QA: 7 mutants killed; pre-fix 3 of 13 fail). Known and accepted: the wishlist dedup is
+  read-then-write, so two simultaneous adds can leave two open rows that both read as one wish. (2)
+  DONE: the Database Engineer removed the 11 copies created that way at 15:08:28Z (copy 11 → 0,
+  placement_decision 12 → 1 with her list-only removal kept, every collection row byte-identical; no
+  snapshot, her call), confirmed by the Senior BA's read (run 35879421633). (3) Dev 2, next after UIL-099's
+  E5. (4) The Tech Lead's audit is accepted: the only legitimate creators are the import, Retry, Undo
+  and the Sync manual match (all carry the Dex row's presence group); the database guard is migration
+  `0023` (`copy.presence_group_id` NOT NULL, FK ON DELETE RESTRICT), built by the Tech Lead after part
+  3, gated on a read showing zero ungrouped copies; defects in the legitimate paths are UIL-099. **Until
+  part 3 ships:** bring cards in only through a Dex import and place them from the Haul Plan's queue; do
+  not use the Haul Plan's add form or Backfill, both of which still create copies.
 - **Priority:** High (Karvi's ruling; Senior BA agrees) — every hand-created copy is a future duplicate
   that only UIL-089's merge can clean up, and she is about to re-enter her whole collection after the
   2026-09-23 wipe.
