@@ -44,7 +44,6 @@ import {
   buildNewLineJoinOps,
   collectionTargetJoinOp,
   isMoveDestinationComplete,
-  LINE_EXISTS_IN_BINDER,
   lineJoinOf,
   placementForMove,
   releaseSlotOps,
@@ -61,8 +60,6 @@ const REFUSE = {
   incomplete: "That destination is incomplete — reload the screen and pick again.",
   slotGone: "That line slot no longer exists — reload the screen and pick again.",
   slotFilled: "That slot has already been filled — reload the screen and pick again.",
-  /** UIL-084: keyed on the BINDER too, and its remedies both exist. Shared string, see lib/line/move.ts. */
-  lineExists: LINE_EXISTS_IN_BINDER,
   catalogMissing: "That card's catalog entry is missing — reload and try again.",
 } as const;
 import { copyPlacementFromTarget } from "./placement";
@@ -736,19 +733,12 @@ function writeOverriddenCard(
       binderId: dest.binderId,
       destinationBand: dest.band,
     });
-    // Keyed on the line's ACTUAL root, not the card's own dexId (a Stage1 is not its own root) —
-    // the same check, and the same key, `applyMove` uses. Scoped to the DESTINATION BINDER as of
-    // UIL-084: a line in another binder no longer owns this species-and-band, so she can start this
-    // binder's own line. A duplicate in the SAME binder is still refused, and the panel now disables
-    // Confirm for exactly that case, so reaching here is a stale client.
+    // NO "a line already exists here" refusal (UIL-096) — the same ruling `applyMove` follows. She asked
+    // for a new line explicitly, having been shown every line the family already has; starting a second
+    // one in this binder and band is her call. The key below is kept only for the in-pass bookkeeping, so
+    // a later card in THIS payload can find the line just created — it no longer decides anything.
     const locale = localeOfId(p.tcgdexId);
     const key = passLineKey(dest.binderId, built.rootDexId, dest.band, locale);
-    if (
-      passLines.has(key) ||
-      findLineInBinder(pc, built.rootDexId, dest.band, dest.binderId, locale)
-    ) {
-      throw new Error(REFUSE.lineExists);
-    }
     ops.push(...built.ops);
     if (built.slotId) {
       ops.push({ op: "update_copy", id: copyId, patch: { line_slot_id: built.slotId } });

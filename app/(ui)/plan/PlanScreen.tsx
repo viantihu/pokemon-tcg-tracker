@@ -1130,7 +1130,7 @@ export function moveTargetFor(
     bandKey: item.bandKey,
     currentLabel: item.destination,
     joinCandidates: join?.joinCandidates,
-    existingLineByBinderBand: join?.existingLineByBinderBand,
+    existingLines: join?.existingLines,
     naturalBandKey: join?.naturalBandKey,
     initial,
   };

@@ -324,6 +324,8 @@ export interface LineJoinCandidate {
  * is offered anyway (her call), but explained rather than left to read as an empty, broken list.
  */
 export interface ExistingLineBlock {
+  /** Which line — so a warning can offer to JOIN this exact one when it has a slot open (UIL-096). */
+  lineId: string;
   speciesLabel: string;
   filledCount: number;
   totalCount: number;
@@ -376,7 +378,7 @@ export interface UnlinedCard {
    * ever appeared.
    */
   joinCandidates: LineJoinCandidate[];
-  /** Every line this family already has, keyed by BINDER AND BAND (`lineKey`) — the same key the
-   *  server refuses a duplicate on (UIL-084). Absent, not just empty, where no line exists. */
-  existingLineByBinderBand: Record<string, ExistingLineBlock>;
+  /** Every line this family already has, ANYWHERE in the collection (UIL-096) — see
+   *  `LineJoinOptions.existingLines` for why this is a list and no longer a binder-keyed record. */
+  existingLines: ExistingLineBlock[];
 }

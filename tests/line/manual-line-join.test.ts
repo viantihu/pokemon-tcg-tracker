@@ -243,7 +243,10 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     expect((await copyRow(CARD)).line_slot_id).not.toBeNull();
   });
 
-  it("REFUSES a new line when one for this species + band already exists IN THE SAME BINDER", async () => {
+  it("STARTS a second line when one for this species + band already exists in the same binder (UIL-096)", async () => {
+    // Was a refusal (UIL-084's per-binder rule). Karvi overruled the rule itself: "Instead of blocking the
+    // creation of an evolution line, I want a warning". The warning is the Move panel's; this pins that the
+    // write now honours her explicit choice.
     await seedCard({
       id: "onlymon",
       name: "Onlymon",
@@ -262,26 +265,24 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     `);
     await asOwner(db);
 
-    await expect(
-      applyMove(
-        pgliteClient(db),
-        {
-          copyId: CARD,
-          destination: {
-            kind: "shelf",
-            binderId: GEN,
-            half: "back",
-            band: "red",
-            lineJoin: { mode: "new" },
-          },
+    await applyMove(
+      pgliteClient(db),
+      {
+        copyId: CARD,
+        destination: {
+          kind: "shelf",
+          binderId: GEN,
+          half: "back",
+          band: "red",
+          lineJoin: { mode: "new" },
         },
-        names,
-      ),
-    ).rejects.toThrow(/already has a line for this species in this band/i);
+      },
+      names,
+    );
 
     await asSuperuser(db);
-    expect(await q(`select 1 from evolution_line`)).toHaveLength(1); // no second line inserted
-    expect((await copyRow(CARD)).line_slot_id).toBeNull(); // nothing moved
+    expect(await q(`select 1 from evolution_line`)).toHaveLength(2); // the second line, beside the first
+    expect((await copyRow(CARD)).line_slot_id).not.toBeNull(); // and the card sits in it
   });
 
   it("ALLOWS that same species and band in a DIFFERENT binder — one line per species per band per BINDER (UIL-084)", async () => {
@@ -344,11 +345,11 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     expect(rootSlot[0].copy_id).toBe(OTHER);
   });
 
-  it("REFUSES using the CHAIN'S root, not the moved card's own dexId — a Stage1 is not its own root", async () => {
-    // The existing line is rooted at Emberling (9101); the card being moved is a SECOND Emberdrake
-    // (9102) — a different dexId from the root. Checking against the card's OWN dexId (the bug this
-    // regresses) would never find this line, silently letting a second, colliding (9101, red) line
-    // through with no DB constraint to catch it.
+  it("a Stage1 starting a second line roots it at the CHAIN'S root, not its own dexId (UIL-096)", async () => {
+    // This used to pin that the REFUSAL keyed on the chain root: a second Emberdrake (9102) had to find
+    // the existing Emberling (9101) line. The refusal is gone (UIL-096), but the chain-root question did
+    // not go with it — a new line started by a Stage1 must be rooted at its Basic, or the two Emberling
+    // lines would not even read as the same family, and the warning keyed on the root would miss them.
     const THIRD = "c0000000-0000-0000-0000-0000000000e3";
     await seedCard({
       id: "emberling",
@@ -379,26 +380,29 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     `);
     await asOwner(db);
 
-    await expect(
-      applyMove(
-        pgliteClient(db),
-        {
-          copyId: CARD,
-          destination: {
-            kind: "shelf",
-            binderId: GEN,
-            half: "back",
-            band: "red",
-            lineJoin: { mode: "new" },
-          },
+    await applyMove(
+      pgliteClient(db),
+      {
+        copyId: CARD,
+        destination: {
+          kind: "shelf",
+          binderId: GEN,
+          half: "back",
+          band: "red",
+          lineJoin: { mode: "new" },
         },
-        names,
-      ),
-    ).rejects.toThrow(/already has a line for this species in this band/i);
+      },
+      names,
+    );
 
     await asSuperuser(db);
-    expect(await q(`select 1 from evolution_line`)).toHaveLength(1); // no colliding second line
-    expect((await copyRow(CARD)).line_slot_id).toBeNull();
+    const roots = await q(`select root_dex_id from evolution_line order by created_at, id`);
+    expect(roots).toHaveLength(2);
+    // Both rooted at Emberling — one family, two lines — never at the moved Emberdrake's own dexId.
+    expect(roots.every((r) => (r as { root_dex_id: number }).root_dex_id === EMBERLING_DEX)).toBe(
+      true,
+    );
+    expect((await copyRow(CARD)).line_slot_id).not.toBeNull();
   });
 
   it("creates the line in HER chosen band, not the card's own natural type-band", async () => {

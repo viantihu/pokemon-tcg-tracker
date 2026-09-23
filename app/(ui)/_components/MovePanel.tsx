@@ -42,7 +42,6 @@ import type {
 } from "@/lib/line/types";
 import { defaultMoveHalf, isMoveDestinationComplete } from "@/lib/line/move";
 import type { Locale } from "@/lib/sync/types";
-import { lineKey } from "@/lib/line/join-options";
 import { bandMeta } from "./plan-meta";
 
 const BULK = "__bulk__";
@@ -53,7 +52,7 @@ export function MovePanel({
   confirmLabel = "Place it here ▶",
   allowLineJoin = false,
   joinCandidates,
-  existingLineByBinderBand,
+  existingLines,
   naturalBandKey,
   cardLocale,
   blockNeeds,
@@ -66,17 +65,16 @@ export function MovePanel({
   /** Flat across every band (UIL-064) — present (even empty) turns the line-first flow on. */
   joinCandidates?: LineJoinCandidate[];
   /**
-   * Every line this family already has, keyed by BINDER AND BAND (UIL-084) — the same key the server
-   * refuses a duplicate on. Band-keyed before, which could not answer the question that actually
-   * decides the write: does the binder SHE has picked already have one.
+   * Every line this family already has, ANYWHERE in the collection — every binder, band and regional
+   * variant (UIL-096). What the warning names when she starts a new line.
    */
-  existingLineByBinderBand?: Record<string, ExistingLineBlock>;
+  existingLines?: ExistingLineBlock[];
   /** This card's own type-derived band — the default for "start a new line"'s one remaining pick
    *  (UIL-064): the app's own answer, not ten empty chips. */
   naturalBandKey?: string;
   /**
-   * This card's regional variant (UIL-090). The blocking lookup is keyed by it, so a Japanese line in
-   * the destination binder and band does not block an English card — they are different lines.
+   * This card's regional variant (UIL-090). Decides which existing lines it could JOIN (only its own
+   * locale's); the warning still names the other variant's lines, tagged, because she asked for all of them.
    */
   cardLocale?: Locale;
   /**
@@ -115,21 +113,34 @@ export function MovePanel({
   const isSpecialty = binder?.type === "specialty";
   const collections = binder ? (options.collectionsByBinder[binder.id] ?? []) : [];
   /**
-   * The line already occupying the destination she has picked (UIL-084). Looked up by BINDER AND BAND
-   * through the shared `lineKey`, so this is the same question `applyMove` answers — a line in another
-   * binder is no longer treated as blocking, which is the whole of her report.
+   * UIL-096 — a WARNING, never a block. Karvi: "Instead of blocking the creation of an evolution line, I
+   * want a warning that there is a line existing in my ENTIRE collection (not just the binder)."
+   *
+   * Until now a second line for a species in the same binder and band was refused by the server and
+   * Confirm was disabled here to match — so her EN Toedscruel, whose EN Toedscool line in that binder
+   * already had its Stage 1 filled, had nowhere to go in the back half at all. The rule is now a
+   * suggestion: the panel names every line the family already has, anywhere, and offers the two things
+   * she can do — join one that has a slot open for this card, or start a new line anyway.
+   *
+   * Shown only when she has chosen "start a new line"; joining an existing line needs no warning.
    */
-  const blockingLine =
-    allowLineJoin && band && !isBulk && binder?.type === "general"
-      ? existingLineByBinderBand?.[lineKey(binder.id, band, cardLocale ?? "en")]
-      : undefined;
+  const warnLines = allowLineJoin && lineJoin?.mode === "new" ? (existingLines ?? []) : [];
+  /** Which of those she could actually JOIN: an open slot for THIS card, in its own locale. */
+  const joinableByLine = new Map((joinCandidates ?? []).map((c) => [c.lineId, c]));
   /**
-   * She has asked to START a line where one already lives. The server refuses this, so Confirm does
-   * too — a client that offered it would be recommending the one action that cannot succeed, which is
-   * exactly the dead end UIL-084 reported. The remedies are on screen: join its open slot if it has
-   * one, pick another binder, or use the front half.
+   * The per-binder match — the DEFAULT SUGGESTION the old rule has become (the Senior BA's ruling). The
+   * line in the binder and band she picked, in the card's own locale; offered first, and as the join,
+   * when it has a slot open for this card.
    */
-  const newLineBlocked = half === "back" && lineJoin?.mode === "new" && blockingLine != null;
+  const sameHere = (l: ExistingLineBlock) =>
+    l.binderId === (binder?.id ?? null) && l.bandKey === band && l.locale === (cardLocale ?? "en");
+  const orderedWarnLines = [...warnLines].sort(
+    (a, b) =>
+      Number(sameHere(b)) - Number(sameHere(a)) ||
+      Number(b.bandKey === band) - Number(a.bandKey === band),
+  );
+  const suggestedJoin =
+    orderedWarnLines.map((l) => joinableByLine.get(l.lineId)).find((c) => c != null) ?? null;
 
   const destination: MoveDestination = blockNeed
     ? {
@@ -150,7 +161,9 @@ export function MovePanel({
             ...(half === "back" && allowLineJoin ? { lineJoin } : {}),
           };
 
-  const canConfirm = isMoveDestinationComplete(destination) && !newLineBlocked;
+  // No line-uniqueness gate any more (UIL-096): starting a second line is her call, and the warning below
+  // is how she makes it knowingly.
+  const canConfirm = isMoveDestinationComplete(destination);
 
   const hasCandidates = (joinCandidates ?? []).length > 0;
 
@@ -441,16 +454,26 @@ export function MovePanel({
               );
             })}
           </div>
-          {blockingLine ? (
-            /* UIL-084: this used to say the opposite of what happens — "this one starts its own line
-               instead" — for a placement the server always refused. It now names the condition and the
-               remedies that exist. A line in ANOTHER binder is not blocking and says nothing here. */
-            <div className="oskip" style={{ marginTop: 6 }}>
-              {binder?.name ?? "This binder"} already has {blockingLine.speciesLabel} in this band (
-              {blockingLine.filledCount}/{blockingLine.totalCount} filled), and one binder tracks a
-              species once per band — so a second line here cannot be saved. Join its open slot
-              above if it has one, pick a different binder, or use the front half.
-            </div>
+          {orderedWarnLines.length > 0 ? (
+            <ExistingLinesWarning
+              lines={orderedWarnLines}
+              sameHere={sameHere}
+              pickedBand={band}
+              binderName={(id) => options.binders.find((b) => b.id === id)?.name ?? "Binder"}
+              // The band's name as the chips above show it (the DB's display name), so one band is not
+              // called two things on one screen; the static table only when the options lack it.
+              bandName={(key) =>
+                options.bands.find((b) => b.key === key)?.display ?? bandMeta(key).display
+              }
+              cardLocale={cardLocale ?? "en"}
+              suggestedJoin={suggestedJoin}
+              onJoin={(c) => {
+                setLineJoin({ mode: "existing", lineId: c.lineId, slotId: c.slotId });
+                setBinderId(c.binderId ?? firstGeneral?.id ?? options.binders[0]?.id ?? BULK);
+                setHalf("back");
+                setBand(c.bandKey);
+              }}
+            />
           ) : null}
         </div>
       ) : null}
@@ -513,9 +536,88 @@ export function MovePanel({
           disabled={!canConfirm}
           onClick={() => canConfirm && onConfirm(destination)}
         >
-          {confirmLabel}
+          {/* UIL-096: with the warning showing, Confirm IS the "start a new line anyway" choice — so it
+              says so, rather than a neutral "Place it here" that reads as if nothing was said. */}
+          {orderedWarnLines.length > 0 && destination.kind === "shelf"
+            ? "Start a new line anyway ▶"
+            : confirmLabel}
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The UIL-096 warning: every line this family already has, anywhere in her collection, and the choice.
+ *
+ * Her words asked for the WHOLE collection, not the binder, so every binder, every band and both regional
+ * variants are named — each said plainly as where it is, and whether it is this binder or this band. A line
+ * is always in a back half (the schema pins `evolution_line.half = 'back'`), so "both halves" needs no
+ * separate mention.
+ *
+ * The two choices are the two things that can happen. "Join" is offered for the suggested line only when it
+ * has a slot open for THIS card — her Toedscruel case is exactly a line whose Stage 1 is already filled, and
+ * offering to join it would be a button that cannot work. "Start a new line anyway" is the Confirm button
+ * itself, relabelled, so neither choice hides behind the other.
+ */
+function ExistingLinesWarning({
+  lines,
+  sameHere,
+  pickedBand,
+  binderName,
+  bandName,
+  cardLocale,
+  suggestedJoin,
+  onJoin,
+}: {
+  lines: ExistingLineBlock[];
+  sameHere: (l: ExistingLineBlock) => boolean;
+  pickedBand: string | null;
+  binderName: (id: string) => string;
+  bandName: (key: string) => string;
+  cardLocale: Locale;
+  suggestedJoin: LineJoinCandidate | null;
+  onJoin: (c: LineJoinCandidate) => void;
+}) {
+  const where = (l: ExistingLineBlock) => {
+    const parts = [
+      l.binderId ? binderName(l.binderId) : "No binder",
+      bandName(l.bandKey),
+      `${l.filledCount}/${l.totalCount} filled`,
+    ];
+    if (l.locale !== cardLocale) parts.push(l.locale.toUpperCase());
+    const tag = sameHere(l)
+      ? "this binder, this band"
+      : l.bandKey === pickedBand
+        ? "same band, another binder"
+        : "another band";
+    return `${parts.join(" · ")} — ${tag}`;
+  };
+  const n = lines.length;
+  return (
+    <div className="oskip" role="status" style={{ marginTop: 6 }}>
+      <b>
+        You already have {n === 1 ? "a" : n} {lines[0].speciesLabel}
+        {n === 1 ? "" : "S"} in your collection.
+      </b>
+      <ul style={{ margin: "4px 0 6px", paddingLeft: 18 }}>
+        {lines.map((l) => (
+          <li key={l.lineId}>{where(l)}</li>
+        ))}
+      </ul>
+      {suggestedJoin ? (
+        <>
+          <button type="button" className="btn sm" onClick={() => onJoin(suggestedJoin)}>
+            Join that line · {suggestedJoin.stage.toUpperCase()} slot
+          </button>{" "}
+          or start a new line anyway below.
+        </>
+      ) : (
+        <>
+          None of them has a slot open for this card, so joining is not possible — start a new line
+          anyway below, or use the front half.
+        </>
+      )}
     </div>
   );
 }

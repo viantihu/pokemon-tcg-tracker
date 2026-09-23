@@ -283,13 +283,15 @@ describe("UIL-070 part 1 · starting a NEW line from the Haul Plan", () => {
     expect(copy.line_slot_id).not.toBeNull();
   });
 
-  it("REFUSES a new line when one for this species and band already exists IN THE SAME BINDER, in applyMove's words", async () => {
+  it("STARTS a new line when she asks for one, even where a joinable line exists in the same binder (UIL-096)", async () => {
+    // Was a refusal "in applyMove's words". Karvi overruled the rule: a new line is her call, and the
+    // panel's warning — naming this very line and offering to join its open slot — is how she makes it
+    // knowingly. The two write paths still agree, which is what this suite pins.
     await seedOpenLine(); // a red Emberling line exists in Binder 1, with Emberdrake's own slot OPEN
-    await expect(commit({ ...BACK_RED, lineJoin: { mode: "new" } })).rejects.toThrow(
-      "That binder already has a line for this species in this band.",
-    );
-    expect(await lines()).toHaveLength(1);
-    expect(await drakeCopies()).toHaveLength(0);
+    await commit({ ...BACK_RED, lineJoin: { mode: "new" } });
+    expect(await lines()).toHaveLength(2);
+    const [copy] = await drakeCopies();
+    expect(copy.line_slot_id).not.toBeNull();
   });
 });
 
@@ -322,12 +324,14 @@ describe("UIL-084 · one line per species per band per BINDER, from the Haul Pla
     expect((await slot(placed.line_slot_id as string)).copy_id).toBe(placed.id);
   });
 
-  it("still REFUSES a second line in the binder that already has one, so the rule is per binder and not simply dropped", async () => {
+  it("a second line in the binder that already has one now LANDS — her Toedscruel shape (UIL-096)", async () => {
+    // This pinned "the rule is per binder and not simply dropped". Karvi has since dropped it on purpose:
+    // the line's matching stage is FILLED, so there is no slot to join, and the back half had nowhere to
+    // take her card at all. That is the case she reported.
     await seedFilledLine();
-    await expect(commit({ ...BACK_RED, lineJoin: { mode: "new" } })).rejects.toThrow(
-      "That binder already has a line for this species in this band.",
-    );
-    expect(await linesWithBinder()).toHaveLength(1);
+    await commit({ ...BACK_RED, lineJoin: { mode: "new" } });
+    const rows = await linesWithBinder();
+    expect(rows).toHaveLength(2);
   });
 });
 
@@ -379,26 +383,25 @@ describe("UIL-084 · two cards, one payload, two binders — the in-pass key is 
     expect(new Set(drakes.map((d) => d.line_slot_id)).size).toBe(2);
   });
 
-  it("still REFUSES the second of two cards sent to the SAME binder, inside the one payload", async () => {
-    // The in-pass mirror is the only thing that can catch this: neither card's line exists in the
-    // database yet when the other is built. She asked twice for a line in one binder, so the second
-    // ask is refused in the same words a stale client gets — the rule is per binder, not per payload.
+  it("two explicit new lines in the SAME binder, in one payload, are TWO lines (UIL-096)", async () => {
+    // This used to refuse the second ask. She asked twice for a new line in one binder; with the rule gone
+    // each ask is honoured, and the in-pass mirror still keeps them as two distinct lines rather than
+    // folding the second card into the first's.
     const pc = await planContext();
     const cards: DraftItem[] = [
       { id: "d-drake-1", tcgdexId: "emberdrake", variant: "normal" },
       { id: "d-drake-2", tcgdexId: "emberdrake", variant: "normal" },
     ];
     const { planned } = planFromDraft(pc, cards);
-    expect(() =>
-      buildHaulCommitPayload(pc, planned, {
-        source: "bulk-bin",
-        draft: cards,
-        overrides: {
-          "d-drake-1": { ...BACK_RED, lineJoin: { mode: "new" } },
-          "d-drake-2": { ...BACK_RED, lineJoin: { mode: "new" } },
-        },
-      }),
-    ).toThrow("That binder already has a line for this species in this band.");
+    const { payload } = buildHaulCommitPayload(pc, planned, {
+      source: "bulk-bin",
+      draft: cards,
+      overrides: {
+        "d-drake-1": { ...BACK_RED, lineJoin: { mode: "new" } },
+        "d-drake-2": { ...BACK_RED, lineJoin: { mode: "new" } },
+      },
+    });
+    expect(payload.ops.filter((o) => o.op === "insert_line")).toHaveLength(2);
   });
 });
 
