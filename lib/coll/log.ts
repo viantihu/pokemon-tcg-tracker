@@ -7,14 +7,17 @@
  * Three outcomes, by where an existing copy (if any) already sits:
  *   - shelved in one of the collection's OWN binders: the "log" is a no-op repeat. The caller unions
  *     the target tag (idempotent even if already there) and inserts no copy.
- *   - owned anywhere else — shelved elsewhere, or sitting in the bulk box: refuse. Inserting here
- *     would create a second physical copy for a card she has exactly one of. Moving the existing one
- *     is her call, not this action's (UIL-043 is the designed follow-on: offering that move inline
- *     from the row).
+ *   - owned anywhere else — shelved elsewhere, sitting in the bulk box, or IN HER HAUL and not placed
+ *     yet: refuse. Inserting here would create a second physical copy for a card she has exactly one of.
+ *     Moving the existing one is her call, not this action's (UIL-043 is the designed follow-on: offering
+ *     that move inline from the row). The haul case gets its own sentence, because the remedy is the Haul
+ *     Plan rather than Move (UIL-093).
  *   - owned nowhere: the caller inserts, as before.
  *
- * `role = 'block'` is excluded from "owned": it marks a slot no card can ever fill, not a physical
- * card she holds (system-design §4).
+ * `role = 'block'` is excluded from "owned", and is the ONLY exclusion: it marks a slot no card can ever
+ * fill, not a physical card she holds (system-design §4). It was not always the only one — the filter used
+ * to name the roles that counted, which silently dropped the haul when UIL-088 added it, and that is the
+ * regression UIL-093 fixes.
  *
  * ONE TRANSACTION (UIL-033). The write is a single `apply_write_ops` call — `insert_copy` +
  * `insert_decision` when she owns none, and the chase-list join as `union_collection_targets` (0007) —
@@ -27,6 +30,7 @@
  */
 
 import { errorMessage } from "@/lib/errors";
+import { isPlaced, type Role } from "@/lib/engine";
 import { collectionTargetJoinOp } from "@/lib/line/move";
 import {
   applyWriteOps,
@@ -42,15 +46,21 @@ import {
 export type ExistingCollectionCopy =
   { kind: "here"; copy: Row<"copy"> } | { kind: "elsewhere"; copy: Row<"copy"> } | { kind: "none" };
 
-/** Where, if anywhere, she already holds a physical copy of this catalog card. */
+/**
+ * Where, if anywhere, she already holds a physical copy of this catalog card.
+ *
+ * ASKED AS "NOT A BLOCK" (UIL-093). This filtered `role === "shelved" || role === "bulk"`, which stopped
+ * meaning "anywhere" the moment UIL-088 gave an unplaced card its own role: a card sitting in her haul
+ * came back as `kind: "none"`, so logging it into a collection INSERTED A SECOND COPY of a card she
+ * already owned — the duplicate this function exists to refuse. `block` is the only role excluded, and
+ * for the one reason that it is not a card at all (system-design §4).
+ */
 export async function findExistingCopy(
   db: DbClient,
   tcgdexId: string,
   collectionBinderIds: string[],
 ): Promise<ExistingCollectionCopy> {
-  const owned = (await copyRepo.listByCatalogCard(db, tcgdexId)).filter(
-    (c) => c.role === "shelved" || c.role === "bulk",
-  );
+  const owned = (await copyRepo.listByCatalogCard(db, tcgdexId)).filter((c) => c.role !== "block");
   if (owned.length === 0) return { kind: "none" };
   const here = owned.find((c) => c.binder_id !== null && collectionBinderIds.includes(c.binder_id));
   return here ? { kind: "here", copy: here } : { kind: "elsewhere", copy: owned[0] };
@@ -61,6 +71,10 @@ export async function describeExistingCopyLocation(
   db: DbClient,
   copy: Row<"copy">,
 ): Promise<string> {
+  // A card in the haul is not in the bulk box (UIL-093): the box is somewhere she chose, and this card
+  // has not been put anywhere. It reaches its own message below rather than this one, but the branch is
+  // here too so no caller of this exported helper can name a placement she never made.
+  if (!isPlaced(copy.role as Role)) return "your haul, waiting to be placed";
   if (copy.role === "bulk" || !copy.binder_id) return "the bulk box";
   const binder = await binderRepo.getByPk(db, copy.binder_id);
   const binderName = binder?.name ?? "a binder";
@@ -76,6 +90,16 @@ export async function describeExistingCopyLocation(
 export function alreadyOwnedElsewhereMessage(location: string): string {
   return `You already own this — it's in ${location}. Use Move to bring it here.`;
 }
+
+/**
+ * The refusal for a card she owns but has NOT placed yet (UIL-093).
+ *
+ * Its own sentence, because the remedy is different. "Use Move to bring it here" answers "your card is
+ * somewhere else"; this card is nowhere yet, and the place it gets put somewhere is the Haul Plan. Saying
+ * Move would send her to the wrong screen for a card the app has never filed.
+ */
+export const ALREADY_OWNED_IN_HAUL_MESSAGE =
+  "You already own this card; it is in your haul, waiting to be placed.";
 
 export type LogCardOutcome =
   { ok: true; copyId: string; created: boolean } | { ok: false; error: string };
@@ -101,6 +125,11 @@ export async function applyCollectionLog(
 
   const existing = await findExistingCopy(db, tcgdexId, binderIds);
   if (existing.kind === "elsewhere") {
+    // Asked through `isPlaced`, the one bridge between her word SHELVED and the column's (UIL-088), so
+    // "has this card been put anywhere" is answered in exactly one place.
+    if (!isPlaced(existing.copy.role as Role)) {
+      return { ok: false, error: ALREADY_OWNED_IN_HAUL_MESSAGE };
+    }
     const where = await describeExistingCopyLocation(db, existing.copy);
     return { ok: false, error: alreadyOwnedElsewhereMessage(where) };
   }

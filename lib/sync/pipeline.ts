@@ -23,7 +23,7 @@ import {
   typeColorMapRepo,
   unresolvedEntryRepo,
 } from "@/lib/repo";
-import { band } from "@/lib/engine";
+import { band, type Role } from "@/lib/engine";
 import { toCatalogCard } from "@/lib/plan";
 import { decodeDexCsv, filterOwned, parseDexCsv } from "./csv";
 import { resolveDexId, SET_ALIAS_SEED } from "./resolve";
@@ -125,7 +125,9 @@ export async function loadCurrentGroups(db: DbClient): Promise<CurrentGroup[]> {
     dexVariantRaw: g.dex_variant_raw,
     copies: (byGroup.get(g.id) ?? []).map((c) => ({
       copyId: c.id,
-      role: c.role as "shelved" | "bulk" | "block",
+      // `Role`, not a hand-written union: the literal list here silently went stale when UIL-088
+      // added 'haul', so the cast was asserting something untrue of rows flowing through it (UIL-093).
+      role: c.role as Role,
       binderId: c.binder_id,
       binderHalf: c.binder_half as "front" | "back" | null,
       colorBand: c.color_band,

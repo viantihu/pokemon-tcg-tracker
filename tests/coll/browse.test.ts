@@ -143,17 +143,25 @@ describe("catalogCardRepo.browse", () => {
 });
 
 describe("copyRepo.ownedCatalogCardIdSet", () => {
-  it("counts shelved and bulk, excludes block and cards with no copy", async () => {
-    await seedCards([{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }]);
+  it("counts a card ANYWHERE — including in the haul — and excludes only a block", async () => {
+    /**
+     * UIL-093: `'haul'` is the case this got wrong. The filter named the roles that counted
+     * (`shelved`, `bulk`), so when UIL-088 gave an unplaced card its own role, 545 cards sitting in
+     * her haul badged as NOT OWNED on the search grid and fell on the wrong side of its owned/unowned
+     * filter. Dex is the source of truth for what she owns, and a card an import created is owned; it
+     * simply has not been placed yet. A `block` is still excluded, because it is not a card.
+     */
+    await seedCards([{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "e" }]);
     await db.exec(`
       insert into copy (id, owner_id, catalog_card_id, role)
         values ('e0000000-0000-0000-0000-000000000001', '${OWNER}', 'a', 'shelved'),
                ('e0000000-0000-0000-0000-000000000002', '${OWNER}', 'b', 'bulk'),
-               ('e0000000-0000-0000-0000-000000000003', '${OWNER}', 'c', 'block');
+               ('e0000000-0000-0000-0000-000000000003', '${OWNER}', 'c', 'block'),
+               ('e0000000-0000-0000-0000-000000000004', '${OWNER}', 'e', 'haul');
     `);
     await asOwner(db);
     const owned = await copyRepo.ownedCatalogCardIdSet(pgliteClient(db));
-    expect(owned).toEqual(new Set(["a", "b"]));
+    expect(owned).toEqual(new Set(["a", "b", "e"]));
   });
 });
 

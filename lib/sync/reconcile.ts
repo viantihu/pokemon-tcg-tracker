@@ -14,6 +14,7 @@
  * retire (released under the removal rule, §1.6) — and a variant change carries placement across
  * rather than retire+recreate.
  */
+import type { Role } from "@/lib/engine";
 import { diff, presenceKey, toPresenceMap, type PresenceCount, type SyncDiff } from "./diff";
 import { OWNED_TYPE } from "./csv";
 
@@ -95,7 +96,8 @@ export interface ResolvedRow {
 /** Placement-bearing snapshot of one existing Copy (§1.5). `copyId` is app-generated and stable. */
 export interface CopySnapshot {
   copyId: string;
-  role: "shelved" | "bulk" | "block";
+  /** `Role`, not a literal list: the list went stale when UIL-088 added 'haul' (UIL-093). */
+  role: Role;
   binderId: string | null;
   binderHalf: "front" | "back" | null;
   colorBand: string | null;
