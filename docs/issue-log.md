@@ -7448,18 +7448,23 @@ second attempt at all.
   issue. First, a developer needs to fix this issue so it doesn't happen moving forward. Then, the data
   engineer needs to remove those cards from inventory. Then, the tech lead should make sure all edge
   cases are covered so that the entry of cards is streamlined to a manual add or Dex."
-- **Status:** Open — **re-specced 2026-09-23 by Karvi's second report; three owners in the order she
-  set.** Her rule: inventory enters ONLY through a Dex import or ONE manual add (her earlier ruling, "if
-  adding cards in the haul plan will cause data integrity issues, that option should not exist", now
-  reads as: the manual add must exist and must be safe). (1) **Full Stack Dev - 2**, first: adding a card
-  she does not own to a collection adds it to her wishlist and the collection's chase list and creates no
-  copy (Collections log-a-card, `lib/coll/log.ts:145`). (2) **Database Engineer**, after (1) deploys:
-  removes the copies already created that way (5 at the 2026-09-23 read, run `35874221109`), keeping
-  every collection's chase list. (3) **Tech Lead (new)**: audits every path that can create a copy,
-  designs the single safe manual add (the known hazard: a manual copy is invisible to the import's diff,
-  so a later Dex listing creates a twin; the likely rule is that the import adopts it), and a
-  database-level guard; Dev 2 builds it. The Haul Plan's add form stays until that design lands.
-  Backfill's inserts are part of the audit.
+
+  **Third message, same day.** In her words: "Well there's a difference between the haul plan's manual
+  add and the manual add after the sync".
+- **Status:** Open — **re-specced 2026-09-23 by Karvi's second and third messages; owners in the order
+  she set.** Her rule: inventory enters ONLY through a Dex import, which includes the manual match she
+  makes on the Sync page for a Dex row the import could not resolve (that copy still comes from her Dex
+  row and carries its presence group). The Haul Plan's add-by-hand is not that, so her first ruling
+  stands: "if adding cards in the haul plan will cause data integrity issues, that option should not
+  exist". (1) **Full Stack Dev - 2**, first: adding a card she does not own to a collection adds it to
+  her wishlist and the collection's chase list and creates no copy (`lib/coll/log.ts:145`). (2)
+  **Database Engineer**, after (1) deploys: removes the copies already created that way (5 at the
+  2026-09-23 read, run `35874221109`), keeping every collection's chase list. (3) **Full Stack Dev - 2**:
+  the Haul Plan's add form, source picker and notes are removed and the server refuses a row that is not
+  a queued copy; Backfill is re-pointed to pick existing haul copies instead of creating them. (4) **Tech
+  Lead (new)**: audits every path that can create a copy, confirms the Sync manual-match and stand-in
+  paths carry the Dex row's presence group, adds a database-level guard and an invariant test, and
+  reviews Dev 2's PRs against that list before QA.
 - **Priority:** High (Karvi's ruling; Senior BA agrees) — every hand-created copy is a future duplicate
   that only UIL-089's merge can clean up, and she is about to re-enter her whole collection after the
   2026-09-23 wipe.
