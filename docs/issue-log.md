@@ -7615,3 +7615,79 @@ tests over existing fixes, not new code.
 **Cross-reference UIL-098** (the paths that should create no copy at all; this entry is the paths that
 legitimately do, creating too many), **UIL-089** (the removed-presence memory E2 bypasses), **UIL-086**
 (the case-insensitive lookup E3 guards), and **UIL-082** (the stand-in-promotion resolution E4 guards).
+
+## UIL-100 — The app can hold more copies of a card than Dex lists, and nothing checks
+
+- **Reported:** 2026-09-23 20:53Z (Karvi). In her words: "these cards were shelved (as can be seen) but
+  still show up in the haul plan. Additionally, some cards are showing up in the haul plan even though I
+  do not own 2 of those cards in Dex. There needs to be some kind of validation in the sync that makes
+  sure that the total number of cards in the collection equal the dex import file. This will ensure that
+  cards are not double counted during the matching process or manual add process (which is where I
+  suspect the issue occurred)."
+- **Status:** Open — cause undetermined until she names the cards; assignment follows.
+- **Priority:** High (Senior BA's read; Karvi to confirm) — a silent wrong count on import is exactly the
+  defect class UIL-098 and UIL-099 exist to close.
+- **Area:** Sync
+- **Env:** Testing, `develop` `3bac29c`
+
+**Evidence read before her Undo (run `35921438911`, 21:17:03Z):** 717 copies, every one in a presence
+group, 0 ungrouped. Nothing came from the Haul Plan add, Backfill or Collections log-a-card — those are
+the three paths UIL-098 closes, and their signature (an ungrouped copy) isn't present here. 691 groups:
+665 hold 1 copy, 26 hold 2. 4 manual matches, 3 waiting, 1 snapshot.
+
+**Why nothing can check today.** `presence_group.desired_count` is recomputed from the copies themselves
+after every apply — confirmed at [`lib/repo/write-ops.ts:254`](../lib/repo/write-ops.ts:254), "Presence
+groups whose `desired_count` is recomputed (post-apply live copy count)." The app keeps no separate
+record of what Dex's own export said the count should be, so there is nothing to compare the copy count
+against once the copies already exist — the reconciler can only diff *this* export against *current
+state*, not against a remembered "what the last export actually said."
+
+**Her Sep 7 export agrees with Dex.** `~/Downloads/dexcollection.csv` has 25 owned rows at quantity 2 and
+51 cards owned in two variants — so the totals in the export itself are consistent; the divergence, if
+real, is introduced somewhere between the export and what landed as copies, not in the export.
+
+**Per-card cause: UNDETERMINED.** Candidates, not yet distinguished: Dex genuinely says quantity 2 for
+some of these cards (correct behavior, not a bug); one card legitimately owned in two variants (also
+correct); or UIL-099's E1 (a manual match adds its quantity on top of a group that already has copies
+from another Dex row, rather than reconciling to it) — the mechanism that would produce exactly this
+symptom. Her screenshot (IMG_0731) could not be opened — macOS blocks the Messages folder from this
+session — and she has been asked to re-attach it.
+
+**The per-card evidence is now gone.** Her import was undone at 21:17:31Z (tombstone; run
+`35921910356`): 4 copies left (3 shelved, 1 haul), 691 groups (687 now empty), 54 decisions (51 with no
+copy), 0 unresolved. Whatever the exact cause was for the specific cards she saw, it can no longer be
+read back from Testing — the next occurrence (or her naming the cards from memory) is what would
+distinguish the candidates above.
+
+**Cross-reference UIL-098** (paths that create a copy with no Dex row at all — ruled out here, since
+every copy in the pre-Undo read had a presence group) **and UIL-099**, specifically **E1** (a manual
+match's no-diff insert), the strongest candidate mechanism for a Dex-backed copy still being over-counted.
+
+## UIL-101 — Collections' bulk add should put every card she does not own on her wishlist, the way UIL-098 part 1 does for a single add
+
+- **Reported:** 2026-09-23 (Karvi). In her words: "Collections bulk add should put every card I don't
+  own on my wishlist but that can come later."
+- **Status:** Open, unassigned.
+- **Priority:** Low (Karvi: "can come later").
+- **Area:** Collections
+- **Env:** Testing, `develop` `3bac29c`
+
+**Checked against today's bulk-add path before writing this up, and it doesn't match the mechanism this
+entry's title assumes — flagging that rather than asserting a cause that isn't there.**
+`applyBulkAddTargets` ([`lib/coll/save.ts:136-162`](../lib/coll/save.ts:136), "Bulk-add from the search
+grid (UIL-039)") and the `applyCollectionSave` it calls
+([`lib/coll/save.ts:55-127`](../lib/coll/save.ts:55)) only merge into
+`target_catalog_card_ids` — the collection's own target list — and never call `insert_copy`. Unlike
+`lib/coll/log.ts:145` (UIL-098 part 1's fix surface, PR [#319](https://github.com/viantihu/pokemon-tcg-tracker/pull/319),
+merged `404b79c`), today's bulk add already creates no inventory for a card she doesn't own; it adds the
+card to the collection's chase list, which functions like a wishlist entry already.
+
+**What this is, most likely: a parity/consistency request, not yet a reproduced defect.** She may be
+describing a different surface than `applyBulkAddTargets` (there could be another bulk path this session
+hasn't located), or asking that the *language and behavior* explicitly match UIL-098 part 1's wishlist
+framing rather than reporting a live inventory-creation bug on this path specifically. Either reading is
+consistent with "but that can come later" — worth her confirming which, once this reaches the front of
+the queue, rather than guessing further now.
+
+**Cross-reference UIL-098** (part 1, #319, the single-add fix this entry asks to extend) **and UIL-039**
+(the original grid-search bulk-add feature this path was built for).
