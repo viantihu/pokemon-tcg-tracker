@@ -36,10 +36,9 @@ import {
   copyRepo,
   evolutionLineRepo,
   lineSlotRepo,
-  placementDecisionRepo,
   typeColorMapRepo,
-  wishlistItemRepo,
   type DbClient,
+  type SlotPatch,
   type WriteOp,
   binderBlockRepo,
 } from "@/lib/repo";
@@ -273,17 +272,36 @@ export async function applyDecision(
   // id already follows here.
   const writes = resolveDecisionWrites(derived.resolution, choiceId, pickedCatalogCardId);
 
-  // Line status.
+  /**
+   * ONE `apply_write_ops` CALL (UIL-095). Until 0021 this was a SEQUENCE: the line's status, then one update
+   * per slot patch, then a read of the whole `wishlist_item` table, then a wishlist update or insert per
+   * slot, then the audit row. Any failure after the first left her decision half-applied — a line capped
+   * with its slot unmarked, a slot re-pointed with no wishlist row, or every write landed and NO audit row,
+   * which UIL-042 says is not optional. Same shape as UIL-014, UIL-023 and UIL-033, and the same answer.
+   *
+   * THE WISHLIST OPS ARE KEYED ON THE SLOT, which is what let the read go. The old code read every wishlist
+   * row to find the open one for a slot, then chose update-or-insert from that snapshot: a read-modify-write
+   * across statements, the fault 0007 fixed in `union_collection_targets`. `upsert_wishlist_for_slot`
+   * conflicts on 0021's partial unique index instead, so Postgres decides from the row it locks.
+   *
+   * ORDER IS TODAY'S ORDER — line, slots, wishlist resolves, wishlist upserts, audit — so the audit trail
+   * reads the same as before. This is a change of transaction boundary, not of outcome, and the op-set
+   * assertion in tests/line/decision-atomicity.test.ts is what says so.
+   */
+  const ops: WriteOp[] = [];
+
   if (writes.linePatch?.status) {
-    await evolutionLineRepo.update(db, derived.resolution.lineId, {
-      status: writes.linePatch.status,
+    ops.push({
+      op: "update_line",
+      id: derived.resolution.lineId,
+      patch: { status: writes.linePatch.status },
     });
   }
 
-  // Slot state / target changes, including the UIL-078 "stays resolved" marker: state in state,
-  // so the marker survives whatever happens to the audit trail (docs/issue-log.md UIL-042).
+  // Slot state / target changes, including the UIL-078 "stays resolved" marker: state in state, so the
+  // marker survives whatever happens to the audit trail (docs/issue-log.md UIL-042).
   for (const p of writes.slotPatches) {
-    const patch: Record<string, unknown> = {};
+    const patch: SlotPatch = {};
     if (p.state !== undefined) patch.state = p.state;
     if (p.copyId !== undefined) patch.copy_id = p.copyId;
     /**
@@ -303,43 +321,34 @@ export async function applyDecision(
     if (p.resolvedDecisionCollectionId !== undefined) {
       patch.resolved_decision_collection_id = p.resolvedDecisionCollectionId;
     }
-    if (Object.keys(patch).length > 0) await lineSlotRepo.update(db, p.slotId, patch);
+    if (Object.keys(patch).length > 0) ops.push({ op: "update_slot", id: p.slotId, patch });
   }
 
-  // Wishlist: resolve (drop) some, upsert (create/refresh) others.
-  if (writes.wishlistResolveSlotIds.length > 0 || writes.wishlistUpserts.length > 0) {
-    const existing = await wishlistItemRepo.listAll(db);
-    const openBySlot = new Map<string, string>();
-    for (const w of existing) {
-      if (w.resolved_at === null && w.line_slot_id) openBySlot.set(w.line_slot_id, w.id);
-    }
-
-    for (const slotId of writes.wishlistResolveSlotIds) {
-      const id = openBySlot.get(slotId);
-      if (id) await wishlistItemRepo.update(db, id, { resolved_at: new Date().toISOString() });
-    }
-
-    for (const up of writes.wishlistUpserts) {
-      const id = openBySlot.get(up.lineSlotId);
-      const values = {
-        line_slot_id: up.lineSlotId,
-        required_dex_id: up.requiredDexId,
-        required_type: up.requiredType,
-        required_stage: up.requiredStage,
-        chosen_catalog_card_id: up.chosenCatalogCardId,
-        alternate_catalog_card_ids: up.alternateCatalogCardIds,
-        will_live_in_specialty: up.willLiveInSpecialty,
-      };
-      if (id) await wishlistItemRepo.update(db, id, values);
-      else await wishlistItemRepo.insert(db, { owner_id: ownerId, ...values });
-    }
+  // Wishlist: resolve (close) some, upsert (create/refresh) others. No read first — see the note above.
+  for (const slotId of writes.wishlistResolveSlotIds) {
+    ops.push({ op: "resolve_wishlist_for_slot", line_slot_id: slotId });
+  }
+  for (const up of writes.wishlistUpserts) {
+    ops.push({
+      op: "upsert_wishlist_for_slot",
+      line_slot_id: up.lineSlotId,
+      required_dex_id: up.requiredDexId,
+      required_type: up.requiredType,
+      required_stage: up.requiredStage,
+      chosen_catalog_card_id: up.chosenCatalogCardId,
+      alternate_catalog_card_ids: up.alternateCatalogCardIds,
+      will_live_in_specialty: up.willLiveInSpecialty,
+      // Never set by this path before 0021 either: a decision's wishlist row is not held for a binder.
+      held_for_binder_id: null,
+    });
   }
 
   // Audit (dev-spec §4 — one row per user decision). `line_id`/`line_slot_id` are traceability only
-  // (UIL-078) — naming which slot this row was about, since nothing here or anywhere else reads them
-  // back to decide behaviour (that's `line_slot.resolved_decision_kind`'s job, not this table's).
-  await placementDecisionRepo.insert(db, {
-    owner_id: ownerId,
+  // (UIL-078) — nothing here or anywhere else reads them back to decide behaviour (that is
+  // `line_slot.resolved_decision_kind`'s job, not this table's) — and 0021 taught `insert_decision` to
+  // carry them so moving this write inside the transaction did not quietly drop them.
+  ops.push({
+    op: "insert_decision",
     haul_id: null,
     copy_id: null,
     line_id: derived.resolution.lineId,
@@ -348,4 +357,6 @@ export async function applyDecision(
     reason: writes.decision.reason,
     resolved_by: "user",
   });
+
+  await applyWriteOps(db, { ops });
 }
