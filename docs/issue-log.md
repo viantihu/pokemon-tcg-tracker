@@ -6992,7 +6992,7 @@ shelf twice this week.
 ## UIL-089 — There is no way to remove a copy from the app: a card misidentified as owned in Dex stays "owned" until a later import happens to retire it, and a card that was traded or went missing has no lifecycle at all
 
 - **Reported:** 2026-09-22 (Karvi; body by the Senior BA, no intake session on the roster)
-- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-088; design proposal before code.** **Karvi's ruling 2026-09-22: no reason is necessary.** So this is one plain action, remove this copy from the app, for both cases; the app releases what the copy holds, records a `placement_decision` for the removal (UIL-042: history is never deleted), shows no reason field and no "gone" list, and remembers the removal keyed on the Dex row so the next import does not recreate it until Dex no longer lists it, since Dex is the source of truth (UIL-088). **2026-09-23, moved up:** UIL-092's incident left four duplicate copies on Testing (two Meditite, one Pikachu, one Raichu: a hand-typed copy now shelved in a line beside its Dex twin waiting in the haul), and nothing in the app can remove or merge either one, so she has been told to leave those queue rows unplaced until this lands. The proposal must cover that shape explicitly: two records for one physical card, one Dex-backed. Removing the Dex twin must not let the next import recreate it (already in the brief); removing the hand-typed one must not undo her placement; the cleanest answer is probably a merge, the surviving copy adopting the Dex presence, argued in the proposal. Next in Full Stack Dev - 2's queue after UIL-092 and UIL-093, ahead of UIL-091.
+- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-088; design proposal before code.** **Karvi's ruling 2026-09-22: no reason is necessary.** So this is one plain action, remove this copy from the app, for both cases; the app releases what the copy holds, records a `placement_decision` for the removal (UIL-042: history is never deleted), shows no reason field and no "gone" list, and remembers the removal keyed on the Dex row so the next import does not recreate it until Dex no longer lists it, since Dex is the source of truth (UIL-088). **2026-09-23, moved up:** UIL-092's incident left four duplicate copies on Testing (two Meditite, one Pikachu, one Raichu: a hand-typed copy now shelved in a line beside its Dex twin waiting in the haul), and nothing in the app can remove or merge either one, so she has been told to leave those queue rows unplaced until this lands. The proposal must cover that shape explicitly: two records for one physical card, one Dex-backed. Removing the Dex twin must not let the next import recreate it (already in the brief); removing the hand-typed one must not undo her placement; the cleanest answer is probably a merge, the surviving copy adopting the Dex presence, argued in the proposal. Next in Full Stack Dev - 2's queue after UIL-092 and UIL-093, ahead of UIL-091. **2026-09-23, built:** PR [#311](https://github.com/viantihu/pokemon-tcg-tracker/pull/311) open (head `531f546`, 30 files, migration `0020` = a `removed_presence` table keyed like `presence_group` with a server-side increment computed from the column and a GC when the key leaves the import, plus `apply_write_ops` verbatim plus two ops; no existing row rewritten), Dev 2's gate green, 9 mutants killed, Senior BA's BEFORE taken (run 35817873803: every count recorded, `removed_presence` absent); **waiting on QA, which is off the roster.** Rulings applied: a table, not a tombstone (a tombstone is a fourth state every read would have to learn, the class UIL-093 just charged us for); Remove on every copy surface and Merge on Lookup, both shipped, Merge the smaller of the two because the survivor adopts the twin's presence group and no memory row is needed; removal does NOT subtract a collection's chase tag (a want, not an ownership record; Karvi can overturn); on Collections the action shows only on single-copy rows, Lookup handles the rest (Dev 2's judgement, accepted). Traded or missing cards use the same action with no reason. Accepted edges, documented in the migration: Dex's count rising after a removal creates one (she bought another); a hand re-add does not touch the memory.
 - **Priority:** High (Karvi's own report; Senior BA's read pending her confirmation) — the app's record of
   what she owns is the point of the app; a copy she knows is not hers, or is no longer hers, that the app
   keeps counting, placing and proposing is a wrong record with no remedy.
@@ -7057,8 +7057,12 @@ she has no way to correct it, and the wrong record drives placement.
   `ja:` slots, 57 filled slots, 22 placeholders, 1 block and every copy, decision, line, wishlist and
   collection count unchanged. **Step for Karvi:** find a species you own in both English and Japanese; put
   the Japanese one into a binder's back half as a new line, then the English one into the same binder and
-  colour: both save, and the Lines page names each line in its own language. Then the Toedscruel from your
-  screenshot: it should now start its own line in KB-002's back half. Closed on your confirmation.
+  colour: both save, and the Lines page names each line in its own language. **Correction 2026-09-23:**
+  the Toedscruel from your screenshot is NOT unblocked by this entry. Both it and KB-002's existing
+  Toedscool line are English (the Testing read established that; the label was the Japanese one only
+  because of D3), so the rule that stopped it is the one-line-per-species-band-binder rule, not locale.
+  Your 2026-09-23 ruling turns that rule into a warning: UIL-096. Closed on your confirmation of the
+  two-locale step above.
 - **Priority:** High (Karvi's own rule; Senior BA agrees) — a card she has decided to place cannot be
   placed, the refusal offers no remedy that matches her intent, and the rule the app enforces contradicts
   the architecture's own statement that a JP and an EN printing are different cards.
@@ -7105,8 +7109,19 @@ rule she never asked for.
 
 - **Reported:** 2026-09-22 (found by Full Stack Dev - 2 while tracing UIL-090's repair; body by the Senior
   BA, no intake session on the roster)
-- **Status:** Open — unassigned; after UIL-090 and UIL-088 in Full Stack Dev - 2's queue unless Karvi sees
-  it first.
+- **Status:** Open — **assigned to Full Stack Dev - 2 2026-09-23 after UIL-089; built.** PR
+  [#312](https://github.com/viantihu/pokemon-tcg-tracker/pull/312) open (head `1092c7c`, three files, no
+  migration), Dev 2's gate green (1235 tests), 3 mutants killed; **waiting on QA, which is off the roster.**
+  Design settled as **re-point the stored target on the pick**, in the same slot update that already carries
+  the resolved-decision marker, because `target_catalog_card_id` is not a display field: the Plan's
+  `dexIdForSlot`, the plan stamp, `toEvolutionLine` and migration `0019` all read it, so "the load prefers
+  the wishlist" would have been "every reader also consults the wishlist", the state multiplication UIL-088
+  ruled against. The re-point fires ONLY on a validated explicit pick: a cap confirmed with no pick leaves a
+  null target alone, because null means "cheapest at load" (follows prices and new printings) and a value
+  means "she chose this"; the first cut stamped the engine's default and its own regression test caught it.
+  The option she moved away from lands in the wishlist row's alternates; the decision is audited.
+  **Step for Karvi**, once deployed: on a line decision pick an alternative instead of the suggested card;
+  the slot shows the card you picked, on Lines and after a reload.
 - **Priority:** Medium (Senior BA's read) — a decision she made is honoured in the data she is charged for
   (the wishlist) but not in the picture she reads (the line), so the Lines screen shows a card she has
   already replaced; not a placement error, but a false display on the screen UIL-067 just simplified.
@@ -7271,3 +7286,90 @@ else on the row identifies the card: `reason` is free text, `haul_id` names a si
 
 **Priority rationale.** Medium: it makes past history illegible rather than present state wrong, and
 UIL-089 carries a working stopgap.
+
+## UIL-095 — A line decision is written as a sequence of separate statements, not one transaction, so a failure part-way leaves it half-applied: a line capped with its slot unmarked, a slot re-pointed with no wishlist row, or every write landed and no audit row
+
+- **Reported:** 2026-09-23 (found by Full Stack Dev - 2 while wiring UIL-091's pick into the slot; body by
+  the Senior BA). Latent: no user report; the shape is the one UIL-014, UIL-023 and UIL-033 exist to
+  forbid.
+- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-091, ahead of UIL-094; design proposal
+  reviewed and ruled 2026-09-23; one PR with migration `0021`.** Two `apply_write_ops` ops the RPC lacks,
+  both keyed on the SLOT rather than a row id: `resolve_wishlist_for_slot` (set `resolved_at` on the open
+  row for a slot) and `upsert_wishlist_for_slot` (update the open row for a slot, else insert), expressed as
+  `insert … on conflict do update` against a new partial unique index `(owner_id, line_slot_id) where
+  resolved_at is null`. **Ruled (a) over a two-statement upsert** because the Senior BA's Testing read (run
+  35818777597) found `wishlist_item` at 6 rows, all open, 6 distinct slots, so the index applies cleanly
+  and turns an invariant the TypeScript only assumed ("at most one open row per slot") into one the
+  database enforces; Production's table is empty. `applyDecision` is rebuilt as ONE call, ops in today's
+  order (`update_line` → `update_slot` per patch → resolve per resolved slot → upsert per upsert →
+  `insert_decision`), the staleness guard and the pick validation staying before any write; TypeScript
+  stops reading the whole wishlist table to decide insert-vs-update, which deletes the read-modify-write
+  across statements (0007's `union_collection_targets` lesson). `0021` carries `0020`'s function text
+  verbatim plus the two branches, with the mechanical verbatim-diff test extended one link. Tests: a
+  pre-fix control that poisons a mid-sequence write with a raising trigger and records the half-applied
+  state today, then nothing written after the fix; the op-set assertion; resolve idempotent and a no-op on
+  a slot with no open row; upsert updates rather than inserting a second open row, inserts when none, and
+  never resurrects a resolved row; the whole UIL-057/UIL-091 suite unchanged (a transaction-boundary
+  change, not a behaviour change); fresh-apply and RLS for `0021`.
+- **Priority:** High (Senior BA's read) — the class this project has made High three times: a decision she
+  confirmed can be recorded in the line and not in the slot, or in the slot and not in history, and UIL-042
+  says the audit row is not optional. Latent rather than reported, which is why it queues behind UIL-091
+  and UIL-089 rather than jumping them.
+- **Area:** Lines (decisions), schema (`apply_write_ops`, `wishlist_item`)
+- **Env:** Testing, develop `d239d52`
+
+**Mechanism.** `applyDecision` ([`lib/line/write.ts:300`](../lib/line/write.ts:300)) awaits, one after
+another: `evolutionLineRepo.update` for the status, one `lineSlotRepo.update` per slot patch, a
+`wishlistItemRepo.listAll` read from which it decides insert-vs-update per slot, the per-slot wishlist
+`update`/`insert`, then `placementDecisionRepo.insert`. Each is its own PostgREST statement; there is no
+transaction around them. UIL-091's re-point rides inside the existing slot update, so her pick lands
+atomically with the resolved-decision marker on the same row, but the wishlist half and the audit row remain
+separate statements, and UIL-091 gave that gap one more thing to lose.
+
+**Priority rationale.** High by class; latent by evidence.
+
+## UIL-096 — Starting a new line is refused when the binder already has a line for the species and band; Karvi wants a warning that names every existing line across her ENTIRE collection and lets her join it or start a new one anyway
+
+- **Reported:** 2026-09-23 (Karvi, in her own words below; body by the Senior BA)
+- **Status:** Open — **assigned to Full Stack Dev - 2, first in the queue ahead of UIL-095; plan approved
+  2026-09-23, no migration.** The `lineExists` refusal (`lib/plan/commit.ts`, text `LINE_EXISTS_IN_BINDER`
+  in `lib/line/move.ts`: "That binder already has a line for this species in this band. Join its open slot
+  if it has one, or place this copy in the front half.") and the same rule wherever a new line is started
+  (Move's "Start a new line", the Lines sheet, the Haul Plan) becomes a WARNING and never a block. The
+  warning names where every existing line for the species sits across the whole collection, every binder,
+  both halves, both locales, and offers two choices: join that line (the existing join flow) or start a new
+  one anyway. Per-binder uniqueness stays as the default suggestion, not as a rule. Pre-fix-failing test:
+  an English Toedscruel against an English Toedscool line in the same binder and band gets the warning with
+  both choices and, on "start new", a second line in that binder; a `*.dom.test.ts` for the sheet. Fence:
+  `lib/plan/commit.ts`, `lib/plan/*`, `lib/line/join-options.ts`, `lib/line/move.ts`, `lib/line/write.ts`,
+  `app/(ui)/plan/*`, `app/(ui)/line/*`, `app/(ui)/_components/*`, tests.
+- **Priority:** High (Karvi's own report, twice: UIL-084's screenshot and today) — a card she has decided
+  to place is refused, and her standing principle is that a card must always be movable; the rule the app
+  enforces is one she has now overruled.
+- **Area:** Lines, Haul Plan, Move
+- **Env:** Testing, develop `d239d52` (after UIL-090's `984f388` deployed)
+
+In her words: "the Toedscruel issue is still there. I'm not able to create a new line for it. Instead of
+blocking the creation of an evolution line, I want a warning that there is a line existing in my ENTIRE
+collection (not just the binder)."
+
+**Why it survived three fixes.** UIL-084 moved the uniqueness key from global to per-binder and fixed the
+back-half-into-a-second-binder case; UIL-087 removed the false "already placed" slot; UIL-090 separated
+Japanese from English lines. Her Toedscruel and KB-002's Toedscool line are both English and in the same
+binder and band, so every one of those fixes left the rule that stops it intact: one line per species,
+band and binder. That rule was the design's, not hers, and today she overruled it. What she wants from the
+app is information (a line for this species exists here, here and here) and a choice, not a refusal.
+
+**Design note, settled with the dev 2026-09-23.** No new read and no migration: `buildLineJoinIndex`
+(`lib/line/join-options.ts`) already indexes EVERY line in the collection by chain root, and both the Plan
+and Lines screens build it from the full line list; `joinOptionsFor` then narrows it to a per-binder record,
+which is exactly the view she is objecting to. The fix exposes the unfiltered lines for the root on the
+join options, the Move panel warns from them before she confirms (binder, half, band, locale, filled
+slots, with the card image per the visual-search principle), offers "Join that line" or "Start a new line
+anyway" with the per-binder match pre-selected, and the two write paths (`lib/plan/commit.ts:750`,
+`lib/line/write.ts:199`) plus the panel gate (`MovePanel.tsx:124`) stop refusing. No DB constraint
+stands in the way: `0002` declares only a non-unique index on (root, band), so the uniqueness was only
+ever TypeScript. The engine's oldest-first tie-break for two lines in one binder stays pinned.
+
+**Priority rationale.** High: a placement she has decided on is impossible, and it is the third report on
+the same card.
