@@ -384,10 +384,6 @@ export function buildHaulCommitPayload(
   planned: PlannedCard[],
   input: CommitInput,
 ): { payload: WritePayload; counts: CommitCounts } {
-  // Refused here too, not only in `commitCardPlacement`: this builder is exported, and a caller that
-  // skipped the per-card guard must still not be able to turn a hand-typed row into a copy (UIL-098).
-  if (planned.some((p) => !p.existingCopyId)) throw new Error(NOT_A_HAUL_COPY.notFromImport);
-
   const ops: WriteOp[] = [];
   const counts: CommitCounts = {
     routed: 0,
@@ -715,7 +711,7 @@ function writeOverriddenCard(
  *
  * It PATCHES that row and never inserts one (UIL-098 part 2). This used to be the one place the
  * new-vs-routed split was decided (UIL-003), with an `insert_copy` branch for a hand-typed card; that
- * branch is gone, and `buildHaulCommitPayload` refuses a row without `existingCopyId` before reaching here.
+ * branch is gone, and this function refuses a row without `existingCopyId` (below) rather than write one.
  * The patch names all five placement columns explicitly because `CopyPatch` writes exactly the keys
  * present (a missing key is left unchanged, which would strand a stale placement); it deliberately omits
  * `variant` / `dex_variant_raw` / `haul_id`, which are not this pass's to change.
@@ -733,9 +729,9 @@ function emitIncomingCopy(
   },
   counts: CommitCounts,
 ): string {
-  // A deliberate SECOND guard: `buildHaulCommitPayload` refuses first, so this is unreachable through it,
-  // and removing either one alone changes no outcome. It stays because it narrows the id for the patch
-  // below and keeps this function from ever writing a row it was handed with no copy behind it.
+  // The builder's refusal of a hand-typed row (UIL-098), not only `commitCardPlacement`'s: the builder is
+  // exported, so a caller that skipped the per-card guard must still not turn a typed row into a copy.
+  // Every card reaches here, and `ops` is local, so a throw returns no payload at all.
   if (!p.existingCopyId) throw new Error(NOT_A_HAUL_COPY.notFromImport);
   ops.push({
     op: "update_copy",
