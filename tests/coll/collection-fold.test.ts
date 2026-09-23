@@ -15,7 +15,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CollectionCard } from "@/app/(ui)/coll/CollHub";
+import { CollectionCard, LogCardModal } from "@/app/(ui)/coll/CollHub";
 import type { CollectionCardView, CollectionView } from "@/app/(ui)/coll/coll-types";
 
 function card(n: number, owned: boolean): CollectionCardView {
@@ -191,5 +191,46 @@ describe('UIL-089 · "Not mine" sits beside Collections\' own Remove, and only w
     const html = render(withCopies([]), false);
     expect(html).toContain("Remove ▸");
     expect(html).not.toContain("Not mine");
+  });
+});
+
+describe("UIL-098 · the control says what it does — it never adds a card to her inventory", () => {
+  /**
+   * It read "Log a card" / "Log it ▶" with "logging it is a placement into <binder>", and for a card she did
+   * not own it created inventory. Karvi: "Adding cards that I don't own to a collection should add them to
+   * the wishlist, not into inventory itself." Now the only two outcomes are joining the list (a card she
+   * already has in the binder) or her wishlist, and the words say both.
+   */
+  const modal = () =>
+    renderToStaticMarkup(
+      createElement(LogCardModal, {
+        collection: collection(1, 1),
+        busy: false,
+        onClose: () => {},
+        onLog: () => {},
+      }),
+    );
+
+  it("names both outcomes and rules out inventory", () => {
+    const html = modal();
+    expect(html).toContain("Add a card");
+    expect(html).toContain("goes on your wishlist");
+    expect(html).toContain("never");
+    expect(html).toContain("added to your inventory");
+    expect(html).toContain("Add it ▶");
+  });
+
+  it("the old wording, which described a placement, is gone", () => {
+    const html = modal();
+    expect(html).not.toContain("Log a card");
+    expect(html).not.toContain("Log it ▶");
+    expect(html).not.toMatch(/logging it is a placement/i);
+  });
+
+  it("an open collection's own button says Add, not Log", () => {
+    // The button lives on an OPEN collection (a finite one has its gaps' own Wishlist buttons instead).
+    const open: CollectionView = { ...collection(1, 0), mode: "open" };
+    expect(render(open, false)).toContain("Add a card");
+    expect(render(open, false)).not.toContain("Log a card");
   });
 });

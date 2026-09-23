@@ -12,21 +12,33 @@
  *     Moving the existing one is her call, not this action's (UIL-043 is the designed follow-on: offering
  *     that move inline from the row). The haul case gets its own sentence, because the remedy is the Haul
  *     Plan rather than Move (UIL-093).
- *   - owned nowhere: the caller inserts, as before.
+ *   - owned nowhere: goes on her WISHLIST and the collection's chase list — and creates NO copy (UIL-098).
+ *     This used to insert a copy, i.e. inventory. Karvi: "Adding cards that I don't own to a collection should
+ *     add them to the wishlist, not into inventory itself. This is a major data integrity issue." Dex is the
+ *     source of truth for what she owns, and a copy made here belongs to no presence group, so the next
+ *     import's reconcile cannot see it and creates a SECOND one when Dex lists the card — two records for
+ *     one physical card, the duplicate UIL-089 had to learn to merge.
+ *
+ *     The wishlist row is the shape the Collections "Wishlist" button already writes
+ *     (`wishlistCollectionCard`): no line slot, the collection's binder as `held_for_binder_id`, and
+ *     `will_live_in_specialty`. A collection want is exactly what `wishlist_item.line_slot_id` was left
+ *     nullable for, so no new table. It is what every "wishlisted?" reader already recognises — the hub's
+ *     `wished` and Lookup's WISHLISTED fact both match an open row on `chosen_catalog_card_id`.
  *
  * `role = 'block'` is excluded from "owned", and is the ONLY exclusion: it marks a slot no card can ever
  * fill, not a physical card she holds (system-design §4). It was not always the only one — the filter used
  * to name the roles that counted, which silently dropped the haul when UIL-088 added it, and that is the
  * regression UIL-093 fixes.
  *
- * ONE TRANSACTION (UIL-033). The write is a single `apply_write_ops` call — `insert_copy` +
- * `insert_decision` when she owns none, and the chase-list join as `union_collection_targets` (0007) —
+ * ONE TRANSACTION (UIL-033). The write is a single `apply_write_ops` call — the wishlist row when she owns
+ * none, and the chase-list join as `union_collection_targets` (0007) —
  * the same op set the other three "join a collection" paths use (backfill, removal, the Line/Plan
  * move), instead of a fourth bespoke shape. The old shape was three awaited writes with a TypeScript
  * read-modify-write on `target_catalog_card_ids` in the middle, so two logs that interleaved lost one
  * tag, and a failure after the copy insert left a placed card on no list. The union happens server-side
- * in one statement, so concurrent logs compose; and a copy that cannot be inserted rolls the tag and
- * the audit row back with it.
+ * in one statement, so concurrent logs compose, and a wishlist row that cannot be written takes the tag
+ * back with it. (The copy insert and its audit row that used to ride in the same transaction are gone with
+ * UIL-098: this path never creates a copy, and a wish is not a placement, so it writes no decision row.)
  */
 
 import { errorMessage } from "@/lib/errors";
@@ -35,12 +47,14 @@ import { collectionTargetJoinOp } from "@/lib/line/move";
 import {
   applyWriteOps,
   binderRepo,
+  catalogCardRepo,
   collectionRepo,
   colorBandRepo,
   copyRepo,
   type DbClient,
   type Row,
   type WriteOp,
+  wishlistItemRepo,
 } from "@/lib/repo";
 
 export type ExistingCollectionCopy =
@@ -102,7 +116,16 @@ export const ALREADY_OWNED_IN_HAUL_MESSAGE =
   "You already own this card; it is in your haul, waiting to be placed.";
 
 export type LogCardOutcome =
-  { ok: true; copyId: string; created: boolean } | { ok: false; error: string };
+  | {
+      ok: true;
+      /** The copy already in this collection's binder; null when the card went on her wishlist instead. */
+      copyId: string | null;
+      /** Always false since UIL-098 — this path never creates a copy. Kept so the outcome's shape holds. */
+      created: false;
+      /** True when she does not own the card, so it went on her wishlist (UIL-098). */
+      wishlisted: boolean;
+    }
+  | { ok: false; error: string };
 
 /**
  * The testable core of "log a card into a collection" — a PLACEMENT, not a tally. `created` is false
@@ -135,31 +158,33 @@ export async function applyCollectionLog(
   }
 
   const ops: WriteOp[] = [];
-  let copyId: string;
+  let copyId: string | null = null;
   if (existing.kind === "here") {
+    // Already shelved in this collection's binder: a repeat that unions the tag and writes nothing else.
     copyId = existing.copy.id;
   } else {
-    // Client-generated id, so the audit row can reference the copy inside the same transaction.
-    copyId = crypto.randomUUID();
-    ops.push({
-      op: "insert_copy",
-      id: copyId,
-      catalog_card_id: tcgdexId,
-      variant: "normal",
-      role: "shelved",
-      binder_id: binderId,
-      binder_half: null, // specialty binder is a single section
-      color_band: null,
-      acquired_at: new Date().toISOString(),
-    });
-    ops.push({
-      op: "insert_decision",
-      haul_id: null,
-      copy_id: copyId,
-      decision: "collection-log",
-      reason: `Logged into ${col.name}`,
-      resolved_by: "user",
-    });
+    // Owned nowhere: a WISH, never inventory (UIL-098 — see the header). The row the Collections "Wishlist"
+    // button already writes, so both ways of wanting a collection card are one shape.
+    const card = await catalogCardRepo.getByPk(db, tcgdexId);
+    if (!card) return { ok: false, error: "That card is not in the catalog." };
+    // Idempotent: a card she is already chasing is not wished for twice. Read-then-write, not server-side —
+    // the one open-row uniqueness the schema enforces (0021) is per line SLOT, and a collection want has none.
+    // A race between two adds of the same card could leave two wish rows for it; both read as one "wished",
+    // so the cost of that race is a duplicate row, never a wrong answer.
+    const open = await wishlistItemRepo.listOpen(db);
+    if (!open.some((w) => w.chosen_catalog_card_id === tcgdexId)) {
+      ops.push({
+        op: "insert_wishlist",
+        line_slot_id: null,
+        required_dex_id: card.dex_id?.[0] ?? null,
+        required_type: card.types?.[0] ?? null,
+        required_stage: card.stage,
+        chosen_catalog_card_id: tcgdexId,
+        alternate_catalog_card_ids: [],
+        held_for_binder_id: binderId,
+        will_live_in_specialty: true,
+      });
+    }
   }
 
   // The chase-list join, the same op every other "into a collection" path emits (UIL-022/UIL-033):
@@ -181,11 +206,16 @@ export async function applyCollectionLog(
   if (!after || !(after.target_catalog_card_ids ?? []).includes(tcgdexId)) {
     return {
       ok: false,
+      // Said per case, because what did land differs: an owned card was already in the binder; a wished
+      // one is on her wishlist (that row does not depend on the collection) but on no collection's list.
       error:
-        "That collection changed under you, so the card was shelved in the binder but not added to " +
-        "this list. Reload to see what changed, then move it from the binder view.",
+        existing.kind === "here"
+          ? "That collection changed under you, so the card is in the binder but was not added to this " +
+            "list. Reload to see what changed, then move it from the binder view."
+          : "That collection changed under you, so the card is on your wishlist but was not added to " +
+            "this list. Reload to see what changed.",
     };
   }
 
-  return { ok: true, copyId, created: existing.kind === "none" };
+  return { ok: true, copyId, created: false, wishlisted: existing.kind === "none" };
 }

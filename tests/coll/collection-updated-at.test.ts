@@ -121,12 +121,18 @@ describe("UIL-052 · collection.updated_at bumps on every real write path", () =
     expect(await updatedAtOf(COL2)).not.toBe(before);
   });
 
-  it("logCardIntoCollection (applyCollectionLog) shelving a new copy", async () => {
+  it("logCardIntoCollection (applyCollectionLog) adding a card already in its binder to the list", async () => {
+    // Was "shelving a new copy"; since UIL-098 the log never creates a copy, and the only log that writes is
+    // this one — a card already shelved in the collection's binder, joining its chase list.
     await seedCatalogCards(db, ["cardA"]);
     await seedBinders(db, [{ id: SPEC, type: "specialty", name: "Specialty A" }]);
     await seedCollections(db, [
       { id: COL, name: "Matsuno", targetCatalogCardIds: [], currentBinderIds: [SPEC] },
     ]);
+    await db.query(
+      `insert into copy (owner_id, catalog_card_id, role, binder_id) values ($1, 'cardA', 'shelved', $2)`,
+      [OWNER, SPEC],
+    );
     const before = await backdate(COL);
     await asOwner(db);
 
