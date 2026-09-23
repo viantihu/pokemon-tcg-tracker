@@ -7434,3 +7434,63 @@ equivalent) gives a real retry margin, but the `token_hash` fix removes most of 
 second attempt at all.
 
 **Cross-reference:** none — first report of this mechanism.
+
+## UIL-098 — A card can be created in the app outside a Dex import, and Dex will duplicate it on its next import
+
+- **Reported:** 2026-09-23 (Karvi, answering a report that a hand-added Haul Plan card Dex will also
+  import creates a twin — the Meditite duplicate from UIL-092's incident). In her words: "If adding
+  cards in the haul plan will cause data integrity issues, that option should not exist."
+- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-096, ahead of UIL-097; two PRs, no
+  migration expected.** Rule, applied by function per Karvi's ruling: only a Dex import creates a copy.
+  PR 1: the Haul Plan's add-by-hand form is removed and the server refuses a draft row that is not a
+  queued haul copy; Collections' "log a card" no longer creates a copy and refuses a card she does not
+  own ("This card is not in your Dex import. Add it in Dex, then import."); an invariant test fails if
+  anything but the import emits `insert_copy`. PR 2: Backfill is re-pointed, not removed: every entry
+  picks an existing copy of that printing from her haul and places it, never creates one; design proposal
+  first. **Until PR 2 ships:** bring cards in only through a Dex import; do not use the Haul Plan's add
+  form, Backfill, or "log a card" for a card you do not already own. Delivery is in three PRs: part 1
+  Collections log-a-card, part 2 the Haul Plan (its source picker and notes go with the add form, since a
+  haul row would no longer be written), part 3 Backfill. 2026-09-23 read (run `35874221109`): five copies
+  already created on Testing through log-a-card; each will need UIL-089's Merge after her first import.
+- **Priority:** High (Karvi's ruling; Senior BA agrees) — every hand-created copy is a future duplicate
+  that only UIL-089's merge can clean up, and she is about to re-enter her whole collection after the
+  2026-09-23 wipe.
+- **Area:** Haul Plan, Collections, Backfill
+- **Env:** Testing, `develop` `07ff166`
+
+**One functional requirement, three surfaces — grouped by Karvi's own rule.** The Haul Plan's add form,
+Collections' "log a card," and every Backfill entry are three different screens doing the same thing:
+creating a `copy` row by hand instead of through a Dex import. This is one entry, not three.
+
+**Root cause: Dex is the source of truth (her UIL-088 ruling), but presence is derived from a group table
+a hand-created copy never joins.** `loadCurrentGroups`
+([`lib/sync/pipeline.ts:116-130`](../lib/sync/pipeline.ts:116)) builds the reconciler's view of "what she
+currently has" by loading `presence_group` rows and attaching only the copies whose
+`presence_group_id` matches one (`if (!c.presence_group_id) continue;`). A copy with no presence group
+isn't a group with zero copies — it's absent from the loop entirely, since the loop iterates
+`presence_group` rows, not `copy` rows. `reconcile`
+([`lib/sync/reconcile.ts:6-13`](../lib/sync/reconcile.ts:6)) then diffs Dex's export against exactly that
+snapshot: "Dex owns presence... rebuilds a group." A copy the app created outside that machinery is
+invisible to this diff, so the next import that lists the same card sees no existing presence for it and
+creates a second one.
+
+**Three call sites insert a copy with no presence group, confirmed directly, none of them setting
+`presence_group_id`:**
+
+1. **Haul Plan, adding a card by hand** (set/number/name) —
+   [`lib/plan/commit.ts:823`](../lib/plan/commit.ts:823), `insert_copy` inside the haul-commit op list.
+2. **Collections, "log a card" she does not already own** —
+   [`lib/coll/log.ts:145`](../lib/coll/log.ts:145), `insert_copy` with a client-generated id.
+3. **Backfill, every entry** — [`lib/backfill/commit.ts:60`](../lib/backfill/commit.ts:60), `insert_copy`
+   for each write in the batch; this is Backfill's *only* way to record a card, not one path among
+   several.
+
+**Suggested fix, as split above.** Removing the create path outright works for the Haul Plan and
+Collections, since both have a Dex-import alternative already. Backfill has no such alternative today —
+it exists specifically to place cards Dex has already imported but that haven't been placed yet — so its
+fix is a re-point (pick an existing unplaced copy of that printing) rather than a removal, which is why
+it is scoped as its own PR with a design proposal first rather than folded into PR 1.
+
+**Cross-reference UIL-088** (Dex as source of truth, the ruling this entry applies), **UIL-089** (the
+removed-presence merge that is the only current cleanup for a hand-created duplicate), and **UIL-092**
+(the Meditite incident that surfaced this for the Haul Plan specifically).
