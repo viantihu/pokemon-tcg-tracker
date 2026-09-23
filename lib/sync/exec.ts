@@ -29,6 +29,16 @@ import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
 import type { SyncPlanBundle } from "./pipeline";
 import {
+  assertFreshBase,
+  latestSnapshot,
+  planDigest,
+  refusalAfterRace,
+  snapshotIdForBase,
+  tombstoneIdFor,
+  undoableSnapshot,
+  type SnapshotTombstone,
+} from "./apply-guard";
+import {
   invertSnapshot,
   type AppliedSnapshot,
   type SnapshotCopy,
@@ -151,8 +161,24 @@ function reinsertEntryOp(e: SnapshotEntry): WriteOp {
 export async function executeApply(
   db: DbClient,
   bundle: SyncPlanBundle,
+  /**
+   * Who is applying — keys the no-snapshot-yet case of the apply-once guard (UIL-099 E5; see
+   * `snapshotIdForBase`). REQUIRED (the Tech Lead's N1): a default would let a new server caller silently
+   * share one first-import key across owners.
+   */
+  ownerScope: string,
   overrides?: SyncOverrides,
 ): Promise<ApplyResult> {
+  /**
+   * ONE PREVIEW, APPLIED ONCE (UIL-099 E5). Refused before anything is built or written when the collection
+   * has moved on since this bundle's preview — most often because this very preview was already applied
+   * from another tab, a double click or a retry. The race two simultaneous applies would still win against
+   * this read is closed by the snapshot's derived primary key below.
+   */
+  const priorSnapshots = await lastSyncSnapshotRepo.list(db);
+  const digest = planDigest(bundle);
+  assertFreshBase(bundle.baseSnapshotId, latestSnapshot(priorSnapshots), ownerScope, digest);
+
   const plan = applyOverrides(bundle.plan, bundle.current, overrides);
   const now = nowIso();
 
@@ -320,6 +346,9 @@ export async function executeApply(
   const fastPath = plan.retires.length === 0 && plan.variantUpdates.length === 0;
   const snapshot: AppliedSnapshot = {
     version: 1,
+    // What this apply applied, so a later refusal can tell "this same preview, again" from "a different file"
+    // (UIL-099 E5, the Tech Lead's M1).
+    planDigest: digest,
     createdAt: now,
     fastPath,
     counts: bundle.counts,
@@ -342,13 +371,29 @@ export async function executeApply(
     });
   }
 
-  const prior = await lastSyncSnapshotRepo.list(db);
-  for (const pr of prior) ops.push({ op: "delete_snapshot", id: pr.id });
-  const snapshotId = crypto.randomUUID();
+  for (const pr of priorSnapshots) ops.push({ op: "delete_snapshot", id: pr.id });
+  // DERIVED, not random (UIL-099 E5): two applies of the same base insert the SAME id, so the second fails on
+  // the primary key inside its own transaction and nothing it wrote survives. See lib/sync/apply-guard.ts.
+  const snapshotId = snapshotIdForBase(bundle.baseSnapshotId, ownerScope);
   ops.push({ op: "insert_snapshot", id: snapshotId, snapshot: snapshot as unknown as Json });
 
   // 8. Touched groups' desired_count is recomputed by the RPC after all copy writes (§C).
-  await applyWriteOps(db, { ops, resyncGroupIds: [...touchedGroupIds] });
+  try {
+    await applyWriteOps(db, { ops, resyncGroupIds: [...touchedGroupIds] });
+  } catch (err) {
+    // Did a racing apply of THIS base commit first? This transaction has rolled back whole either way; the
+    // question is only what to tell her. Asked of the database, not of the error: which constraint fires
+    // first depends on the plan — a racing apply that creates a new presence group collides on that
+    // group's unique key before it ever reaches the snapshot insert — so matching an error message would
+    // answer correctly only for some imports.
+    const refusal = refusalAfterRace(
+      latestSnapshot(await lastSyncSnapshotRepo.list(db)),
+      snapshotId,
+      digest,
+    );
+    if (refusal) throw refusal;
+    throw err;
+  }
 
   return {
     snapshotId,
@@ -371,11 +416,10 @@ export interface UndoResult {
  * transaction. Available until the next apply overwrites the snapshot; a pure local restore.
  */
 export async function executeUndo(db: DbClient): Promise<UndoResult> {
-  const snapshots = await lastSyncSnapshotRepo.list(db);
-  if (snapshots.length === 0) {
-    throw new Error("Nothing to undo — the last sync's undo point is gone.");
-  }
-  const snap = snapshots[0].snapshot as unknown as AppliedSnapshot;
+  // A tombstone is what an Undo leaves behind: that sync has already been undone (UIL-099 E5).
+  const latest = undoableSnapshot(await lastSyncSnapshotRepo.list(db));
+  if (!latest) throw new Error("Nothing to undo — the last sync's undo point is gone.");
+  const snap = latest.snapshot as unknown as AppliedSnapshot;
   const undo = invertSnapshot(snap);
 
   const ops: WriteOp[] = [];
@@ -444,10 +488,32 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
     ops.push({ op: "delete_copy", id });
   }
 
-  // Undo consumed the snapshot: the undo point is now gone.
-  ops.push({ op: "delete_snapshot", id: snapshots[0].id });
+  /**
+   * Undo consumes the snapshot and leaves a TOMBSTONE in its place, never nothing (UIL-099 E5, the Tech
+   * Lead's B1). With no row at all the collection's freshness key would be null — the same as "never synced"
+   * — and a stale tab's preview from before her first import would pass and apply again on top of it. The
+   * tombstone is the new base, so that preview is refused as stale while a FRESH preview (whose base is the
+   * tombstone) applies normally. Its id is derived from the snapshot it replaces, so a double-clicked Undo
+   * collides on it and rolls back whole.
+   */
+  const tombstoneId = tombstoneIdFor(latest.id);
+  const tombstone: SnapshotTombstone = {
+    version: 1,
+    tombstone: true,
+    undoneSnapshotId: latest.id,
+    createdAt: nowIso(),
+  };
+  ops.push({ op: "delete_snapshot", id: latest.id });
+  ops.push({ op: "insert_snapshot", id: tombstoneId, snapshot: tombstone as unknown as Json });
 
-  await applyWriteOps(db, { ops, resyncGroupIds: undo.resyncGroupIds });
+  try {
+    await applyWriteOps(db, { ops, resyncGroupIds: undo.resyncGroupIds });
+  } catch (err) {
+    // A racing Undo of this same snapshot committed first (a double click): this one rolled back whole.
+    const now = latestSnapshot(await lastSyncSnapshotRepo.list(db));
+    if (now?.id === tombstoneId) throw new Error("That sync has already been undone.");
+    throw err;
+  }
 
   return {
     restoredCopies: undo.reinsertCopies.length,

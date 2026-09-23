@@ -261,6 +261,7 @@ describe("UIL-078 · a released slot forgets its resolution", () => {
   function retireBundle(copyId: string, catalogCardId: string): SyncPlanBundle {
     return {
       mode: "import",
+      baseSnapshotId: null, // a collection that has never synced (UIL-099 E5)
       plan: {
         creates: [],
         retires: [
@@ -314,7 +315,7 @@ describe("UIL-078 · a released slot forgets its resolution", () => {
     `);
     await asOwner(db);
 
-    await executeApply(client, retireBundle(COPY, "refillmon-ex-a"));
+    await executeApply(client, retireBundle(COPY, "refillmon-ex-a"), OWNER);
 
     await asSuperuser(db);
     const slot = await db.query<{
