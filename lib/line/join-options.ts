@@ -15,11 +15,14 @@
 import {
   band as bandOf,
   buildChain,
+  lineLocaleOf,
   type CatalogCard,
   type ChainNode,
   type IncomingCard,
   type TypeColorMap,
 } from "@/lib/engine";
+import { localeOfId } from "@/lib/catalog/locale";
+import type { Locale } from "@/lib/sync/types";
 import type { ExistingLineBlock, LineJoinCandidate } from "./types";
 
 /** The line columns the index reads — `Row<"evolution_line">` mapped, or an engine `EvolutionLine`. */
@@ -36,11 +39,19 @@ export interface JoinIndexSlot {
   stage_index: number;
   stage: string;
   state: string;
+  /** For the line's locale (UIL-090): the placeholder's target, used when the line holds no copy. */
+  target_catalog_card_id?: string | null;
+  /** For the line's locale: the filled copy, whose card's namespace wins over any target. */
+  copy_id?: string | null;
 }
 
 export interface LineJoinIndex {
-  /** Every OPEN (not filled) slot across every line, by the dexId it wants. */
-  openSlotsByDexId: Map<number, LineJoinCandidate[]>;
+  /**
+   * Every OPEN (not filled) slot across every line, by the dexId it wants — keyed `${locale}:${dexId}`
+   * (UIL-090), because a Japanese card must never be offered an English line's slot and the two are the
+   * same species. `joinOptionsFor` looks up its own card's locale.
+   */
+  openSlotsByDexId: Map<string, LineJoinCandidate[]>;
   /** Every line for a family, by chain-root dexId — each carrying its own binder and band, so a
    *  caller can ask the question the server actually answers: is there already one HERE (UIL-084). */
   linesByRoot: Map<number, ExistingLineBlock[]>;
@@ -53,6 +64,8 @@ export interface LineJoinOptions {
   dexId: number;
   /** This card's own type-derived band — the "start a new line" default (UIL-064 part 1). */
   naturalBandKey: string;
+  /** This card's regional variant, so the panel keys its lookups the way the server does (UIL-090). */
+  locale: Locale;
   /** Flat across every band, closest-to-complete first; each carries its own binder + band. */
   joinCandidates: LineJoinCandidate[];
   /**
@@ -72,8 +85,13 @@ export interface LineJoinOptions {
  * (UIL-084). Defined once here so the panel's lookup and the index's population cannot drift — a
  * bulk/unbindered line keys on the empty string, matching `binder_id is null` on the server.
  */
-export function lineKey(binderId: string | null, bandKey: string): string {
-  return `${binderId ?? ""}|${bandKey}`;
+export function lineKey(binderId: string | null, bandKey: string, locale: Locale): string {
+  return `${binderId ?? ""}|${bandKey}|${locale}`;
+}
+
+/** Open slots are offered per LOCALE as well as per species (UIL-090). */
+export function candidateKey(locale: Locale, dexId: number): string {
+  return `${locale}:${dexId}`;
 }
 
 /** Closest-to-complete first (UIL-064 part 1) — finishing a nearly-done line is the more satisfying
@@ -90,8 +108,16 @@ export function buildLineJoinIndex(
   lines: readonly JoinIndexLine[],
   slotsByLine: ReadonlyMap<string, readonly JoinIndexSlot[]>,
   catalog: CatalogCard[],
+  /**
+   * The stored card id of a filled copy — how a line's locale is derived (UIL-090).
+   *
+   * REQUIRED, deliberately: a default of "no copies" is not a safe fallback, it is a wrong answer. With
+   * it, every line derives from its lowest placeholder target (or "en" when it has none), so a Japanese
+   * line reads as English and the label and the key are both wrong. Let the compiler find the callers.
+   */
+  copyCardId: (copyId: string) => string | null,
 ): LineJoinIndex {
-  const openSlotsByDexId = new Map<number, LineJoinCandidate[]>();
+  const openSlotsByDexId = new Map<string, LineJoinCandidate[]>();
   const linesByRoot = new Map<number, ExistingLineBlock[]>();
   const chains = new Map<string, ChainNode[]>();
 
@@ -100,8 +126,36 @@ export function buildLineJoinIndex(
       (a, b) => a.stage_index - b.stage_index,
     );
 
-    // Rebuild the chain from the root to name every slot (incl. blocks with no stored species).
-    const seed = catalog.find((c) => !c.isDigitalOnly && c.dexId.includes(line.rootDexId));
+    /**
+     * The line's own locale (UIL-090), by the shared rule: filled copies first, then the lowest target.
+     * Everything below depends on it — which cards may join, and what the line is CALLED.
+     */
+    const locale = lineLocaleOf(
+      slots.map((s) => ({
+        id: s.id,
+        stageIndex: s.stage_index,
+        stage: s.stage,
+        state: "placeholder" as const, // unread by the derivation; the record shape wants it
+        copyId: s.copy_id ?? null,
+        dexId: null,
+        targetCatalogCardId: s.target_catalog_card_id ?? null,
+      })),
+      copyCardId,
+    );
+
+    /**
+     * Rebuild the chain from the root to name every slot (incl. blocks with no stored species), seeding
+     * with a card OF THIS LINE'S LOCALE. Seeding with whatever printing the catalog listed first is how
+     * every line of a species with a Japanese printing came to read "ノノクラゲ LINE": `makeNode` labels a
+     * species with the SHORTEST name among the node's cards, and a Japanese name is usually shorter. Two
+     * same-species lines were therefore indistinguishable on screen — and so were the two READINGS of
+     * Karvi's screenshot, which is why her report could not be diagnosed from it.
+     */
+    const seed =
+      catalog.find(
+        (c) =>
+          !c.isDigitalOnly && c.dexId.includes(line.rootDexId) && localeOfId(c.tcgdexId) === locale,
+      ) ?? catalog.find((c) => !c.isDigitalOnly && c.dexId.includes(line.rootDexId));
     const chain = seed
       ? buildChain({ id: "r", card: seed, variant: "normal" } as IncomingCard, catalog)
       : [];
@@ -118,13 +172,14 @@ export function buildLineJoinIndex(
       totalCount,
       binderId: line.binderId,
       bandKey: line.colorBand,
+      locale,
     });
     linesByRoot.set(line.rootDexId, forRoot);
     for (const s of slots) {
       if (s.state === "filled") continue;
       const dexId = chain[s.stage_index]?.dexId;
       if (dexId === undefined) continue;
-      const list = openSlotsByDexId.get(dexId) ?? [];
+      const list = openSlotsByDexId.get(candidateKey(locale, dexId)) ?? [];
       list.push({
         lineId: line.id,
         slotId: s.id,
@@ -135,7 +190,7 @@ export function buildLineJoinIndex(
         filledCount,
         totalCount,
       });
-      openSlotsByDexId.set(dexId, list);
+      openSlotsByDexId.set(candidateKey(locale, dexId), list);
     }
   }
 
@@ -154,7 +209,11 @@ export function joinOptionsFor(
 ): LineJoinOptions | null {
   const dexId = card.dexId[0];
   if (dexId === undefined) return null;
-  const joinCandidates = sortJoinCandidates(index.openSlotsByDexId.get(dexId) ?? []);
+  /** This card's own locale: it may only join a line of the same regional variant (UIL-090). */
+  const locale = localeOfId(card.tcgdexId);
+  const joinCandidates = sortJoinCandidates(
+    index.openSlotsByDexId.get(candidateKey(locale, dexId)) ?? [],
+  );
 
   // THIS card's own chain root (may differ from its own dexId, e.g. a Stage1 whose Basic exists in
   // the catalog) — the same key `applyMove`'s "does a line already exist" check uses, so a band that
@@ -164,13 +223,16 @@ export function joinOptionsFor(
   // Every line this family already has, wherever it is — keyed the way the server refuses (UIL-084).
   // Not filtered by "has an open slot for this card": that filter is what let the panel recommend a
   // new line the write would reject.
+  // Keyed by locale too (UIL-090): a Japanese line in this binder and band does not block an English
+  // one, so only a line of the CARD's own locale can be reported as occupying its destination.
   const existingLineByBinderBand: Record<string, ExistingLineBlock> = {};
   for (const line of index.linesByRoot.get(cardRootDexId) ?? []) {
-    existingLineByBinderBand[lineKey(line.binderId, line.bandKey)] = line;
+    existingLineByBinderBand[lineKey(line.binderId, line.bandKey, line.locale)] = line;
   }
 
   return {
     dexId,
+    locale,
     naturalBandKey: bandOf(card, typeColorMap),
     joinCandidates,
     existingLineByBinderBand,

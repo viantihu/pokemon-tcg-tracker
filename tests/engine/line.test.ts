@@ -192,7 +192,7 @@ describe("line: slot generation (system-design §6 table)", () => {
 
 describe("line: alternates ranked by market price ascending, standard class, physical only", () => {
   it("ranks Fire Charmeleon printings cheapest-first and excludes the digital-only card", () => {
-    const alt = rankAlternates(5, "red" as Band, CHARMANDER_CATALOG, MAP);
+    const alt = rankAlternates(5, "red" as Band, "en", CHARMANDER_CATALOG, MAP);
     expect(alt.willLiveInSpecialty).toBe(false);
     // sv03-027 (0.30) < sv03.5-005 (0.45) < swsh4-24 (0.60) < xy12-10 (0.90); A1-034 is digital-only.
     expect(alt.chosenCatalogCardId).toBe("sv03-027");
@@ -201,13 +201,15 @@ describe("line: alternates ranked by market price ascending, standard class, phy
   });
 
   it("supports excluding a specific printing (used by the collection-claim path)", () => {
-    const alt = rankAlternates(5, "red" as Band, CHARMANDER_CATALOG, MAP, undefined, ["xy12-10"]);
+    const alt = rankAlternates(5, "red" as Band, "en", CHARMANDER_CATALOG, MAP, undefined, [
+      "xy12-10",
+    ]);
     expect(alt.chosenCatalogCardId).toBe("sv03-027");
     expect(alt.alternateCatalogCardIds).toEqual(["sv03.5-005", "swsh4-24"]);
   });
 
   it("uses specialty printings only when no standard printing exists (ex-only cap)", () => {
-    const alt = rankAlternates(6, "red" as Band, CHARMANDER_CATALOG, MAP);
+    const alt = rankAlternates(6, "red" as Band, "en", CHARMANDER_CATALOG, MAP);
     expect(alt.willLiveInSpecialty).toBe(true);
     expect(alt.chosenCatalogCardId).toBe("sv03.5-006"); // 8.0 < 25.0
     expect(alt.alternateCatalogCardIds).toEqual(["sv03.5-183"]);

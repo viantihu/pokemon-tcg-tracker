@@ -22,6 +22,7 @@
  * Pure: no I/O. The clock (`now`) and market prices (`priceOf`) are injected via `EngineContext`.
  */
 
+import { localeOfId } from "@/lib/catalog/locale";
 import { band, type Band } from "./bands";
 import { resolveDuplicate, type HoloSwap } from "./duplicate";
 import {
@@ -31,6 +32,7 @@ import {
   type LineSlotPlan,
   type PriceOf,
   type WishlistProposal,
+  lineLocaleOf,
 } from "./line";
 import type {
   Binder,
@@ -204,13 +206,26 @@ function newLineBinderId(ctx: EngineContext): string | null {
  * adding one would widen a type every fixture in the suite builds — so this function cannot re-derive
  * that order itself, and a caller that shuffles its lines gets an arbitrary answer back.
  */
+/** The stored catalog id of an owned copy, for deriving a line's locale from its filled slots. */
+function ownedCardIdOf(ctx: EngineContext, copyId: string): string | null {
+  return ctx.owned.find((o) => o.id === copyId)?.card.tcgdexId ?? null;
+}
+
 function existingLineSlot(
   incoming: IncomingCard,
   ctx: EngineContext,
 ): { line: EvolutionLine; slot: LineSlotRecord } | null {
   const dexId = incoming.card.dexId[0];
+  /**
+   * Only lines of the card's OWN locale (UIL-090). An English and a Japanese printing of one species
+   * are two different cards with two placements (sync-architecture L5), so a Japanese card must never
+   * be routed into an English line's slot — nor counted as already filling one, which is how the
+   * "the line already has this stage" refusal reached a card that was not in that line at all.
+   */
+  const locale = localeOfId(incoming.card.tcgdexId);
   const matches: { line: EvolutionLine; slot: LineSlotRecord }[] = [];
   for (const line of ctx.lines) {
+    if (lineLocaleOf(line.slots, (id: string) => ownedCardIdOf(ctx, id)) !== locale) continue;
     const slot = line.slots.find((s) => s.dexId === dexId);
     if (slot) matches.push({ line, slot });
   }
@@ -260,9 +275,18 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
       // this file (see `PlacementTarget.band`'s own docs elsewhere) — same trust here.
       const lineBand = needed.line.colorBand as Band;
       // The claimed copy lives in the specialty binder, so it is not itself an alternate to chase.
-      const alt = rankAlternates(incoming.card.dexId[0], lineBand, ctx.catalog, map, priceOf, [
-        incoming.card.tcgdexId,
-      ]);
+      // The LINE's locale, not the claimed card's: the stage being chased belongs to that line
+      // (UIL-090). They agree here because `existingLineSlot` only matches a line of the incoming's own
+      // locale, but reading it off the line makes that true by derivation rather than by coincidence.
+      const alt = rankAlternates(
+        incoming.card.dexId[0],
+        lineBand,
+        lineLocaleOf(needed.line.slots, (id: string) => ownedCardIdOf(ctx, id)),
+        ctx.catalog,
+        map,
+        priceOf,
+        [incoming.card.tcgdexId],
+      );
       result.wishlist = [
         {
           stageIndex: needed.slot.stageIndex,

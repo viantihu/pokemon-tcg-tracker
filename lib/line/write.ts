@@ -27,8 +27,9 @@
  * SERVER ONLY.
  */
 
+import { localeOfId } from "@/lib/catalog/locale";
 import { toCatalogCard } from "@/lib/plan/adapt";
-import type { IncomingCard, TypeColorMap, Variant } from "@/lib/engine";
+import { lineLocaleOf, type IncomingCard, type TypeColorMap, type Variant } from "@/lib/engine";
 import {
   applyWriteOps,
   catalogCardRepo,
@@ -160,14 +161,43 @@ export async function applyMove(
       // a throw is safe: they are pure data, no I/O has happened yet.
       // Scoped to the DESTINATION BINDER (UIL-084): a line in another binder no longer owns this
       // species-and-band, so she can start that binder's own line.
-      const existing = await evolutionLineRepo.findByRootBandAndBinder(
+      /**
+       * Scoped to the destination binder (UIL-084) AND to this card's regional variant (UIL-090): a
+       * Japanese line for the species does not occupy an English card's key, because they are two
+       * different cards with two placements (sync-architecture L5). A candidate's locale is derived from
+       * its own slots — `root_dex_id` cannot tell them apart — so this reads the shortlist (normally
+       * zero or one line) and its slots, one extra query on the rare path that STARTS a line.
+       */
+      const incomingLocale = localeOfId(cc.tcgdexId);
+      const candidates = await evolutionLineRepo.findAllByRootBandAndBinder(
         db,
         built.rootDexId,
         req.destination.band,
         req.destination.binderId,
       );
-      if (existing) {
-        throw new Error(LINE_EXISTS_IN_BINDER);
+      for (const cand of candidates) {
+        const candSlots = await lineSlotRepo.listByLine(db, cand.id);
+        const slotCopyCardIds = new Map<string, string>();
+        for (const s of candSlots) {
+          if (!s.copy_id) continue;
+          const c = await copyRepo.getByPk(db, s.copy_id);
+          if (c) slotCopyCardIds.set(c.id, c.catalog_card_id);
+        }
+        const candLocale = lineLocaleOf(
+          candSlots.map((s) => ({
+            id: s.id,
+            stageIndex: s.stage_index,
+            stage: s.stage,
+            state: "placeholder" as const,
+            copyId: s.copy_id,
+            dexId: null,
+            targetCatalogCardId: s.target_catalog_card_id,
+          })),
+          // Read by primary key, as this file already does for a slot: the candidate list is normally
+          // one line of ~3 slots, so this is a handful of reads on the rare path that starts a line.
+          (copyId: string) => slotCopyCardIds.get(copyId) ?? null,
+        );
+        if (candLocale === incomingLocale) throw new Error(LINE_EXISTS_IN_BINDER);
       }
       lineJoinOps = built.ops;
       resolvedLineSlotId = built.slotId;

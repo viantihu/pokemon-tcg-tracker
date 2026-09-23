@@ -39,6 +39,8 @@ const IN_KB1: ExistingLineBlock = {
   totalCount: 2,
   binderId: "kb1",
   bandKey: "orange",
+  // UIL-090: a line belongs to one regional variant; these fixtures are English.
+  locale: "en",
 };
 
 function mount(over: Partial<Parameters<typeof MovePanel>[0]> = {}) {
@@ -50,7 +52,7 @@ function mount(over: Partial<Parameters<typeof MovePanel>[0]> = {}) {
       naturalBandKey: "orange",
       allowLineJoin: true,
       joinCandidates: [], // her case: the line's matching stage is filled, so nothing to join
-      existingLineByBinderBand: { [lineKey("kb1", "orange")]: IN_KB1 },
+      existingLineByBinderBand: { [lineKey("kb1", "orange", "en")]: IN_KB1 },
       onConfirm,
       ...over,
     }),

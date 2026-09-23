@@ -16,6 +16,9 @@
  * that actually exist in the catalog, so a line whose top is the last evolution gets no phantom slot.
  */
 
+import { localeOfId } from "@/lib/catalog/locale";
+import type { Locale } from "@/lib/sync/types";
+import type { LineSlotRecord } from "./types";
 import { band, type Band } from "./bands";
 import { isPlaced } from "./types";
 import type {
@@ -42,7 +45,23 @@ export interface ChainNode {
 
 const norm = (s: string) => s.trim().toLowerCase();
 
-const physical = (catalog: CatalogCard[]) => catalog.filter((c) => !c.isDigitalOnly);
+/**
+ * Physical printings IN ONE LOCALE (UIL-090).
+ *
+ * An English and a Japanese printing of one species are two different cards with two placements
+ * (sync-architecture L5), and a line belongs to one of them. The chain walk used the whole catalog, so
+ * every `ChainNode` came back holding both namespaces — measured: a chain built from the English
+ * Toedscruel returned `cards: ["ja:SV9-088", "sv09-088"]` at each node. Everything downstream inherited
+ * it: a Japanese copy was offered an English line's open slot, a new line could be given placeholder
+ * targets from the other locale, and the species LABEL took the shortest name across both, which is why
+ * every line of that species read "ノノクラゲ LINE" whatever locale it actually was.
+ *
+ * `localeOfId` is imported rather than re-testing the `ja:` prefix here: lib/catalog/locale.ts is
+ * deliberately the only place that prefix is spelled out, and a second copy of that rule is exactly how
+ * the two drift. It is a pure string function, so the engine stays I/O-free.
+ */
+const physicalIn = (catalog: CatalogCard[], locale: Locale) =>
+  catalog.filter((c) => !c.isDigitalOnly && localeOfId(c.tcgdexId) === locale);
 
 const byName = (cards: CatalogCard[], name: string) =>
   cards.filter((c) => norm(c.name) === norm(name));
@@ -66,7 +85,10 @@ function makeNode(dexId: number, cards: CatalogCard[]): ChainNode {
  * ambiguous there; for a Stage-1/2 trigger the forward path is linear in practice.
  */
 export function buildChain(incoming: IncomingCard, catalog: CatalogCard[]): ChainNode[] {
-  const phys = physical(catalog);
+  // The chain is scoped to the incoming card's own locale (UIL-090): a regional variant is a different
+  // card, so it belongs to a different line. Derived from the card rather than passed in, so every
+  // caller — the cascade, the pickers, the backfill, a line's own label — gets it without knowing.
+  const phys = physicalIn(catalog, localeOfId(incoming.card.tcgdexId));
   const xDex = incoming.card.dexId[0];
   const seen = new Set<number>([xDex]);
 
@@ -114,30 +136,72 @@ function sameColour(node: ChainNode, b: Band, map: TypeColorMap) {
 }
 
 /**
- * An owned same-colour copy sitting at a node (used to fill slots and emit pull actions).
+ * An owned same-colour copy of the SAME LOCALE sitting at a node (used to fill slots and emit pulls).
+ *
+ * THREE exclusions, from three entries, and all of them have to hold:
  *
  * BULK copies count (UIL-087, the Senior BA's ruling): a card in the pile is still hers, and pulling it
- * into its line is exactly the work a haul sitting is for — the write now shelves it and the disclosure
- * says to fetch it. `role: "block"` is the one exclusion, and not as a general role filter: a block copy
- * is a card deliberately sacrificed as a physical spacer and is REFERENCED BY a `binder_block` row, so
- * shelving it into a line would leave that row naming a copy which is now in a line slot — the same
- * half-written shape this entry exists to close. Un-blocking a line is a real action, but it is the
- * UIL-030 flow's to offer, with the block row removed in the same transaction, not a side effect of
- * filling a slot.
+ * into its line is exactly the work a haul sitting is for — the write shelves it and the disclosure names
+ * the bulk box so she knows where to go and get it. `role: "block"` is excluded, and not as a general role
+ * filter: a block copy is a card deliberately sacrificed as a physical spacer and is REFERENCED BY a
+ * `binder_block` row, so shelving it into a line would leave that row naming a copy which is now in a
+ * line slot. Un-blocking a line belongs to the UIL-030 flow, with the block row removed in the same
+ * transaction, not to filling a slot.
+ *
+ * IN-HAUL copies do NOT count (UIL-088). A bulk copy has a home she chose, so offering to pull it into a
+ * line is a real proposal; an in-haul copy has no home at all — it IS the Haul Plan's queue, and proposing
+ * it here would be the app placing a card behind her back. The role filter that was rightly declined for
+ * UIL-087 became expressible once the two states were separate. Asked through `isPlaced`, which is her
+ * SHELVED, so the line reads as the question it is.
+ *
+ * And only copies of the LINE'S OWN LOCALE (UIL-090): an English and a Japanese printing of one species
+ * are two different cards with two placements (sync-architecture L5), so a Japanese copy never fills an
+ * English line's slot and is never counted as already filling one.
  */
-function ownedAt(node: ChainNode, b: Band, owned: OwnedCopy[], map: TypeColorMap) {
+function ownedAt(node: ChainNode, b: Band, owned: OwnedCopy[], map: TypeColorMap, locale: Locale) {
   return owned.find(
     (o) =>
       o.role !== "block" &&
-      // IN-HAUL IS PLACEABLE, BULK IS PLACED (UIL-088). A bulk copy has a home she chose, so offering to
-      // pull it into a line is a real proposal. An in-haul copy has no home at all: it is the Haul Plan's
-      // queue, and proposing it here would be the app placing a card behind her back — the role filter
-      // that was rightly declined for UIL-087 becomes expressible once the two states are separate.
-      // Asked through `isPlaced`, which is her SHELVED, so this reads as the question it is.
       isPlaced(o.role) &&
+      localeOfId(o.card.tcgdexId) === locale &&
       o.card.dexId.includes(node.dexId) &&
       band(o.card, map) === b,
   );
+}
+
+/**
+ * A LINE's locale, derived rather than stored (UIL-090).
+ *
+ * `evolution_line` has no locale column and needs none: `root_dex_id` is a species key shared by both
+ * regional variants, so the locale can only come from the CARDS at the line's slots — and a stored id's
+ * namespace IS its locale.
+ *
+ * THE RULE, and it is the same rule migration 0019 repairs by, deliberately: FILLED COPIES FIRST — the
+ * lowest-stage slot that holds a copy — and only when the line holds no copy at all does it fall back to
+ * the lowest slot's placeholder target. A copy is a card she physically owns; a target is a suggestion
+ * the app made, and in an already-mixed line that suggestion is the thing that is wrong. Reading the
+ * lowest slot's card WITHOUT that precedence would let a Japanese target at stage 0 declare an otherwise
+ * English line Japanese — and a repair built on the same mistake would then release the ENGLISH targets
+ * instead. The app and the migration must not be able to disagree about a line's locale.
+ *
+ * For a line that is already mixed it returns that answer and the write paths stop new ones; the Lines
+ * screen flags the odd slot so she can move it out.
+ *
+ * Returns "en" for a line with no card at all, which is also the namespace-free default.
+ */
+export function lineLocaleOf(
+  slots: readonly LineSlotRecord[],
+  cardIdOfCopy: (copyId: string) => string | null,
+): Locale {
+  const ordered = [...slots].sort((a, b) => a.stageIndex - b.stageIndex);
+  for (const s of ordered) {
+    const id = s.copyId ? cardIdOfCopy(s.copyId) : null;
+    if (id) return localeOfId(id);
+  }
+  for (const s of ordered) {
+    if (s.targetCatalogCardId) return localeOfId(s.targetCatalogCardId);
+  }
+  return "en";
 }
 
 export interface Viability {
@@ -163,11 +227,14 @@ export function testViability(
 ): Viability {
   const b = band(incoming.card, map);
   const chain = buildChain(incoming, catalog);
+  // The card's own locale scopes everything below (UIL-090): a regional variant is a different card and
+  // belongs to a different line, so it neither counts toward viability nor fills a slot here.
+  const locale = localeOfId(incoming.card.tcgdexId);
   let members = 0;
   const blockedStages: number[] = [];
   for (const node of chain) {
     const sc = sameColour(node, b, map);
-    const owns = ownedAt(node, b, owned, map);
+    const owns = ownedAt(node, b, owned, map, locale);
     if (sc.all.length > 0 || owns) members += 1;
     else blockedStages.push(node.dexId);
   }
@@ -192,13 +259,15 @@ export interface PricedAlternates {
 export function rankAlternates(
   dexId: number,
   b: Band,
+  /** The line's locale (UIL-090): an English line's wishlist must not rank Japanese printings. */
+  locale: Locale,
   catalog: CatalogCard[],
   map: TypeColorMap,
   priceOf: PriceOf = defaultPriceOf,
   exclude: readonly string[] = [],
 ): PricedAlternates {
   const excluded = new Set(exclude);
-  const phys = physical(catalog).filter(
+  const phys = physicalIn(catalog, locale).filter(
     (c) => c.dexId.includes(dexId) && band(c, map) === b && !excluded.has(c.tcgdexId),
   );
   const price = (c: CatalogCard) => {
@@ -284,12 +353,14 @@ export function generateSlots(
 
   const incomingDex = incoming.card.dexId[0];
   const incomingStageIndex = viability.chain.findIndex((n) => n.dexId === incomingDex);
+  /** The line's locale is the incoming card's: it is the card that starts it (UIL-090). */
+  const locale = localeOfId(incoming.card.tcgdexId);
 
   viability.chain.forEach((node, stageIndex) => {
     const isRoot = stageIndex === 0;
     const sc = sameColour(node, b, map);
     const isIncoming = node.dexId === incomingDex;
-    const ownedCopy = isIncoming ? undefined : ownedAt(node, b, owned, map);
+    const ownedCopy = isIncoming ? undefined : ownedAt(node, b, owned, map, locale);
 
     // Filled: the incoming card, or an owned same-colour copy (pulled from a front half if shelved).
     if (isIncoming) {
@@ -317,20 +388,14 @@ export function generateSlots(
         /**
          * UIL-087: "already placed" was asserted for every copy that was not in a front half, which
          * quietly included copies that are placed NOWHERE. Karvi has to find that card before the line
-         * really holds it, so the note says so instead of claiming it is already where it belongs.
+         * really holds it, so the note says where it is instead of claiming it is already where it belongs.
          *
-         * The wording is "not yet placed (still in the haul)", not "in the bulk box", on her ruling
-         * (2026-09-22): the app conflates two different states in `role: 'bulk'` — a card deliberately
-         * filed in a bulk box, and a card an import created that has not been placed anywhere yet. Only
-         * the second is what a pulled copy usually is. Calling it "the bulk box" would assert a placement
-         * she never made. That conflation is UIL-088; this wording is true under today's data and under
-         * the model that replaces it.
+         * UIL-087 had to word that case as "not yet placed (still in the haul)" rather than naming the box,
+         * because `role: 'bulk'` meant either "filed in a bulk box" or "imported and placed nowhere", and
+         * asserting the box would have claimed a placement she never made. UIL-088 separated the two, and
+         * an in-haul copy is no longer proposed as a pull at all (`ownedAt` asks `isPlaced`), so a bulk pull
+         * really is in the bulk box. Saying so is both true and more useful: it tells her where to go.
          */
-        // UIL-088 makes this exact again. UIL-087 had to say "not yet placed (still in the haul)" because
-        // `role: 'bulk'` meant either "filed in a box" or "imported, unplaced", and asserting the box
-        // would have claimed a placement she never made. Now the two are separate values and an in-haul
-        // copy is never proposed as a pull at all, so a bulk pull really is in the bulk box, and saying so
-        // is both true and more useful: it tells her where to go and get it.
         note: fromFront
           ? "pull from front half"
           : ownedCopy.role === "bulk"
@@ -342,7 +407,7 @@ export function generateSlots(
 
     // Not owned: placeholder (standard or specialty-only) or block (no same-colour printing).
     if (sc.all.length > 0) {
-      const alt = rankAlternates(node.dexId, b, catalog, map, priceOf);
+      const alt = rankAlternates(node.dexId, b, locale, catalog, map, priceOf);
       if (alt.willLiveInSpecialty) capped = true;
       slots.push({
         stageIndex,

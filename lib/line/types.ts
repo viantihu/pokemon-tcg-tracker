@@ -8,6 +8,7 @@
  * user's confirm/override/move back into repo writes.
  */
 
+import type { Locale } from "@/lib/sync/types";
 import type { LineStatus, Role, SlotState } from "@/lib/engine";
 
 /* ------------------------------- line detail ------------------------------- */
@@ -330,6 +331,12 @@ export interface ExistingLineBlock {
    *  say "THAT binder already has one" rather than "this band is taken everywhere". */
   binderId: string | null;
   bandKey: string;
+  /**
+   * Which regional variant this line is for (UIL-090). Part of the uniqueness key, and shown as a tag
+   * so two same-species lines in one binder and band read apart instead of both taking whichever name
+   * happens to be shorter.
+   */
+  locale: Locale;
 }
 
 /** The client-facing line-screen payload (loaded server-side, rendered client-side). */

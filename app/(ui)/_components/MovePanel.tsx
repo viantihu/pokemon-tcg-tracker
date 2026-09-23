@@ -41,6 +41,7 @@ import type {
   MoveOptions,
 } from "@/lib/line/types";
 import { defaultMoveHalf, isMoveDestinationComplete } from "@/lib/line/move";
+import type { Locale } from "@/lib/sync/types";
 import { lineKey } from "@/lib/line/join-options";
 import { bandMeta } from "./plan-meta";
 
@@ -54,6 +55,7 @@ export function MovePanel({
   joinCandidates,
   existingLineByBinderBand,
   naturalBandKey,
+  cardLocale,
   blockNeeds,
   onConfirm,
 }: {
@@ -72,6 +74,11 @@ export function MovePanel({
   /** This card's own type-derived band — the default for "start a new line"'s one remaining pick
    *  (UIL-064): the app's own answer, not ten empty chips. */
   naturalBandKey?: string;
+  /**
+   * This card's regional variant (UIL-090). The blocking lookup is keyed by it, so a Japanese line in
+   * the destination binder and band does not block an English card — they are different lines.
+   */
+  cardLocale?: Locale;
   /**
    * UIL-030: open binder-block needs this card could fill. Present (non-empty) ONLY when the engine
    * offered the card as a repurposed block — the Plan spotlight passes them, Lines and Lookup never do,
@@ -114,7 +121,7 @@ export function MovePanel({
    */
   const blockingLine =
     allowLineJoin && band && !isBulk && binder?.type === "general"
-      ? existingLineByBinderBand?.[lineKey(binder.id, band)]
+      ? existingLineByBinderBand?.[lineKey(binder.id, band, cardLocale ?? "en")]
       : undefined;
   /**
    * She has asked to START a line where one already lives. The server refuses this, so Confirm does

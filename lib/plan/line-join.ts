@@ -16,6 +16,11 @@ export function lineJoinOptionsFromContext(
 ): LineJoinOptions | null {
   const card = pc.catalogById.get(tcgdexId);
   if (!card) return null;
-  const index = buildLineJoinIndex(pc.ctx.lines, pc.slotRowsByLine, pc.ctx.catalog);
+  const index = buildLineJoinIndex(
+    pc.ctx.lines,
+    pc.slotRowsByLine,
+    pc.ctx.catalog,
+    (id) => pc.copyRowById.get(id)?.catalog_card_id ?? null,
+  );
   return joinOptionsFor(card, index, pc.ctx.typeColorMap, pc.ctx.catalog);
 }

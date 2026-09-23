@@ -27,7 +27,9 @@
  * the RLS `with check (owner_id = auth.uid())` policy enforces it.
  */
 
-import { effectiveType, type Role } from "@/lib/engine";
+import { localeOfId } from "@/lib/catalog/locale";
+import type { Locale } from "@/lib/sync/types";
+import { lineLocaleOf, effectiveType, type Role } from "@/lib/engine";
 import {
   applyWriteOps,
   type DbClient,
@@ -739,8 +741,12 @@ function writeOverriddenCard(
     // UIL-084: a line in another binder no longer owns this species-and-band, so she can start this
     // binder's own line. A duplicate in the SAME binder is still refused, and the panel now disables
     // Confirm for exactly that case, so reaching here is a stale client.
-    const key = passLineKey(dest.binderId, built.rootDexId, dest.band);
-    if (passLines.has(key) || findLineInBinder(pc, built.rootDexId, dest.band, dest.binderId)) {
+    const locale = localeOfId(p.tcgdexId);
+    const key = passLineKey(dest.binderId, built.rootDexId, dest.band, locale);
+    if (
+      passLines.has(key) ||
+      findLineInBinder(pc, built.rootDexId, dest.band, dest.binderId, locale)
+    ) {
       throw new Error(REFUSE.lineExists);
     }
     ops.push(...built.ops);
@@ -843,7 +849,9 @@ function writeNewLine(
   const plan = p.result.newLine!;
   // Binder-scoped as of UIL-084, like every other reading of the uniqueness key: "the same line"
   // means the same species and band IN THE SAME BINDER.
-  const key = passLineKey(plan.binderId, plan.rootDexId, plan.colorBand);
+  // The line's locale is the incoming card's: it is the card that starts it (UIL-090).
+  const planLocale = localeOfId(p.tcgdexId);
+  const key = passLineKey(plan.binderId, plan.rootDexId, plan.colorBand, planLocale);
   const incomingStageIndex =
     p.result.target.kind === "back-half-line" ? p.result.target.stageIndex : -1;
 
@@ -851,7 +859,7 @@ function writeNewLine(
   const passLine = passLines.get(key);
   const dbLine = passLine
     ? null
-    : findLineInBinder(pc, plan.rootDexId, plan.colorBand, plan.binderId);
+    : findLineInBinder(pc, plan.rootDexId, plan.colorBand, plan.binderId, planLocale);
   if (passLine || dbLine) {
     const lineId = passLine?.lineId ?? dbLine!;
     const slots = slotsByLine.get(lineId) ?? [];
@@ -1049,12 +1057,18 @@ function findLineInBinder(
   rootDexId: number,
   colorBand: string,
   binderId: string | null,
+  locale: Locale,
 ): string | null {
   for (const line of pc.ctx.lines) {
     if (
       line.rootDexId === rootDexId &&
       line.colorBand === colorBand &&
-      (line.binderId ?? null) === binderId
+      (line.binderId ?? null) === binderId &&
+      // UIL-090: an English and a Japanese line of one species are different lines, so one does not
+      // occupy the other's key. Derived from the line's own slots — `root_dex_id` is a species key
+      // shared by both regional variants and cannot answer this.
+      lineLocaleOf(line.slots, (id: string) => pc.copyRowById.get(id)?.catalog_card_id ?? null) ===
+        locale
     ) {
       return line.id;
     }
@@ -1063,6 +1077,11 @@ function findLineInBinder(
 }
 
 /** The in-pass key for a line created earlier in THIS payload — the same (binder, species, band). */
-function passLineKey(binderId: string | null, rootDexId: number, colorBand: string): string {
-  return `${binderId ?? ""}:${rootDexId}:${colorBand}`;
+function passLineKey(
+  binderId: string | null,
+  rootDexId: number,
+  colorBand: string,
+  locale: Locale,
+): string {
+  return `${binderId ?? ""}:${rootDexId}:${colorBand}:${locale}`;
 }
