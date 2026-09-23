@@ -6876,6 +6876,12 @@ anything; a one-place normalisation fixes it; and every future Japanese import h
   delete). **Step for Karvi:** on Lines, the three affected rows read "FILLED · CARD NOT SHELVED" with a Move
   button; move each card to where it really is and the slot releases. Closed on her confirmation. Her
   principle, "each card is a separate underlying object", is the invariant the test now holds.
+  **2026-09-23:** the three rows were still unmoved when migration `0018` (UIL-088, PR
+  [#305](https://github.com/viantihu/pokemon-tcg-tracker/pull/305), deployed `c79383c`) reached Testing:
+  slotted, in a general binder, half and band set, decision row present, role still `bulk`. Its rule (a)
+  repaired their role to `shelved`, so they now read as ordinary filled slots rather than "CARD NOT
+  SHELVED"; the Move remedy still applies to any of them that is not physically in that slot. Still
+  Closed on her confirmation.
 - **Priority:** High (Senior BA's read, to be confirmed by Karvi) — the record disagrees with the physical
   shelf, the class UIL-062 was High for: a line says a stage is filled, the engine routes the next copy on
   that basis ("the Orange line already has this stage — the extra copy goes to the front half"), and the
@@ -6925,8 +6931,33 @@ the species.
 
 - **Reported:** 2026-09-22 (Karvi, in her own words below, while working UIL-087; body by the Senior BA, no
   intake session on the roster)
-- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-087 lands; design proposal before code.**
-  Migration `0018` is allocated to this entry (the state itself is a schema fact). **Karvi's rulings 2026-09-22, which fix the design:** Dex is the source of truth for her inventory, so a card is in her collection, and stays in haul, exactly as long as it appears in the import; when a later import no longer has it, it leaves the haul (the retire path, not a placement). Lookup shows an in-haul card as "in haul"; Collections does not show a card until it is shelved.
+- **Status:** **Fixed** — PR [#305](https://github.com/viantihu/pokemon-tcg-tracker/pull/305) MERGED to
+  `develop` 2026-09-23 (squash `c79383c`), QA-gated on the merged tree (1187 tests, build; migration
+  mutants: rule (a) removed fails 3, the two-sided slot guard dropped fails 1, the decision-row check
+  dropped fails 2, rule (a) repairing to `haul` fails 2; code mutants: the import writing `bulk` fails 1,
+  the stand-in match writing `bulk` fails 1, `isPlaced` true for `haul` fails 2, `ownedAt` without
+  `isPlaced` fails 1, `listUnplaced` back to `bulk` fails 7), confirmed **deployed** (Deploy run
+  35811864943: migrate applied `0018`, smoke, acceptance and Vercel green on `c79383c`). Migration `0018`
+  is allocated to this entry (the state itself is a schema fact). **Karvi's rulings 2026-09-22, which fix
+  the design:** Dex is the source of truth for her inventory, so a card is in her collection, and stays in
+  haul, exactly as long as it appears in the import; when a later import no longer has it, it leaves the
+  haul (the retire path, not a placement). Lookup shows an in-haul card as "in haul"; Collections does
+  not show a card until it is shelved. **Built:** `copy.role` admits `haul` and an import writes it;
+  `isPlaced(role)` in `lib/engine/types.ts` is the single bridge between her word SHELVED (placed
+  anywhere) and the column's `shelved` (in a binder); `ownedAt` refuses an in-haul copy, so one can never
+  fill a stage again (UIL-087's cause (a), closed at the root); the Haul Plan reads its queue by role;
+  Lookup says "In haul (not placed yet)"; the Plan footer counts the sitting as In haul · In a binder ·
+  In the bulk box. **Migration `0018` on Testing** (BEFORE run 35811374535, AFTER run 35812019619): 577
+  `bulk` copies became 545 `haul` + 21 `bulk` (the 21 carry a placement decision, so she or the cascade
+  put them in the box) + 3 repaired to `shelved` (UIL-087's leftover rows, slotted but still labelled
+  bulk; the first cut asserted that shape away and would have stopped the deploy, which the BEFORE read
+  caught); `block` 0; no haul copy holds a binder, a slot or a decision row; the copy total moved only by
+  her own adds between the reads. **Follow-ups this fix exposed, logged separately:** UIL-093 (two "do I
+  already own this" reads still ask for shelved-or-bulk and so miss an in-haul copy) and UIL-092 (the
+  role rewrite moved the Haul Plan's state stamp, which discarded her parked run; the draft loss behind
+  that is older than this change). **Step for Karvi:** the Haul Plan footer reads "In haul N"; Lookup on
+  a card still waiting says "In haul (not placed yet)"; Collections lists no card until it is shelved.
+  Closed on her confirmation that the three states read right.
 - **Priority:** High (Karvi's own report; Senior BA agrees) — a modelling error at the root of the app that
   has already produced UIL-087 (an unplaced copy read as "already placed" and pulled into a line) and the
   false premise under UIL-084 ("the extra copy goes to the front half"), and that makes every count of
@@ -6961,7 +6992,7 @@ shelf twice this week.
 ## UIL-089 — There is no way to remove a copy from the app: a card misidentified as owned in Dex stays "owned" until a later import happens to retire it, and a card that was traded or went missing has no lifecycle at all
 
 - **Reported:** 2026-09-22 (Karvi; body by the Senior BA, no intake session on the roster)
-- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-088; design proposal before code.** **Karvi's ruling 2026-09-22: no reason is necessary.** So this is one plain action, remove this copy from the app, for both cases; the app releases what the copy holds, records a `placement_decision` for the removal (UIL-042: history is never deleted), shows no reason field and no "gone" list, and remembers the removal keyed on the Dex row so the next import does not recreate it until Dex no longer lists it, since Dex is the source of truth (UIL-088).
+- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-088; design proposal before code.** **Karvi's ruling 2026-09-22: no reason is necessary.** So this is one plain action, remove this copy from the app, for both cases; the app releases what the copy holds, records a `placement_decision` for the removal (UIL-042: history is never deleted), shows no reason field and no "gone" list, and remembers the removal keyed on the Dex row so the next import does not recreate it until Dex no longer lists it, since Dex is the source of truth (UIL-088). **2026-09-23, moved up:** UIL-092's incident left four duplicate copies on Testing (two Meditite, one Pikachu, one Raichu: a hand-typed copy now shelved in a line beside its Dex twin waiting in the haul), and nothing in the app can remove or merge either one, so she has been told to leave those queue rows unplaced until this lands. The proposal must cover that shape explicitly: two records for one physical card, one Dex-backed. Removing the Dex twin must not let the next import recreate it (already in the brief); removing the hand-typed one must not undo her placement; the cleanest answer is probably a merge, the surviving copy adopting the Dex presence, argued in the proposal. Next in Full Stack Dev - 2's queue after UIL-092 and UIL-093, ahead of UIL-091.
 - **Priority:** High (Karvi's own report; Senior BA's read pending her confirmation) — the app's record of
   what she owns is the point of the app; a copy she knows is not hers, or is no longer hers, that the app
   keeps counting, placing and proposing is a wrong record with no remedy.
@@ -7000,7 +7031,12 @@ she has no way to correct it, and the wrong record drives placement.
 - **Status:** Open — **assigned to Full Stack Dev - 2, ahead of the UIL-088 proposal because it blocks a
   placement now; reproduction on PGlite first, then one PR.** Design question left to the dev, argued in
   the PR: derive a line's locale from its root card (no migration) or add a column (migration `0019`
-  would be allocated).
+  would be allocated). **2026-09-23:** PR [#304](https://github.com/viantihu/pokemon-tcg-tracker/pull/304)
+  open with migration `0019`, rebased onto `c79383c` (head `534f0bd`), QA-gated green (1216 tests, build,
+  six mutant groups biting), **held by the Senior BA behind UIL-092**: `0019` rewrites `line_slot` rows
+  and so moves the Haul Plan's state stamp, which today discards a typed draft (UIL-092). Merges as soon
+  as UIL-092 deploys. Fresh BEFORE (run 35812410192): 25 `ja:` targets = 19 placeholder + 6 filled; `0019`
+  touches placeholders only, so the 6 filled slots stay.
 - **Priority:** High (Karvi's own rule; Senior BA agrees) — a card she has decided to place cannot be
   placed, the refusal offers no remedy that matches her intent, and the rule the app enforces contradicts
   the architecture's own statement that a JP and an EN printing are different cards.
@@ -7070,3 +7106,102 @@ because none of them was her choice; this entry is about the case where one IS.
 
 **Priority rationale.** Medium: a display disagreement with her own decision, recoverable, on a screen she
 uses often.
+
+## UIL-092 — A card typed into the Haul Plan by hand can vanish before it is committed, and can be written twice: the typed draft lives only in the browser tab, is dropped whenever the database changes under it or the tab reloads before a plan is run, and re-committing the same row mints a second copy
+
+- **Reported:** 2026-09-23 (Karvi, three messages in the minutes after `c79383c` deployed; body by the
+  Senior BA; loss paths confirmed from code by Full Stack Dev - 2, the deploy timing by QA)
+- **Status:** Open — **assigned to Full Stack Dev - 2, ahead of everything else including UIL-090's PR
+  #304, which is held until this deploys; one PR, two parts, no migration.** Part 1: park the typed draft
+  always, plan or no plan; on a stamp change discard the plan, overrides, cursor and folds, never the
+  typed rows; re-seed the Dex-backed rows from the queue and keep the typed ones; keep the draft and the
+  written set coherent so a typed row that was already committed never reappears as actionable. Part 2:
+  make the per-card commit idempotent per draft row (the row's client id is the natural key) so a retry
+  after a lost response, or a re-press, cannot insert a second copy; never dedupe by card, she may own
+  two. QA gate: DOM cases for the three survivals, a pre-fix-failing double-commit case yielding one copy
+  row, mutants restoring the clearing and dropping the key.
+- **Priority:** High (Karvi's own reports; Senior BA agrees) — the Haul Plan is where every card enters
+  the app, and this loses what she typed and then charges her twice for re-typing it; four duplicate
+  copies already exist on Testing with no way to remove them (UIL-089).
+- **Area:** Haul Plan
+- **Env:** Testing, develop `c79383c`
+
+In her words, in order: "When I added Meditite from the hauls page (because I didn't record the proper
+number of copies in Dex), it double counted the card. Even though I have 3 cards, it is showing that I
+own 4." Then: "Now my entire haul has disappeared." After a hard reload: "It is back, but now I have
+duplicate Pikachu and Raichu records, one in the haul plan and the other in lines."
+
+**What happened, from the deploy log and Testing.** Migration `0018` (UIL-088) finished at 02:49:26Z and
+the new build went live at 02:49:38Z. Her Plan tab was already open, so it kept running the previous
+code, which asks the queue for `role = 'bulk'`; against the relabelled rows that returned only the 21
+decided copies, which the queue then filters out, so the haul read EMPTY. With nothing waiting she typed
+the cards in front of her by hand and committed them: four copies with `haul_id` set and no
+`presence_group_id`, the signature of the Plan commit and of nothing else (read run 35812254590; the
+collection-log path writes a binder and no haul), two Meditite, one Pikachu, one Raichu, shelved into
+lines. On reload the 545 Dex-backed copies came back, their Dex twins among them, waiting in the queue
+beside the copies she had just placed. At the same time the role rewrite changed the Plan's state stamp
+(the fingerprint is a multiset of placement tuples, `lib/plan/fingerprint.ts`), and the page discards its
+parked run on a stamp mismatch by design (UIL-006), so anything typed and not yet committed was gone.
+Nothing left the database and the queue query on `develop` returns all 545; the haul vanished from her
+screen, not from her data.
+
+**The two loss paths, read from `c79383c`.** (a)
+[`PlanScreen.tsx:178`](<../app/(ui)/plan/PlanScreen.tsx:178>) seeds the draft as
+`resumed?.draft ?? initialPending`; the resume blob in `sessionStorage` is the ONLY home a typed row has,
+because a typed row carries no `existingCopyId` and so exists nowhere server-side until commit; `readResume`
+drops the blob whenever `parsed.stamp !== stamp`. (b) The parking effect
+([`PlanScreen.tsx:253`](<../app/(ui)/plan/PlanScreen.tsx:253>)) opens `if (!plan) { clearResume(); return; }`:
+a typed draft with no plan run is never parked and any earlier blob is cleared. Type ten cards, reload
+before pressing run, and they are gone, with no migration, no deploy and no Move involved. The comment
+there, "a bare draft has nothing worth resuming", is exactly the assumption that is wrong: a bare draft is
+the one thing on the screen she cannot recover by pressing a button.
+
+**The double, read from the same tree.** There is one commit path, per card (`commitHaul` is gone,
+`lib/plan/commit.ts:408`). `emitIncomingCopy` ([`commit.ts:759`](../lib/plan/commit.ts:759)) mints a fresh
+uuid on every attempt for a row without `existingCopyId`; the `catch` at `PlanScreen.tsx:518` leaves the
+row actionable after a transport failure, so a commit that succeeded server-side with a lost response
+inserts a second copy on retry; and nothing dedupes a re-typed card against copies she already owns, by
+design, because she may legitimately own two. The reset-then-retype sequence above needs no transport
+failure at all to produce the same result. The stamp change on a successful commit is already rolled
+forward from the server (`setLiveStamp(res.stamp)`), so a normal commit does not trigger the reset.
+
+**Remedy today:** none for the four duplicates until UIL-089 can remove or merge a copy. Until then the
+Meditite, Pikachu and Raichu rows waiting in the Haul Plan are the Dex twins of cards already in her
+lines and should be left unplaced, not routed anywhere.
+
+**Priority rationale.** High: the entry point of the whole app both loses her typing and double-writes it,
+and the second effect is irreversible in the current build.
+
+## UIL-093 — An in-haul copy is invisible to two "do I already own this card" reads: logging a card into a collection that is already waiting in her haul inserts a second copy instead of refusing, and the search grid badges every waiting card as not owned
+
+- **Reported:** 2026-09-23 (found by Full Stack Dev - 2 and QA reading the deployed tree for UIL-092; body
+  by the Senior BA). A regression from UIL-088's PR
+  [#305](https://github.com/viantihu/pokemon-tcg-tracker/pull/305).
+- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-092, as its own small PR, before UIL-090's
+  #304 merges; no migration.** Both reads include `haul`; the collection-log refusal names the state and
+  the remedy ("you already own this card; it is in your haul, waiting to be placed; place it from the Haul
+  Plan into this collection"); the `as "shelved" | "bulk" | "block"` casts in `lib/sync/pipeline.ts` and
+  `lib/sync/reconcile.ts` are widened in the same PR for honesty (their fall-through behaviour for a haul
+  copy was checked and is correct). QA gate: a haul-role fixture makes the collection log refuse rather
+  than insert; the owned set includes a haul copy; no owned-check on shelved-or-bulk survives in
+  `lib/coll`, `lib/repo` or `lib/sync`.
+- **Priority:** High (Senior BA's read) — a second record for a card she owns is the defect class UIL-092
+  just produced, reachable here from a different button, and irreversible until UIL-089.
+- **Area:** Collections (log a card), Lookup search grid (owned badge and the owned/unowned filter,
+  UIL-039)
+- **Env:** Testing, develop `c79383c`
+
+**Mechanism.** `findExistingCopy` ([`lib/coll/log.ts:52`](../lib/coll/log.ts:52)) keeps copies whose role
+is `shelved` or `bulk`; a copy in the haul now has role `haul`, so the check reports none and the log
+inserts a new `shelved` copy, where before UIL-088 the same card would have been refused with "You already
+own this — it's in the bulk box." `ownedCatalogCardIdSet` ([`lib/repo/copy.ts:50`](../lib/repo/copy.ts:50))
+selects `role in ('shelved', 'bulk')`, so the 545 cards waiting in her haul badge as not owned on the
+search grid, and the owned/unowned filter it feeds (applied at the database for correct paging, UIL-039)
+is wrong by the same 545.
+
+**Why "owned" includes the haul.** Karvi's ruling on UIL-088: Dex is the source of truth, so a card in the
+import is in her collection from the moment it lands. Her companion ruling, "Collections should not show
+a card until it is shelved", is about what a collection LISTS, not about whether the app knows she owns
+the card; it must never let her make a second one.
+
+**Priority rationale.** High: silent duplicate creation, not recoverable in the current build.
