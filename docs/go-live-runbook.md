@@ -201,6 +201,9 @@ to the `main` rail to get past it; find out what is in Production first.
       the implicit-flow fix is what shipped). Without the `token_hash` template or that fix,
       the default PKCE link only works in the browser that requested it, which is how Testing
       locked her out on the iPad.
+      Repo side, for whoever edits it: `supabase/templates/magic_link.html` is loaded by
+      `supabase db push` itself (via `supabase/config.toml`), so moving or renaming it breaks
+      the Production migration, not just the email. CI's migration-order job checks it.
 - [ ] **Custom SMTP configured on Production — REQUIRED before cutover** (UIL-097). The built-in
       sender allows 2 emails per hour and locks template edits, so Production's `token_hash`
       template cannot be set without it (Karvi hit the lock on Testing on 2026-09-23). Configure

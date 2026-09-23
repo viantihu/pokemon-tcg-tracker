@@ -70,9 +70,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # PINNED, not `latest` (2026-09-23). `db push` LOADS supabase/config.toml before it
+      # connects, and resolves every `content_path` in it (the UIL-097 magic-link template),
+      # so a CLI release that changes config loading would turn migrate red on Testing AND
+      # Production with no code change of ours. 2.117.0 is the stable release every green
+      # Deploy since 2026-09-07 ran. ci.yml's `supabase-config` step reads THIS line to pick
+      # the version it tests with, so bumping it here is the one place to bump it, and CI
+      # proves the new version still loads our config before the bump can merge.
       - uses: supabase/setup-cli@v3
         with:
-          version: latest
+          version: 2.117.0
 
       # NO `supabase link`, DELIBERATELY (UIL-005). `link` is a Management API call, so
       # it depends on secrets.SUPABASE_ACCESS_TOKEN having project privileges — and that
