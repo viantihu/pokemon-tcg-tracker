@@ -79,6 +79,11 @@ export const OWNER_TABLES = [
   "binder",
   "collection",
   "presence_group",
+  // 0020: how many copies of a (card, Dex variant) she removed while Dex still lists it.
+  // The import subtracts it from desired presence, so leaving it behind would let
+  // Production's first import re-create every card she removed on Testing. FK is to
+  // catalog_card only, which SHARED_TABLES lands first.
+  "removed_presence",
   "evolution_line",
   "copy",
   "line_slot",
@@ -339,6 +344,21 @@ export async function promoteCollection({
     }
   }
   log(`  ${allTables.length} tables have matching columns`);
+
+  // Every public table in Testing must be CLASSIFIED: shared, owner-scoped or excluded
+  // with a reason. A table in none of the three lists is one a newer migration added and
+  // nobody decided about, and the old behaviour was to leave it behind without a word —
+  // which is how 0020's removed_presence was missed. Refuse and name it instead.
+  const classified = new Set([...allTables, ...Object.keys(EXCLUDED)]);
+  const unclassified = [...sourceColumns.keys()].filter((t) => !classified.has(t)).sort();
+  if (unclassified.length > 0) {
+    fail(
+      `Testing has table(s) this script does not classify: ${unclassified.join(", ")}. ` +
+        `Add each to OWNER_TABLES (in foreign-key-safe order), SHARED_TABLES, or EXCLUDED ` +
+        `with the reason it must not travel, then re-run.`,
+    );
+  }
+  log(`  every public table in Testing is classified (${sourceColumns.size})`);
 
   // --- Resolve both owners. --------------------------------------------------
   const resolvedTarget = await resolveTargetOwner(target, { ownerEmail, targetOwner });
