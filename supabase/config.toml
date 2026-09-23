@@ -255,6 +255,11 @@ otp_expiry = 3600
 
 # UIL-097: the hosted projects use this same template (pasted in the dashboard; the deploy PAT
 # cannot PATCH auth config). A token_hash link works in any browser, unlike the PKCE default.
+#
+# DO NOT MOVE OR RENAME supabase/templates/magic_link.html without changing content_path in the
+# same commit. `supabase db push` (Deploy -> migrate, on Testing AND Production) loads this file
+# before connecting and aborts with LegacyDbConfigLoadError if content_path does not resolve.
+# CI's `supabase config.toml loads` step (migration-order job) catches it before merge.
 [auth.email.template.magic_link]
 subject = "Your Magic Link"
 content_path = "./supabase/templates/magic_link.html"
