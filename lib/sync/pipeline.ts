@@ -18,6 +18,7 @@ import {
   catalogCardRepo,
   colorBandRepo,
   copyRepo,
+  lastSyncSnapshotRepo,
   presenceGroupRepo,
   removedPresenceRepo,
   setAliasRepo,
@@ -38,6 +39,7 @@ import {
 } from "./reconcile";
 import type { DexRow } from "./types";
 import type { RemovedPresence } from "./diff";
+import { latestSnapshotId } from "./apply-guard";
 import type { SyncCounts } from "./undo";
 import { buildPreview, type CardMeta, type PreviewEnrichment, type SyncPreview } from "./preview";
 
@@ -46,6 +48,12 @@ export type SyncMode = "import" | "retry";
 /** The serializable bundle the preview hands to `applySync` — everything the executor needs. */
 export interface SyncPlanBundle {
   mode: SyncMode;
+  /**
+   * The collection's sync state when this preview was computed: the latest undo snapshot's id, or null when
+   * she has never synced (UIL-099 E5). The apply refuses unless it is still the latest, so a second tab, a
+   * double click or a retry cannot apply one preview twice. See lib/sync/apply-guard.ts.
+   */
+  baseSnapshotId: string | null;
   plan: ReconcilePlan;
   current: CurrentGroup[];
   queue: {
@@ -154,6 +162,14 @@ export function entryAsDexRow(e: Row<"unresolved_entry">): Pick<DexRow, "Id" | "
  */
 export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): Promise<SyncRun> {
   const mode: SyncMode = bytes ? "import" : "retry";
+  /**
+   * The sync state this preview is computed against (UIL-099 E5) — read FIRST, strictly before any state the
+   * plan is built from (the Tech Lead's B2). Read after, an apply landing between the two reads would pair a
+   * pre-apply plan with a post-apply base, pass the freshness check and apply stale `creates`. Read before,
+   * the same interleaving pairs an OLD base with a newer plan, which is refused: the ordering errs safe.
+   * Awaited on its own, not folded into the `Promise.all` below, because that order is the whole point.
+   */
+  const baseSnapshotId = latestSnapshotId(await lastSyncSnapshotRepo.list(db));
   const [aliasMap, waiting, current, manualMatches] = await Promise.all([
     loadAliasMap(db),
     unresolvedEntryRepo.listWaiting(db),
@@ -300,6 +316,7 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
 
   const bundle: SyncPlanBundle = {
     mode,
+    baseSnapshotId,
     plan,
     current: reconcileCurrent,
     queue: { parks, archiveEntryIds, dropEntryIds, stillWaiting },

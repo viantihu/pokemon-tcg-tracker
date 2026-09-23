@@ -87,6 +87,12 @@ export interface SyncCounts {
 
 export interface AppliedSnapshot {
   version: 1;
+  /**
+   * A digest of the plan this apply applied (UIL-099 E5). Lets a refused bundle be told "already applied"
+   * only when it is this same preview. Optional: snapshots written before E5 carry none, and read as "some
+   * other plan", which errs toward the safe "import again" message.
+   */
+  planDigest?: string;
   createdAt: string;
   fastPath: boolean;
   counts: SyncCounts;

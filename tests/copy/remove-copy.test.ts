@@ -83,7 +83,7 @@ async function one<T extends Record<string, unknown>>(sql: string): Promise<T | 
 async function importOnce() {
   const client = pgliteClient(db);
   const run = await runSyncPipeline(client, exportBytes());
-  await executeApply(client, run.bundle);
+  await executeApply(client, run.bundle, OWNER);
   return run;
 }
 
@@ -106,7 +106,7 @@ describe("UIL-089 · a removed Dex copy stays removed", () => {
     // is the whole defect: the app handing back a card she has told it she does not have.
     const second = await runSyncPipeline(client, exportBytes());
     expect(second.bundle.plan.creates).toHaveLength(0);
-    await executeApply(client, second.bundle);
+    await executeApply(client, second.bundle, OWNER);
     expect(await copies()).toHaveLength(0);
   });
 
@@ -121,13 +121,13 @@ describe("UIL-089 · a removed Dex copy stays removed", () => {
     // memory recorded is over and keeping it would suppress a future genuine row forever.
     const empty = await runSyncPipeline(client, exportBytes([]));
     expect(empty.bundle.plan.forgetRemoved).toHaveLength(1);
-    await executeApply(client, empty.bundle);
+    await executeApply(client, empty.bundle, OWNER);
     expect(await memory()).toHaveLength(0);
 
     // And now buying it again works: the card comes back, because nothing is suppressing it.
     const again = await runSyncPipeline(client, exportBytes());
     expect(again.bundle.plan.creates).toHaveLength(1);
-    await executeApply(client, again.bundle);
+    await executeApply(client, again.bundle, OWNER);
     expect(await copies()).toHaveLength(1);
   });
 
@@ -143,7 +143,7 @@ describe("UIL-089 · a removed Dex copy stays removed", () => {
 
     const retry = await runSyncPipeline(client, null); // bytes = null is the retry sweep
     expect(retry.bundle.plan.forgetRemoved).toHaveLength(0);
-    await executeApply(client, retry.bundle);
+    await executeApply(client, retry.bundle, OWNER);
     expect(await memory()).toHaveLength(1); // still remembered
   });
 
@@ -367,7 +367,7 @@ describe("UIL-089 · migration 0020", () => {
       client,
       exportBytes([ROW.replace(";Common;;1;;", ";Common;;2;;")]),
     );
-    await executeApply(client, run.bundle);
+    await executeApply(client, run.bundle, OWNER);
     const both = await copies();
     expect(both).toHaveLength(2);
 

@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import { executeApply, manualMatch } from "@/lib/sync";
 import { runSyncPipeline } from "@/lib/sync/pipeline";
-import { asOwner, asSuperuser, freshRpcDb } from "../support/pglite-rpc";
+import { asOwner, asSuperuser, freshRpcDb, OWNER } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
 const HEADER =
@@ -48,7 +48,7 @@ describe("UIL-082 · a manual match survives re-importing the same export", () =
     // 1. First import: the set resolves by name, the card does not exist → parks as UNKNOWN_CARD.
     const first = await runSyncPipeline(client, exportBytes());
     expect(first.bundle.plan.unresolved.map((u) => u.dexId)).toEqual(["xy7-99"]);
-    await executeApply(client, first.bundle);
+    await executeApply(client, first.bundle, OWNER);
     const parked = await db.query<{ id: string; reason: string; status: string }>(
       "select id, reason, status from unresolved_entry",
     );
@@ -87,7 +87,7 @@ describe("UIL-082 · the match is her override, and it never invents rows", () =
   async function matched() {
     const client = pgliteClient(db);
     const first = await runSyncPipeline(client, exportBytes());
-    await executeApply(client, first.bundle);
+    await executeApply(client, first.bundle, OWNER);
     const { rows } = await db.query<{ id: string }>("select id from unresolved_entry");
     await manualMatch(client, rows[0].id, "xy7-012");
     return client;

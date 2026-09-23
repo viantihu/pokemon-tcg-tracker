@@ -41,6 +41,7 @@ import {
 } from "@/lib/repo";
 import type { AppliedSnapshot } from "@/lib/sync";
 import { errorMessage } from "@/lib/errors";
+import { undoableSnapshot } from "@/lib/sync/apply-guard";
 import { lookupCatalog } from "../plan/actions";
 import type { LookupCard } from "../plan/plan-types";
 import type {
@@ -79,8 +80,9 @@ export async function applySync(
   overrides?: SyncOverrides,
 ): Promise<ApplyOutcome | ActionError> {
   try {
-    const { db } = await getOwnerContext();
-    const r = await executeApply(db, bundle, overrides);
+    const { db, ownerId } = await getOwnerContext();
+    // The owner keys the apply-once guard's no-snapshot-yet case (UIL-099 E5).
+    const r = await executeApply(db, bundle, ownerId, overrides);
     return {
       ok: true,
       added: r.added,
@@ -126,7 +128,7 @@ export async function retryUnresolvedNow(): Promise<
   { ok: true; promoted: number; applied: boolean; stamped: number } | ActionError
 > {
   try {
-    const { db } = await getOwnerContext();
+    const { db, ownerId } = await getOwnerContext();
     const { bundle } = await runSyncPipeline(db, null);
     const promoted = bundle.queue.archiveEntryIds.length;
 
@@ -137,7 +139,7 @@ export async function retryUnresolvedNow(): Promise<
       (e) => !promotedIds.has(e.id),
     );
 
-    if (promoted > 0) await executeApply(db, bundle);
+    if (promoted > 0) await executeApply(db, bundle, ownerId);
 
     const stamped = await stampRetrySweep(db, stillWaiting);
     return { ok: true, promoted, applied: promoted > 0, stamped };
@@ -236,7 +238,10 @@ export async function loadSyncState(): Promise<SyncState> {
   const waiting = entries.filter((e) => e.status === "WAITING").map(toEntryView);
   const dismissed = entries.filter((e) => e.status === "DISMISSED").map(toEntryView);
 
-  const snap = snapshots[0]?.snapshot as unknown as AppliedSnapshot | undefined;
+  // A tombstone is what an Undo leaves behind (UIL-099 E5): it is a real sync state, but there is nothing to
+  // undo, so it must not light up "Undo available".
+  const undoable = undoableSnapshot(snapshots);
+  const snap = undoable?.snapshot as unknown as AppliedSnapshot | undefined;
   return {
     waiting: {
       unknownSet: waiting.filter((e) => e.reason === "UNKNOWN_SET"),
@@ -245,7 +250,7 @@ export async function loadSyncState(): Promise<SyncState> {
     dismissed,
     counts: { waiting: waiting.length, dismissed: dismissed.length },
     undo: {
-      available: snapshots.length > 0,
+      available: undoable !== null,
       createdAt: snap?.createdAt ?? null,
       summary: snap?.counts ?? null,
     },

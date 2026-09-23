@@ -389,6 +389,7 @@ function bundleWithCreates(
   };
   return {
     mode: "full" as SyncPlanBundle["mode"],
+    baseSnapshotId: null, // a collection that has never synced (UIL-099 E5)
     plan,
     current: [],
     queue: { parks: [], archiveEntryIds: [], dropEntryIds: [], stillWaiting: 0 },
@@ -418,6 +419,7 @@ describe("sync builders emit the correct ordered op set (fake DbClient)", () => 
         { catalogCardId: "cardA", dexVariantRaw: "", variant: "normal" },
         { catalogCardId: "cardA", dexVariantRaw: "", variant: "normal" },
       ]),
+      OWNER,
     );
 
     const { ops, resync_group_ids } = captured();
