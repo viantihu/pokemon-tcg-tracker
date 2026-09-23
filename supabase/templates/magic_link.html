@@ -1,0 +1,23 @@
+<h2>Magic Link</h2>
+
+<p>Follow this link to log in:</p>
+<p>
+  <a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email">Log In</a>
+</p>
+
+<p>Or enter this code on the sign-in page: <strong>{{ .Token }}</strong></p>
+
+<!--
+  Why this shape (UIL-097). The default template links to {{ .ConfirmationURL }}, which completes
+  a PKCE flow: it only works in the browser that requested the link, because the code verifier
+  lives in that browser's cookies. Opened from a mail app's in-app browser (iPad Gmail) it lands
+  in a different cookie jar, exchangeCodeForSession fails, and the user is bounced to
+  /login?error=auth. A token_hash link is verified server-side with verifyOtp
+  (app/auth/callback/route.ts) and works in ANY browser. {{ .Token }} is the same one-time code
+  in 6-digit form, for the code-entry fallback on /login.
+
+  This file is applied to LOCAL dev by supabase/config.toml. The hosted projects (Testing,
+  Production) cannot be updated from CI: the deploy PAT gets 401 from the Management API, so the
+  same HTML is pasted into Supabase Dashboard -> Authentication -> Emails -> Templates -> Magic Link
+  (see docs/go-live-runbook.md, Part A). Keep the three in step.
+-->

@@ -184,6 +184,24 @@ to the `main` rail to get past it; find out what is in Production first.
 
 ## A7. First sign-in
 
+- [ ] **Magic Link template, Site URL and allow-list on the Production project** (UIL-097). The
+      two projects, by name, so they are never confused: **Testing = `cpmwdcmokbgcpmkvbtsw`**
+      (app `https://pokemon-tcg-tracker-git-develop-viantihus-projects.vercel.app`), **Production
+      = `bqqerxpdxywnpvndhxbs`** (app `https://pokemon-tcg-tracker-sooty.vercel.app`). Testing got
+      this change first (2026-09-23). In the Supabase dashboard for **Production
+      (`bqqerxpdxywnpvndhxbs`)**: Authentication → Emails → Templates → Magic Link
+      must contain the same HTML as `supabase/templates/magic_link.html` (a `token_hash` link
+      plus the `{{ .Token }}` code, not `{{ .ConfirmationURL }}`); Authentication → URL
+      Configuration: Site URL = `https://pokemon-tcg-tracker-sooty.vercel.app` (no trailing
+      slash, or the custom domain if one is added first) and
+      `https://pokemon-tcg-tracker-sooty.vercel.app/auth/callback` in Redirect URLs. This cannot be scripted:
+      the deploy PAT gets 401 from the Management API. Without it the sign-in link only works
+      in the browser that requested it, which is how Testing locked her out on the iPad.
+- [ ] **Email sender for Production decided** (UIL-097). The built-in Supabase sender allows
+      2 emails per hour per project and is documented as not for production. Either accept
+      that for a single-user app, or configure custom SMTP (Authentication → Emails → SMTP
+      Settings) with the same provider Testing uses, then raise the send limit under
+      Authentication → Rate Limits.
 - [ ] Karvi signs into Production once via magic link. This creates her `auth.users`
       row, which is the uuid the promotion remaps `owner_id` onto. Without it the
       script refuses to start (it must resolve exactly one owner).
