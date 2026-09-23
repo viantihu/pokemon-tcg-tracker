@@ -1078,3 +1078,52 @@ jobs:
             echo "::error::PREMISE FALSIFIED — count ($cnt) does NOT exceed the returned rows ($rows). #90 would compare equal values, never fire, and ship as protection that does nothing. Do not merge it on this assumption."
             exit 1
           fi
+
+      # UIL-097 (2026-09-23): can the deploy PAT read Testing's AUTH CONFIG through the Management
+      # API? If GET works, PATCHing the Magic Link template to a token_hash link is scriptable;
+      # if 401/403, Karvi pastes it in the dashboard. READ-ONLY: this step never PATCHes.
+      # Prints an allow-list of non-secret fields only (URLs, booleans, limits, the magic-link
+      # template HTML). Anything whose name contains pass/secret/key/token is never printed.
+      - name: "UIL-097: auth config readability via the Management API (read-only)"
+        if: always()
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          echo "=============== UIL-097: GET /v1/projects/<ref>/config/auth ==============="
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+            echo "SUPABASE_ACCESS_TOKEN is NOT available to this job (not set on the 'testing' environment or repo). Verdict: dashboard path."
+            exit 0
+          fi
+          out=$(curl -sS --retry 3 --retry-delay 5 -w $'\n%{http_code}' \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/config/auth" || printf '\n000')
+          code=${out##*$'\n'}
+          body=${out%$'\n'*}
+          echo "HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "message: $(printf '%s' "$body" | jq -r '.message // .error // "(no message)"' 2>/dev/null | head -c 300)"
+            echo "Verdict: the PAT cannot read auth config, so it cannot PATCH it either. Karvi edits the template in the dashboard."
+            exit 0
+          fi
+          echo "Verdict: the PAT CAN read auth config (a PATCH to the same path is the scriptable route)."
+          echo "--- non-secret fields ---"
+          printf '%s' "$body" | jq -r '
+            {
+              site_url,
+              uri_allow_list,
+              external_email_enabled,
+              mailer_autoconfirm,
+              mailer_otp_exp,
+              rate_limit_email_sent,
+              smtp_host_set: ((.smtp_host // "") != ""),
+              smtp_sender_name,
+              smtp_admin_email,
+              mailer_subjects_magic_link,
+              magic_link_uses_TokenHash: ((.mailer_templates_magic_link_content // "") | test("TokenHash")),
+              magic_link_uses_ConfirmationURL: ((.mailer_templates_magic_link_content // "") | test("ConfirmationURL")),
+              field_count: (keys | length)
+            }'
+          echo "--- current magic link template (HTML, no secrets) ---"
+          printf '%s' "$body" | jq -r '.mailer_templates_magic_link_content // "(empty: Supabase default template in use)"'
