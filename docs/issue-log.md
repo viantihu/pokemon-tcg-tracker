@@ -7111,15 +7111,27 @@ uses often.
 
 - **Reported:** 2026-09-23 (Karvi, three messages in the minutes after `c79383c` deployed; body by the
   Senior BA; loss paths confirmed from code by Full Stack Dev - 2, the deploy timing by QA)
-- **Status:** Open — **assigned to Full Stack Dev - 2, ahead of everything else including UIL-090's PR
-  #304, which is held until this deploys; one PR, two parts, no migration.** Part 1: park the typed draft
-  always, plan or no plan; on a stamp change discard the plan, overrides, cursor and folds, never the
-  typed rows; re-seed the Dex-backed rows from the queue and keep the typed ones; keep the draft and the
-  written set coherent so a typed row that was already committed never reappears as actionable. Part 2:
-  make the per-card commit idempotent per draft row (the row's client id is the natural key) so a retry
-  after a lost response, or a re-press, cannot insert a second copy; never dedupe by card, she may own
-  two. QA gate: DOM cases for the three survivals, a pre-fix-failing double-commit case yielding one copy
-  row, mutants restoring the clearing and dropping the key.
+- **Status:** **Fixed** — PR [#307](https://github.com/viantihu/pokemon-tcg-tracker/pull/307) MERGED to
+  `develop` 2026-09-23 (squash `2c89cce`), QA-gated on the merged tree (1200 tests, build, no migration;
+  mutants: a stamp mismatch binning the whole payload, the pre-fix code, fails 4 DOM cases; the copy id a
+  fresh uuid again, the pre-fix code, fails 4 idempotency cases; a committed typed row restored as
+  actionable fails 1; the short-circuit firing for a routed row fails 1), confirmed **deployed** (Vercel,
+  migrate, smoke and acceptance green on `2c89cce`). It was assigned ahead of everything else, including
+  UIL-090's PR #304, which was held until this deployed and is now released. **Built, two parts, as
+  specified.** Part 1: a typed draft is parked whether or not a plan has been run; on a stamp change the
+  page discards the derived half (plan, overrides, cursor, folds) and keeps her input (typed rows, notes,
+  source and the sitting's haul id, kept so a reset cannot open a second haul and split the audit trail);
+  restoring is a pure `restoreDraft` with three rules: a Dex-backed row is re-read from the queue and
+  dropped if it has left it, a typed row is kept verbatim, and a typed row already written is DROPPED, so
+  the reset itself can never put an actionable row on screen for a card already in a binder; her parked
+  order is preserved. Part 2: the typed row's id is now its copy id, so a retry collides with itself and
+  the commit returns "already committed" with the existing row's haul id, writing nothing; keyed on the
+  row, never the printing, so two typed rows of one card still become two copies (its own test).
+  Unpinned, disclosed by the dev: `newId`'s non-crypto fallback branch is unreachable under jsdom; the
+  server accepting a non-uuid row id is pinned instead. **Step for Karvi:** type a card on the Haul Plan,
+  reload before running the plan, the row is still there; run a plan, place a card from another screen,
+  come back, the plan is gone but the typed rows remain; press a card's placement twice quickly, one copy.
+  The four duplicates from the incident remain until UIL-089. Closed on her confirmation.
 - **Priority:** High (Karvi's own reports; Senior BA agrees) — the Haul Plan is where every card enters
   the app, and this loses what she typed and then charges her twice for re-typing it; four duplicate
   copies already exist on Testing with no way to remove them (UIL-089).
