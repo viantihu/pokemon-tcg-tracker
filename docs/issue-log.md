@@ -7028,15 +7028,37 @@ she has no way to correct it, and the wrong record drives placement.
 
 - **Reported:** 2026-09-22 (Karvi, with a screenshot, minutes after UIL-084's per-binder rule deployed; body
   by the Senior BA, no intake session on the roster)
-- **Status:** Open — **assigned to Full Stack Dev - 2, ahead of the UIL-088 proposal because it blocks a
-  placement now; reproduction on PGlite first, then one PR.** Design question left to the dev, argued in
-  the PR: derive a line's locale from its root card (no migration) or add a column (migration `0019`
-  would be allocated). **2026-09-23:** PR [#304](https://github.com/viantihu/pokemon-tcg-tracker/pull/304)
-  open with migration `0019`, rebased onto `c79383c` (head `534f0bd`), QA-gated green (1216 tests, build,
-  six mutant groups biting), **held by the Senior BA behind UIL-092**: `0019` rewrites `line_slot` rows
-  and so moves the Haul Plan's state stamp, which today discards a typed draft (UIL-092). Merges as soon
-  as UIL-092 deploys. Fresh BEFORE (run 35812410192): 25 `ja:` targets = 19 placeholder + 6 filled; `0019`
-  touches placeholders only, so the 6 filled slots stay.
+- **Status:** **Fixed** — PR [#304](https://github.com/viantihu/pokemon-tcg-tracker/pull/304) MERGED to
+  `develop` 2026-09-23 (squash `984f388`, at head `4fad022` after rebases onto UIL-087's #301, UIL-088's
+  #305 and UIL-092's #307), QA-gated on the merged tree (1232 tests, build; mutants: filled-copy
+  precedence fails 5, `physicalIn` ignoring locale fails 4, the migration deriving from the lowest slot
+  fails 1, the plan's uniqueness key dropping locale at two sites fails 3, `ownedAt` without `isPlaced`
+  fails 1, `ownedAt` without the locale match fails 1; 28 tests added across `tests/line/line-locale` and
+  `tests/line/foreign-locale-target-repair`), confirmed **deployed** (Deploy run 35815693970: migrate
+  applied `0019`, smoke, acceptance and Vercel green on `984f388`). It was assigned ahead of the UIL-088
+  proposal because it blocked a placement, reproduced on PGlite first, then one PR; the design question
+  (derive a line's locale or store it) was argued in the PR and settled as **derived, not stored**: no
+  column, `root_dex_id` is a species key both regional variants share, so a line's locale can only come
+  from the cards at its slots, filled copies first, then the lowest placeholder target. **Three defects,
+  not one, all reproduced before code:** D1, the uniqueness key ignored locale, so a Japanese line blocked
+  an English card in the same binder and band (her screen); D2, the chain walk, candidates, `ownedAt` and
+  the wishlist ranking ignored locale, so a Japanese card was offered an English line's open slot and a new
+  line could receive the other locale's placeholder targets; D3, a species was labelled with the shortest
+  name across both locales, so every line of the species read "ノノクラゲ LINE" whatever its locale, which
+  is why her screenshot could not be diagnosed and why the Senior BA's Testing read was needed (her KB-002
+  Toedscool line was English under a Japanese label, and the refusal of her second English Toedscruel was
+  the app being right about a wrong label). **Migration `0019`** (data-only, symmetric, idempotent,
+  no-op on Production's empty table) releases every placeholder target whose namespace disagrees with the
+  locale derived from the line's filled copies, and releases rather than re-points on 0010's precedent. It
+  was held by the Senior BA behind UIL-092 because it moves the Haul Plan's state stamp, which until
+  UIL-092 discarded a typed draft. **Verified on Testing** (BEFORE run 35815004926, AFTER run 35815835779,
+  no user activity between): 19 Japanese-targeted placeholders released, all of them in English-led lines
+  (placeholder `ja:` targets 19 → 0, null targets 1 → 20, placeholders with a target 22 → 3); the 6 filled
+  `ja:` slots, 57 filled slots, 22 placeholders, 1 block and every copy, decision, line, wishlist and
+  collection count unchanged. **Step for Karvi:** find a species you own in both English and Japanese; put
+  the Japanese one into a binder's back half as a new line, then the English one into the same binder and
+  colour: both save, and the Lines page names each line in its own language. Then the Toedscruel from your
+  screenshot: it should now start its own line in KB-002's back half. Closed on your confirmation.
 - **Priority:** High (Karvi's own rule; Senior BA agrees) — a card she has decided to place cannot be
   placed, the refusal offers no remedy that matches her intent, and the rule the app enforces contradicts
   the architecture's own statement that a JP and an EN printing are different cards.
@@ -7189,14 +7211,22 @@ and the second effect is irreversible in the current build.
 - **Reported:** 2026-09-23 (found by Full Stack Dev - 2 and QA reading the deployed tree for UIL-092; body
   by the Senior BA). A regression from UIL-088's PR
   [#305](https://github.com/viantihu/pokemon-tcg-tracker/pull/305).
-- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-092, as its own small PR, before UIL-090's
-  #304 merges; no migration.** Both reads include `haul`; the collection-log refusal names the state and
-  the remedy ("you already own this card; it is in your haul, waiting to be placed; place it from the Haul
-  Plan into this collection"); the `as "shelved" | "bulk" | "block"` casts in `lib/sync/pipeline.ts` and
-  `lib/sync/reconcile.ts` are widened in the same PR for honesty (their fall-through behaviour for a haul
-  copy was checked and is correct). QA gate: a haul-role fixture makes the collection log refuse rather
-  than insert; the owned set includes a haul copy; no owned-check on shelved-or-bulk survives in
-  `lib/coll`, `lib/repo` or `lib/sync`.
+- **Status:** **Fixed** — PR [#309](https://github.com/viantihu/pokemon-tcg-tracker/pull/309) MERGED to
+  `develop` 2026-09-23 (squash `cfc2594`), QA-gated on the merged tree (1203 tests, build, no migration;
+  mutants: the owned set back to shelved-or-bulk fails 1, a block counted as owned fails 1, a haul copy
+  described as the bulk box fails 1, the new PGlite `neq` shim meaning `eq` fails 4 including its contract
+  case, so the first two pass for the right reason), confirmed **deployed** (Vercel, migrate, smoke and
+  acceptance green on `cfc2594`). Assigned after UIL-092 as its own small PR. **Built:** both owned-checks
+  now ask "not a block" instead of naming the roles that count, the phrasing that went stale when UIL-088
+  added a third place a card can be; the collection-log refusal for an in-haul copy is its own sentence
+  and sends her to the Haul Plan rather than to Move, because a card in the haul is not somewhere else, it
+  is nowhere yet; the `as "shelved" | "bulk" | "block"` casts in `lib/sync/pipeline.ts` and
+  `lib/sync/reconcile.ts` now read `Role` (no behaviour change; every downstream chain already fell
+  through correctly for a haul copy). Pre-fix-failing: "refuses when the copy she owns is IN HER HAUL"
+  (pre-fix the copy count was 2); the browse case now seeds a haul row, the fixture whose absence let the
+  regression ship green. **Step for Karvi:** on a collection, try to log a card that is still waiting in
+  your haul; it refuses and points you to the Haul Plan. On the search grid, cards in your haul badge as
+  owned. Closed on your confirmation.
 - **Priority:** High (Senior BA's read) — a second record for a card she owns is the defect class UIL-092
   just produced, reachable here from a different button, and irreversible until UIL-089.
 - **Area:** Collections (log a card), Lookup search grid (owned badge and the owned/unowned filter,
@@ -7217,3 +7247,27 @@ a card until it is shelved", is about what a collection LISTS, not about whether
 the card; it must never let her make a second one.
 
 **Priority rationale.** High: silent duplicate creation, not recoverable in the current build.
+
+## UIL-094 — Placement history loses the card it is about: `placement_decision.copy_id` is ON DELETE SET NULL, so every retired or removed copy leaves a decision row that names no card unless its free-text reason happens to
+
+- **Reported:** 2026-09-23 (found by Full Stack Dev - 2 while designing UIL-089; body by the Senior BA)
+- **Status:** Open — unassigned; after UIL-089 and UIL-091 in Full Stack Dev - 2's queue. UIL-089 works
+  around it by writing a self-describing `reason` ("Removed — <card id> <variant>, was <placement>"), which
+  is the only surviving identity of a removed copy; this entry is the proper fix, a nullable
+  `catalog_card_id` (and `variant`) on `placement_decision`, back-filled from `copy` where the link still
+  exists, so history is queryable instead of grep-able. Its own migration when assigned (next free number
+  at that time; `0020` is UIL-089's).
+- **Priority:** Medium (Senior BA's read) — UIL-042 promised that history is never deleted, and the rows do
+  survive; but a row whose copy is gone says "removed" or "retired" about nothing in particular, so the
+  promise is kept in the letter and thin in practice. Not a placement error.
+- **Area:** schema, Sync (retire), UIL-089's removal
+- **Env:** Testing, develop `984f388`
+
+**Mechanism.** `placement_decision.copy_id references copy(id) on delete set null` (migration `0002`). Sync's
+retire path deletes the copy, so every retire since go-live has left its decision rows with a null
+`copy_id`; UIL-089's removal will do the same, inside the same transaction as its own audit insert. Nothing
+else on the row identifies the card: `reason` is free text, `haul_id` names a sitting, `line_id` and
+`line_slot_id` name where, not what.
+
+**Priority rationale.** Medium: it makes past history illegible rather than present state wrong, and
+UIL-089 carries a working stopgap.
