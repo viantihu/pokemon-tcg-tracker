@@ -32,7 +32,7 @@ import {
   type DraftItem,
 } from "@/lib/plan";
 import { applyMove } from "@/lib/line";
-import { candidateKey, lineKey } from "@/lib/line/join-options";
+import { candidateKey } from "@/lib/line/join-options";
 import {
   OWNER,
   applyOps,
@@ -193,7 +193,9 @@ describe("UIL-090 · D3: a line is labelled in its own locale", () => {
   it("an ENGLISH line reads with the English name, even though the Japanese name is shorter", async () => {
     await seedFilledLine("en");
     const opts = (await picker("sv09-089"))!;
-    const block = opts.existingLineByBinderBand[lineKey(KB2, "orange", "en")];
+    const block = opts.existingLines.find(
+      (l) => l.binderId === KB2 && l.bandKey === "orange" && l.locale === "en",
+    )!;
     expect(block.speciesLabel).toBe("TOEDSCOOL LINE"); // pre-fix: "ノノクラゲ LINE"
     expect(block.locale).toBe("en");
   });
@@ -201,7 +203,9 @@ describe("UIL-090 · D3: a line is labelled in its own locale", () => {
   it("a JAPANESE line reads with the Japanese name", async () => {
     await seedFilledLine("ja");
     const opts = (await picker("ja:SV9-089"))!;
-    const block = opts.existingLineByBinderBand[lineKey(KB2, "orange", "ja")];
+    const block = opts.existingLines.find(
+      (l) => l.binderId === KB2 && l.bandKey === "orange" && l.locale === "ja",
+    )!;
     expect(block.speciesLabel).toBe("ノノクラゲ LINE");
     expect(block.locale).toBe("ja");
   });
@@ -239,20 +243,26 @@ describe("UIL-090 · D1: the uniqueness key includes the locale", () => {
     expect(await lines()).toHaveLength(2);
   });
 
-  it("but a SECOND English card is still refused — the rule is per locale, not dropped", async () => {
+  it("a SECOND English card now starts its own line too — the rule is gone, not only per locale (UIL-096)", async () => {
+    // This used to pin a refusal: a second line of the SAME locale in one binder and band was the case
+    // UIL-090's locale scoping deliberately did not unblock. Karvi overruled the rule itself in UIL-096 —
+    // "Instead of blocking the creation of an evolution line, I want a warning" — so it lands, and the
+    // warning is the Move panel's job. Pinned in this direction so nobody restores the old refusal.
     await seedFilledLine("en");
-    await expect(commit(EN_CRUEL)).rejects.toThrow(
-      "That binder already has a line for this species in this band.",
-    );
-    expect(await lines()).toHaveLength(1);
+    await commit(EN_CRUEL);
+    const rows = await lines();
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.binder_id === KB2 && r.color_band === "orange")).toBe(true);
   });
 
-  it("her actual card: a second EN Toedscruel where the line is EN is refused, which was correct all along", async () => {
-    // The Testing read settled this: no Japanese copy is slotted anywhere, so her KB-002 line is
-    // English wearing the Japanese name. D3 is what she saw; D1 does not unblock this card, and the
-    // refusal was right. Pinned so nobody "fixes" it later by relaxing the rule.
+  it("her actual card: a second EN Toedscruel where the line is EN LANDS in a new line (UIL-096)", async () => {
+    // UIL-090 noted this was refused "correctly" under the rule as it stood, and pinned it "so nobody
+    // fixes it later by relaxing the rule". Karvi has now relaxed the rule on purpose, for exactly this
+    // card: "the Toedscruel issue is still there. I'm not able to create a new line for it." Overruled by
+    // the product owner, not relaxed by accident — which is what this sentence is here to say.
     await seedFilledLine("en");
-    await expect(commit(EN_CRUEL)).rejects.toThrow(/already has a line for this species/);
+    await commit(EN_CRUEL);
+    expect(await lines()).toHaveLength(2);
   });
 });
 
@@ -411,7 +421,9 @@ describe("UIL-090 · D1 from the LINES screen too, so both write paths agree", (
     expect(await lines()).toHaveLength(2); // pre-fix: refused
   });
 
-  it("applyMove still refuses a SECOND English line in that binder and band", async () => {
+  it("applyMove starts a SECOND English line in that binder and band — both write paths agree (UIL-096)", async () => {
+    // Was a refusal; Karvi overruled the rule in UIL-096, and the Plan and the Lines screen must still agree
+    // with each other, which is what this describe block exists to pin.
     await seedFilledLine("en");
     await db.query(
       `insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band)
@@ -419,18 +431,16 @@ describe("UIL-090 · D1 from the LINES screen too, so both write paths agree", (
       ["c0000000-0000-0000-0000-00000000f009", OWNER, KB2],
     );
     await asOwner(db);
-    await expect(
-      applyMove(
-        pgliteClient(db),
-        {
-          copyId: "c0000000-0000-0000-0000-00000000f009",
-          destination: { ...BACK_ORANGE, lineJoin: { mode: "new" } },
-        },
-        { binderName: () => "KB-002", collectionName: () => null, bandDisplay: (k) => k },
-      ),
-    ).rejects.toThrow(/already has a line for this species/);
+    await applyMove(
+      pgliteClient(db),
+      {
+        copyId: "c0000000-0000-0000-0000-00000000f009",
+        destination: { ...BACK_ORANGE, lineJoin: { mode: "new" } },
+      },
+      { binderName: () => "KB-002", collectionName: () => null, bandDisplay: (k) => k },
+    );
     await asSuperuser(db);
-    expect(await lines()).toHaveLength(1);
+    expect(await lines()).toHaveLength(2);
   });
 });
 
@@ -465,22 +475,23 @@ describe("UIL-090 · two cards, one payload, two locales — the in-pass key is 
     expect(await lines()).toHaveLength(2);
   });
 
-  it("still refuses the second of two cards of the SAME locale in one payload", async () => {
+  it("two cards of the SAME locale in one payload each get their own line when she asks (UIL-096)", async () => {
+    // Was a refusal of the second card. With the rule gone, each explicit "new line" is honoured — the
+    // in-pass key now only keeps the bookkeeping straight, it no longer decides anything.
     await asOwner(db);
     const pc = await loadPlanContext(pgliteClient(db));
     await asSuperuser(db);
     const second: DraftItem = { id: "d-en-cruel-2", tcgdexId: "sv09-089", variant: "normal" };
     const cards: DraftItem[] = [EN_CRUEL, second];
     const { planned } = planFromDraft(pc, cards);
-    expect(() =>
-      buildHaulCommitPayload(pc, planned, {
-        source: "bulk-bin",
-        draft: cards,
-        overrides: {
-          [EN_CRUEL.id]: { ...BACK_ORANGE, lineJoin: { mode: "new" } },
-          [second.id]: { ...BACK_ORANGE, lineJoin: { mode: "new" } },
-        },
-      }),
-    ).toThrow("That binder already has a line for this species in this band.");
+    const { payload } = buildHaulCommitPayload(pc, planned, {
+      source: "bulk-bin",
+      draft: cards,
+      overrides: {
+        [EN_CRUEL.id]: { ...BACK_ORANGE, lineJoin: { mode: "new" } },
+        [second.id]: { ...BACK_ORANGE, lineJoin: { mode: "new" } },
+      },
+    });
+    expect(payload.ops.filter((o) => o.op === "insert_line")).toHaveLength(2);
   });
 });

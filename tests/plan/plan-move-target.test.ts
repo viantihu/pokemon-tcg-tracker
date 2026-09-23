@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { PlanItem } from "@/lib/plan";
-import { lineKey, type LineJoinOptions } from "@/lib/line/join-options";
+import type { LineJoinOptions } from "@/lib/line/join-options";
 import { moveTargetFor } from "@/app/(ui)/plan/PlanScreen";
 
 const ITEM: PlanItem = {
@@ -31,8 +31,9 @@ const JOIN: LineJoinOptions = {
   locale: "en",
   naturalBandKey: "red",
   joinCandidates: [],
-  existingLineByBinderBand: {
-    [lineKey("b2", "green", "en")]: {
+  existingLines: [
+    {
+      lineId: "L2",
       speciesLabel: "CHARMANDER LINE",
       filledCount: 2,
       totalCount: 2,
@@ -40,7 +41,7 @@ const JOIN: LineJoinOptions = {
       bandKey: "green",
       locale: "en",
     },
-  },
+  ],
 };
 const INITIAL = { kind: "shelf", binderId: "b1", half: "front", band: "red" } as const;
 
@@ -48,14 +49,14 @@ describe("UIL-070 · moveTargetFor threads the line-join lookup onto the Move pa
   it("a lookup result — even with NO candidates — puts joinCandidates on the card, which is what turns the picker on", () => {
     const card = moveTargetFor(ITEM, JOIN, INITIAL);
     expect(card.joinCandidates).toEqual([]); // present, not undefined: the Plan's common case
-    expect(card.existingLineByBinderBand).toEqual(JOIN.existingLineByBinderBand);
+    expect(card.existingLines).toEqual(JOIN.existingLines);
     expect(card.naturalBandKey).toBe("red");
   });
 
   it("no lookup result (Trainer, or the action failed) leaves them absent → the plain move", () => {
     const card = moveTargetFor(ITEM, null, INITIAL);
     expect(card.joinCandidates).toBeUndefined();
-    expect(card.existingLineByBinderBand).toBeUndefined();
+    expect(card.existingLines).toBeUndefined();
     expect(card.naturalBandKey).toBeUndefined();
   });
 

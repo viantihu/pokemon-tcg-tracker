@@ -454,7 +454,7 @@ export async function buildScreenModel(
       binderHalf: (c.binder_half as "front" | "back" | null) ?? null,
       naturalBandKey: join.naturalBandKey,
       joinCandidates: join.joinCandidates,
-      existingLineByBinderBand: join.existingLineByBinderBand,
+      existingLines: join.existingLines,
     });
   }
 

@@ -32,8 +32,8 @@ export interface MoveTargetCard {
    *  present (even if empty) turns the picker's line-first flow on; absent (a card already filling a
    *  slot elsewhere) keeps today's plain binder/half/band flow. */
   joinCandidates?: LineJoinCandidate[];
-  /** Line screen only (UIL-056): a band whose only matching line has this card's stage filled. */
-  existingLineByBinderBand?: Record<string, ExistingLineBlock>;
+  /** Every line this card's family already has, anywhere in the collection (UIL-096). */
+  existingLines?: ExistingLineBlock[];
   /** Line screen only (UIL-064 part 1): this card's own type-derived band — the default for "start a
    *  new line"'s one remaining pick. */
   naturalBandKey?: string;
@@ -129,7 +129,7 @@ export function MoveOverlay({
             initial={card.initial}
             allowLineJoin={lineJoinOn}
             joinCandidates={card.joinCandidates}
-            existingLineByBinderBand={card.existingLineByBinderBand}
+            existingLines={card.existingLines}
             naturalBandKey={card.naturalBandKey}
             blockNeeds={card.blockNeeds}
             onConfirm={onConfirm}

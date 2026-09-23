@@ -11,7 +11,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import { loadLineScreen } from "@/lib/line";
-import { lineKey } from "@/lib/line/join-options";
 import { OWNER, freshRpcDb, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -21,7 +20,7 @@ const SLOT_ROOT = "50000000-0000-0000-0000-0000000000f1";
 const SLOT_NEXT = "50000000-0000-0000-0000-0000000000f2";
 const OWNED_EMBERLING = "c0000000-0000-0000-0000-0000000000f1"; // fills the line's root slot
 const UNLINED_EMBERDRAKE = "c0000000-0000-0000-0000-0000000000f2"; // should get a candidate
-const DUPLICATE_EMBERLING = "c0000000-0000-0000-0000-0000000000f3"; // should get existingLineByBinderBand
+const DUPLICATE_EMBERLING = "c0000000-0000-0000-0000-0000000000f3"; // should get its line reported in existingLines
 
 const EMBERLING_DEX = 9301;
 const EMBERDRAKE_DEX = 9302;
@@ -104,7 +103,9 @@ describe("loadLineScreen's unlinedCards (UIL-056)", () => {
     // not this card can join it — the question the server actually answers. The red line in GEN is
     // reported here even though the drake has an open slot in it, because a SECOND red line in GEN is
     // what would be refused.
-    expect(drake!.existingLineByBinderBand[lineKey(GEN, "red", "en")]).toMatchObject({
+    expect(
+      drake!.existingLines.find((l) => l.binderId === GEN && l.bandKey === "red"),
+    ).toMatchObject({
       speciesLabel: "EMBERLING LINE",
       binderId: GEN,
       bandKey: "red",
@@ -119,7 +120,9 @@ describe("loadLineScreen's unlinedCards (UIL-056)", () => {
     // No open candidate for the duplicate — its own (Basic) stage is already filled by the FIRST copy.
     expect(dupe!.joinCandidates).toHaveLength(0);
     // But it's explained, not just silently empty (note 3) — and says WHERE that line lives (UIL-084).
-    expect(dupe!.existingLineByBinderBand[lineKey(GEN, "red", "en")]).toMatchObject({
+    expect(
+      dupe!.existingLines.find((l) => l.binderId === GEN && l.bandKey === "red"),
+    ).toMatchObject({
       speciesLabel: "EMBERLING LINE",
       filledCount: 1,
       totalCount: 2,

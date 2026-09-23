@@ -1,25 +1,31 @@
 // @vitest-environment jsdom
 /**
- * UIL-084, the sheet — "start a new line" names the binder it would start it in, and the panel refuses
- * exactly what the server refuses: a second line for one species, in one band, in ONE binder.
+ * UIL-096, the sheet — starting a new line where the family already has one is a WARNING, never a block.
  *
- * Her report: the only offer the sheet could make for a second Toedscruel was "+ Start a new line", the
- * note under it said "this one starts its own line instead", and the write refused it every time —
- * because line uniqueness ignored the binder and its remedy ("join it instead") named a slot that did
- * not exist. The panel now asks the same question the write answers, keyed by BINDER AND BAND.
+ * Karvi, verbatim: "the Toedscruel issue is still there. I'm not able to create a new line for it. Instead
+ * of blocking the creation of an evolution line, I want a warning that there is a line existing in my
+ * ENTIRE collection (not just the binder)."
  *
- * Driven through the real `MovePanel` in a DOM (QA's rule for a click path): chips are clicked, and what
- * she can confirm, what the note says, and what the host receives are all asserted.
+ * Under UIL-084 this panel refused a second line for one species in one band in one binder: it disabled
+ * Confirm and said "a second line here cannot be saved", because the server refused it too. Her Toedscruel
+ * is exactly that shape — its Toedscool line in KB-001, Orange, has its Stage 1 already filled, so there
+ * is no slot to join — and the back half had nowhere to take it. Now the panel names every line the family
+ * has, anywhere in the collection, and offers the two things she can do: join one that has a slot open for
+ * this card, or start a new line anyway (Confirm, relabelled to say so).
+ *
+ * Driven through the real `MovePanel` in a DOM (QA's rule for a click path): chips are clicked, and what she
+ * can confirm, what the warning says, and what the host receives are all asserted.
  */
 import { createElement } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { lineKey } from "@/lib/line/join-options";
-import type { ExistingLineBlock, MoveOptions } from "@/lib/line/types";
+import type { ExistingLineBlock, LineJoinCandidate, MoveOptions } from "@/lib/line/types";
+import { buildLineJoinIndex, joinOptionsFor } from "@/lib/line/join-options";
 import { MovePanel } from "@/app/(ui)/_components/MovePanel";
+import { CHARMANDER_SV03_026, CHARMELEON_SV03_027 } from "../engine/fixtures";
 
-/** Two general binders: KB-001 holds the family's Orange line, KB-002 is the one she is filling. */
+/** Two general binders: KB-001 holds the family's Orange line, KB-002 is the other one she fills. */
 const OPTIONS: MoveOptions = {
   binders: [
     { id: "kb1", name: "KB-001", type: "general" },
@@ -32,16 +38,33 @@ const OPTIONS: MoveOptions = {
   ],
 };
 
-/** The Orange TOEDSCOOL line, in KB-001, every stage filled — so there is no slot to join. */
+/** Her line: the Orange TOEDSCOOL line in KB-001, every stage filled — so there is no slot to join. */
 const IN_KB1: ExistingLineBlock = {
+  lineId: "L1",
   speciesLabel: "TOEDSCOOL LINE",
   filledCount: 2,
   totalCount: 2,
   binderId: "kb1",
   bandKey: "orange",
-  // UIL-090: a line belongs to one regional variant; these fixtures are English.
   locale: "en",
 };
+/** Same family, same band, ANOTHER binder, with its Stage 1 open. */
+const IN_KB2: ExistingLineBlock = { ...IN_KB1, lineId: "L2", binderId: "kb2", filledCount: 1 };
+/** Same family, same binder, ANOTHER band. */
+const RED_IN_KB1: ExistingLineBlock = { ...IN_KB1, lineId: "L3", bandKey: "red" };
+/** Same family, same binder and band, the OTHER regional variant — named, but not joinable. */
+const JA_IN_KB1: ExistingLineBlock = { ...IN_KB1, lineId: "L4", locale: "ja" };
+
+const openSlot = (line: ExistingLineBlock, slotId: string): LineJoinCandidate => ({
+  lineId: line.lineId,
+  slotId,
+  binderId: line.binderId,
+  bandKey: line.bandKey,
+  speciesLabel: line.speciesLabel,
+  stage: "Stage1",
+  filledCount: line.filledCount,
+  totalCount: line.totalCount,
+});
 
 function mount(over: Partial<Parameters<typeof MovePanel>[0]> = {}) {
   const onConfirm = vi.fn();
@@ -51,8 +74,9 @@ function mount(over: Partial<Parameters<typeof MovePanel>[0]> = {}) {
       options: OPTIONS,
       naturalBandKey: "orange",
       allowLineJoin: true,
+      cardLocale: "en",
       joinCandidates: [], // her case: the line's matching stage is filled, so nothing to join
-      existingLineByBinderBand: { [lineKey("kb1", "orange", "en")]: IN_KB1 },
+      existingLines: [IN_KB1],
       onConfirm,
       ...over,
     }),
@@ -62,16 +86,9 @@ function mount(over: Partial<Parameters<typeof MovePanel>[0]> = {}) {
 
 const button = (name: string | RegExp) => screen.getByRole("button", { name }) as HTMLButtonElement;
 const newLine = () => button(/^\+ Start a new line/);
-const confirm = () => button("Place it here ▶");
-/**
- * With nothing to join, the manual controls render FIRST and the line picker second, so both sections
- * offer band chips — the picker's is the last one. Scoped rather than `getByRole`, which would match two.
- */
-const pickerBand = (name: RegExp) => {
-  const all = screen.getAllByRole("button", { name }) as HTMLButtonElement[];
-  return all[all.length - 1];
-};
-const note = () => screen.queryByText(/already has TOEDSCOOL LINE in this band/);
+const anyway = () => button("Start a new line anyway ▶");
+const plain = () => button("Place it here ▶");
+const warning = () => screen.queryByRole("status");
 
 afterEach(cleanup);
 
@@ -84,64 +101,175 @@ describe("UIL-084 · the new-line chip names the binder it would start the line 
   });
 });
 
-describe("UIL-084 · a second line in the binder that already has one is refused, with remedies that exist", () => {
-  it("explains the block and disables Confirm, instead of recommending the one action that cannot succeed", async () => {
-    const { user } = mount();
-    await user.click(newLine());
-    // The band defaults to her natural Orange, which is the band KB-001's line holds.
-    expect(note()).toBeTruthy();
-    expect(note()!.textContent).toContain("one binder tracks a species once per band");
-    expect(note()!.textContent).toContain("pick a different binder");
-    expect(confirm().disabled).toBe(true);
-  });
-
-  it("the SAME pick in KB-002 is allowed, says nothing about a block, and confirms a new line there", async () => {
+describe("UIL-096 · her Toedscruel: a warning, and she can still start the line", () => {
+  it("names the existing line, says joining is not possible, and lets her START the line anyway", async () => {
+    // PRE-FIX: Confirm was disabled here, under "a second line here cannot be saved".
     const { onConfirm, user } = mount();
-    // Binder first: forcing a binder by hand deliberately clears a line choice (UIL-073), so this is
-    // the order she actually works in — choose where it goes, then choose to start a line there.
-    await user.click(button("KB-002"));
     await user.click(newLine());
-    expect(note()).toBeNull();
-    expect(confirm().disabled).toBe(false);
 
-    await user.click(confirm());
+    const w = warning()!;
+    expect(w).toBeTruthy();
+    expect(w.textContent).toContain("You already have a TOEDSCOOL LINE in your collection");
+    expect(w.textContent).toContain("KB-001 · Orange · 2/2 filled — this binder, this band");
+    // Its Stage 1 is filled, so offering a join would be a button that cannot work.
+    expect(w.textContent).toContain("joining is not possible");
+    expect(screen.queryByRole("button", { name: /Join that line/ })).toBeNull();
+
+    expect(anyway().disabled).toBe(false);
+    await user.click(anyway());
     expect(onConfirm).toHaveBeenCalledWith({
       kind: "shelf",
-      binderId: "kb2",
+      binderId: "kb1",
       half: "back",
       band: "orange",
       lineJoin: { mode: "new" },
     });
   });
 
-  it("a DIFFERENT band in the blocked binder is allowed too — the key is binder AND band", async () => {
-    const { onConfirm, user } = mount();
+  it("the old refusal text is gone", async () => {
+    const { user } = mount();
     await user.click(newLine());
-    await user.click(pickerBand(/Red fire/));
-    expect(note()).toBeNull();
-    expect(confirm().disabled).toBe(false);
-    await user.click(confirm());
-    expect(onConfirm).toHaveBeenCalledWith(
-      expect.objectContaining({ binderId: "kb1", band: "red", lineJoin: { mode: "new" } }),
-    );
+    expect(screen.queryByText(/cannot be saved/)).toBeNull();
+    expect(screen.queryByText(/one binder tracks a species once per band/)).toBeNull();
+    expect(screen.queryByText(/reload the screen and join it instead/)).toBeNull();
+  });
+});
+
+describe("UIL-096 · the warning names the WHOLE collection, not the binder", () => {
+  it("every binder, every band and both regional variants, each saying where it is relative to her pick", async () => {
+    const { user } = mount({ existingLines: [RED_IN_KB1, IN_KB2, JA_IN_KB1, IN_KB1] });
+    await user.click(newLine());
+    const items = [...warning()!.querySelectorAll("li")].map((li) => li.textContent);
+
+    expect(items).toHaveLength(4);
+    // The per-binder match leads: it is the default suggestion the old rule has become.
+    expect(items[0]).toBe("KB-001 · Orange · 2/2 filled — this binder, this band");
+    expect(items).toContain("KB-002 · Orange · 1/2 filled — same band, another binder");
+    expect(items).toContain("KB-001 · Red fire · 2/2 filled — another band");
+    // The other regional variant is named and tagged — she asked for all of them — but it is not "this
+    // binder, this band": an English card cannot join a Japanese line (UIL-090).
+    expect(items).toContain("KB-001 · Orange · 2/2 filled · JA — same band, another binder");
+    expect(warning()!.textContent).toContain("You already have 4 TOEDSCOOL LINES");
   });
 
-  it("the front half is unaffected: no line is involved, so no block and no refusal", async () => {
+  it("no existing line anywhere means no warning and the ordinary Confirm", async () => {
+    const { user } = mount({ existingLines: [] });
+    await user.click(newLine());
+    expect(warning()).toBeNull();
+    expect(plain().disabled).toBe(false);
+  });
+
+  it("the front half involves no line, so no warning", async () => {
     const { onConfirm, user } = mount();
     await user.click(button("FRONT HALF"));
-    expect(note()).toBeNull();
-    expect(confirm().disabled).toBe(false);
-    await user.click(confirm());
+    expect(warning()).toBeNull();
+    await user.click(plain());
     expect(onConfirm).toHaveBeenCalledWith(
       expect.objectContaining({ binderId: "kb1", half: "front", band: "orange" }),
     );
   });
+});
 
-  it("with NO existing line anywhere, the chip still names its binder and nothing is blocked", async () => {
-    const { user } = mount({ existingLineByBinderBand: {} });
+describe("UIL-096 · the other choice: join a line that has a slot for this card", () => {
+  it("offers to join the joinable line, and joining sends the existing-line choice instead", async () => {
+    const { onConfirm, user } = mount({
+      existingLines: [IN_KB1, IN_KB2],
+      joinCandidates: [openSlot(IN_KB2, "s2")],
+    });
     await user.click(newLine());
-    expect(newLine().textContent).toContain("in KB-001");
-    expect(note()).toBeNull();
-    expect(confirm().disabled).toBe(false);
+    // KB-001's line is full; KB-002's has its Stage 1 open, so that is the join on offer.
+    await user.click(button(/Join that line · STAGE1 slot/));
+
+    // Joining is not starting a line, so the warning goes and Confirm is the ordinary one again.
+    expect(warning()).toBeNull();
+    await user.click(plain());
+    expect(onConfirm).toHaveBeenCalledWith({
+      kind: "shelf",
+      binderId: "kb2",
+      half: "back",
+      band: "orange",
+      lineJoin: { mode: "existing", lineId: "L2", slotId: "s2" },
+    });
+  });
+
+  it("the per-binder match is the suggested join when it is joinable — a suggestion, not a rule", async () => {
+    const { onConfirm, user } = mount({
+      existingLines: [IN_KB2, { ...IN_KB1, filledCount: 1 }],
+      joinCandidates: [openSlot(IN_KB2, "s2"), openSlot({ ...IN_KB1, filledCount: 1 }, "s1")],
+    });
+    await user.click(newLine());
+    await user.click(button(/Join that line/));
+    await user.click(plain());
+    // KB-001, the binder she is in, wins over KB-002 even though KB-002 was listed first.
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        binderId: "kb1",
+        lineJoin: { mode: "existing", lineId: "L1", slotId: "s1" },
+      }),
+    );
+  });
+
+  it("and she can still ignore the suggestion and start the line anyway", async () => {
+    const { onConfirm, user } = mount({
+      existingLines: [IN_KB2],
+      joinCandidates: [openSlot(IN_KB2, "s2")],
+    });
+    await user.click(newLine());
+    await user.click(anyway());
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ binderId: "kb1", lineJoin: { mode: "new" } }),
+    );
+  });
+});
+
+/**
+ * QA's survivor, in its PRODUCT form: after one "Start a new line anyway", the family has TWO lines in one
+ * binder, band and locale, and the open slot is in the second. Driven through the REAL `joinOptionsFor`
+ * into the real panel — a hand-built `existingLines` fixture would not notice `joinOptionsFor` collapsing
+ * the two to one per key, which is the mutation this exists to kill.
+ */
+describe("UIL-096 · two lines sharing a binder, band and locale — the second holds the open slot", () => {
+  it("both are named, and the one with the open slot is the join on offer", async () => {
+    const root = CHARMANDER_SV03_026.dexId[0];
+    const slot = (id: string, i: number, stage: string, state: string) => ({
+      id,
+      stage_index: i,
+      stage,
+      state,
+      target_catalog_card_id: "sv03-027",
+    });
+    const index = buildLineJoinIndex(
+      [
+        { id: "L1", rootDexId: root, colorBand: "red", binderId: "kb1" },
+        { id: "L2", rootDexId: root, colorBand: "red", binderId: "kb1" },
+      ],
+      new Map([
+        ["L1", [slot("a0", 0, "Basic", "filled"), slot("a1", 1, "Stage1", "filled")]],
+        ["L2", [slot("b0", 0, "Basic", "filled"), slot("b1", 1, "Stage1", "placeholder")]],
+      ]),
+      [CHARMANDER_SV03_026, CHARMELEON_SV03_027],
+      () => null,
+    );
+    const opts = joinOptionsFor(CHARMELEON_SV03_027, index, { Fire: "red" }, [
+      CHARMANDER_SV03_026,
+      CHARMELEON_SV03_027,
+    ])!;
+
+    const { onConfirm, user } = mount({
+      naturalBandKey: "red",
+      existingLines: opts.existingLines,
+      joinCandidates: opts.joinCandidates,
+    });
+    await user.click(newLine());
+    // Both lines are in the warning — collapsed to one per key, only L1 would be.
+    expect(warning()!.querySelectorAll("li")).toHaveLength(2);
+
+    // The join is the SECOND line's open slot. With L2 dropped from the list, no join would be offered and
+    // she would be told joining is not possible while a slot stood open.
+    await user.click(button(/Join that line · STAGE1 slot/));
+    await user.click(plain());
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ lineJoin: { mode: "existing", lineId: "L2", slotId: "b1" } }),
+    );
   });
 });

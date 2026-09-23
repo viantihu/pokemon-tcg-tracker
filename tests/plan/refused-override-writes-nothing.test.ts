@@ -8,10 +8,12 @@
  * line or slot is touched, and no audit row is written — there is nothing half-applied for the screen to
  * be right or wrong about, and nothing for a retry to trip over.
  *
- * The refusal used here is a duplicate line in the SAME binder as the existing one. That is deliberate:
- * it is the case that stays refused under either line-uniqueness rule (globally, or one line per species
- * per binder), so this test kept its meaning when the rule was settled per binder — only the refusal's
- * WORDING moved with it (UIL-084's second half, which also made its remedies ones that exist).
+ * WHICH REFUSAL, and why it changed. This file used "a second line for the species in the SAME binder",
+ * on the reasoning that it stayed refused under every uniqueness rule. UIL-096 removed that refusal
+ * outright — Karvi: "Instead of blocking the creation of an evolution line, I want a warning" — so a new
+ * line there now LANDS (pinned in tests/line/second-line-in-binder.test.ts). The property this file exists
+ * for is not about lines at all, it is "a refused override leaves nothing behind", so it now uses a refusal
+ * that still stands on the same fixture: joining the line's Stage 1 slot, which a Toedscruel already fills.
  *
  * Real Postgres (PGlite), real migrations, real `apply_write_ops`, as the authenticated owner.
  */
@@ -86,7 +88,7 @@ async function state() {
 }
 
 describe("UIL-084 · a refused manual placement writes nothing at all", () => {
-  it("refuses a second line for the species in the SAME binder and leaves every row untouched", async () => {
+  it("refuses joining a slot that is already filled, and leaves every row untouched", async () => {
     const before = await state();
     expect(before.decisions).toBe(0);
     expect(before.hauls).toBe(0);
@@ -96,12 +98,12 @@ describe("UIL-084 · a refused manual placement writes nothing at all", () => {
       binderId: KB1,
       half: "back",
       band: "orange",
-      lineJoin: { mode: "new" },
+      lineJoin: { mode: "existing", lineId: LINE, slotId: SLOT_S1 },
     };
     await asOwner(db);
     await expect(
       commitCardPlacement(pgliteClient(db), { source: "bulk-bin", card: DRAFT, override }),
-    ).rejects.toThrow(/already has a line for this species in this band/);
+    ).rejects.toThrow(/already been filled/);
     await asSuperuser(db);
 
     // Byte-for-byte the state we started from: no new copy for the card she is holding, no second
@@ -120,10 +122,10 @@ describe("UIL-084 · a refused manual placement writes nothing at all", () => {
           binderId: KB1,
           half: "back",
           band: "orange",
-          lineJoin: { mode: "new" },
+          lineJoin: { mode: "existing", lineId: LINE, slotId: SLOT_S1 },
         },
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/already been filled/);
     await asSuperuser(db);
 
     // One Toedscruel: the copy that was already filling the line's Stage1 slot. Not hers-in-hand.

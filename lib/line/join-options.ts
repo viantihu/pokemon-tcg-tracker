@@ -69,15 +69,20 @@ export interface LineJoinOptions {
   /** Flat across every band, closest-to-complete first; each carries its own binder + band. */
   joinCandidates: LineJoinCandidate[];
   /**
-   * Every line this family already has, keyed by BINDER AND BAND (`lineKey`) — UIL-084.
+   * Every line this family already has, ANYWHERE in the collection — every binder, every band, both
+   * regional variants (UIL-096). Oldest first, as the loaders hand lines in.
    *
-   * It was keyed by band alone AND filtered to bands with no open candidate, which is two ways of
-   * disagreeing with the server: the refusal is keyed on the binder, and it fires whether or not the
-   * card has an open slot in that line. So a back-half pick into a second binder looked allowed and
-   * was refused, and a band with a joinable line showed no warning yet refused a NEW line there.
-   * Unfiltered and binder-keyed, this answers exactly the question `applyMove` asks.
+   * It was a record keyed by binder + band + locale, because the server REFUSED a second line on that key
+   * (UIL-084) and the panel had to ask exactly the question the server asked. Karvi overruled the rule
+   * itself: "Instead of blocking the creation of an evolution line, I want a warning that there is a line
+   * existing in my ENTIRE collection (not just the binder)." So the refusal is gone, and a keyed record is
+   * now the wrong shape twice over: it cannot answer "where else", and once two lines CAN share a key it
+   * silently drops one of them. A list cannot.
+   *
+   * The per-binder match is still the panel's DEFAULT SUGGESTION (the join it offers first) — the
+   * Senior BA's ruling: a suggestion, never a rule.
    */
-  existingLineByBinderBand: Record<string, ExistingLineBlock>;
+  existingLines: ExistingLineBlock[];
 }
 
 /**
@@ -167,6 +172,7 @@ export function buildLineJoinIndex(
     const totalCount = slots.length;
     const forRoot = linesByRoot.get(line.rootDexId) ?? [];
     forRoot.push({
+      lineId: line.id,
       speciesLabel,
       filledCount,
       totalCount,
@@ -215,26 +221,18 @@ export function joinOptionsFor(
     index.openSlotsByDexId.get(candidateKey(locale, dexId)) ?? [],
   );
 
-  // THIS card's own chain root (may differ from its own dexId, e.g. a Stage1 whose Basic exists in
-  // the catalog) — the same key `applyMove`'s "does a line already exist" check uses, so a band that
-  // would REFUSE a new line explains why here rather than showing an empty candidate list.
+  // THIS card's own chain root (may differ from its own dexId, e.g. a Stage1 whose Basic exists in the
+  // catalog): a family is identified by its root, which is what `linesByRoot` is keyed on.
   const cardChain = buildChain({ id: "u", card, variant: "normal" } as IncomingCard, catalog);
   const cardRootDexId = cardChain[0]?.dexId ?? dexId;
-  // Every line this family already has, wherever it is — keyed the way the server refuses (UIL-084).
-  // Not filtered by "has an open slot for this card": that filter is what let the panel recommend a
-  // new line the write would reject.
-  // Keyed by locale too (UIL-090): a Japanese line in this binder and band does not block an English
-  // one, so only a line of the CARD's own locale can be reported as occupying its destination.
-  const existingLineByBinderBand: Record<string, ExistingLineBlock> = {};
-  for (const line of index.linesByRoot.get(cardRootDexId) ?? []) {
-    existingLineByBinderBand[lineKey(line.binderId, line.bandKey, line.locale)] = line;
-  }
 
   return {
     dexId,
     locale,
     naturalBandKey: bandOf(card, typeColorMap),
     joinCandidates,
-    existingLineByBinderBand,
+    // Unfiltered on purpose (UIL-096): every binder, band and locale. The panel decides what to say about
+    // each; filtering here would decide for it, which is how the old record came to hide lines elsewhere.
+    existingLines: [...(index.linesByRoot.get(cardRootDexId) ?? [])],
   };
 }
