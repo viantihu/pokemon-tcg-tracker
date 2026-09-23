@@ -73,8 +73,11 @@ jobs:
       # LegacyDbConfigLoadError and never reaches the database, so moving or renaming that
       # file would pass every other gate and then break migrate on Testing and Production.
       # This runs the SAME loader, at the SAME version Deploy pins, against a dead local URL.
-      # It passes only on a POSITIVE signal, LegacyDbConnectError (config loaded, connect
-      # refused as intended), so a new error shape fails loudly instead of passing vacuously.
+      # It passes only on a POSITIVE signal, "failed to connect to postgres" (config loaded,
+      # connect refused as intended), so a new error shape fails loudly instead of passing
+      # vacuously. Match MESSAGE TEXT, not error codes: the CLI prints plain text on the runner
+      # but JSON ({"code":"LegacyDbConnectError",...}) when it detects an AI agent shell, and
+      # both forms carry the same message.
       - name: Pin the Supabase CLI version from deploy.yml
         id: cli
         run: |
@@ -99,14 +102,14 @@ jobs:
           # the output is inspected. `|| true` keeps the captured output; the verdict is below.
           out=$(supabase db push --db-url "postgresql://ci:ci@127.0.0.1:1/ci" --dry-run 2>&1) || true
           printf '%s\n' "$out" | tail -5
-          if printf '%s' "$out" | grep -q 'LegacyDbConnectError'; then
+          if printf '%s' "$out" | grep -q 'failed to connect to postgres'; then
             echo "config.toml loaded; the connect refusal is the expected end of this check."
             exit 0
           fi
-          if printf '%s' "$out" | grep -q 'LegacyDbConfigLoadError'; then
+          if printf '%s' "$out" | grep -q 'Invalid config for'; then
             echo "::error::supabase/config.toml does not load, so Deploy's migrate would fail before touching the database. Most likely a content_path points at a file that was moved or renamed (supabase/templates/magic_link.html, UIL-097). Fix the path or restore the file."
           else
-            echo "::error::unexpected output: config loading could not be confirmed (no LegacyDbConnectError). If the CLI version changed, re-measure this check against it before relaxing the match."
+            echo "::error::unexpected output: config loading could not be confirmed (no 'failed to connect to postgres'). If the CLI version changed, re-measure this check against it before relaxing the match."
           fi
           exit 1
 
