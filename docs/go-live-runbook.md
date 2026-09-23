@@ -184,6 +184,28 @@ to the `main` rail to get past it; find out what is in Production first.
 
 ## A7. First sign-in
 
+- [ ] **Magic Link template, Site URL and allow-list on the Production project** (UIL-097). The
+      two projects, by name, so they are never confused: **Testing = `cpmwdcmokbgcpmkvbtsw`**
+      (app `https://pokemon-tcg-tracker-git-develop-viantihus-projects.vercel.app`), **Production
+      = `bqqerxpdxywnpvndhxbs`** (app `https://pokemon-tcg-tracker-sooty.vercel.app`). Testing got
+      this change first (2026-09-23). In the Supabase dashboard for **Production
+      (`bqqerxpdxywnpvndhxbs`)**: Authentication → Emails → Templates → Magic Link
+      must contain the same HTML as `supabase/templates/magic_link.html` (a `token_hash` link
+      plus the `{{ .Token }}` code, not `{{ .ConfirmationURL }}`); Authentication → URL
+      Configuration: Site URL = `https://pokemon-tcg-tracker-sooty.vercel.app` (no trailing
+      slash, or the custom domain if one is added first) and
+      `https://pokemon-tcg-tracker-sooty.vercel.app/auth/callback` in Redirect URLs. This
+      cannot be scripted: the deploy PAT gets 401 from the Management API. It also needs custom SMTP first (item
+      below): the built-in sender locks template edits. Whatever sign-in path ships, the
+      Redirect URLs must include its landing route (`/auth/callback`, and `/auth/confirm` if
+      the implicit-flow fix is what shipped). Without the `token_hash` template or that fix,
+      the default PKCE link only works in the browser that requested it, which is how Testing
+      locked her out on the iPad.
+- [ ] **Custom SMTP configured on Production — REQUIRED before cutover** (UIL-097). The built-in
+      sender allows 2 emails per hour and locks template edits, so Production's `token_hash`
+      template cannot be set without it (Karvi hit the lock on Testing on 2026-09-23). Configure
+      it under Authentication → Emails → SMTP Settings, then raise the send limit under
+      Authentication → Rate Limits. Do this BEFORE the template item above, which depends on it.
 - [ ] Karvi signs into Production once via magic link. This creates her `auth.users`
       row, which is the uuid the promotion remaps `owner_id` onto. Without it the
       script refuses to start (it must resolve exactly one owner).

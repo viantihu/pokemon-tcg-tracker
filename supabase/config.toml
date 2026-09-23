@@ -253,6 +253,12 @@ otp_expiry = 3600
 # subject = "Your password has been changed"
 # content_path = "./supabase/templates/password_changed_notification.html"
 
+# UIL-097: the hosted projects use this same template (pasted in the dashboard; the deploy PAT
+# cannot PATCH auth config). A token_hash link works in any browser, unlike the PKCE default.
+[auth.email.template.magic_link]
+subject = "Your Magic Link"
+content_path = "./supabase/templates/magic_link.html"
+
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.
 enable_signup = false
