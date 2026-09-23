@@ -451,19 +451,71 @@ export function deriveAllDecisions(lines: DecisionLineInput[]): DerivedDecision[
  * before picking — and the stored alternates are always "every option minus whichever is chosen",
  * never a self-reference, regardless of which one that ends up being.
  */
+/**
+ * The card this resolution ends up wanting, and the options it leaves behind (UIL-057).
+ *
+ * ONE definition, because two things now read it: the wishlist row she is charged against, and — since
+ * UIL-091 — the SLOT'S STORED TARGET. Computing "which card did she pick" twice is how the two came to
+ * disagree in the first place.
+ */
+function chosenTargetFor(res: DecisionResolution, pickedCatalogCardId?: string) {
+  const options = [...new Set([res.chosenCatalogCardId, ...res.alternateCatalogCardIds])].filter(
+    (id): id is string => Boolean(id),
+  );
+  const picked = Boolean(pickedCatalogCardId && options.includes(pickedCatalogCardId));
+  const chosen = picked ? pickedCatalogCardId! : res.chosenCatalogCardId;
+  // `picked` distinguishes HER choice from the engine's default. UIL-091 re-points the slot only on the
+  // first; see `pickedTargetPatch` for why stamping the default would cost her something.
+  return { chosen, others: options.filter((id) => id !== chosen), picked };
+}
+
+/**
+ * The slot patch that makes her pick the slot's own answer (UIL-091).
+ *
+ * UIL-057 let her choose an alternate instead of the engine's cheapest, and wrote that choice to the
+ * WISHLIST row only. `line_slot.target_catalog_card_id` kept the original, and `lib/line/load.ts` resolves
+ * a placeholder as `targetCc ?? alt[0]` — the stored target wins — so the Lines screen kept showing the card
+ * she had just replaced.
+ *
+ * RE-POINTING THE SLOT, not teaching the load to prefer the wishlist. The stored target is not a display
+ * field: `lib/plan/context.ts`'s `dexIdForSlot` resolves a slot's species from it, `lib/plan/fingerprint.ts`
+ * carries it in the plan stamp, `toEvolutionLine` hands it to the engine, and migration 0019 read it to
+ * decide a line's locale. Leaving her pick in the wishlist alone would mean every one of those still plans
+ * against the card she replaced — so the alternative is not "one fix in the loader", it is "every reader of
+ * the stored target must also consult the wishlist". That is the state multiplication UIL-088 ruled against
+ * and UIL-093 charged us for twice in a day.
+ *
+ * Nothing is lost by re-pointing: the option she moved away from lands in the same wishlist row's
+ * `alternate_catalog_card_ids` (`chosenTargetFor` returns it), and the decision itself is audited.
+ *
+ * EMITTED ONLY WHEN SHE ACTUALLY PICKED, never for the engine's own default — and that distinction is the
+ * whole shape of the column. A placeholder with NO stored target displays `altOptions`' cheapest computed at
+ * LOAD, so it follows prices and new printings; stamping the engine's current answer would freeze it and
+ * quietly turn a live default into a stale decision nobody made. Migration 0019 relied on exactly that
+ * reading when it RELEASED foreign-locale targets instead of re-pointing them: a null target is "ask again
+ * at load", and a stored one is "she chose this".
+ *
+ * My first cut emitted on every resolution and the regression test caught it: confirming a cap with no pick
+ * wrote the cheapest printing onto a slot that had deliberately carried none.
+ *
+ * Deliberately NOT applied to a FILLED slot: these two branches leave the stage a placeholder, which is the
+ * only state a target means anything in.
+ */
+function pickedTargetPatch(
+  res: DecisionResolution,
+  pickedCatalogCardId?: string,
+): { targetCatalogCardId?: string | null } {
+  const { chosen, picked } = chosenTargetFor(res, pickedCatalogCardId);
+  return picked && chosen ? { targetCatalogCardId: chosen } : {};
+}
+
 function wishlistUpsertFor(
   res: DecisionResolution,
   willSpecialty: boolean,
   pickedCatalogCardId?: string,
 ) {
   if (!res.slotId) return [];
-  const options = [...new Set([res.chosenCatalogCardId, ...res.alternateCatalogCardIds])].filter(
-    (id): id is string => Boolean(id),
-  );
-  const chosen =
-    pickedCatalogCardId && options.includes(pickedCatalogCardId)
-      ? pickedCatalogCardId
-      : res.chosenCatalogCardId;
+  const { chosen, others } = chosenTargetFor(res, pickedCatalogCardId);
   return [
     {
       lineSlotId: res.slotId,
@@ -471,7 +523,7 @@ function wishlistUpsertFor(
       requiredType: res.requiredType,
       requiredStage: res.requiredStage,
       chosenCatalogCardId: chosen,
-      alternateCatalogCardIds: options.filter((id) => id !== chosen),
+      alternateCatalogCardIds: others,
       willLiveInSpecialty: willSpecialty,
     },
   ];
@@ -514,7 +566,17 @@ export function resolveDecisionWrites(
       return {
         ...base,
         linePatch: { status: "capped" },
-        slotPatches: res.slotId ? [{ slotId: res.slotId, ...resolvedMark }] : [],
+        // UIL-091: her pick re-points the SLOT's stored target too, not only the wishlist row. See
+        // `pickedTargetPatch` for why the slot is the thing that has to change.
+        slotPatches: res.slotId
+          ? [
+              {
+                slotId: res.slotId,
+                ...resolvedMark,
+                ...pickedTargetPatch(res, pickedCatalogCardId),
+              },
+            ]
+          : [],
         wishlistUpserts: wishlistUpsertFor(res, true, pickedCatalogCardId),
         decision: {
           decision: "line-cap-confirmed",
@@ -652,7 +714,15 @@ export function resolveDecisionWrites(
     case "collection-wins":
       return {
         ...base,
-        slotPatches: res.slotId ? [{ slotId: res.slotId, ...resolvedMark }] : [],
+        slotPatches: res.slotId
+          ? [
+              {
+                slotId: res.slotId,
+                ...resolvedMark,
+                ...pickedTargetPatch(res, pickedCatalogCardId),
+              },
+            ]
+          : [],
         wishlistUpserts: wishlistUpsertFor(res, res.willLiveInSpecialty, pickedCatalogCardId),
         decision: {
           decision: "collection-wins",

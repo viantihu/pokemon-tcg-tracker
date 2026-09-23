@@ -88,6 +88,15 @@ async function wishlistRow(): Promise<{
   return r.rows[0] ?? null;
 }
 
+/** The slot's own stored target — what every reader BUT the wishlist goes by (UIL-091). */
+async function slotTarget(): Promise<string | null> {
+  const r = await db.query<{ target_catalog_card_id: string | null }>(
+    `select target_catalog_card_id from line_slot where id = $1`,
+    [SLOT],
+  );
+  return r.rows[0]?.target_catalog_card_id ?? null;
+}
+
 async function lineStatus(): Promise<string> {
   const r = await db.query<{ status: string }>(`select status from evolution_line where id = $1`, [
     LINE,
@@ -110,6 +119,60 @@ describe("applyDecision honours pickedCatalogCardId end to end (UIL-057, real Po
       alternate_catalog_card_ids: [CHEAP_ID],
     });
     expect(await lineStatus()).toBe("capped");
+  });
+
+  it("re-points the SLOT's stored target to her pick, so the screen stops showing the old card (UIL-091)", async () => {
+    /**
+     * PRE-FIX this stayed CHEAP_ID. `line_slot.target_catalog_card_id` was written once at insert time and
+     * never again, and `lib/line/load.ts` resolves a placeholder as `targetCc ?? alt[0]` — the stored target
+     * wins — so the Lines screen kept showing the printing she had just replaced.
+     *
+     * The slot is the thing that has to change, not the loader: `lib/plan/context.ts`'s `dexIdForSlot`
+     * resolves a slot's species from this column, `lib/plan/fingerprint.ts` carries it in the plan stamp,
+     * `toEvolutionLine` hands it to the engine, and migration 0019 read it to decide a line's locale.
+     */
+    await seedExOnlyCapDecision();
+    await asOwner(db);
+    await applyDecision(pgliteClient(db), OWNER, DECISION_ID, "confirm-cap", PRICEY_ID);
+
+    await asSuperuser(db);
+    expect(await slotTarget()).toBe(PRICEY_ID);
+    // And nothing is lost: the option she moved away from is still on the wishlist row as an alternate.
+    expect(await wishlistRow()).toEqual({
+      chosen_catalog_card_id: PRICEY_ID,
+      alternate_catalog_card_ids: [CHEAP_ID],
+    });
+  });
+
+  it("leaves the stored target NULL when she picks nothing — the default stays live", async () => {
+    /**
+     * The other half of UIL-091, and the half that is easy to break while fixing the first. A placeholder
+     * with no stored target displays `altOptions`' cheapest computed at LOAD, so it follows prices and new
+     * printings. Stamping the engine's current answer here would freeze it: a live default silently becomes
+     * a stale decision nobody made. Migration 0019 depends on the same reading — a null target means "ask
+     * again at load", which is why it RELEASED foreign targets instead of re-pointing them.
+     *
+     * My first cut of this fix did stamp it, and this case is what caught it.
+     */
+    await seedExOnlyCapDecision();
+    expect(await slotTarget()).toBeNull(); // the seed's own state: no target, decided at load
+    await asOwner(db);
+    await applyDecision(pgliteClient(db), OWNER, DECISION_ID, "confirm-cap");
+
+    await asSuperuser(db);
+    expect(await slotTarget()).toBeNull();
+  });
+
+  it("a REFUSED pick does not re-point the slot either", async () => {
+    // The validation lives in one place (`chosenTargetFor`), so an id that was never an option cannot reach
+    // the slot any more than it can reach the wishlist. Pinned because the slot is the higher-stakes one:
+    // the engine plans against it.
+    await seedExOnlyCapDecision();
+    await asOwner(db);
+    await applyDecision(pgliteClient(db), OWNER, DECISION_ID, "confirm-cap", "not-an-option");
+
+    await asSuperuser(db);
+    expect(await slotTarget()).toBeNull(); // refused, so nothing was her choice and nothing is stored
   });
 
   it("with no pick at all, still defaults to the cheapest (regression guard)", async () => {
