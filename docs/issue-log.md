@@ -7057,8 +7057,12 @@ she has no way to correct it, and the wrong record drives placement.
   `ja:` slots, 57 filled slots, 22 placeholders, 1 block and every copy, decision, line, wishlist and
   collection count unchanged. **Step for Karvi:** find a species you own in both English and Japanese; put
   the Japanese one into a binder's back half as a new line, then the English one into the same binder and
-  colour: both save, and the Lines page names each line in its own language. Then the Toedscruel from your
-  screenshot: it should now start its own line in KB-002's back half. Closed on your confirmation.
+  colour: both save, and the Lines page names each line in its own language. **Correction 2026-09-23:**
+  the Toedscruel from your screenshot is NOT unblocked by this entry. Both it and KB-002's existing
+  Toedscool line are English (the Testing read established that; the label was the Japanese one only
+  because of D3), so the rule that stopped it is the one-line-per-species-band-binder rule, not locale.
+  Your 2026-09-23 ruling turns that rule into a warning: UIL-096. Closed on your confirmation of the
+  two-locale step above.
 - **Priority:** High (Karvi's own rule; Senior BA agrees) — a card she has decided to place cannot be
   placed, the refusal offers no remedy that matches her intent, and the rule the app enforces contradicts
   the architecture's own statement that a JP and an EN printing are different cards.
@@ -7323,3 +7327,49 @@ atomically with the resolved-decision marker on the same row, but the wishlist h
 separate statements, and UIL-091 gave that gap one more thing to lose.
 
 **Priority rationale.** High by class; latent by evidence.
+
+## UIL-096 — Starting a new line is refused when the binder already has a line for the species and band; Karvi wants a warning that names every existing line across her ENTIRE collection and lets her join it or start a new one anyway
+
+- **Reported:** 2026-09-23 (Karvi, in her own words below; body by the Senior BA)
+- **Status:** Open — **assigned to Full Stack Dev - 2, first in the queue ahead of UIL-095; plan approved
+  2026-09-23, no migration.** The `lineExists` refusal (`lib/plan/commit.ts`, text `LINE_EXISTS_IN_BINDER`
+  in `lib/line/move.ts`: "That binder already has a line for this species in this band. Join its open slot
+  if it has one, or place this copy in the front half.") and the same rule wherever a new line is started
+  (Move's "Start a new line", the Lines sheet, the Haul Plan) becomes a WARNING and never a block. The
+  warning names where every existing line for the species sits across the whole collection, every binder,
+  both halves, both locales, and offers two choices: join that line (the existing join flow) or start a new
+  one anyway. Per-binder uniqueness stays as the default suggestion, not as a rule. Pre-fix-failing test:
+  an English Toedscruel against an English Toedscool line in the same binder and band gets the warning with
+  both choices and, on "start new", a second line in that binder; a `*.dom.test.ts` for the sheet. Fence:
+  `lib/plan/commit.ts`, `lib/plan/*`, `lib/line/join-options.ts`, `lib/line/move.ts`, `lib/line/write.ts`,
+  `app/(ui)/plan/*`, `app/(ui)/line/*`, `app/(ui)/_components/*`, tests.
+- **Priority:** High (Karvi's own report, twice: UIL-084's screenshot and today) — a card she has decided
+  to place is refused, and her standing principle is that a card must always be movable; the rule the app
+  enforces is one she has now overruled.
+- **Area:** Lines, Haul Plan, Move
+- **Env:** Testing, develop `d239d52` (after UIL-090's `984f388` deployed)
+
+In her words: "the Toedscruel issue is still there. I'm not able to create a new line for it. Instead of
+blocking the creation of an evolution line, I want a warning that there is a line existing in my ENTIRE
+collection (not just the binder)."
+
+**Why it survived three fixes.** UIL-084 moved the uniqueness key from global to per-binder and fixed the
+back-half-into-a-second-binder case; UIL-087 removed the false "already placed" slot; UIL-090 separated
+Japanese from English lines. Her Toedscruel and KB-002's Toedscool line are both English and in the same
+binder and band, so every one of those fixes left the rule that stops it intact: one line per species,
+band and binder. That rule was the design's, not hers, and today she overruled it. What she wants from the
+app is information (a line for this species exists here, here and here) and a choice, not a refusal.
+
+**Design note, settled with the dev 2026-09-23.** No new read and no migration: `buildLineJoinIndex`
+(`lib/line/join-options.ts`) already indexes EVERY line in the collection by chain root, and both the Plan
+and Lines screens build it from the full line list; `joinOptionsFor` then narrows it to a per-binder record,
+which is exactly the view she is objecting to. The fix exposes the unfiltered lines for the root on the
+join options, the Move panel warns from them before she confirms (binder, half, band, locale, filled
+slots, with the card image per the visual-search principle), offers "Join that line" or "Start a new line
+anyway" with the per-binder match pre-selected, and the two write paths (`lib/plan/commit.ts:750`,
+`lib/line/write.ts:199`) plus the panel gate (`MovePanel.tsx:124`) stop refusing. No DB constraint
+stands in the way: `0002` declares only a non-unique index on (root, band), so the uniqueness was only
+ever TypeScript. The engine's oldest-first tie-break for two lines in one binder stays pinned.
+
+**Priority rationale.** High: a placement she has decided on is impossible, and it is the third report on
+the same card.
