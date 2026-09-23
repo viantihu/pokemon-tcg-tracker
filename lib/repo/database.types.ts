@@ -273,6 +273,44 @@ export type Database = {
           },
         ];
       };
+      /** Copies she removed that her Dex export still lists (UIL-089, migration 0020). */
+      removed_presence: {
+        Row: {
+          id: string;
+          owner_id: string;
+          catalog_card_id: string;
+          dex_variant_raw: string;
+          count: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id?: string;
+          catalog_card_id: string;
+          dex_variant_raw: string;
+          count?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          catalog_card_id?: string;
+          dex_variant_raw?: string;
+          count?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "removed_presence_catalog_card_id_fkey";
+            columns: ["catalog_card_id"];
+            referencedRelation: "catalog_card";
+            referencedColumns: ["tcgdex_id"];
+          },
+        ];
+      };
       presence_group: {
         Row: {
           id: string;

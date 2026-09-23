@@ -48,8 +48,10 @@ const COPIES: LookupMovableCopy[] = [
     role: "shelved",
     currentLabel: "Main · Back · Red",
     initial: { kind: "shelf", binderId: "b1", half: "back", band: "red" },
+    // Both Dex-tracked, so no "Same card" merge is offered here — that is its own case below (UIL-089).
+    dexTracked: true,
   },
-  { copyId: "c-block", role: "block", currentLabel: "Main · binder block" },
+  { copyId: "c-block", role: "block", currentLabel: "Main · binder block", dexTracked: true },
 ];
 
 const render = (el: React.ReactElement) => renderToStaticMarkup(el);
@@ -93,6 +95,8 @@ describe("UIL-051 · every copy is on screen, every movable copy has a Move", ()
         copies: COPIES,
         busy: false,
         onMove: () => {},
+        onRemove: () => {},
+        onMerge: () => {},
       }),
     );
     expect(html).toContain("COPY 1 OF 2");
@@ -109,6 +113,8 @@ describe("UIL-051 · every copy is on screen, every movable copy has a Move", ()
         copies: [COPIES[1]],
         busy: false,
         onMove: () => {},
+        onRemove: () => {},
+        onMerge: () => {},
       }),
     );
     expect(html).toContain("YOUR COPY");
@@ -124,6 +130,8 @@ describe("UIL-051 · every copy is on screen, every movable copy has a Move", ()
         copies: [],
         busy: false,
         onMove: () => {},
+        onRemove: () => {},
+        onMerge: () => {},
       }),
     );
     expect(html).toContain("NOT OWNED");
@@ -138,6 +146,8 @@ describe("UIL-051 · every copy is on screen, every movable copy has a Move", ()
         copies: [COPIES[0]],
         busy: true,
         onMove: () => {},
+        onRemove: () => {},
+        onMerge: () => {},
       }),
     );
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Move<\/button>/);
@@ -167,6 +177,8 @@ describe("UIL-077 · the answer header shows the full printed collector number",
         copies: COPIES,
         busy: false,
         onMove: () => {},
+        onRemove: () => {},
+        onMerge: () => {},
       }),
     );
 

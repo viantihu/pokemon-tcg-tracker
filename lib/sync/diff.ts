@@ -189,3 +189,56 @@ function pairVariantMigrations(entries: DiffEntry[]): VariantMigration[] {
   }
   return migrations;
 }
+
+/* ----------------------- copies she removed that Dex still lists (UIL-089) ----------------------- */
+
+/** One `removed_presence` row: how many of this exact key she has removed while Dex still listed it. */
+export interface RemovedPresence {
+  catalogCardId: string;
+  dexVariantRaw: string;
+  count: number;
+}
+
+/**
+ * Subtract what she has REMOVED from what Dex says she owns (UIL-089).
+ *
+ * Presence is a count, so a copy she removed while Dex still lists the card reads as `desired 1 /
+ * current 0` on the very next import and comes straight back. She traded it away; the app cannot keep
+ * handing it to her. This is the one place that knows, which is the whole reason the memory is keyed
+ * exactly like `presence_group`: the subtraction is `max(0, dex - removed)` and nothing has to agree with
+ * anything else.
+ *
+ * Subtracting to zero DELETES the entry rather than storing a zero, because `diff` already reads an absent
+ * key as zero and `toPresenceMap` drops zero counts — one representation of "none", not two.
+ *
+ * THE `forget` LIST IS GATED ON A FULL EXPORT, and that gate is load-bearing. A retry import reconciles
+ * only against the handful of keys it just promoted (`lib/sync/pipeline.ts`), so its `desired` map is
+ * almost entirely empty — treating "absent from desired" as "Dex stopped listing it" there would forget
+ * every memory she has on the first retry. Only a full export is evidence of absence.
+ */
+export function applyRemovedMemory(
+  desired: PresenceMap,
+  removed: readonly RemovedPresence[],
+  fullExport: boolean,
+): { desired: PresenceMap; forget: RemovedPresence[] } {
+  const out: PresenceMap = new Map(
+    [...desired].map(([k, v]) => [k, { ...v }] as [string, PresenceCount]),
+  );
+  const forget: RemovedPresence[] = [];
+
+  for (const m of removed) {
+    const key = presenceKey(m.catalogCardId, m.dexVariantRaw);
+    const entry = out.get(key);
+    if (!entry) {
+      // Dex no longer lists this key at all. On a full export that means the disagreement is over and the
+      // memory would otherwise suppress a genuine future re-acquisition forever.
+      if (fullExport) forget.push(m);
+      continue;
+    }
+    const left = entry.count - m.count;
+    if (left > 0) entry.count = left;
+    else out.delete(key);
+  }
+
+  return { desired: out, forget };
+}

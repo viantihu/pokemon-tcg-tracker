@@ -277,6 +277,7 @@ describe("UIL-078 · a released slot forgets its resolution", () => {
         unchanged: 0,
         unresolved: [],
         fastPath: false,
+        forgetRemoved: [], // UIL-089: nothing removed, nothing to forget.
         diff: { entries: [], migrations: [] } as unknown as ReconcilePlan["diff"],
       },
       current: [],

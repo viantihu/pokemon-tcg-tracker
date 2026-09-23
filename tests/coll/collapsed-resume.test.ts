@@ -70,6 +70,7 @@ function render(d: CollHubData): string {
       onLog: () => {},
       onWishlist: () => {},
       onRemove: () => {},
+      onRemoveCopy: () => {},
     }),
   );
 }

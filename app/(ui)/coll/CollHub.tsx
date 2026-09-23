@@ -35,6 +35,7 @@ import {
   logCardIntoCollection,
   rebindCollectionWithMove,
   removeCardFromCollection,
+  removeCopyFromApp,
   saveCollection,
   searchCatalog,
   setCollectionMode,
@@ -48,6 +49,7 @@ import type {
   SaveResult,
   CollHubData,
 } from "./coll-types";
+import { RemoveCopyButton } from "../_components/RemoveCopyButton";
 
 type Tab = "coll" | "wish";
 
@@ -238,6 +240,14 @@ export function CollHub() {
     await run(() => removeCardFromCollection(collection.id, card.tcgdexId, { kind: "bulk" }));
   }
 
+  /**
+   * UIL-089: the copy is gone, not moved. `run` refreshes the hub, so the row drops to "not owned" (or off
+   * a finite list's held set) without the screen holding a card she has told it she does not have.
+   */
+  async function onRemoveCopyFromApp(copyId: string) {
+    await run(() => removeCopyFromApp(copyId));
+  }
+
   async function submitEditor() {
     if (!editor) return;
     const input: CollectionInput = {
@@ -309,6 +319,7 @@ export function CollHub() {
           onLog={setLogFor}
           onWishlist={(cid, tid) => run(() => wishlistCollectionCard(cid, tid))}
           onRemove={requestRemove}
+          onRemoveCopy={onRemoveCopyFromApp}
         />
       ) : (
         <WishlistView data={data} />
@@ -433,8 +444,11 @@ export function CollectionsView(props: {
   onLog: (c: CollectionView) => void;
   onWishlist: (collectionId: string, tcgdexId: string) => void;
   onRemove: (c: CollectionView, k: CollectionCardView) => void;
+  /** UIL-089: remove the COPY from the app, distinct from `onRemove`'s collection-level move. */
+  onRemoveCopy: (copyId: string) => void;
 }) {
-  const { data, busy, onNew, onEdit, onMode, onDelete, onLog, onWishlist, onRemove } = props;
+  const { data, busy, onNew, onEdit, onMode, onDelete, onLog, onWishlist, onRemove, onRemoveCopy } =
+    props;
   // Defaults every collection already on the page to FOLDED (UIL-034): unlike the Haul Plan, which
   // defaults all-expanded because she works one band at a time, Collections is a browse surface — and
   // a finite set list is 200-300+ CardFace tiles, the same "fine at three cards, wrong at real scale"
@@ -505,6 +519,7 @@ export function CollectionsView(props: {
           onLog={onLog}
           onWishlist={onWishlist}
           onRemove={onRemove}
+          onRemoveCopy={onRemoveCopy}
         />
       ))}
       <div className="foot">FINITE · A SET LIST YOU CHASE. OPEN · A RUNNING COUNT WITH NO END.</div>
@@ -530,6 +545,8 @@ export function CollectionCard(props: {
   onLog: (c: CollectionView) => void;
   onWishlist: (collectionId: string, tcgdexId: string) => void;
   onRemove: (c: CollectionView, k: CollectionCardView) => void;
+  /** UIL-089: remove the COPY from the app, distinct from `onRemove`'s collection-level move. */
+  onRemoveCopy: (copyId: string) => void;
 }) {
   const {
     collection: c,
@@ -542,6 +559,7 @@ export function CollectionCard(props: {
     onLog,
     onWishlist,
     onRemove,
+    onRemoveCopy,
   } = props;
   const fin = c.mode === "finite";
   const prog = finiteProgress(c.totalCount, c.ownedCount);
@@ -646,6 +664,8 @@ export function CollectionCard(props: {
                   <>
                     <span className="cpill have u">Owned</span>
                     <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
+                    <NotMineButton card={k} busy={busy} onRemoveCopy={onRemoveCopy} />
+                    <NotMineButton card={k} busy={busy} onRemoveCopy={onRemoveCopy} />
                   </>
                 ) : k.wished ? (
                   <span className="cpill wish u">On wishlist</span>
@@ -715,6 +735,16 @@ export function CollectionCard(props: {
  * leaving one behind would leave it shelved in the collection's binder and on no list — the exact
  * orphan this fix exists to prevent.
  */
+/**
+ * TWO different removals sit on this row, and the difference is the point (UIL-089).
+ *
+ * "Remove ▸" takes the card off this collection's list and re-homes the copies — a MOVE, not a delete
+ * (UIL-014). "Not mine" means she does not have the card at all: that one deletes the copy.
+ *
+ * Offered only when she holds exactly ONE copy here. With two or more, "remove this card" has no single
+ * answer — Lookup shows each copy as its own row with its own button, which is where an ambiguous case
+ * belongs. Inventing a bulk delete here would be this action guessing which cards she no longer owns.
+ */
 function RemoveCardButton({
   card,
   busy,
@@ -739,6 +769,27 @@ function RemoveCardButton({
     >
       {count > 1 ? `Remove ${count} ▸` : "Remove ▸"}
     </button>
+  );
+}
+
+/** The "I do not have this card" button, beside the collection-level one (UIL-089). */
+function NotMineButton({
+  card,
+  busy,
+  onRemoveCopy,
+}: {
+  card: CollectionCardView;
+  busy: boolean;
+  onRemoveCopy: (copyId: string) => void;
+}) {
+  if (card.copyIds.length !== 1) return null;
+  return (
+    <RemoveCopyButton
+      onRemove={() => onRemoveCopy(card.copyIds[0])}
+      busy={busy}
+      label="Not mine"
+      what={`${card.name} from your collection`}
+    />
   );
 }
 

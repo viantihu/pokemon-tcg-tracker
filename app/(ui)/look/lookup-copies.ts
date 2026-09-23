@@ -19,6 +19,14 @@ export interface LookupMovableCopy {
   currentLabel: string;
   /** Its present home as a destination; absent when it has none the picker can express (a block). */
   initial?: MoveDestination;
+  /**
+   * True when this record came from her Dex export — it belongs to a `presence_group` (UIL-089).
+   *
+   * What it decides: whether a removal needs remembering (Dex would otherwise re-create it), and which of
+   * two records of one card is the IDENTITY in a merge. A hand-typed copy is in no group, so no import
+   * counts it and none will re-create it.
+   */
+  dexTracked: boolean;
 }
 
 /** The slice of an owned copy + name lookups this module needs. Matches `OwnedCopy` + PlanContext. */
@@ -29,6 +37,8 @@ export interface CopyHome {
   binderHalf: "front" | "back" | null;
   colorBand: string | null;
   lineSlotId: string | null;
+  /** The `presence_group` this copy belongs to, or null for a hand-typed one (UIL-089). */
+  presenceGroupId?: string | null;
 }
 
 export interface HomeNames {
@@ -79,5 +89,6 @@ export function toMovableCopy(c: CopyHome, names: HomeNames): LookupMovableCopy 
     role: c.role,
     currentLabel: copyHomeLabel(c, names),
     initial: copyHomeDestination(c, names),
+    dexTracked: c.presenceGroupId != null,
   };
 }
