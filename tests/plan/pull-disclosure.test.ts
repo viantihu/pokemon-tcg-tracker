@@ -38,8 +38,8 @@ const PULLS: ProposedPull[] = [
     fromLabel: "Binder 1 · Front · Red",
     stageIndex: 0,
     fromLine: false,
-    // A front-half pull: a card she can see on a page, nothing to find (UIL-087).
-    notYetPlaced: false,
+    // A front-half pull: a card she can see on a page, nothing to dig out (UIL-087/088).
+    needsFetching: false,
   },
   {
     copyId: "c2",
@@ -48,7 +48,7 @@ const PULLS: ProposedPull[] = [
     fromLabel: "Bulk box or still in the haul",
     stageIndex: 2,
     fromLine: true,
-    notYetPlaced: true,
+    needsFetching: true,
   },
 ];
 

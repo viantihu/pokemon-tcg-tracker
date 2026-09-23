@@ -173,7 +173,7 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
     expect(await violations()).toEqual([]);
   });
 
-  it("says the card is not placed yet, never 'already placed' (her wording, UIL-088's premise)", async () => {
+  it("says the card is in the bulk box, never 'already placed' (exact again since UIL-088)", async () => {
     await seedBulkCool();
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
@@ -183,11 +183,11 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
     });
     await asSuperuser(db);
     const rootSlot = (await slots()).find((s) => s.stage_index === 0)!;
-    expect(rootSlot.note).toBe("not yet placed (still in the haul)");
+    // UIL-087 had to say "not yet placed (still in the haul)" because `role: 'bulk'` meant either thing.
+    // UIL-088 separated them, an in-haul copy is never proposed as a pull, so this really is the box —
+    // and naming it tells her where to go and get the card.
+    expect(rootSlot.note).toBe("from the bulk box");
     expect(rootSlot.note).not.toBe("already placed");
-    // Never asserts a placement she did not make: "bulk box" is a real place in her model, and an
-    // imported-but-unplaced card is not in it (Karvi 2026-09-22; the conflation is UIL-088).
-    expect(rootSlot.note).not.toMatch(/bulk/i);
   });
 
   it("a DECLINED pull still leaves a placeholder and touches nothing (UIL-061, unchanged)", async () => {
@@ -288,7 +288,7 @@ describe("UIL-087 · what she is told BEFORE she confirms", () => {
    * The consent step and the anti-drift digest, derived from real state rather than a hand-built
    * `ProposedPull` — a fixture can only confirm the author's own belief about which pulls are flagged.
    */
-  it("flags a pull of a not-yet-placed copy, so the consent step can tell her to find the card", async () => {
+  it("flags a pull out of the bulk box, so the consent step can tell her to dig the card out", async () => {
     await seedBulkCool();
     await asOwner(db);
     const placement = await deriveSpotlightPlacement(pgliteClient(db), TOEDSCRUEL);
@@ -297,7 +297,7 @@ describe("UIL-087 · what she is told BEFORE she confirms", () => {
     expect(placement!.proposedPulls[0]).toMatchObject({
       copyId: BULK_COOL,
       name: "Toedscool",
-      notYetPlaced: true,
+      needsFetching: true,
     });
   });
 
@@ -308,7 +308,7 @@ describe("UIL-087 · what she is told BEFORE she confirms", () => {
     await asSuperuser(db);
     expect(placement!.proposedPulls[0]).toMatchObject({
       copyId: FRONT_COOL,
-      notYetPlaced: false,
+      needsFetching: false,
     });
   });
 
@@ -448,14 +448,14 @@ describe("UIL-087 · her remedy: moving the card puts the record right", () => {
  * anywhere yet"; for a proposed pull it is usually the second, and saying "Bulk box" would be the same
  * false claim as the "already placed" slot note. Separating the two states is UIL-088.
  */
-describe("UIL-087 · the pull's from-label does not guess which kind of 'bulk' it is", () => {
-  it("reads as the honest either/or for an unplaced import copy", async () => {
+describe("UIL-087/088 · the pull's from-label is exact, because the states are separate", () => {
+  it("names the bulk box for a copy that is really in it", async () => {
     await seedBulkCool();
     await asOwner(db);
     const placement = await deriveSpotlightPlacement(pgliteClient(db), TOEDSCRUEL);
     await asSuperuser(db);
-    expect(placement!.proposedPulls[0].fromLabel).toBe("Bulk box or still in the haul");
-    expect(placement!.proposedPulls[0].fromLabel).not.toBe("Bulk box");
+    // "Bulk box or still in the haul" was UIL-087's honest hedge while one role meant both things.
+    expect(placement!.proposedPulls[0].fromLabel).toBe("Bulk box");
   });
 
   it("a shelved copy's label is unchanged and still names the exact pocket", async () => {
@@ -464,6 +464,46 @@ describe("UIL-087 · the pull's from-label does not guess which kind of 'bulk' i
     const placement = await deriveSpotlightPlacement(pgliteClient(db), TOEDSCRUEL);
     await asSuperuser(db);
     expect(placement!.proposedPulls[0].fromLabel).toBe("KB-001 · Front · Orange");
-    expect(placement!.proposedPulls[0].notYetPlaced).toBe(false);
+    expect(placement!.proposedPulls[0].needsFetching).toBe(false);
+  });
+});
+
+/**
+ * UIL-088 — an IN-HAUL copy is never proposed as a pull at all.
+ *
+ * "In-haul is placeable, bulk is placed": a bulk copy has a home she chose, so offering to move it into a
+ * line is a real proposal she can accept or decline. A copy an import created and she has never placed has
+ * no home — it is the Haul Plan's own queue — and proposing it here would be the app placing a card behind
+ * her back. This is UIL-087's cause (a) fixed at the model rather than worked around in wording.
+ */
+describe("UIL-088 · an in-haul copy is the queue, not a pull", () => {
+  it("is not offered as a pull, and a stale confirmation cannot move it", async () => {
+    await db.query(
+      `insert into copy (id, owner_id, catalog_card_id, role) values ($1, $2, 'toedscool', 'haul')`,
+      [BULK_COOL, OWNER],
+    );
+    await asOwner(db);
+    const placement = await deriveSpotlightPlacement(pgliteClient(db), TOEDSCRUEL);
+    await asSuperuser(db);
+    expect(placement!.proposedPulls).toEqual([]);
+
+    // Even ticked by a stale client, nothing moves: the engine never claimed that stage was filled.
+    await asOwner(db);
+    await commitCardPlacement(pgliteClient(db), {
+      source: "bulk-bin",
+      card: TOEDSCRUEL,
+      confirmedPulls: [BULK_COOL],
+    });
+    await asSuperuser(db);
+    expect(await copyRow(BULK_COOL)).toMatchObject({ role: "haul", line_slot_id: null });
+    expect(await violations()).toEqual([]);
+  });
+
+  it("a BULK copy still is offered — it has a home she chose, so moving it is a real proposal", async () => {
+    await seedBulkCool();
+    await asOwner(db);
+    const placement = await deriveSpotlightPlacement(pgliteClient(db), TOEDSCRUEL);
+    await asSuperuser(db);
+    expect(placement!.proposedPulls.map((p) => p.copyId)).toEqual([BULK_COOL]);
   });
 });

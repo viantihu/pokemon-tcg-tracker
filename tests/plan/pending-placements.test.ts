@@ -1,10 +1,12 @@
 /**
  * UIL-003 — the pending-placement queue reads exactly the copies that still need a home.
  *
- * The subtle part is not "find the unplaced copies", it is telling an untouched sync add apart from a
- * card the cascade deliberately routed TO bulk: both are `role: 'bulk'` with no binder and no slot.
- * The discriminator is the `placement_decision` row, so these tests pin that, plus the ordering and
- * the catalog join. Run against a fake `DbClient` (the pattern from tests/sync/exec-atomicity.test.ts)
+ * The subtle part WAS telling an untouched sync add apart from a card the cascade deliberately routed TO
+ * bulk, because both were `role: 'bulk'` with no binder and no slot. UIL-088 made them different roles —
+ * an import writes `'haul'`, and placing a card writes `'bulk'` or `'shelved'` — so the roles now separate
+ * them. The `placement_decision` check is KEPT as its own guard (the Senior BA's ruling): a decision row
+ * is what clears the queue (UIL-042), which is a different fact from where the card is, so a data anomaly
+ * cannot resurrect a card she has already placed. These pin that, plus the ordering and the catalog join. Run against a fake `DbClient` (the pattern from tests/sync/exec-atomicity.test.ts)
  * because the logic under test is the composition, not the SQL — the SQL-level behaviour is covered on
  * real Postgres in ./route-existing-copies.test.ts.
  */
@@ -79,14 +81,14 @@ function fakeDb(store: Record<string, Record<string, unknown>[]>): DbClient {
   } as unknown as DbClient;
 }
 
-/** A copy row as sync leaves it: unplaced, no haul. */
+/** A copy row as sync leaves it: in the haul, placed nowhere (UIL-088). */
 function copy(id: string, cardId: string, over: Record<string, unknown> = {}) {
   return {
     id,
     catalog_card_id: cardId,
     variant: "normal",
     dex_variant_raw: "Reverse Holo",
-    role: "bulk",
+    role: "haul",
     binder_id: null,
     binder_half: null,
     color_band: null,

@@ -425,7 +425,8 @@ describe("sync builders emit the correct ordered op set (fake DbClient)", () => 
     const snaps = ops.filter((o) => o.op === "insert_snapshot");
     expect(groups).toHaveLength(1); // both adds share one (cardA,'') group
     expect(copies).toHaveLength(2);
-    expect(copies.every((c) => c.role === "bulk" && c.catalog_card_id === "cardA")).toBe(true);
+    // UIL-088: an import creates copies IN THE HAUL — it has identified the card, not placed it.
+    expect(copies.every((c) => c.role === "haul" && c.catalog_card_id === "cardA")).toBe(true);
     expect(snaps).toHaveLength(1);
     // No retires/variants in a fast path.
     expect(ops.some((o) => o.op === "delete_copy" || o.op === "update_copy")).toBe(false);

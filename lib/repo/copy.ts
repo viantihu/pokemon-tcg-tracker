@@ -76,7 +76,22 @@ export const copyRepo = {
       db
         .from("copy")
         .select("*")
-        .eq("role", "bulk")
+        /**
+         * UIL-088: the ROLE is now the answer, where this was `role = 'bulk' AND binder_id IS NULL AND
+         * line_slot_id IS NULL` — the same question asked as a conjunction that could drift from every
+         * other asking of it.
+         *
+         * The two column checks STAY, as a guard rather than as the definition. A copy in the haul with a
+         * binder or a line slot is a contradiction, and this project has shipped exactly that
+         * contradiction before (UIL-087: three copies wired to a slot while not shelved). Dropping the
+         * guards would put such a row into the queue she works from, which is worse than filtering a row
+         * that should not exist. They cost nothing and they refuse a contradiction rather than restate a
+         * definition.
+         *
+         * `loadPendingPlacements` applies the `placement_decision` check separately: a decision row is
+         * what takes a card OUT of the queue (UIL-042), which is a different fact from where it sits.
+         */
+        .eq("role", "haul")
         .is("binder_id", null)
         .is("line_slot_id", null)
         .order("created_at", { ascending: true })

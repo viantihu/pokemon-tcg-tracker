@@ -11,8 +11,13 @@
  * No I/O: the server action does the joins and calls this. That keeps the decision logic testable.
  */
 
-/** Whether an owned copy sits shelved, in bulk, or is a repurposed block (system-design §4 Copy.role). */
-export type CopyRole = "shelved" | "bulk" | "block";
+/**
+ * Where an owned copy sits (system-design §4 `Copy.role`), including "nowhere yet" (UIL-088).
+ *
+ * `'haul'` is a card an import created and she has not placed. It used to be stored as `'bulk'`, so this
+ * surface described it as a duplicate sitting in the bulk box — a placement she never made.
+ */
+export type CopyRole = "haul" | "shelved" | "bulk" | "block";
 
 /** One physical copy of the looked-up printing, with its resolved location labels. */
 export interface LookupCopy {
@@ -110,9 +115,9 @@ function subtitleOf(card: LookupCardRef): string {
   return [card.rarity, card.types[0], card.stage].filter((s): s is string => !!s).join(" · ");
 }
 
-/** Pick the copy whose location we surface: a shelved copy wins over a block, block over bulk. */
+/** Pick the copy whose location we surface: shelved beats a block, block beats bulk, bulk beats in-haul. */
 function primaryCopy(copies: readonly LookupCopy[]): LookupCopy | null {
-  const rank: Record<CopyRole, number> = { shelved: 0, block: 1, bulk: 2 };
+  const rank: Record<CopyRole, number> = { shelved: 0, block: 1, bulk: 2, haul: 3 };
   return [...copies].sort((a, b) => rank[a.role] - rank[b.role])[0] ?? null;
 }
 
@@ -128,7 +133,9 @@ function halfLabel(copy: LookupCopy): string {
  */
 export function buildLookupAnswer(input: LookupInput): LookupAnswer {
   const { card, copies, collections } = input;
-  const shelvedOrBlock = copies.filter((c) => c.role !== "bulk");
+  // Only copies that are actually somewhere can supply a LOCATION (UIL-088): an in-haul copy is placed
+  // nowhere, so it must not be read as one, any more than a bulk copy can name a binder.
+  const shelvedOrBlock = copies.filter((c) => c.role !== "bulk" && c.role !== "haul");
   const owned = copies.length > 0;
   const primary = primaryCopy(shelvedOrBlock);
   const location: LookupLocation | null =
@@ -197,8 +204,21 @@ export function buildLookupAnswer(input: LookupInput): LookupAnswer {
     facts.push({ tone: "n", label: "NO COLLECTION", detail: "Not claimed." });
   }
 
-  // 4. Duplicate nuance.
+  // 4. Duplicate nuance — and, before it, the state that is not a duplicate at all (UIL-088).
   if (owned) {
+    /**
+     * IN HAUL is its own answer, not a duplicate in the box. These copies were stored as `'bulk'` until
+     * UIL-088, so an imported card she had not placed yet read as "N copies in the bulk box" — asserting a
+     * placement she never made, on the one screen she uses to ask where a card is.
+     */
+    const haulCount = copies.filter((c) => c.role === "haul").length;
+    if (haulCount > 0) {
+      facts.push({
+        tone: "y",
+        label: "IN HAUL",
+        detail: `${haulCount} cop${haulCount === 1 ? "y" : "ies"} imported but not placed anywhere yet. Place ${haulCount === 1 ? "it" : "them"} from the Haul Plan.`,
+      });
+    }
     const bulkCount = copies.filter((c) => c.role === "bulk").length;
     if (bulkCount > 0) {
       facts.push({
@@ -206,7 +226,7 @@ export function buildLookupAnswer(input: LookupInput): LookupAnswer {
         label: "DUPLICATES",
         detail: `${bulkCount} copy${bulkCount === 1 ? "" : "ies"} in the bulk box. Different art still counts as its own card.`,
       });
-    } else {
+    } else if (haulCount === 0) {
       facts.push({
         tone: "n",
         label: "DUPLICATES",
