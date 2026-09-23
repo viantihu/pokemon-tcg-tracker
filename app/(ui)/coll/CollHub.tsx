@@ -693,7 +693,7 @@ export function CollectionCard(props: {
             <div className="infnum">{c.totalCount}</div>
             <div className="inflab u">Cards and counting</div>
             <button className="logbtn u" onClick={() => onLog(c)} disabled={busy}>
-              ＋ Log a card
+              ＋ Add a card
             </button>
           </div>
           <div className="cprog u">Open collection · no target, just a running count</div>
@@ -1385,7 +1385,7 @@ export function CollectionEditor(props: {
   );
 }
 
-function LogCardModal(props: {
+export function LogCardModal(props: {
   collection: CollectionView;
   busy: boolean;
   onClose: () => void;
@@ -1397,16 +1397,20 @@ function LogCardModal(props: {
     <div className="veil on" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="dsheet panel" role="dialog" aria-modal="true">
         <div className="cap">
-          <span className="t u">Log a card</span>
+          <span className="t u">Add a card</span>
           <span className="n u">{collection.name}</span>
           <button className="btn u" onClick={onClose} style={{ background: "var(--panel-2)" }}>
             Close
           </button>
         </div>
         <div className="body">
+          {/* UIL-098: this used to create inventory for a card she did not own — Karvi: "Adding cards that
+              I don't own to a collection should add them to the wishlist, not into inventory itself." So
+              it says what each case does: nothing here ever adds a card to her collection. */}
           <div className="cerow-h u">
-            Find the card — logging it is a placement into{" "}
-            {collection.binderNames[0] ?? "the binder"}, not a tally bump.
+            Find the card. If you already have it in {collection.binderNames[0] ?? "this binder"},
+            it joins this collection. If you don&apos;t own it yet, it goes on your wishlist — it is
+            never added to your inventory.
           </div>
           <CardResultsGrid
             search={searchCatalog}
@@ -1451,7 +1455,7 @@ function LogCardModal(props: {
               disabled={!pick || busy}
               onClick={() => pick && onLog(pick.tcgdexId)}
             >
-              {busy ? "Logging…" : "Log it ▶"}
+              {busy ? "Adding…" : "Add it ▶"}
             </button>
           </div>
         </div>
