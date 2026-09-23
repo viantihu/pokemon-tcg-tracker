@@ -65,6 +65,7 @@ function render(c: CollectionView, collapsed: boolean, over: Record<string, unkn
       onLog: () => {},
       onWishlist: () => {},
       onRemove: () => {},
+      onRemoveCopy: () => {},
       ...over,
     }),
   );
@@ -156,5 +157,39 @@ describe("UIL-034 · open collections fold the same way", () => {
     expect(cardCount(render(c, true))).toBe(0);
     expect(render(c, false)).toContain("4 logged");
     expect(render(c, true)).toContain("4 logged");
+  });
+});
+
+describe('UIL-089 · "Not mine" sits beside Collections\' own Remove, and only where it is unambiguous', () => {
+  /**
+   * TWO DIFFERENT REMOVALS on one row, and the difference is the whole point. "Remove ▸" takes the card off
+   * this collection's list and RE-HOMES the copies (UIL-014) — a move, not a delete. "Not mine" deletes the
+   * copy (UIL-089).
+   *
+   * Offered only when she holds exactly ONE copy here: with two or more, "remove this card" has no single
+   * answer, and Lookup shows each copy as its own row with its own button. Guessing here would be this
+   * action deciding for her which cards she no longer owns.
+   */
+  const withCopies = (ids: string[]): CollectionView => ({
+    ...collection(1, 0),
+    cards: [{ ...card(1, true), copyIds: ids }],
+  });
+
+  it("offered on a row with exactly one copy", () => {
+    const html = render(withCopies(["copy-1"]), false);
+    expect(html).toContain("Remove ▸"); // the collection-level move is still there
+    expect(html).toContain("Not mine");
+  });
+
+  it("NOT offered on a row with two copies — the ambiguous case belongs on Lookup", () => {
+    const html = render(withCopies(["copy-1", "copy-2"]), false);
+    expect(html).toContain("Remove 2 ▸");
+    expect(html).not.toContain("Not mine");
+  });
+
+  it("NOT offered on a gap she does not hold at all — there is no copy to remove", () => {
+    const html = render(withCopies([]), false);
+    expect(html).toContain("Remove ▸");
+    expect(html).not.toContain("Not mine");
   });
 });

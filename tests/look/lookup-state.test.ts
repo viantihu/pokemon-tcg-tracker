@@ -30,7 +30,12 @@ describe("UIL-035 · failure is not 'not found'", () => {
 
   it("a found card is neither", () => {
     const copies = [
-      { copyId: "c1", role: "bulk" as const, currentLabel: "Bulk box (not shelved)" },
+      {
+        copyId: "c1",
+        role: "bulk" as const,
+        currentLabel: "Bulk box (not shelved)",
+        dexTracked: true,
+      },
     ];
     expect(lookupViewFrom({ ok: true, answer: ANSWER, copies })).toEqual({
       answer: ANSWER,

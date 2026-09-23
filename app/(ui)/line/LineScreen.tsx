@@ -31,7 +31,8 @@ import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { bandMeta } from "../_components/plan-meta";
 import { fmtPrice } from "../_components/decision-format";
-import { loadLine, moveCardAction, resolveDecisionAction } from "./actions";
+import { loadLine, moveCardAction, removeSlotCopyAction, resolveDecisionAction } from "./actions";
+import { RemoveCopyButton } from "../_components/RemoveCopyButton";
 
 const SLOT_HEAD: Record<SlotView["state"], string> = {
   filled: "FILLED",
@@ -241,6 +242,20 @@ export function LineScreen() {
     setMove(unlinedMoveTarget(card));
   }
 
+  /** UIL-089: the card in this pocket is gone. The slot reopens and the line is no longer complete. */
+  async function onRemoveSlotCopy(copyId: string) {
+    setBusy(true);
+    setError(null);
+    const res = await removeSlotCopyAction(copyId, view);
+    setBusy(false);
+    if (res.ok) {
+      setData(res.data);
+      flashToast("Removed · the stage is open again");
+    } else {
+      setError(res.error);
+    }
+  }
+
   async function onMoveConfirm(dest: MoveDestination) {
     if (!move) return;
     setBusy(true);
@@ -397,7 +412,12 @@ export function LineScreen() {
                   </span>
                 </div>
               ) : null}
-              <Slot line={curLine} slot={slot} onMove={() => openMove(curLine, slot)} />
+              <Slot
+                line={curLine}
+                slot={slot}
+                onMove={() => openMove(curLine, slot)}
+                onRemoveCopy={onRemoveSlotCopy}
+              />
             </div>
           ))}
           {curLine.cap ? (
@@ -551,10 +571,13 @@ export function Slot({
   line,
   slot,
   onMove,
+  onRemoveCopy,
 }: {
   line: LineView;
   slot: SlotView;
   onMove: () => void;
+  /** UIL-089: remove the copy filling this slot. Absent on a screen that does not offer it. */
+  onRemoveCopy?: (copyId: string) => void;
 }) {
   const meta = bandMeta(line.bandKey);
   const topBg =
@@ -649,6 +672,17 @@ export function Slot({
             <button type="button" className="movebtn u" onClick={onMove}>
               ↔ Move
             </button>
+          ) : null}
+          {/* UIL-089: the card in this pocket can be gone — traded, lost, or never really here. Removing it
+              releases the slot back to a placeholder and reopens the line, so the stage is wanted again
+              rather than reading as filled by a card she does not have. */}
+          {onRemoveCopy && slot.copyId ? (
+            <div style={{ marginTop: 6 }}>
+              <RemoveCopyButton
+                onRemove={() => onRemoveCopy(slot.copyId as string)}
+                what={`${slot.card?.name ?? "this card"} from your collection`}
+              />
+            </div>
           ) : null}
         </div>
       </div>

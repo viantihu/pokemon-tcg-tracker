@@ -381,6 +381,7 @@ function bundleWithCreates(
     creates: creates.map((c) => ({ kind: "create", ...c })) as ReconcilePlan["creates"],
     retires: [],
     variantUpdates: [],
+    forgetRemoved: [], // UIL-089: nothing removed, nothing to forget.
     unchanged: 0,
     unresolved: [],
     fastPath: true,

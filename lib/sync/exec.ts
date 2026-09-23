@@ -330,6 +330,18 @@ export async function executeApply(
     touchedGroupIds: [...touchedGroupIds],
     queue: q,
   };
+  // 7b. Forget the removal memories this export no longer contradicts (UIL-089). Dex has stopped listing
+  //     these keys, so the disagreement each row recorded is over; keeping them would suppress a genuine
+  //     future re-acquisition forever. In THIS transaction, so a half-applied import cannot forget half a
+  //     memory. Empty on a retry import by construction — `reconcile` only populates it for a full export.
+  for (const f of plan.forgetRemoved) {
+    ops.push({
+      op: "forget_removed_presence",
+      catalog_card_id: f.catalogCardId,
+      dex_variant_raw: f.dexVariantRaw,
+    });
+  }
+
   const prior = await lastSyncSnapshotRepo.list(db);
   for (const pr of prior) ops.push({ op: "delete_snapshot", id: pr.id });
   const snapshotId = crypto.randomUUID();

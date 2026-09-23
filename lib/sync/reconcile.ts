@@ -15,7 +15,15 @@
  * rather than retire+recreate.
  */
 import type { Role } from "@/lib/engine";
-import { diff, presenceKey, toPresenceMap, type PresenceCount, type SyncDiff } from "./diff";
+import {
+  applyRemovedMemory,
+  diff,
+  presenceKey,
+  toPresenceMap,
+  type PresenceCount,
+  type RemovedPresence,
+  type SyncDiff,
+} from "./diff";
 import { OWNED_TYPE } from "./csv";
 
 /** The app's five-flag display/placement variant (0002_domain.sql copy.variant check). */
@@ -159,11 +167,30 @@ export interface ReconcilePlan {
   unresolved: UnresolvedRow[];
   fastPath: boolean;
   diff: SyncDiff;
+  /**
+   * `removed_presence` rows whose key this export no longer lists, to delete in the apply's own
+   * transaction (UIL-089). Dex has stopped claiming the card, so the disagreement the memory recorded is
+   * over; keeping it would suppress a genuine future re-acquisition forever. Empty on a retry import,
+   * which has no evidence of absence — see `applyRemovedMemory`.
+   */
+  forgetRemoved: RemovedPresence[];
 }
 
 export interface ReconcileInput {
   rows: ResolvedRow[];
   current: CurrentGroup[];
+  /**
+   * Copies she has REMOVED that Dex still lists (UIL-089), subtracted from desired presence so the import
+   * does not hand them back. Absent means none, which is the state of a collection nobody has removed
+   * from — so every existing caller stays correct without knowing about this.
+   */
+  removed?: readonly RemovedPresence[];
+  /**
+   * True when `rows` came from a WHOLE Dex export, false for a retry that promoted a few parked rows.
+   * Only used to decide whether a memory whose key is absent may be forgotten: a retry's `desired` map is
+   * nearly empty by design, so absence proves nothing there. Defaults to false, the safe answer.
+   */
+  fullExport?: boolean;
   /** Injected clock (purity). Currently unused by the plan itself; reserved for dated decisions. */
   clock?: () => Date;
 }
@@ -240,7 +267,13 @@ function removalConsequence(c: CopySnapshot): {
  * retires (least-committed released under the removal rule). UNCHANGED keys are never touched.
  */
 export function reconcile(input: ReconcileInput): ReconcilePlan {
-  const { desired, unresolved } = buildDesiredPresence(input.rows);
+  const { desired: dexDesired, unresolved } = buildDesiredPresence(input.rows);
+  // What Dex says she owns, minus what she has told the app she no longer has (UIL-089).
+  const { desired, forget: forgetRemoved } = applyRemovedMemory(
+    dexDesired,
+    input.removed ?? [],
+    input.fullExport ?? false,
+  );
 
   const groupByKey = new Map<string, CurrentGroup>();
   const currentCounts: PresenceCount[] = [];
@@ -345,5 +378,6 @@ export function reconcile(input: ReconcileInput): ReconcilePlan {
     unresolved,
     fastPath: d.fastPath,
     diff: d,
+    forgetRemoved,
   };
 }

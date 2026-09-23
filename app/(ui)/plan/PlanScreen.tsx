@@ -36,8 +36,10 @@ import { cardCaption } from "../_components/CardLightbox";
 import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { ProgressBar } from "../_components/ProgressBar";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
+import { RemoveCopyButton } from "../_components/RemoveCopyButton";
 import { VariantSelector } from "../_components/VariantSelector";
 import { ACTION_META, bandMeta, moveMeta } from "../_components/plan-meta";
+import { removeCopy } from "../look/actions";
 import {
   shelveCardAction,
   getLineJoinOptions,
@@ -497,6 +499,28 @@ export function PlanScreen({
     mutateDraft(draft.filter((d) => d.id !== id));
   }
 
+  /**
+   * "I do not have this card" — remove the COPY from the app, not just the row from this sitting (UIL-089).
+   *
+   * The ✕ beside it means something different and both are needed: ✕ takes a card off today's working list
+   * and leaves it in the queue for next time, this deletes the copy. Only offered on a row backed by a real
+   * copy (`existingCopyId`); a row she has only typed has no copy to remove, so its ✕ is the whole story.
+   */
+  async function removeCopyFromApp(row: DraftCard) {
+    if (!row.existingCopyId) return;
+    setError(null);
+    setShelving(row.id);
+    const res = await removeCopy(row.existingCopyId);
+    setShelving(null);
+    if (!res.ok) {
+      setError(res.error);
+      return;
+    }
+    // Drop the row too: the copy it stood for is gone, so leaving it would offer her a card she does not
+    // have, and the next `reloadPending` would not return it anyway.
+    mutateDraft(draft.filter((d) => d.id !== row.id));
+  }
+
   async function onRun() {
     setError(null);
     setRunning(true);
@@ -817,6 +841,7 @@ export function PlanScreen({
           onAdd={addCard}
           onVariant={setVariant}
           onRemove={removeCard}
+          onRemoveCopy={removeCopyFromApp}
           onRun={onRun}
           running={running}
           pendingState={pendingState}
@@ -930,6 +955,8 @@ function IntakePanel(props: {
   onAdd: (c: LookupCard) => void;
   onVariant: (id: string, v: Variant) => void;
   onRemove: (id: string) => void;
+  /** UIL-089: remove the COPY, for a row that is backed by one. Distinct from `onRemove`'s ✕. */
+  onRemoveCopy: (row: DraftCard) => void;
   onRun: () => void;
   running: boolean;
   pendingState: "loading" | "ready";
@@ -945,6 +972,7 @@ function IntakePanel(props: {
     onAdd,
     onVariant,
     onRemove,
+    onRemoveCopy,
     onRun,
     running,
     pendingState,
@@ -1031,14 +1059,25 @@ function IntakePanel(props: {
                   )}
                 </div>
               </div>
-              <button
-                type="button"
-                className="iconbtn"
-                onClick={() => onRemove(d.id)}
-                aria-label={`Remove ${d.card.name}`}
-              >
-                ✕
-              </button>
+              <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                {/* Only on a row backed by a real copy: "I do not have this card" (UIL-089). */}
+                {d.existingCopyId ? (
+                  <RemoveCopyButton
+                    onRemove={() => onRemoveCopy(d)}
+                    label="Not mine"
+                    what={`${d.card.name} from your collection`}
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  className="iconbtn"
+                  onClick={() => onRemove(d.id)}
+                  aria-label={`Take ${d.card.name} off this sitting`}
+                  title="Take it off this sitting. The card stays in your collection."
+                >
+                  ✕
+                </button>
+              </span>
             </div>
           ))}
         </div>

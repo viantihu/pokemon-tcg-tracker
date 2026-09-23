@@ -19,6 +19,7 @@ import {
   colorBandRepo,
   copyRepo,
   presenceGroupRepo,
+  removedPresenceRepo,
   setAliasRepo,
   typeColorMapRepo,
   unresolvedEntryRepo,
@@ -36,6 +37,7 @@ import {
   type UnresolvedRow,
 } from "./reconcile";
 import type { DexRow } from "./types";
+import type { RemovedPresence } from "./diff";
 import type { SyncCounts } from "./undo";
 import { buildPreview, type CardMeta, type PreviewEnrichment, type SyncPreview } from "./preview";
 
@@ -158,6 +160,16 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
     loadCurrentGroups(db),
     bytes ? unresolvedEntryRepo.listManualMatches(db) : Promise.resolve([]),
   ]);
+  // UIL-089: copies she removed that Dex still lists, subtracted from desired presence below so a card she
+  // traded away is not handed back on every sync. Read separately rather than added to the tuple above:
+  // that `Promise.all` already mixes a conditional `Promise.resolve([])` in, and a fifth element collapses
+  // its tuple inference — `waiting` silently became `{}[]`, which typechecked here and would have thrown at
+  // the first field access.
+  const removed: RemovedPresence[] = (await removedPresenceRepo.listAll(db)).map((r) => ({
+    catalogCardId: r.catalog_card_id,
+    dexVariantRaw: r.dex_variant_raw,
+    count: r.count,
+  }));
   // UIL-082: a row she matched by hand resolves to that card FIRST, before the catalog is asked. The
   // catalog could not resolve it when she matched it and usually still cannot; without this memory
   // the next import re-parked the row as a fresh WAITING entry and, since no row then resolved to the
@@ -251,6 +263,11 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
     rows: resolvedRows,
     current: reconcileCurrent,
     clock: () => new Date(),
+    removed,
+    // Only a WHOLE export is evidence that Dex has stopped listing a key. A retry reconciles against the
+    // handful of keys it just promoted, so "absent from desired" there would forget every memory she has
+    // (UIL-089; `applyRemovedMemory` states the same gate from the other side).
+    fullExport: bytes !== null,
   });
   const parks = plan.unresolved;
 

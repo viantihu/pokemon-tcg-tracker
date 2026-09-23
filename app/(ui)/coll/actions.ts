@@ -25,6 +25,7 @@ import {
 } from "@/lib/repo";
 import { band } from "@/lib/engine";
 import { getOwnerContext, toCatalogCard } from "@/lib/plan";
+import { applyCopyRemoval } from "@/lib/copy";
 import { errorMessage } from "@/lib/errors";
 import {
   applyBulkAddTargets,
@@ -331,6 +332,23 @@ export async function removeCardFromCollection(
     };
     await applyCollectionRemoval(db, { collectionId, tcgdexId, destination }, names);
     return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * "I do not have this card" — remove the COPY from the app (UIL-089).
+ *
+ * Distinct from `removeCardFromCollection`, which takes a card off a collection's list and RE-HOMES the
+ * copies: that one is a move, this one is a deletion. Deliberately does NOT touch the collection's chase
+ * tag — a chase tag is a want, and she can want a card she no longer owns (the Senior BA's ruling).
+ */
+export async function removeCopyFromApp(copyId: string): Promise<SaveResult> {
+  try {
+    const { db } = await getOwnerContext();
+    const res = await applyCopyRemoval(db, copyId);
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }

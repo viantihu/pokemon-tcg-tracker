@@ -16,7 +16,7 @@ export type {
 } from "./write-ops";
 
 export { catalogCardRepo } from "./catalog-card";
-export { copyRepo } from "./copy";
+export { copyRepo, removedPresenceRepo } from "./copy";
 export { binderRepo } from "./binder";
 export { binderSectionRepo } from "./binder-section";
 export { collectionRepo } from "./collection";

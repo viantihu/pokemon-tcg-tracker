@@ -204,6 +204,26 @@ export type WriteOp =
   | { op: "delete_unresolved_entry"; id: string }
   | { op: "delete_snapshot"; id: string }
   /**
+   * Remember that she removed a Dex-backed copy (0020, UIL-089), so the next import does not hand the
+   * card back. Emitted in the SAME transaction as the `delete_copy` it describes.
+   *
+   * `delta` is added to the stored count SERVER-SIDE, computed from the column — never read-modify-written
+   * here, or two removals of the same printing racing each other would lose one (0007's own lesson from
+   * `union_collection_targets`). Keyed like `presence_group`, which is the key `diff()` reconciles on.
+   */
+  | {
+      op: "remember_removed_presence";
+      catalog_card_id: string;
+      dex_variant_raw: string;
+      delta: number;
+    }
+  /**
+   * Forget that memory (0020, UIL-089), on the first import whose export no longer lists the key: Dex has
+   * stopped claiming the card, so the disagreement is over. A key that matches no row is a silent no-op,
+   * like `delete_copy`.
+   */
+  | { op: "forget_removed_presence"; catalog_card_id: string; dex_variant_raw: string }
+  /**
    * Forget a learned set alias (0014, UIL-047 C3). Keyed on `set_alias`'s primary key; a key that
    * matches no row is a silent no-op like `delete_copy`. Emitted together with the re-classification of
    * that set's WAITING entries (lib/sync/alias.ts) so the two land in one transaction.

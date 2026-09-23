@@ -120,3 +120,20 @@ export const copyRepo = {
     return data ?? [];
   },
 };
+
+/**
+ * Copies she has REMOVED that her Dex export still lists (UIL-089, table added in 0020).
+ *
+ * Read once per import and subtracted from desired presence, so a card she traded away is not handed back
+ * to her every time she syncs. Written only through `apply_write_ops` — the increment has to be computed
+ * server-side from the column, or two removals of one printing racing each other would lose one (0007's
+ * lesson from `union_collection_targets`), so there is deliberately no write method here.
+ */
+export const removedPresenceRepo = {
+  /** Every memory she holds. Small by nature: one row per (card, variant) she has ever removed. */
+  async listAll(db: DbClient): Promise<Row<"removed_presence">[]> {
+    const { data, error } = await db.from("removed_presence").select("*");
+    if (error) throw error;
+    return data ?? [];
+  },
+};

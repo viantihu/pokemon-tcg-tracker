@@ -21,6 +21,7 @@ import {
   type MoveDestination,
 } from "@/lib/line";
 import { getOwnerContext } from "@/lib/plan/session";
+import { applyCopyRemoval } from "@/lib/copy";
 import { errorMessage } from "@/lib/errors";
 
 /** Reload the whole screen model (called after every mutation so the strip + queue stay truthful). */
@@ -51,6 +52,26 @@ export async function moveCardAction(
     const res = await applyMove(db, { copyId, destination }, moveNameLookups(before.moveOptions));
     const data = await loadLineScreen(db, { view });
     return { ok: true, label: res.destinationLabel, data };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * Remove the copy filling a slot (UIL-089), then hand back fresh data in the view she is looking at.
+ *
+ * The removal itself releases the slot and reopens the line in its own transaction (lib/copy/remove.ts);
+ * this only re-reads, so the stage shows as wanted again instead of filled by a card she does not have.
+ */
+export async function removeSlotCopyAction(
+  copyId: string,
+  view: LineViewMode = "color",
+): Promise<DecisionActionResult> {
+  try {
+    const { db } = await getOwnerContext();
+    const res = await applyCopyRemoval(db, copyId);
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, data: await loadLineScreen(db, { view }) };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }
