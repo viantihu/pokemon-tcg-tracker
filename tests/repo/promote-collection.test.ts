@@ -190,6 +190,13 @@ async function seedCollection(db: PGlite, owner: string): Promise<void> {
      values ($1, $2, 'me6-14', 'Normal', 3, 'UNKNOWN_SET')`,
     [IDS.unresolved, owner],
   );
+  // A removal memory (0020): she removed one Charmeleon Dex still lists. If it does not
+  // travel, Production's first import re-creates the card she removed.
+  await db.query(
+    `insert into removed_presence (owner_id, catalog_card_id, dex_variant_raw, count)
+     values ($1, 'sv03-027', 'Normal', 1)`,
+    [owner],
+  );
   // Excluded on purpose: stale undo state must not follow the collection to production.
   await db.query(
     `insert into last_sync_snapshot (id, owner_id, snapshot) values ($1, $2, '{"ops":[]}'::jsonb)`,
@@ -245,6 +252,7 @@ describe("promote-collection: Testing -> Production", () => {
       "binder_block",
       "placement_decision",
       "unresolved_entry",
+      "removed_presence",
     ]) {
       const stale = await one<{ n: number }>(
         target,
@@ -255,9 +263,27 @@ describe("promote-collection: Testing -> Production", () => {
     }
 
     // Row-for-row, both sides agree.
-    for (const table of ["haul", "binder", "collection", "copy", "line_slot", "wishlist_item"]) {
+    for (const table of [
+      "haul",
+      "binder",
+      "collection",
+      "copy",
+      "line_slot",
+      "wishlist_item",
+      "removed_presence",
+    ]) {
       expect(await count(target, table), table).toBe(await count(source, table));
     }
+  });
+
+  it("carries the removal memory, so Production's first import does not re-create removed cards", async () => {
+    await promoteCollection({ source, target, ownerEmail: PROD_EMAIL });
+    const row = await one<{ catalog_card_id: string; dex_variant_raw: string; count: number }>(
+      target,
+      `select catalog_card_id, dex_variant_raw, count from removed_presence where owner_id = $1`,
+      [PROD_OWNER],
+    );
+    expect(row).toEqual({ catalog_card_id: "sv03-027", dex_variant_raw: "Normal", count: 1 });
   });
 
   it("reconstructs the circular copy <-> line_slot reference", async () => {
@@ -484,6 +510,15 @@ describe("promote-collection: preflight refusals", () => {
     await expect(promoteCollection({ source, target, ownerEmail: PROD_EMAIL })).rejects.toThrow(
       /Production's copy is missing column\(s\)[\s\S]*dex_variant_raw/,
     );
+  });
+
+  it("refuses when Testing has a table the script does not classify", async () => {
+    // Stands in for the next migration that adds an owner-scoped table: promotion must
+    // stop and name it, not silently leave it behind (how removed_presence was missed).
+    await source.query(`create table public.brand_new_thing (id int, owner_id uuid)`);
+    await expect(
+      promoteCollection({ source, target, ownerEmail: PROD_EMAIL, dryRun: true }),
+    ).rejects.toThrow(/brand_new_thing/);
   });
 
   it("raises PromotionError, so the CLI prints a message rather than a stack", async () => {
