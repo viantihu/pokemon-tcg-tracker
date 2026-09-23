@@ -45,8 +45,10 @@ import {
   asSuperuser,
   freshRpcDb,
   OWNER,
+  haulRow,
   seedBinders,
   seedCatalogCardsFull,
+  seedHaulRows,
 } from "../support/pglite-rpc";
 
 const B1 = "1c000000-0000-0000-0000-0000000000b1";
@@ -72,12 +74,14 @@ const TYPE_COLOR_MAP: Record<string, string> = {
 };
 const CATALOG = [CHARMANDER_SV03_026, CHARMELEON_SV03_027];
 
-/** Charmeleon comes in this haul; Charmander is already shelved in the front half. */
-const INCOMING: DraftItem = {
-  id: "d-charmeleon",
-  tcgdexId: CHARMELEON_SV03_027.tcgdexId,
-  variant: "normal",
-};
+/**
+ * Charmeleon comes in this haul — a copy her import made, waiting to be placed (UIL-098 part 2), seeded
+ * in `beforeEach` — and Charmander is already shelved in the front half.
+ */
+const INCOMING: DraftItem = haulRow(
+  "d0000000-0000-4000-8000-00000000c0a1",
+  CHARMELEON_SV03_027.tcgdexId,
+);
 
 function ownedRow(over: Partial<Row<"copy">> = {}): Row<"copy"> {
   return {
@@ -181,7 +185,7 @@ async function shelveIncoming(
   const built = buildHaulCommitPayload(
     pc,
     planned.map((p) => ({ ...p, confirmedPulls })),
-    { source: "bulk-bin", draft: [INCOMING] },
+    { draft: [INCOMING] },
   );
   await applyOps(db, built.payload);
   return built;
@@ -214,6 +218,7 @@ beforeEach(async () => {
     { id: B1, type: "general" },
     { id: SPEC, type: "specialty" },
   ]);
+  await seedHaulRows(db, [INCOMING]);
 });
 afterEach(async () => {
   await db.close();

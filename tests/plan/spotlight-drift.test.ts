@@ -48,8 +48,10 @@ import {
   asOwner,
   asSuperuser,
   freshRpcDb,
+  haulRow,
   seedBinders,
   seedCatalogCardsFull,
+  seedHaulRows,
 } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -86,22 +88,30 @@ const TYPE_COLOR_MAP: Record<string, string> = {
 
 const CATALOG = [NEST_BALL_SV01_181, SCYTHER_SV035_123];
 
-/** A context holding exactly `owned` — the two calls model "before" and "after" the first Done. */
-function makeContext(owned: Row<"copy">[] = []): PlanContext {
+/**
+ * A context holding exactly `owned` — the two calls model "before" and "after" the first Done.
+ *
+ * `exclude` is `loadPlanContext`'s `excludeOwnedCopyIds`: the haul copies being placed stay in
+ * `copyRowById` but are withheld from `ctx.owned`, so a card is never its own duplicate (UIL-003).
+ */
+function makeContext(owned: Row<"copy">[] = [], exclude: string[] = []): PlanContext {
   const catalogById = new Map(CATALOG.map((c) => [c.tcgdexId, c]));
+  const withheld = new Set(exclude);
   const ctx: EngineContext = {
     typeColorMap: TYPE_COLOR_MAP,
     catalog: CATALOG,
-    owned: owned.map((r) => ({
-      id: r.id,
-      card: catalogById.get(r.catalog_card_id)!,
-      variant: (r.variant as "normal" | "holo") ?? "normal",
-      role: (r.role as "shelved" | "bulk" | "block") ?? "shelved",
-      binderId: r.binder_id,
-      binderHalf: (r.binder_half as "front" | "back" | null) ?? null,
-      colorBand: r.color_band,
-      lineSlotId: r.line_slot_id,
-    })),
+    owned: owned
+      .filter((r) => !withheld.has(r.id))
+      .map((r) => ({
+        id: r.id,
+        card: catalogById.get(r.catalog_card_id)!,
+        variant: (r.variant as "normal" | "holo") ?? "normal",
+        role: (r.role as "shelved" | "bulk" | "block") ?? "shelved",
+        binderId: r.binder_id,
+        binderHalf: (r.binder_half as "front" | "back" | null) ?? null,
+        colorBand: r.color_band,
+        lineSlotId: r.line_slot_id,
+      })),
     binders: [
       { id: B1, name: "Binder 1", type: "general", isActive: true },
       { id: SPEC, name: "Specialty A", type: "specialty", isActive: false },
@@ -128,27 +138,26 @@ function makeContext(owned: Row<"copy">[] = []): PlanContext {
   };
 }
 
-/** Two copies of the same Trainer — her actual bulk-bin case, and the commonest drift trigger. */
+/**
+ * Two copies of the same Trainer — her actual bulk-bin case, and the commonest drift trigger. Both are
+ * copies her import made, waiting in her haul (UIL-098 part 2), seeded in `beforeEach`.
+ */
 const TWO_NEST_BALLS: DraftItem[] = [
-  { id: "d-nb-1", tcgdexId: NEST_BALL_SV01_181.tcgdexId, variant: "normal" },
-  { id: "d-nb-2", tcgdexId: NEST_BALL_SV01_181.tcgdexId, variant: "normal" },
+  haulRow("d0000000-0000-4000-8000-0000000000a1", NEST_BALL_SV01_181.tcgdexId),
+  haulRow("d0000000-0000-4000-8000-0000000000a2", NEST_BALL_SV01_181.tcgdexId),
 ];
+const ALL_IDS = TWO_NEST_BALLS.map((d) => d.id);
 
 /** Commit ONE card from a given context, exactly as `commitCardPlacement` does. */
-async function shelve(
-  db: PGlite,
-  pc: PlanContext,
-  card: DraftItem,
-  haulId: string | null,
-): Promise<string | null> {
+async function shelve(db: PGlite, pc: PlanContext, card: DraftItem): Promise<void> {
   const { planned } = planFromDraft(pc, [card]);
-  const built = buildHaulCommitPayload(pc, planned, {
-    source: "bulk-bin",
-    draft: [card],
-    existingHaulId: haulId,
-  });
+  const built = buildHaulCommitPayload(pc, planned, { draft: [card] });
   await applyOps(db, built.payload);
-  return built.haulId;
+}
+
+/** The context the NEXT card is planned in: current rows, that card withheld, as `commitCardPlacement`. */
+async function contextFor(db: PGlite, card: DraftItem): Promise<PlanContext> {
+  return makeContext((await copyRows(db)) as unknown as Row<"copy">[], [card.id]);
 }
 
 /** The copy row as the database now holds it, by the catalog card and shelving order. */
@@ -177,6 +186,7 @@ beforeEach(async () => {
     { id: B1, type: "general" },
     { id: SPEC, type: "specialty" },
   ]);
+  await seedHaulRows(db, TWO_NEST_BALLS);
 });
 afterEach(async () => {
   await db.close();
@@ -185,7 +195,7 @@ afterEach(async () => {
 describe("UIL-045 · the drift is real and it points at a physical pocket", () => {
   it("forecasts BOTH copies to the front half, then writes the second to bulk", async () => {
     // (1) The plan she is shown. One context, both cards, nothing advanced between them.
-    const pcForecast = makeContext();
+    const pcForecast = makeContext((await copyRows(db)) as unknown as Row<"copy">[], ALL_IDS);
     const { items: forecast } = planFromDraft(pcForecast, TWO_NEST_BALLS);
     expect(forecast).toHaveLength(2);
     // Both rows claim the front half — the second one is already wrong and nothing says so.
@@ -195,23 +205,22 @@ describe("UIL-045 · the drift is real and it points at a physical pocket", () =
 
     // (2) She shelves the first card. Real write.
     await asOwner(db);
-    const haulId = await shelve(db, pcForecast, TWO_NEST_BALLS[0], null);
+    await shelve(db, pcForecast, TWO_NEST_BALLS[0]);
 
     // (3) The second card's write re-reads state, so it now sees a shelved duplicate.
     await asSuperuser(db);
     const afterFirst = await copyRows(db);
-    expect(afterFirst).toHaveLength(1);
-    expect(afterFirst[0].role).toBe("shelved");
-    const pcAfter = makeContext(afterFirst as unknown as Row<"copy">[]);
+    expect(afterFirst.find((r) => r.id === TWO_NEST_BALLS[0].id)?.role).toBe("shelved");
+    const pcAfter = await contextFor(db, TWO_NEST_BALLS[1]);
 
     await asOwner(db);
-    await shelve(db, pcAfter, TWO_NEST_BALLS[1], haulId);
+    await shelve(db, pcAfter, TWO_NEST_BALLS[1]);
     await asSuperuser(db);
 
     // (4) What actually landed: bulk, not the front half the screen promised.
     const rows = await copyRows(db);
-    expect(rows).toHaveLength(2);
-    const second = rows[1];
+    expect(rows).toHaveLength(2); // the two her import made — placed, never added to
+    const second = rows.find((r) => r.id === TWO_NEST_BALLS[1].id)!;
     expect(second.role).toBe("bulk");
     expect(second.binder_id).toBeNull();
     expect(second.color_band).toBeNull();
@@ -224,12 +233,12 @@ describe("UIL-045 · the drift is real and it points at a physical pocket", () =
 
 describe("UIL-045 · the spotlight is re-derived, so the screen agrees with the write", () => {
   it("shows BULK for the second copy once the first is shelved", async () => {
-    const pcForecast = makeContext();
+    const pcForecast = makeContext((await copyRows(db)) as unknown as Row<"copy">[], ALL_IDS);
     await asOwner(db);
-    const haulId = await shelve(db, pcForecast, TWO_NEST_BALLS[0], null);
+    await shelve(db, pcForecast, TWO_NEST_BALLS[0]);
     await asSuperuser(db);
 
-    const pcAfter = makeContext((await copyRows(db)) as unknown as Row<"copy">[]);
+    const pcAfter = await contextFor(db, TWO_NEST_BALLS[1]);
 
     // What the spotlight now shows for the card she is holding — derived against current state.
     const shown = derivePlacementFrom(pcAfter, TWO_NEST_BALLS[1]);
@@ -239,9 +248,9 @@ describe("UIL-045 · the spotlight is re-derived, so the screen agrees with the 
 
     // And what the write does with the very same card.
     await asOwner(db);
-    await shelve(db, pcAfter, TWO_NEST_BALLS[1], haulId);
+    await shelve(db, pcAfter, TWO_NEST_BALLS[1]);
     await asSuperuser(db);
-    const written = (await copyRows(db))[1];
+    const written = (await copyRows(db)).find((r) => r.id === TWO_NEST_BALLS[1].id)!;
 
     // The property the fix exists for: the pocket on screen is the pocket in the database.
     expect(written.role).toBe("bulk");
@@ -252,12 +261,15 @@ describe("UIL-045 · the spotlight is re-derived, so the screen agrees with the 
   it("still shows the FRONT half for a card that nothing this haul affects", async () => {
     // The fix must not make everything read "bulk": a non-interacting card is unchanged, which is
     // what keeps the re-derivation honest rather than merely conservative.
-    const pcForecast = makeContext();
+    const pcForecast = makeContext((await copyRows(db)) as unknown as Row<"copy">[], ALL_IDS);
     await asOwner(db);
-    await shelve(db, pcForecast, TWO_NEST_BALLS[0], null);
+    await shelve(db, pcForecast, TWO_NEST_BALLS[0]);
     await asSuperuser(db);
 
-    const pcAfter = makeContext((await copyRows(db)) as unknown as Row<"copy">[]);
+    // A planner-level derivation (nothing is written), so the Scyther needs no copy of its own here.
+    const pcAfter = makeContext((await copyRows(db)) as unknown as Row<"copy">[], [
+      TWO_NEST_BALLS[1].id,
+    ]);
     const scyther = derivePlacementFrom(pcAfter, {
       id: "d-scyther",
       tcgdexId: SCYTHER_SV035_123.tcgdexId,
@@ -269,13 +281,13 @@ describe("UIL-045 · the spotlight is re-derived, so the screen agrees with the 
 
 describe("UIL-045 · the digest is what lets the write refuse a stale screen", () => {
   it("changes for the second copy once the first is shelved, and is stable otherwise", async () => {
-    const pcForecast = makeContext();
+    const pcForecast = makeContext((await copyRows(db)) as unknown as Row<"copy">[], ALL_IDS);
     const stale = derivePlacementFrom(pcForecast, TWO_NEST_BALLS[1])!;
 
     await asOwner(db);
-    await shelve(db, pcForecast, TWO_NEST_BALLS[0], null);
+    await shelve(db, pcForecast, TWO_NEST_BALLS[0]);
     await asSuperuser(db);
-    const pcAfter = makeContext((await copyRows(db)) as unknown as Row<"copy">[]);
+    const pcAfter = await contextFor(db, TWO_NEST_BALLS[1]);
     const fresh = derivePlacementFrom(pcAfter, TWO_NEST_BALLS[1])!;
 
     // Different pocket → different digest. This inequality is the conflict the write detects.
@@ -315,13 +327,12 @@ describe("UIL-045 · the write refuses a placement she was not shown", () => {
     expect(first).not.toBeNull();
 
     const res = await commitCardPlacement(client, {
-      source: "bulk-bin",
       card: TWO_NEST_BALLS[0],
       expectedDigest: first!.digest,
     });
     await asSuperuser(db);
-    expect(res.counts.copies).toBe(1);
-    expect((await copyRows(db))[0].role).toBe("shelved");
+    expect(res.counts.routed).toBe(1);
+    expect((await copyRows(db)).find((r) => r.id === TWO_NEST_BALLS[0].id)?.role).toBe("shelved");
   });
 
   it("REFUSES and writes nothing when the pocket moved under her", async () => {
@@ -336,8 +347,7 @@ describe("UIL-045 · the write refuses a placement she was not shown", () => {
     // She shelves card one. Card two is now a duplicate.
     clearCatalogCache();
     const firstDigest = (await deriveSpotlightPlacement(client, TWO_NEST_BALLS[0]))!.digest;
-    const one = await commitCardPlacement(client, {
-      source: "bulk-bin",
+    await commitCardPlacement(client, {
       card: TWO_NEST_BALLS[0],
       expectedDigest: firstDigest,
     });
@@ -346,16 +356,14 @@ describe("UIL-045 · the write refuses a placement she was not shown", () => {
     clearCatalogCache();
     await expect(
       commitCardPlacement(client, {
-        source: "bulk-bin",
         card: TWO_NEST_BALLS[1],
-        haulId: one.haulId,
         expectedDigest: staleForCardTwo.digest,
       }),
     ).rejects.toThrow(PlacementChangedError);
 
-    // Nothing was written for card two — a refusal, not a partial write.
+    // Nothing was written for card two — a refusal, not a partial write: still in the haul.
     await asSuperuser(db);
-    expect(await copyRows(db)).toHaveLength(1);
+    expect((await copyRows(db)).find((r) => r.id === TWO_NEST_BALLS[1].id)?.role).toBe("haul");
   });
 
   it("hands back the fresh destination, so the panel can show her what changed", async () => {
@@ -364,15 +372,13 @@ describe("UIL-045 · the write refuses a placement she was not shown", () => {
     clearCatalogCache();
     const stale = (await deriveSpotlightPlacement(client, TWO_NEST_BALLS[1]))!;
     clearCatalogCache();
-    const one = await commitCardPlacement(client, { source: "bulk-bin", card: TWO_NEST_BALLS[0] });
+    await commitCardPlacement(client, { card: TWO_NEST_BALLS[0] });
 
     clearCatalogCache();
     let caught: PlacementChangedError | null = null;
     try {
       await commitCardPlacement(client, {
-        source: "bulk-bin",
         card: TWO_NEST_BALLS[1],
-        haulId: one.haulId,
         expectedDigest: stale.digest,
       });
     } catch (e) {
@@ -394,23 +400,22 @@ describe("UIL-045 · the write refuses a placement she was not shown", () => {
     // A deliberately wrong digest. An override is written verbatim by `writeOverriddenCard`, so there
     // is no re-derivation to disagree with and the guard must stay out of the way.
     const res = await commitCardPlacement(client, {
-      source: "bulk-bin",
       card: TWO_NEST_BALLS[0],
       override: { kind: "bulk" },
       expectedDigest: "deliberately-not-a-real-digest",
     });
     await asSuperuser(db);
-    expect(res.counts.copies).toBe(1);
-    expect((await copyRows(db))[0].role).toBe("bulk");
+    expect(res.counts.routed).toBe(1);
+    expect((await copyRows(db)).find((r) => r.id === TWO_NEST_BALLS[0].id)?.role).toBe("bulk");
   });
 
   it("writes unguarded when no digest is offered, so existing callers are unaffected", async () => {
     const client = pgliteClient(db);
     await asOwner(db);
     clearCatalogCache();
-    const res = await commitCardPlacement(client, { source: "bulk-bin", card: TWO_NEST_BALLS[0] });
+    const res = await commitCardPlacement(client, { card: TWO_NEST_BALLS[0] });
     await asSuperuser(db);
-    expect(res.counts.copies).toBe(1);
+    expect(res.counts.routed).toBe(1);
   });
 });
 

@@ -6,6 +6,9 @@
  *   - a successful commit writes the COMPLETE record set + one PlacementDecision per card;
  *   - a commit that fails partway (a bad FK mid-batch) leaves ZERO rows — full rollback;
  *   - the M7 override path and holo-swap displacement land exactly as the interim did.
+ *
+ * Every draft row is a copy waiting in her haul (UIL-098 part 2: the Plan places, it never creates), so
+ * each test seeds those copies first and the commit patches them.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
@@ -36,10 +39,12 @@ import {
   asSuperuser,
   count,
   freshRpcDb,
+  haulRow,
   OWNER,
   referencedCatalogIds,
   seedBinders,
   seedCatalogCards,
+  seedHaulRows,
 } from "../support/pglite-rpc";
 
 const B1 = "1c000000-0000-0000-0000-0000000000b1"; // active general binder
@@ -88,10 +93,28 @@ const CATALOG = [
   NEST_BALL_SV01_181,
 ];
 
-/** Build a PlanContext with uuid binders; `owned` optionally seeds shelved copies (for holo-swap). */
-function makeContext(owned: Row<"copy">[] = []): PlanContext {
+/**
+ * Build a PlanContext with uuid binders; `owned` optionally seeds shelved copies (for holo-swap).
+ *
+ * `haul` is the draft's own copies: in `copyRowById` but NOT in `owned`, exactly as `loadPlanContext`
+ * builds it with `excludeOwnedCopyIds` — the cascade must not see the card it is placing as one she has.
+ */
+function makeContext(owned: Row<"copy">[] = [], haul: DraftItem[] = []): PlanContext {
   const catalogById = new Map(CATALOG.map((c) => [c.tcgdexId, c]));
-  const copyRowById = new Map(owned.map((c) => [c.id, c]));
+  const haulRows = haul.map(
+    (d) =>
+      ({
+        id: d.id,
+        catalog_card_id: d.tcgdexId,
+        variant: d.variant,
+        role: "haul",
+        binder_id: null,
+        binder_half: null,
+        color_band: null,
+        line_slot_id: null,
+      }) as unknown as Row<"copy">,
+  );
+  const copyRowById = new Map([...owned, ...haulRows].map((c) => [c.id, c]));
   const ownedEngine = owned.map((r) => {
     const card = catalogById.get(r.catalog_card_id)!;
     return {
@@ -136,9 +159,13 @@ function makeContext(owned: Row<"copy">[] = []): PlanContext {
   };
 }
 
-/** Seed everything a payload's inserts reference (catalog + binders) so FKs resolve, then act as owner. */
-async function seedFor(db: PGlite, payload: WritePayload): Promise<void> {
+/**
+ * Seed everything a payload references (catalog + binders) and the haul copies the draft places, so FKs
+ * resolve and every `update_copy` has its row, then act as owner.
+ */
+async function seedFor(db: PGlite, payload: WritePayload, draft: DraftItem[]): Promise<void> {
   await seedCatalogCards(db, referencedCatalogIds(payload));
+  await seedHaulRows(db, draft);
   await seedBinders(db, [
     { id: B1, type: "general" },
     { id: SPEC, type: "specialty" },
@@ -157,27 +184,28 @@ afterEach(async () => {
 describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
   // A mixed haul: NEWLINE (Charmeleon, Fire) + SPEC (Charizard ex holo) + FRONT (Vaporeon).
   const draft: DraftItem[] = [
-    { id: "d-charmeleon", tcgdexId: CHARMELEON_SV03_027.tcgdexId, variant: "normal" },
-    { id: "d-zardex", tcgdexId: CHARIZARD_EX_SV035_006.tcgdexId, variant: "holo" },
-    { id: "d-vaporeon", tcgdexId: VAPOREON_SV035_134.tcgdexId, variant: "normal" },
+    haulRow("d0000000-0000-4000-8000-00000000c0e1", CHARMELEON_SV03_027.tcgdexId),
+    haulRow("d0000000-0000-4000-8000-00000000c0e2", CHARIZARD_EX_SV035_006.tcgdexId, "holo"),
+    haulRow("d0000000-0000-4000-8000-00000000c0e3", VAPOREON_SV035_134.tcgdexId),
   ];
 
   it("writes the complete record set + a PlacementDecision per card", async () => {
-    const pc = makeContext();
+    const pc = makeContext([], draft);
     const { planned } = planFromDraft(pc, draft);
-    const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, {
-      source: "show",
+    const { payload, counts } = buildHaulCommitPayload(pc, planned, {
       draft,
     });
 
-    await seedFor(db, payload);
+    await seedFor(db, payload, draft);
     await applyOps(db, payload);
     await asSuperuser(db);
 
-    // Every table matches the counts the builder computed — the whole set landed.
-    expect(await count(db, "haul")).toBe(1);
-    expect(await count(db, "copy")).toBe(counts.copies);
-    expect(counts.copies).toBe(3);
+    // Every table matches the counts the builder computed — the whole set landed. The three copies are
+    // the three the import made, now placed: none is created, and no haul row is opened (UIL-098).
+    expect(await count(db, "haul")).toBe(0);
+    expect(await count(db, "copy")).toBe(3);
+    expect(counts.routed).toBe(3);
+    expect(await count(db, "copy where role = 'haul'")).toBe(0);
     expect(await count(db, "evolution_line")).toBe(counts.lines);
     expect(await count(db, "line_slot")).toBe(counts.slots);
     expect(await count(db, "wishlist_item")).toBe(counts.wishlist);
@@ -186,8 +214,7 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
 
     // Audit: one row per card, every one automated with a non-empty reason (dev-spec §4).
     const audit = await db.query<{ resolved_by: string; reason: string; copy_id: string }>(
-      `select resolved_by, reason, copy_id from placement_decision where haul_id = $1`,
-      [haulId],
+      `select resolved_by, reason, copy_id from placement_decision where haul_id is null`,
     );
     expect(audit.rows).toHaveLength(3);
     expect(audit.rows.every((r) => r.resolved_by === "auto")).toBe(true);
@@ -227,13 +254,14 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
   });
 
   it("rolls back COMPLETELY when an op fails mid-batch (bad FK) — zero rows written", async () => {
-    const pc = makeContext();
+    const pc = makeContext([], draft);
     const { planned } = planFromDraft(pc, draft);
-    const { payload } = buildHaulCommitPayload(pc, planned, { source: "show", draft });
+    const { payload } = buildHaulCommitPayload(pc, planned, { draft });
 
     // Seed the legitimately-referenced rows, then inject a poison copy referencing a card we did NOT
-    // seed — it violates copy.catalog_card_id → catalog_card AFTER the haul + earlier copies inserted.
-    await seedFor(db, payload);
+    // seed — it violates copy.catalog_card_id → catalog_card AFTER the earlier placements ran. The poison
+    // is the TEST's op, not the builder's: the builder no longer emits `insert_copy` at all (UIL-098).
+    await seedFor(db, payload, draft);
     const poisoned: WritePayload = {
       ops: [
         ...payload.ops.slice(0, 4),
@@ -253,7 +281,6 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
     await asSuperuser(db);
     for (const t of [
       "haul",
-      "copy",
       "evolution_line",
       "line_slot",
       "wishlist_item",
@@ -261,25 +288,25 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
     ]) {
       expect(await count(db, t)).toBe(0);
     }
+    // The three haul copies were there before and are there after — every placement rolled back with it.
+    expect(await count(db, "copy")).toBe(3);
+    expect(await count(db, "copy where role = 'haul' and binder_id is null")).toBe(3);
   });
 
   it("override path: places exactly where told, audited as 'user', cascade side effects skipped", async () => {
-    const pc = makeContext();
-    const overrideDraft: DraftItem[] = [
-      { id: "d-charmeleon", tcgdexId: CHARMELEON_SV03_027.tcgdexId, variant: "normal" },
-    ];
+    const overrideDraft: DraftItem[] = [haulRow(draft[0].id, CHARMELEON_SV03_027.tcgdexId)];
+    const pc = makeContext([], overrideDraft);
     const { planned } = planFromDraft(pc, overrideDraft);
     const { payload, counts } = buildHaulCommitPayload(pc, planned, {
-      source: "trade",
       draft: overrideDraft,
-      overrides: { "d-charmeleon": { kind: "bulk" } },
+      overrides: { [draft[0].id]: { kind: "bulk" } },
     });
 
-    await seedFor(db, payload);
+    await seedFor(db, payload, overrideDraft);
     await applyOps(db, payload);
     await asSuperuser(db);
 
-    expect(counts.copies).toBe(1);
+    expect(counts.routed).toBe(1);
     expect(counts.lines).toBe(0); // cascade's NEWLINE side effects skipped
     expect(counts.slots).toBe(0);
     expect(await count(db, "evolution_line")).toBe(0);
@@ -301,20 +328,19 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
     // The DB `type_color_map` uses band KEYS; the cascade's Trainer step must place a Trainer in the
     // white band's KEY ("white"), not the display literal "White" that is not a color_band row and
     // fails copy_color_band_fkey. Nest Ball (Trainer/Item) exercises exactly that path.
-    const pc = makeContext();
     const trainerDraft: DraftItem[] = [
-      { id: "d-nestball", tcgdexId: NEST_BALL_SV01_181.tcgdexId, variant: "normal" },
+      haulRow("d0000000-0000-4000-8000-0000000000b1", NEST_BALL_SV01_181.tcgdexId),
     ];
+    const pc = makeContext([], trainerDraft);
     const { planned } = planFromDraft(pc, trainerDraft);
     const { payload } = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
       draft: trainerDraft,
     });
 
-    const copyOp = payload.ops.find((o) => o.op === "insert_copy");
-    expect(copyOp && copyOp.op === "insert_copy" ? copyOp.color_band : null).toBe("white");
+    const copyOp = payload.ops.find((o) => o.op === "update_copy" && o.id === trainerDraft[0].id);
+    expect(copyOp && copyOp.op === "update_copy" ? copyOp.patch.color_band : null).toBe("white");
 
-    await seedFor(db, payload);
+    await seedFor(db, payload, trainerDraft);
     await applyOps(db, payload); // before the fix this rejected with copy_color_band_fkey (23503)
     await asSuperuser(db);
 
@@ -326,13 +352,13 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
   });
 
   it("guard rejects an unconfigured band before the write, naming the card + type (UIL-012)", () => {
-    const pc = makeContext();
     const trainerDraft: DraftItem[] = [
-      { id: "d-nestball", tcgdexId: NEST_BALL_SV01_181.tcgdexId, variant: "normal" },
+      haulRow("d0000000-0000-4000-8000-0000000000b1", NEST_BALL_SV01_181.tcgdexId),
     ];
+    // The guard names the card from the copy row it patches, so the context must hold that row.
+    const pc = makeContext([], trainerDraft);
     const { planned } = planFromDraft(pc, trainerDraft);
     const { payload } = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
       draft: trainerDraft,
     });
 
@@ -359,13 +385,12 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
       line_slot_id: null,
     } as unknown as Row<"copy">;
 
-    const pc = makeContext([owned]);
     const swapDraft: DraftItem[] = [
-      { id: "d-vap-holo", tcgdexId: VAPOREON_SV035_134.tcgdexId, variant: "holo" },
+      haulRow("d0000000-0000-4000-8000-0000000000f0", VAPOREON_SV035_134.tcgdexId, "holo"),
     ];
+    const pc = makeContext([owned], swapDraft);
     const { planned } = planFromDraft(pc, swapDraft);
     const { payload } = buildHaulCommitPayload(pc, planned, {
-      source: "pack-rip",
       draft: swapDraft,
     });
 
@@ -378,6 +403,8 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
       { id: B1, type: "general" },
       { id: SPEC, type: "specialty" },
     ]);
+    // The haul copy first: it also seeds the Vaporeon catalog row, which the payload no longer inserts.
+    await seedHaulRows(db, swapDraft);
     await db.query(
       `insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band)
        values ($1, $2, $3, 'normal', 'shelved', $4, 'front', 'light_blue')`,

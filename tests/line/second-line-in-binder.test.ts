@@ -21,7 +21,16 @@ import type { PGlite } from "@electric-sql/pglite";
 import { clearCatalogCache, commitCardPlacement, type DraftItem } from "@/lib/plan";
 import { applyMove, loadMoveOptions, moveNameLookups } from "@/lib/line";
 import type { MoveDestination } from "@/lib/line/types";
-import { OWNER, asOwner, asSuperuser, count, freshRpcDb, seedBinders } from "../support/pglite-rpc";
+import {
+  OWNER,
+  asOwner,
+  asSuperuser,
+  count,
+  freshRpcDb,
+  haulRow,
+  seedBinders,
+  seedHaulRows,
+} from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
 const KB1 = "b0000000-0000-0000-0000-0000000000e1";
@@ -35,12 +44,8 @@ const LOOSE_CRUEL = "c0000000-0000-0000-0000-0000000000e3";
 
 const ROOT_DEX = 9491;
 const S1_DEX = 9492;
-/** A uuid, because a typed row's id IS its copy id (UIL-092). */
-const DRAFT: DraftItem = {
-  id: "d0000000-0000-4000-8000-0000000000e1",
-  tcgdexId: "toedscruel",
-  variant: "normal",
-};
+/** The Toedscruel she is placing from the Haul Plan: a copy her import made, in her haul (UIL-098). */
+const DRAFT: DraftItem = haulRow("d0000000-0000-4000-8000-0000000000e1", "toedscruel");
 
 /** Back half of KB-001, Orange — the binder and band that already hold her Toedscool line. */
 const NEW_LINE_HERE: MoveDestination = {
@@ -82,6 +87,7 @@ beforeEach(async () => {
     update copy set line_slot_id = '${SLOT_ROOT}' where id = '${OWNED_ROOT}';
     update copy set line_slot_id = '${SLOT_S1}'   where id = '${OWNED_S1}';
   `);
+  await seedHaulRows(db, [DRAFT]);
 });
 afterEach(async () => {
   await db.close();
@@ -122,7 +128,6 @@ describe("UIL-096 · the Haul Plan override starts a second line in the same bin
     // PRE-FIX this threw "That binder already has a line for this species in this band." and wrote nothing.
     await asOwner(db);
     const res = await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card: DRAFT,
       override: NEW_LINE_HERE,
     });

@@ -46,7 +46,9 @@ import {
   asSuperuser,
   freshRpcDb,
   OWNER,
+  haulRow,
   seedBinders,
+  seedHaulRows,
 } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -57,8 +59,11 @@ const BULK_COOL = "c0000000-0000-0000-0000-00000000e801";
 const FRONT_COOL = "c0000000-0000-0000-0000-00000000e802";
 const BLOCK_COOL = "c0000000-0000-0000-0000-00000000e803";
 
-/** The card she is placing: a Stage1, which is what makes the cascade create a line. */
-const TOEDSCRUEL: DraftItem = { id: "d-cruel", tcgdexId: "toedscruel", variant: "normal" };
+/**
+ * The card she is placing: a Stage1, which is what makes the cascade create a line. A copy her import
+ * made, waiting in her haul (UIL-098 part 2), seeded in `beforeEach`.
+ */
+const TOEDSCRUEL: DraftItem = haulRow("d0000000-0000-4000-8000-0000000000e9", "toedscruel");
 
 let db: PGlite;
 beforeEach(async () => {
@@ -75,6 +80,7 @@ beforeEach(async () => {
       [id, name, [dex], stage, from],
     );
   }
+  await seedHaulRows(db, [TOEDSCRUEL]);
 });
 afterEach(async () => {
   await db.close();
@@ -158,7 +164,6 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
     await seedBulkCool();
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card: TOEDSCRUEL,
       confirmedPulls: [BULK_COOL], // she ticked it
     });
@@ -177,7 +182,6 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
     await seedBulkCool();
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card: TOEDSCRUEL,
       confirmedPulls: [BULK_COOL],
     });
@@ -193,7 +197,7 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
   it("a DECLINED pull still leaves a placeholder and touches nothing (UIL-061, unchanged)", async () => {
     await seedBulkCool();
     await asOwner(db);
-    await commitCardPlacement(pgliteClient(db), { source: "bulk-bin", card: TOEDSCRUEL });
+    await commitCardPlacement(pgliteClient(db), { card: TOEDSCRUEL });
     await asSuperuser(db);
     const rootSlot = (await slots()).find((s) => s.stage_index === 0)!;
     expect(rootSlot.state).toBe("placeholder");
@@ -206,7 +210,6 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
     await seedFrontCool();
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card: TOEDSCRUEL,
       confirmedPulls: [FRONT_COOL],
     });
@@ -220,7 +223,6 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
     await seedBlockCool();
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card: TOEDSCRUEL,
       // Even if a stale client ticks it, the engine never named this stage as filled by it.
       confirmedPulls: [BLOCK_COOL],
@@ -245,7 +247,6 @@ describe("UIL-087 · V2: deleting a copy that fills a slot", () => {
     await seedBulkCool();
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card: TOEDSCRUEL,
       confirmedPulls: [BULK_COOL],
     });
@@ -344,7 +345,6 @@ describe("UIL-087 · V2 through its real path: undoing a sync that created a now
     await seedBulkCool();
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card: TOEDSCRUEL,
       confirmedPulls: [BULK_COOL],
     });
@@ -408,7 +408,6 @@ describe("UIL-087 · her remedy: moving the card puts the record right", () => {
     await seedBulkCool();
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card: TOEDSCRUEL,
       confirmedPulls: [BULK_COOL],
     });
@@ -490,7 +489,6 @@ describe("UIL-088 · an in-haul copy is the queue, not a pull", () => {
     // Even ticked by a stale client, nothing moves: the engine never claimed that stage was filled.
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card: TOEDSCRUEL,
       confirmedPulls: [BULK_COOL],
     });

@@ -187,18 +187,4 @@ describe("UIL-089 · the Haul Plan queue row keeps its two removals apart", () =
     await waitFor(() => expect(screen.queryByText("Meditite")).toBeNull());
     expect(removeCopyAction).not.toHaveBeenCalled(); // nothing was deleted
   });
-
-  it("a row she only TYPED has no copy to remove, so only the ✕ is offered", async () => {
-    render(
-      createElement(PlanScreen, {
-        stateStamp: "s",
-        initialPending: [{ id: "typed-1", card: card("Machop"), variant: "normal" }],
-      }),
-    );
-    expect(await screen.findByText("Machop")).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: /Remove Machop from your collection/i }),
-    ).toBeNull();
-    expect(screen.getByRole("button", { name: /Take Machop off this sitting/i })).toBeTruthy();
-  });
 });

@@ -1,23 +1,23 @@
 "use client";
 
 /**
- * Haul intake + placement plan — the core daily screen (scr-plan; dev-spec §5 M6; system-design §7B).
+ * Haul placement plan — the core daily screen (scr-plan; dev-spec §5 M6; system-design §7B).
  *
- * Flow: create a haul (source) → fast card entry (type-ahead + variant per card) → run the M3
- * cascade over the whole haul → a placement plan GROUPED to mirror the physical sort (band in
- * rainbow order → basics vs non-basics → name A–Z), worked top-to-bottom with check-off → commit,
- * which writes every record + audit trail atomically on the server.
+ * Flow: the cards waiting in her haul → run the M3 cascade over them → a placement plan GROUPED to
+ * mirror the physical sort (band in rainbow order → basics vs non-basics → name A–Z), worked
+ * top-to-bottom, each card written atomically on the server the moment she presses Done.
  *
- * TWO WAYS CARDS ARRIVE HERE (UIL-003). Typed intake is one. The other is the Sync screen's "Place
- * new cards" handoff (sync-ui-spec §B.6): the draft is SEEDED from `initialPending` — every copy that
- * exists but has never been routed, which is the state sync leaves its additions in on purpose. Those
- * rows are tagged and carry their `existingCopyId`, so committing routes the copy sync already created
- * instead of taking the same card in twice. The queue is read on the server (./page.tsx) so the cards
- * are there in the first paint; `reloadPending` re-reads it after a commit.
+ * ONE WAY CARDS ARRIVE HERE (UIL-098 part 2): her Dex import. The draft is SEEDED from `initialPending`
+ * — every copy that exists but has never been placed, which is the state sync leaves its additions in on
+ * purpose (sync-ui-spec §B.6's "Place new cards" handoff). Every row carries its `existingCopyId`, so
+ * Done places the copy sync already created. This screen used to take cards in by hand too (a source,
+ * notes and an add-by-set-number-or-name form); that is gone, because a copy made here belonged to no
+ * presence group, so the next import could not see it and created a SECOND one when Dex listed the card.
+ * The queue is read on the server (./page.tsx) so the cards are there in the first paint;
+ * `reloadPending` re-reads it after a sitting.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Variant } from "@/lib/engine";
 // Leaf import, NOT the "@/lib/plan" barrel: this is a client component, and the barrel re-exports
 // ./session, which pulls lib/supabase/server (and `next/headers`) into the browser bundle. The
 // `import type` below is fine because types are erased; a VALUE import is not.
@@ -33,11 +33,9 @@ import { localeTag, stripLocaleNamespace } from "@/lib/catalog/locale";
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
 import { cardCaption } from "../_components/CardLightbox";
-import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { ProgressBar } from "../_components/ProgressBar";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
-import { VariantSelector } from "../_components/VariantSelector";
 import { ACTION_META, bandMeta, moveMeta } from "../_components/plan-meta";
 import { removeCopy } from "../look/actions";
 import {
@@ -45,34 +43,10 @@ import {
   getLineJoinOptions,
   getMoveOptions,
   loadPendingPlacementDraft,
-  lookupCatalog,
   refreshSpotlightAction,
   runHaulPlan,
 } from "./actions";
-import type { DraftCard, DraftPayloadItem, LookupCard, RunPlanResult } from "./plan-types";
-
-const SOURCES: { v: "bulk-bin" | "pack-rip" | "show" | "trade"; l: string }[] = [
-  { v: "bulk-bin", l: "Bulk bin" },
-  { v: "pack-rip", l: "Pack rip" },
-  { v: "show", l: "Show" },
-  { v: "trade", l: "Trade" },
-];
-
-/**
- * A draft row's id. ALWAYS a uuid, because the server uses a typed row's id AS ITS COPY ID — that is the
- * idempotency key that stops a retry writing a second copy (UIL-092 part 2, lib/plan/commit.ts
- * `copyIdForTypedRow`). The old fallback emitted `d-<random>`, which is not a uuid and so would have had
- * to be replaced server-side, giving up idempotency on exactly the browsers least likely to hold a
- * connection. The fallback now shapes a v4 uuid by hand; it is not cryptographically strong, and does not
- * need to be — it needs to be unique within one sitting and valid for a uuid column.
- */
-function newId(): string {
-  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  const hex = (n: number) =>
-    Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join("");
-  const variant = ((Math.floor(Math.random() * 4) + 8) & 0xf).toString(16); // 8, 9, a or b
-  return `${hex(8)}-${hex(4)}-4${hex(3)}-${variant}${hex(3)}-${hex(12)}`;
-}
+import type { DraftCard, DraftPayloadItem, RunPlanResult } from "./plan-types";
 
 /* ------------------------- resuming a plan in progress (UIL-006) ------------------------- */
 
@@ -91,18 +65,10 @@ const RESUME_KEY = "binderops.plan.v1";
  */
 interface ResumeState {
   stamp: string;
-  /** The haul this sitting opened, so a resumed sitting keeps writing into the same one (UIL-027). */
-  haulId?: string | null;
-  source: (typeof SOURCES)[number]["v"];
-  notes: string;
   draft: DraftCard[];
   /**
-   * Null when she has typed rows but not run the plan yet (UIL-092).
-   *
-   * It used to be required, and the parking effect skipped — and actively CLEARED — any state with no
-   * plan, on the reasoning that "a bare draft has nothing worth resuming". That is the one thing on this
-   * screen she cannot get back by pressing a button: a typed row exists nowhere but here until it is
-   * committed. Typing ten cards and reloading before pressing Run lost all ten.
+   * Null when she has a draft but has not run the plan yet (UIL-092). A blob parked by a build before
+   * UIL-098 part 2 may also carry `haulId`, `source` and `notes`; they are ignored.
    */
   plan: RunPlanResult | null;
   /** Check-off progress — the part whose loss actually hurts, mid-stack at the binder. */
@@ -137,18 +103,13 @@ export function subgroupKey(bandKey: string, kind: "basic" | "nonbasic"): string
 /**
  * What was parked, and whether the PLAN in it is still trustworthy (UIL-092).
  *
- * The stamp used to be all-or-nothing: any drift and the whole payload went in the bin, typed rows
- * included. Two different things were being conflated. A plan computed against state that has since moved
- * is genuinely worthless — that is what the stamp is for, and UIL-006 was fixed twice for showing one. A
- * row she TYPED is not a derivation of anything; it is her input, and no amount of DB drift makes it stale.
- * So drift now invalidates the derived half and keeps the typed half.
- *
- * Karvi lost a hand-typed haul this way: migration 0018 rewrote 545 copies from `bulk` to `haul`, the copy
- * placement multiset is part of the stamp, so her next page load dropped everything she had typed.
+ * A plan computed against state that has since moved is worthless — that is what the stamp is for, and
+ * UIL-006 was fixed twice for showing one. Drift is reported rather than acted on here, so `restoreDraft`
+ * can re-read the draft from the queue instead of the whole blob going in the bin.
  */
 interface ParkedRun {
   state: ResumeState;
-  /** False when the DB has moved under the parked run: the plan is stale, the typed rows are not. */
+  /** False when the DB has moved under the parked run: the plan is stale, and the draft is re-read. */
   stampMatches: boolean;
 }
 
@@ -159,7 +120,7 @@ function readResume(stamp: string): ParkedRun | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ResumeState;
     // A shape we do not recognise is unusable and cannot be salvaged. Drift is NOT that: it is reported,
-    // and the blob is left in place for `restoreDraft` to rescue her typed rows from.
+    // and the blob is left in place for `restoreDraft` to re-read.
     if (!parsed || !Array.isArray(parsed.draft)) {
       window.sessionStorage.removeItem(RESUME_KEY);
       return null;
@@ -172,49 +133,40 @@ function readResume(stamp: string): ParkedRun | null {
 }
 
 /**
- * The draft to open with: everything when the stamp holds, her typed rows plus fresh server rows when it
- * does not (UIL-092 part 1).
+ * The draft to open with (UIL-092 part 1, narrowed by UIL-098 part 2).
  *
- * Exported and pure so the rescue is testable without a browser. Three rules:
+ * Exported and pure so the rule is testable without a browser. Every row is backed by a copy in her haul,
+ * so every row is DERIVED state:
  *
- *  - A DB-BACKED row (`existingCopyId`) is re-read from `initialPending`, and dropped if it is no longer
- *    there. Those rows ARE derived state: the copy may have been placed, or removed, since she parked.
- *  - A TYPED row is kept verbatim. It exists nowhere else.
- *  - A typed row she ALREADY COMMITTED is dropped, and this is the subtle one: keeping it would put an
- *    actionable row back on screen for a card already in a binder, so the reset itself would manufacture
- *    the double it is meant to prevent. `done` only ever gains a row after the server confirmed the write,
- *    so it is exactly the right filter. (Its DB-backed equivalent needs no rule: a committed pending copy
- *    has a `placement_decision` and so has already left `initialPending`.)
+ *  - When the stamp holds, the parked draft is kept as it was, order and all.
+ *  - When it does not, each parked row is re-read from `initialPending` and dropped if it is no longer
+ *    there: the copy may have been placed, or removed, since she parked. Her parked ORDER is preserved,
+ *    with rows new since she parked appended — she works a physical stack in the order it sits, and
+ *    re-sorting it mid-sitting would cost her her place.
  *
- * Her parked ORDER is preserved, with rows new since she parked appended — she works a physical stack in
- * the order it sits, and re-sorting it mid-sitting would cost her her place.
+ * A row with no copy behind it is a card she typed on a build before UIL-098 part 2. It cannot be placed
+ * any more (the server refuses it), so it is dropped either way, and handed back as `droppedTyped` so the
+ * screen can NAME it rather than lose it silently: the fix for such a card is to add it in Dex and import.
  */
 export function restoreDraft(
   parked: ParkedRun | null,
   initialPending: DraftCard[],
-): { draft: DraftCard[]; keptTyped: number } {
-  if (!parked) return { draft: initialPending, keptTyped: 0 };
-  if (parked.stampMatches) {
-    return {
-      draft: parked.state.draft,
-      keptTyped: parked.state.draft.filter((d) => !d.existingCopyId).length,
-    };
-  }
-  const committed = new Set(parked.state.done ?? []);
+): { draft: DraftCard[]; droppedTyped: DraftCard[] } {
+  if (!parked) return { draft: initialPending, droppedTyped: [] };
+  // Parsed from storage, so a legacy row may lack the field its type now requires.
+  const droppedTyped = parked.state.draft.filter((d) => !d.existingCopyId);
+  const backed = parked.state.draft.filter((d) => !!d.existingCopyId);
+  if (parked.stampMatches) return { draft: backed, droppedTyped };
   const pendingById = new Map(initialPending.map((p) => [p.id, p]));
   const kept: DraftCard[] = [];
-  for (const row of parked.state.draft) {
-    if (row.existingCopyId) {
-      const fresh = pendingById.get(row.id);
-      if (fresh) kept.push(fresh);
-    } else if (!committed.has(row.id)) {
-      kept.push(row);
-    }
+  for (const row of backed) {
+    const fresh = pendingById.get(row.id);
+    if (fresh) kept.push(fresh);
   }
   const keptIds = new Set(kept.map((d) => d.id));
   return {
     draft: [...kept, ...initialPending.filter((p) => !keptIds.has(p.id))],
-    keptTyped: kept.filter((d) => !d.existingCopyId).length,
+    droppedTyped,
   };
 }
 
@@ -242,7 +194,7 @@ function toPayload(draft: DraftCard[]): DraftPayloadItem[] {
     id: d.id,
     tcgdexId: d.card.tcgdexId,
     variant: d.variant,
-    existingCopyId: d.existingCopyId ?? null,
+    existingCopyId: d.existingCopyId,
   }));
 }
 
@@ -260,28 +212,17 @@ export function PlanScreen({
    * The parked run, but only as far as it is still TRUSTWORTHY (UIL-092).
    *
    * Everything derived from DB state — the plan, the overrides she set against it, her cursor, her folds —
-   * reads from here, so a stamp mismatch drops all of it. The typed draft, her notes, the source and the
-   * haul id do not: they are her input and the sitting's identity, neither of which the database can
-   * invalidate. Keeping `haulId` matters concretely — dropping it would open a second haul mid-sitting.
+   * reads from here, so a stamp mismatch drops all of it. The draft is re-read by `restoreDraft`.
    */
   const resumed = parked?.stampMatches ? parked.state : null;
   const [restored] = useState(() => restoreDraft(parked, initialPending));
 
-  const [source, setSource] = useState<(typeof SOURCES)[number]["v"]>(
-    parked?.state.source ?? "bulk-bin",
-  );
-  const [notes, setNotes] = useState(parked?.state.notes ?? "");
   const [draft, setDraft] = useState<DraftCard[]>(restored.draft);
   const [plan, setPlan] = useState<RunPlanResult | null>(resumed?.plan ?? null);
   // Whether the plan CURRENTLY on screen is the restored one. `resumed` stays non-null for the life of
   // the component, so using it directly would keep claiming "resumed" after she re-runs.
   const [planIsResumed, setPlanIsResumed] = useState(resumed?.plan != null);
   const [running, setRunning] = useState(false);
-  // The id of the haul this sitting opened, threaded through every card so the sitting stays one haul
-  // in the audit trail even though each card is its own transaction (UIL-027).
-  // `parked`, not `resumed`: the sitting's identity survives DB drift. Dropping it on a stamp mismatch
-  // would open a SECOND haul for one sitting (UIL-027), splitting the audit trail she reads it from.
-  const [haulId, setHaulId] = useState<string | null>(parked?.state.haulId ?? null);
   /**
    * The stamp the parked run is keyed to. Shelving a card changes the copy count, which is part of the
    * stamp by design (UIL-006), so without rolling it forward the resume cache would be thrown away on
@@ -322,6 +263,12 @@ export function PlanScreen({
    */
   const [bandChoice, setBandChoice] = useState<Record<string, "line" | "own-color">>({});
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Cards she typed by hand on a build before UIL-098 part 2, found in her parked sitting. They cannot be
+   * placed any more, so they were dropped — and are named once, here, rather than vanishing (UIL-092's
+   * rule: her input is never lost silently).
+   */
+  const [droppedTyped, setDroppedTyped] = useState<DraftCard[]>(restored.droppedTyped);
   const [cur, setCur] = useState(resumed?.cur ?? 0);
   /**
    * Cards already SHELVED — written to the database, not merely ticked (UIL-027). Every id in here is
@@ -352,10 +299,8 @@ export function PlanScreen({
    * Park the run whenever it changes. Writing to sessionStorage is exactly what an effect is for — syncing
    * React state out to an external system — and it sets no state, so it cannot cascade.
    *
-   * PARKED WITH OR WITHOUT A PLAN (UIL-092 part 1). This used to open with `if (!plan) { clearResume() }`,
-   * justified as "a bare draft has nothing worth resuming". It was backwards: the plan is the one part she
-   * can rebuild by pressing a button, and the typed rows are the part that exists nowhere else. So a bare
-   * draft is parked, and the only state that clears the key is having genuinely nothing to keep.
+   * PARKED WITH OR WITHOUT A PLAN (UIL-092 part 1): a bare draft is parked too, and the only state that
+   * clears the key is having genuinely nothing to keep.
    */
   useEffect(() => {
     if (!plan && draft.length === 0) {
@@ -364,9 +309,6 @@ export function PlanScreen({
     }
     writeResume({
       stamp: liveStamp,
-      haulId,
-      source,
-      notes,
       draft,
       plan,
       done: [...done],
@@ -375,19 +317,7 @@ export function PlanScreen({
       collapsed: [...collapsed],
       collapsedSubgroups: [...collapsedSubgroups],
     });
-  }, [
-    liveStamp,
-    haulId,
-    source,
-    notes,
-    draft,
-    plan,
-    done,
-    cur,
-    overrides,
-    collapsed,
-    collapsedSubgroups,
-  ]);
+  }, [liveStamp, draft, plan, done, cur, overrides, collapsed, collapsedSubgroups]);
 
   // The override DESTINATION TEXT (e.g. "Binder 1 · Back · Green") needs the move options' name maps,
   // which `openMove` loads lazily. But a RESUMED plan (UIL-006) can carry overrides she set last
@@ -416,7 +346,7 @@ export function PlanScreen({
     loadPendingPlacementDraft()
       .then((rows) => {
         setSeededCount(rows.length);
-        // Only seed when nothing is in progress, so a re-read never discards typed entry.
+        // Only seed when nothing is in progress, so a re-read never discards the sitting she is working.
         setDraft((cur) => (cur.length === 0 ? rows : cur));
       })
       .catch(() => {
@@ -489,12 +419,6 @@ export function PlanScreen({
     flashToast(`Placement override set · ${moveTarget.name}`);
     setMoveTarget(null);
   }
-  function addCard(card: LookupCard) {
-    mutateDraft([...draft, { id: newId(), card, variant: card.variants[0] ?? "normal" }]);
-  }
-  function setVariant(id: string, v: Variant) {
-    mutateDraft(draft.map((d) => (d.id === id ? { ...d, variant: v } : d)));
-  }
   function removeCard(id: string) {
     mutateDraft(draft.filter((d) => d.id !== id));
   }
@@ -503,11 +427,9 @@ export function PlanScreen({
    * "I do not have this card" — remove the COPY from the app, not just the row from this sitting (UIL-089).
    *
    * The ✕ beside it means something different and both are needed: ✕ takes a card off today's working list
-   * and leaves it in the queue for next time, this deletes the copy. Only offered on a row backed by a real
-   * copy (`existingCopyId`); a row she has only typed has no copy to remove, so its ✕ is the whole story.
+   * and leaves it in the queue for next time, this deletes the copy.
    */
   async function removeCopyFromApp(row: DraftCard) {
-    if (!row.existingCopyId) return;
     setError(null);
     setShelving(row.id);
     const res = await removeCopy(row.existingCopyId);
@@ -528,7 +450,6 @@ export function PlanScreen({
       const result = await runHaulPlan(toPayload(draft));
       setPlan(result);
       setPlanIsResumed(false);
-      setHaulId(null);
       setLiveStamp(stateStamp);
       setCur(0);
       setDone(new Set());
@@ -562,20 +483,17 @@ export function PlanScreen({
     setShelving(item.incomingId);
     try {
       const res = await shelveCardAction({
-        source,
-        notes: notes.trim() || null,
         card: {
           id: entry.id,
           tcgdexId: entry.card.tcgdexId,
           variant: entry.variant,
-          existingCopyId: entry.existingCopyId ?? null,
+          existingCopyId: entry.existingCopyId,
         },
         override: overrides[item.incomingId] ?? null,
-        haulId,
         // Everything not yet shelved stays queued, so the returned stamp describes what we hold next.
         pendingCopyIds: draft
-          .filter((d) => d.existingCopyId && !done.has(d.id) && d.id !== item.incomingId)
-          .map((d) => d.existingCopyId as string),
+          .filter((d) => !done.has(d.id) && d.id !== item.incomingId)
+          .map((d) => d.existingCopyId),
         // Only when we hold a fresh derivation FOR THIS CARD (UIL-045). Sending the stale forecast's
         // digest would conflict on every interacting card; sending none keeps the old behaviour.
         expectedDigest: fresh?.id === item.incomingId ? fresh.digest : null,
@@ -638,7 +556,6 @@ export function PlanScreen({
       }
       // Roll the cache forward rather than letting the write invalidate it (see shelveCardAction).
       setLiveStamp(res.stamp);
-      if (res.haulId) setHaulId(res.haulId);
       setDone((prev) => new Set(prev).add(item.incomingId));
       return true;
     } catch (e) {
@@ -655,7 +572,6 @@ export function PlanScreen({
     setDone(new Set());
     setCollapsed(new Set());
     setCollapsedSubgroups(new Set());
-    setNotes("");
     setCur(0);
     setError(null);
     setOverrides({});
@@ -663,7 +579,6 @@ export function PlanScreen({
     setBandChoice({});
     setMoveTarget(null);
     setPlanIsResumed(false);
-    setHaulId(null);
     setLiveStamp(stateStamp);
     // The parked run is spent: it was committed, or she chose to start over.
     clearResume();
@@ -831,15 +746,13 @@ export function PlanScreen({
         </div>
       )}
 
+      {droppedTyped.length > 0 ? (
+        <DroppedTypedNotice rows={droppedTyped} onDismiss={() => setDroppedTyped([])} />
+      ) : null}
+
       {!plan ? (
         <IntakePanel
-          source={source}
-          setSource={setSource}
-          notes={notes}
-          setNotes={setNotes}
           draft={draft}
-          onAdd={addCard}
-          onVariant={setVariant}
           onRemove={removeCard}
           onRemoveCopy={removeCopyFromApp}
           onRun={onRun}
@@ -946,16 +859,42 @@ function PendingBar({
   );
 }
 
+/**
+ * Cards she had typed by hand, parked from a build before UIL-098 part 2, that this screen can no longer
+ * place. Named rather than dropped silently — a typed row existed nowhere else, so this is the last place
+ * she can see what it was (UIL-092's rule). The remedy is the same one the server's refusal gives.
+ */
+export function DroppedTypedNotice({
+  rows,
+  onDismiss,
+}: {
+  rows: DraftCard[];
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="alertbar" role="status" style={{ marginBottom: 12 }}>
+      <span>!</span>
+      <b>
+        {rows.length} card{rows.length === 1 ? "" : "s"} you typed in by hand{" "}
+        {rows.length === 1 ? "was" : "were"} taken off this plan:{" "}
+        {rows.map((r) => r.card.name).join(", ")}.
+      </b>
+      <span style={{ fontSize: 11, color: "var(--ink-2)", flexBasis: "100%" }}>
+        The Haul Plan now places only cards from your Dex import. If you own{" "}
+        {rows.length === 1 ? "it" : "them"}, add {rows.length === 1 ? "it" : "them"} in Dex, then
+        import on the Sync page.
+      </span>
+      <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={onDismiss}>
+        Got it
+      </button>
+    </div>
+  );
+}
+
 function IntakePanel(props: {
-  source: (typeof SOURCES)[number]["v"];
-  setSource: (v: (typeof SOURCES)[number]["v"]) => void;
-  notes: string;
-  setNotes: (s: string) => void;
   draft: DraftCard[];
-  onAdd: (c: LookupCard) => void;
-  onVariant: (id: string, v: Variant) => void;
   onRemove: (id: string) => void;
-  /** UIL-089: remove the COPY, for a row that is backed by one. Distinct from `onRemove`'s ✕. */
+  /** UIL-089: remove the COPY. Distinct from `onRemove`'s ✕, which only takes it off this sitting. */
   onRemoveCopy: (row: DraftCard) => void;
   onRun: () => void;
   running: boolean;
@@ -964,13 +903,7 @@ function IntakePanel(props: {
   onReloadPending: () => void;
 }) {
   const {
-    source,
-    setSource,
-    notes,
-    setNotes,
     draft,
-    onAdd,
-    onVariant,
     onRemove,
     onRemoveCopy,
     onRun,
@@ -979,47 +912,27 @@ function IntakePanel(props: {
     seededCount,
     onReloadPending,
   } = props;
-  const routedInDraft = draft.filter((d) => d.existingCopyId).length;
   return (
     <div className="entry panel">
       <PendingBar
         state={pendingState}
         seededCount={seededCount}
-        routedInDraft={routedInDraft}
+        routedInDraft={draft.length}
         onReload={onReloadPending}
       />
       <div className="entryhead">
         <span className="hk u" style={{ fontSize: 11, letterSpacing: "0.14em" }}>
-          New haul
+          Your haul
         </span>
-        <select
-          className="field"
-          style={{ width: "auto" }}
-          value={source}
-          onChange={(e) => setSource(e.target.value as (typeof SOURCES)[number]["v"])}
-          aria-label="Haul source"
-        >
-          {SOURCES.map((s) => (
-            <option key={s.v} value={s.v}>
-              {s.l}
-            </option>
-          ))}
-        </select>
-        <input
-          className="field"
-          style={{ flex: 1, minWidth: 160 }}
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Notes (optional)"
-        />
       </div>
 
-      <CardResultsGrid search={lookupCatalog} onPick={onAdd} />
-
       {draft.length === 0 ? (
+        // UIL-098 part 2: there is no add form here any more, so the empty state says where cards come
+        // from instead of pointing at a search box that is not there.
         <p style={{ marginTop: 14, fontSize: 11, color: "var(--ink-2)", lineHeight: 1.8 }}>
-          Add cards by set + number or name. Each card picks a variant. Then run the plan — the
-          cascade routes the whole haul and groups it to your physical sort.
+          Nothing is waiting to be placed. Cards arrive here from your Dex import: add them in Dex,
+          then import on the Sync page. Then run the plan — the cascade routes the whole haul and
+          groups it to your physical sort.
         </p>
       ) : (
         <div className="draftlist">
@@ -1044,30 +957,20 @@ function IntakePanel(props: {
                     : ""}
                 </div>
                 <div style={{ marginTop: 6 }}>
-                  {d.existingCopyId ? (
-                    // Dex owns the variant of a synced copy (sync-architecture §1.1), so it is shown,
-                    // not edited: a local change here would be silently reverted by the next import.
-                    <span className="tag u" title="Already in your collection from a Dex sync">
-                      Waiting from sync · {d.dexVariantRaw ?? d.variant}
-                    </span>
-                  ) : (
-                    <VariantSelector
-                      variants={d.card.variants}
-                      value={d.variant}
-                      onChange={(v) => onVariant(d.id, v)}
-                    />
-                  )}
+                  {/* Dex owns the variant of a synced copy (sync-architecture §1.1), so it is shown, not
+                      edited: a local change here would be silently reverted by the next import. */}
+                  <span className="tag u" title="Already in your collection from a Dex sync">
+                    Waiting from sync · {d.dexVariantRaw ?? d.variant}
+                  </span>
                 </div>
               </div>
               <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                {/* Only on a row backed by a real copy: "I do not have this card" (UIL-089). */}
-                {d.existingCopyId ? (
-                  <RemoveCopyButton
-                    onRemove={() => onRemoveCopy(d)}
-                    label="Not mine"
-                    what={`${d.card.name} from your collection`}
-                  />
-                ) : null}
+                {/* "I do not have this card" (UIL-089). */}
+                <RemoveCopyButton
+                  onRemove={() => onRemoveCopy(d)}
+                  label="Not mine"
+                  what={`${d.card.name} from your collection`}
+                />
                 <button
                   type="button"
                   className="iconbtn"

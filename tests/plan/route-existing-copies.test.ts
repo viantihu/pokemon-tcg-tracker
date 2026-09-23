@@ -11,8 +11,10 @@
  *   - a pure routing pass writes NO haul, and its audit row carries `haul_id: null`;
  *   - the copy leaves the pending queue afterwards even when the cascade sent it to BULK, which is
  *     the case the placement columns alone cannot distinguish;
- *   - a mixed pass stamps the haul on the newly-acquired card only;
- *   - the plan for routed copies is IDENTICAL to the plan for the same cards typed by hand.
+ *   - the plan for routed copies is IDENTICAL to the plan for the same cards in a clean context.
+ *
+ * Every draft row is routed now (UIL-098 part 2: the Plan places, it never creates); the mixed
+ * typed-plus-routed pass this file used to pin went with typed intake.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
@@ -217,17 +219,14 @@ describe("routing existing unplaced copies through the plan (UIL-003)", () => {
       },
     ];
     const { planned } = planFromDraft(pc, draft);
-    const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
+    const { payload, counts } = buildHaulCommitPayload(pc, planned, {
       draft,
     });
 
-    // The builder routes rather than creates: no insert_copy at all.
+    // The builder routes rather than creates: no insert_copy, and no haul row, at all.
     expect(payload.ops.some((o) => o.op === "insert_copy")).toBe(false);
+    expect(payload.ops.some((o) => o.op === "insert_haul")).toBe(false);
     expect(payload.ops.some((o) => o.op === "update_copy" && o.id === SCYTHER_COPY)).toBe(true);
-    // A routing pass is not an acquisition event.
-    expect(haulId).toBeNull();
-    expect(counts.copies).toBe(0);
     expect(counts.routed).toBe(1);
 
     await seedFor(db, payload, [SCYTHER_SV035_123.tcgdexId]);
@@ -300,7 +299,7 @@ describe("routing existing unplaced copies through the plan (UIL-003)", () => {
     ];
     const { items, planned } = planFromDraft(pc, draft);
     expect(items[0].action).toBe("BULK");
-    const { payload } = buildHaulCommitPayload(pc, planned, { source: "bulk-bin", draft });
+    const { payload } = buildHaulCommitPayload(pc, planned, { draft });
 
     await seedFor(db, payload, [SCYTHER_SV035_123.tcgdexId]);
     await db.query(
@@ -320,47 +319,6 @@ describe("routing existing unplaced copies through the plan (UIL-003)", () => {
     );
     expect(row.rows[0]).toMatchObject({ role: "bulk", binder_id: null });
     // The decision row is what tells them apart, so the queue is empty and she is not re-nagged.
-    expect(await pendingIds(db)).toEqual([]);
-  });
-
-  it("a mixed pass stamps the haul on the newly-acquired card only", async () => {
-    const pending = unplacedCopy(SCYTHER_COPY, SCYTHER_SV035_123.tcgdexId);
-    const pc = makeContext([pending], [SCYTHER_COPY]);
-    const draft: DraftItem[] = [
-      {
-        id: SCYTHER_COPY,
-        tcgdexId: SCYTHER_SV035_123.tcgdexId,
-        variant: "normal",
-        existingCopyId: SCYTHER_COPY,
-      },
-      { id: "d-eevee", tcgdexId: EEVEE_SV035_133.tcgdexId, variant: "normal" },
-    ];
-    const { planned } = planFromDraft(pc, draft);
-    const { payload, haulId, counts } = buildHaulCommitPayload(pc, planned, {
-      source: "pack-rip",
-      draft,
-    });
-    expect(haulId).not.toBeNull();
-    expect(counts).toMatchObject({ copies: 1, routed: 1, decisions: 2 });
-
-    await seedFor(db, payload, [SCYTHER_SV035_123.tcgdexId, EEVEE_SV035_133.tcgdexId]);
-    await seedCopy(db, pending);
-    await asOwner(db);
-    await applyOps(db, payload);
-    await asSuperuser(db);
-
-    expect(await count(db, "copy")).toBe(2);
-    expect(await count(db, "haul")).toBe(1);
-    const stamped = await db.query<{ catalog_card_id: string }>(
-      `select catalog_card_id from copy where haul_id = $1`,
-      [haulId],
-    );
-    expect(stamped.rows.map((r) => r.catalog_card_id)).toEqual([EEVEE_SV035_133.tcgdexId]);
-    // Only the acquired card's audit row belongs to the haul.
-    const byHaul = await db.query<{ n: number }>(
-      `select count(*)::int as n from placement_decision where haul_id is null`,
-    );
-    expect(byHaul.rows[0].n).toBe(1);
     expect(await pendingIds(db)).toEqual([]);
   });
 
@@ -386,7 +344,7 @@ describe("routing existing unplaced copies through the plan (UIL-003)", () => {
     const { items, planned } = planFromDraft(pc, draft);
     expect(items[0].action).toBe("FRONT");
 
-    const { payload } = buildHaulCommitPayload(pc, planned, { source: "bulk-bin", draft });
+    const { payload } = buildHaulCommitPayload(pc, planned, { draft });
     // The band must be the DB KEY "white", never the display name "White". Asserted on the payload as
     // well as on the row, so the failure names the band rather than surfacing as an opaque 23503.
     // Narrow to update_copy specifically: update_slot also carries a `patch`, so a loose
@@ -436,14 +394,13 @@ describe("routing existing unplaced copies through the plan (UIL-003)", () => {
     ];
     const { planned } = planFromDraft(pc, draft);
     const { payload, counts } = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
       draft,
       overrides: {
         [SCYTHER_COPY]: { kind: "shelf", binderId: B1, half: "back", band: "green" },
       },
     });
     expect(payload.ops.some((o) => o.op === "insert_copy")).toBe(false);
-    expect(counts).toMatchObject({ copies: 0, routed: 1 });
+    expect(counts).toMatchObject({ routed: 1 });
 
     await seedFor(db, payload, [SCYTHER_SV035_123.tcgdexId]);
     await seedCopy(db, pending);

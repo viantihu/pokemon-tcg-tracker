@@ -96,7 +96,9 @@ const OTHER: PlanItem = {
 
 const DRAFT: DraftCard[] = [
   {
+    // A copy her import made, waiting in her haul (UIL-098 part 2): the draft id is the copy id.
     id: "d-cruel",
+    existingCopyId: "d-cruel",
     variant: "normal",
     card: {
       tcgdexId: "sv09-089",
@@ -116,6 +118,7 @@ const DRAFT: DraftCard[] = [
   },
   {
     id: "d-cool",
+    existingCopyId: "d-cool",
     variant: "normal",
     card: {
       tcgdexId: "sv09-088",
@@ -153,9 +156,6 @@ function parkWithOverride(overrides: Record<string, MoveDestination> = { "d-crue
     RESUME_KEY,
     JSON.stringify({
       stamp: STAMP,
-      haulId: "haul-1",
-      source: "bulk-bin",
-      notes: "",
       draft: DRAFT,
       plan: PLAN,
       done: [],
@@ -255,8 +255,7 @@ describe("UIL-084 · once the write lands, 'Moved' is true", () => {
     parkWithOverride();
     shelveCardAction.mockResolvedValue({
       ok: true,
-      haulId: "haul-1",
-      counts: { copies: 1, lines: 1, slots: 2, decisions: 1, wishlist: 0, blocks: 0 },
+      counts: { routed: 1, lines: 1, slots: 2, decisions: 1, wishlist: 0 },
       stamp: STAMP,
     });
     const user = mount();
