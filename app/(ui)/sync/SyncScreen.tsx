@@ -32,6 +32,7 @@ import {
   undoLastSync,
 } from "./actions";
 import type {
+  ApplyOutcome,
   LearnedAliasView,
   QueueEntryView,
   StandInFormInput,
@@ -133,9 +134,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
       setPhase("preview");
       return;
     }
-    setToast(
-      `Applied · ${res.added} added · ${res.removed} removed · ${res.variantChanges} variant changes. Undo available.`,
-    );
+    setToast(appliedToast(res));
     setPreview(null);
     setBundle(null);
     setPhase("idle");
@@ -432,6 +431,20 @@ export function FlagFixSection({ rows }: { rows: FlagFixRow[] }) {
       </div>
     </section>
   );
+}
+
+/**
+ * The toast after an apply. Names corrected variant flags in the preview's own words (UIL-102), and points
+ * back at the preview's list, which is where the cards to check are named.
+ */
+export function appliedToast(
+  res: Pick<ApplyOutcome, "added" | "removed" | "variantChanges" | "flagFixes">,
+): string {
+  const flags =
+    res.flagFixes > 0
+      ? ` · ${res.flagFixes} variant flag${res.flagFixes === 1 ? "" : "s"} corrected (check the pockets listed in the preview)`
+      : "";
+  return `Applied · ${res.added} added · ${res.removed} removed · ${res.variantChanges} variant changes${flags}. Undo available.`;
 }
 
 function UndoBar({
