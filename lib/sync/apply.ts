@@ -38,9 +38,15 @@ export function consequenceOf(c: CopySnapshot): {
  * The fast-path rule (sync-ui-spec §B.1): a sync may auto-apply iff it can ONLY add unplaced copies.
  * Any retire (`REMOVED`/`CHANGED(−)`) or variant migration could move a placement, so it gates.
  * New `UNRESOLVED` parks and self-heal promotions do not disqualify it — neither touches placement.
+ * A flag fix gates too (UIL-102, the Senior BA's ruling): it moves nothing, but it tells her a card may
+ * have been placed as the wrong variant, and she sees that once rather than having it applied silently.
  */
-export function requiresPreview(plan: Pick<ReconcilePlan, "retires" | "variantUpdates">): boolean {
-  return plan.retires.length > 0 || plan.variantUpdates.length > 0;
+export function requiresPreview(
+  plan: Pick<ReconcilePlan, "retires" | "variantUpdates"> & { flagFixes?: readonly unknown[] },
+): boolean {
+  return (
+    plan.retires.length > 0 || plan.variantUpdates.length > 0 || (plan.flagFixes?.length ?? 0) > 0
+  );
 }
 
 /** Whether a plan changes anything at all — an empty plan is a true no-op (idempotent re-import). */
@@ -52,8 +58,10 @@ export function isNoop(counts: {
   drops: number;
   promotions: number;
   dedupeUpdates: number;
+  flagFixes?: number;
 }): boolean {
   return (
+    (counts.flagFixes ?? 0) === 0 &&
     counts.creates === 0 &&
     counts.retires === 0 &&
     counts.variantUpdates === 0 &&

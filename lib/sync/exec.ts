@@ -30,7 +30,7 @@ import { localeOfId, normalizeLocale } from "@/lib/catalog/locale";
 import { entryAsDexRow, loadAliasMap } from "./pipeline";
 import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
-import { dexQuantity } from "./reconcile";
+import { deriveVariantFlag, dexQuantity } from "./reconcile";
 import type { SyncPlanBundle } from "./pipeline";
 import { CountMismatchError, parseCountRefusal, type CardLabel } from "./count-check";
 import type { PresenceKeyRef } from "@/lib/repo/write-ops";
@@ -61,6 +61,8 @@ export interface ApplyResult {
   added: number;
   removed: number;
   variantChanges: number;
+  /** Copies whose stored flag was corrected (UIL-102). */
+  flagFixes: number;
   waiting: number;
   fastPath: boolean;
 }
@@ -347,6 +349,26 @@ export async function executeApply(
     });
   }
 
+  /**
+   * 2b. Flag fixes (UIL-102): the copy stays in its group and in its pocket; only the flag it carries is
+   *     corrected to the one its Dex variant derives. Recorded with the migrations' reverts, so an Undo puts
+   *     the old flag back. A copy the (possibly overridden) plan retires is skipped — it is leaving.
+   */
+  const retiringIds = new Set(plan.retires.map((r) => r.copyId));
+  // `?? []`: a bundle previewed before UIL-102 deployed round-trips the browser without the list.
+  const flagFixes = (plan.flagFixes ?? []).filter((f) => !retiringIds.has(f.copyId));
+  for (const f of flagFixes) {
+    const copy = await copyRepo.getByPk(db, f.copyId);
+    if (!copy) continue;
+    variantReverts.push({
+      copyId: copy.id,
+      variant: copy.variant,
+      dexVariantRaw: copy.dex_variant_raw,
+      presenceGroupId: copy.presence_group_id,
+    });
+    ops.push({ op: "update_copy", id: copy.id, patch: { variant: f.toVariant } });
+  }
+
   // 3. Adds — create unplaced copies for the routing cascade (B.6 places them later).
   for (const c of plan.creates) {
     const groupId = await ensureGroup(c.catalogCardId, c.dexVariantRaw);
@@ -467,7 +489,8 @@ export async function executeApply(
   const recordTouched = Boolean(bundle.dexRecord) || dexAdds.length > 0;
 
   // 7. Write the single undo snapshot LAST (overwrite-per-owner) as part of the same transaction.
-  const fastPath = plan.retires.length === 0 && plan.variantUpdates.length === 0;
+  const fastPath =
+    plan.retires.length === 0 && plan.variantUpdates.length === 0 && flagFixes.length === 0;
   const snapshot: AppliedSnapshot = {
     version: 1,
     // What this apply applied, so a later refusal can tell "this same preview, again" from "a different file"
@@ -545,6 +568,7 @@ export async function executeApply(
     added: plan.creates.length,
     removed: plan.retires.length,
     variantChanges: plan.variantUpdates.length,
+    flagFixes: flagFixes.length,
     waiting: bundle.queue.stillWaiting,
     fastPath,
   };
@@ -1052,7 +1076,9 @@ async function matchOps(
       op: "insert_copy",
       id: matchCopyId(entry, i),
       catalog_card_id: target.tcgdexId,
-      variant: "normal",
+      // Derived from the Dex variant exactly as the import derives it (UIL-102). It was "normal" for every
+      // row, so a hand-matched Holo or Reverse Holo was placed by the holo-swap rule as a normal card.
+      variant: deriveVariantFlag(entry.dex_variant_raw),
       dex_variant_raw: entry.dex_variant_raw,
       presence_group_id: groupId,
       // A manual or stand-in match identifies the card; it does not place it (UIL-088).
@@ -1211,7 +1237,7 @@ export async function restoreWithheldForEntry(
       op: "insert_copy",
       id: restoreCopyId(entry, i),
       catalog_card_id: catalogCardId,
-      variant: "normal",
+      variant: deriveVariantFlag(dexVariantRaw), // as matchOps and the import derive it (UIL-102)
       dex_variant_raw: dexVariantRaw,
       presence_group_id: group.id,
       role: "haul",

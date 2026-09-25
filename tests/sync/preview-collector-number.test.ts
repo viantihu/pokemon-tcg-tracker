@@ -24,12 +24,14 @@ function preview(total: number | null): SyncPreview {
     summary: {
       removed: 1,
       variantChanges: 1,
+      flagFixes: 0,
       added: 1,
       waiting: 0,
       unchanged: 3,
       summaryLine: "1 removed · 1 variant change · 1 added",
     },
     sections: {
+      flagFixes: [], // UIL-102: none here
       removals: [
         {
           ...card,

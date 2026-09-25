@@ -78,6 +78,8 @@ export interface SyncCounts {
   creates: number;
   retires: number;
   variantUpdates: number;
+  /** Copies whose stored flag was corrected (UIL-102). Absent on a snapshot written before it. */
+  flagFixes?: number;
   parks: number;
   drops: number;
   promotions: number;

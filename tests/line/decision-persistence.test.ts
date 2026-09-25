@@ -275,6 +275,7 @@ describe("UIL-078 · a released slot forgets its resolution", () => {
           },
         ],
         variantUpdates: [],
+        flagFixes: [],
         unchanged: 0,
         unresolved: [],
         fastPath: false,

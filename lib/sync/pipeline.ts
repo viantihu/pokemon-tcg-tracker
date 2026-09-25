@@ -153,6 +153,8 @@ export async function loadCurrentGroups(db: DbClient): Promise<CurrentGroup[]> {
       colorBand: c.color_band,
       lineSlotId: c.line_slot_id,
       createdAt: c.created_at,
+      // Audited by reconcile against the group's Dex variant (UIL-102).
+      variant: c.variant,
     })),
   }));
 }
@@ -356,6 +358,7 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
     creates: plan.creates.length,
     retires: plan.retires.length,
     variantUpdates: plan.variantUpdates.length,
+    flagFixes: plan.flagFixes.length,
     parks: newParks,
     drops: dropEntryIds.length,
     promotions: archiveEntryIds.length,
@@ -394,6 +397,7 @@ async function loadEnrichment(
   for (const c of plan.creates) cardIds.add(c.catalogCardId);
   for (const r of plan.retires) cardIds.add(r.catalogCardId);
   for (const v of plan.variantUpdates) cardIds.add(v.catalogCardId);
+  for (const f of plan.flagFixes) cardIds.add(f.catalogCardId);
 
   const [cards, binders, bands, typeMapRows] = await Promise.all([
     Promise.all([...cardIds].map((id) => catalogCardRepo.getByPk(db, id))),
@@ -412,6 +416,7 @@ async function loadEnrichment(
     if (!row) continue;
     cardMetaById[row.tcgdex_id] = {
       name: row.name,
+      setName: row.set_name,
       imageUrl: row.image_url,
       localId: row.local_id,
       setCardCountOfficial: row.set_card_count_official,

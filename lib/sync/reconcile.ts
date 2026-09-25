@@ -113,6 +113,11 @@ export interface CopySnapshot {
   lineSlotId: string | null;
   /** ISO timestamp; the shrink tiebreak retires the most recently created copy first (§1.6). */
   createdAt: string;
+  /**
+   * The flag the copy CARRIES (`copy.variant`), audited against its group's Dex variant (UIL-102).
+   * `loadCurrentGroups` always sets it; a hand-built snapshot may leave it out, and is then not audited.
+   */
+  variant?: string;
 }
 
 /** One current presence group and its ordered copies (§1.5). */
@@ -158,10 +163,29 @@ export interface VariantUpdateOp {
   placementPreserved: true;
 }
 
+/**
+ * A copy whose stored flag disagrees with its own Dex variant (UIL-102): the key is right, the flag is
+ * wrong. Not a migration — the copy stays in its group, only `copy.variant` is corrected — and never a
+ * placement: a copy placed under the wrong flag keeps its pocket, and `placed` is how the preview tells her
+ * to check it.
+ */
+export interface FlagFixOp {
+  kind: "flag_fix";
+  copyId: string;
+  catalogCardId: string;
+  dexVariantRaw: string;
+  fromVariant: string;
+  toVariant: CopyVariant;
+  /** True when the copy sits anywhere but her haul — placed while it carried the wrong flag. */
+  placed: boolean;
+}
+
 export interface ReconcilePlan {
   creates: CreateOp[];
   retires: RetireOp[];
   variantUpdates: VariantUpdateOp[];
+  /** Copies whose stored flag is not the one their Dex variant derives (UIL-102). */
+  flagFixes: FlagFixOp[];
   /** Count of keys the sync leaves completely alone — proof it isn't churning placement. */
   unchanged: number;
   unresolved: UnresolvedRow[];
@@ -363,6 +387,34 @@ export function reconcile(input: ReconcileInput): ReconcilePlan {
     }
   }
 
+  /**
+   * FLAG AUDIT (UIL-102). A copy's `variant` flag is DERIVED from its Dex variant (`deriveVariantFlag`),
+   * and the holo-swap rule reads the flag, not the Dex string — so a copy carrying the wrong one is placed
+   * as the wrong card. The Sync page's manual match wrote "normal" for every row until UIL-102, and no
+   * import ever looked. Every copy that STAYS in its group is checked; a retiring copy is going, and a
+   * migrating one is re-flagged by its own migration.
+   */
+  const leaving = new Set<string>([
+    ...retires.map((r) => r.copyId),
+    ...variantUpdates.map((v) => v.copyId),
+  ]);
+  const flagFixes: FlagFixOp[] = [];
+  for (const g of input.current) {
+    const want = deriveVariantFlag(g.dexVariantRaw);
+    for (const c of g.copies) {
+      if (c.variant === undefined || c.variant === want || leaving.has(c.copyId)) continue;
+      flagFixes.push({
+        kind: "flag_fix",
+        copyId: c.copyId,
+        catalogCardId: g.catalogCardId,
+        dexVariantRaw: g.dexVariantRaw,
+        fromVariant: c.variant,
+        toVariant: want,
+        placed: c.role !== "haul",
+      });
+    }
+  }
+
   // Adds: for each gaining key, create (delta − migrated-in) new unplaced copies for the cascade.
   const creates: CreateOp[] = [];
   for (const e of d.entries) {
@@ -382,6 +434,7 @@ export function reconcile(input: ReconcileInput): ReconcilePlan {
     creates,
     retires,
     variantUpdates,
+    flagFixes,
     unchanged: d.counts.unchanged,
     unresolved,
     fastPath: d.fastPath,
