@@ -13,7 +13,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const otp = vi.fn();
-const createJsClient = vi.fn((..._args: unknown[]) => ({ auth: { signInWithOtp: otp } }));
+/** The throwaway client R2b uses to revoke a link's session (never her cookies). */
+const throwaway = {
+  setSession: vi.fn(),
+  signOut: vi.fn(),
+  refreshSession: vi.fn(),
+};
+const createJsClient = vi.fn((..._args: unknown[]) => ({
+  auth: { signInWithOtp: otp, ...throwaway },
+}));
 vi.mock("@supabase/supabase-js", () => ({
   createClient: (...a: unknown[]) => createJsClient(...a),
 }));
@@ -29,7 +37,9 @@ const setSession = vi.fn();
 const getUser = vi.fn();
 const signOut = vi.fn();
 const refreshSession = vi.fn();
+const getSession = vi.fn();
 const ssr = {
+  getSession: track("getSession", getSession),
   setSession: track("setSession", setSession),
   getUser: track("getUser", getUser),
   signOut: track("signOut", signOut),
@@ -49,6 +59,13 @@ vi.mock("next/headers", () => ({
     ]),
 }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+/** `after()` runs its callback once the response is sent; here it runs at once, and is awaited by `flush`. */
+const scheduled: Promise<unknown>[] = [];
+const after = vi.fn((fn: () => unknown) => {
+  scheduled.push(Promise.resolve().then(fn));
+});
+vi.mock("next/server", () => ({ after: (fn: () => unknown) => after(fn) }));
+const flush = () => Promise.all(scheduled.splice(0));
 
 import { RATE_LIMITED, signIn } from "@/app/login/actions";
 import { completeSignIn } from "@/app/auth/confirm/actions";
@@ -62,6 +79,11 @@ const AT = "SECRET-ACCESS";
 const RT = "SECRET-REFRESH";
 
 const OWNER_USER = { data: { user: { email: "owner@example.com" } } };
+/** A JWT-shaped access token carrying `session_id` (the payload is all R2b reads). */
+const jwt = (sessionId: string) =>
+  `h.${Buffer.from(JSON.stringify({ session_id: sessionId, sub: "u" })).toString("base64url")}.sig`;
+const HERS = jwt("session-hers");
+const SECOND = jwt("session-second-link");
 const NOBODY = { data: { user: null } };
 
 beforeEach(() => {
@@ -73,6 +95,13 @@ beforeEach(() => {
   getUser.mockReset().mockResolvedValueOnce(NOBODY).mockResolvedValue(OWNER_USER);
   signOut.mockResolvedValue({ error: null });
   refreshSession.mockResolvedValue({ error: null });
+  getSession.mockResolvedValue({ data: { session: { access_token: HERS } } });
+  throwaway.setSession.mockImplementation(async (s: { access_token: string }) => ({
+    data: { session: { access_token: s.access_token } },
+    error: null,
+  }));
+  throwaway.signOut.mockResolvedValue({ error: null });
+  throwaway.refreshSession.mockResolvedValue({ error: null });
 });
 
 describe("UIL-097 · signIn requests a link any browser can finish", () => {
@@ -152,12 +181,73 @@ describe("UIL-097 · completeSignIn validates, enforces the owner, and echoes no
     expect(JSON.stringify(res)).not.toContain("SECRET");
   });
 
-  it("R2: already signed in as the owner, a link touches NOTHING — so a crafted link cannot sign her out", async () => {
+  it("R2: already signed in as the owner, her session is never touched — so a crafted link cannot sign her out", async () => {
     getUser.mockReset().mockResolvedValue(OWNER_USER);
-    expect(await completeSignIn(AT, RT)).toEqual({ ok: true });
-    expect(calls).toEqual(["getUser"]);
+    expect(await completeSignIn(SECOND, RT)).toEqual({ ok: true });
+    expect(calls).toEqual(["getUser", "getSession"]);
     expect(setSession).not.toHaveBeenCalled();
     expect(refreshSession).not.toHaveBeenCalled();
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("R2b: a SECOND link's session is revoked on a throwaway client, locally, with no refresh", async () => {
+    getUser.mockReset().mockResolvedValue(OWNER_USER);
+    expect(await completeSignIn(SECOND, RT)).toEqual({ ok: true });
+    // Scheduled with after(): her sign-in returned before the revoke ran.
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(throwaway.signOut).not.toHaveBeenCalled();
+    await flush();
+    expect(throwaway.setSession).toHaveBeenCalledWith({ access_token: SECOND, refresh_token: RT });
+    expect(throwaway.signOut).toHaveBeenCalledWith({ scope: "local" });
+    expect(throwaway.refreshSession).not.toHaveBeenCalled();
+    // A client that keeps nothing: it can only ever hold the link's session.
+    const opts = createJsClient.mock.calls.at(-1)![2] as { auth: Record<string, unknown> };
+    expect(opts.auth).toMatchObject({ persistSession: false, autoRefreshToken: false });
+  });
+
+  it("R2b: a replay of HER OWN link (same session) is left alone — R1 already burned it", async () => {
+    getUser.mockReset().mockResolvedValue(OWNER_USER);
+    expect(await completeSignIn(HERS, RT)).toEqual({ ok: true });
+    await flush();
+    expect(createJsClient).not.toHaveBeenCalled();
+    expect(throwaway.signOut).not.toHaveBeenCalled();
+  });
+
+  it("R2b: when either session id cannot be read, nothing is revoked (it might be hers)", async () => {
+    getUser.mockReset().mockResolvedValue(OWNER_USER);
+    getSession.mockResolvedValue({ data: { session: null } });
+    await completeSignIn(SECOND, RT);
+    getSession.mockResolvedValue({ data: { session: { access_token: HERS } } });
+    await completeSignIn("not-a-jwt", RT);
+    await flush();
+    expect(throwaway.signOut).not.toHaveBeenCalled();
+  });
+
+  it("R2b: re-checked on the session Supabase hands back — if THAT is hers, nothing is revoked", async () => {
+    // The URL claims another session, but the pair Supabase verified or refreshed turns out to be hers.
+    getUser.mockReset().mockResolvedValue(OWNER_USER);
+    throwaway.setSession.mockResolvedValue({
+      data: { session: { access_token: HERS } },
+      error: null,
+    });
+    await completeSignIn(SECOND, RT);
+    await flush();
+    expect(throwaway.signOut).not.toHaveBeenCalled();
+  });
+
+  it("R2b: a link Supabase rejects is not signed out, and her sign-in still stands, silently", async () => {
+    getUser.mockReset().mockResolvedValue(OWNER_USER);
+    throwaway.setSession.mockResolvedValue({ error: { message: `bad ${SECOND}` } });
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {}),
+    );
+    expect(await completeSignIn(SECOND, RT)).toEqual({ ok: true });
+    await flush();
+    expect(throwaway.signOut).not.toHaveBeenCalled();
+    throwaway.setSession.mockRejectedValue(new Error("network"));
+    expect(await completeSignIn(SECOND, RT)).toEqual({ ok: true });
+    await flush();
+    for (const s of spies) expect(s).not.toHaveBeenCalled();
     expect(signOut).not.toHaveBeenCalled();
   });
 
