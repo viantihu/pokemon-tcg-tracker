@@ -255,6 +255,109 @@ describe("UIL-100 · the other named cases", () => {
   });
 });
 
+describe("UIL-100 · every sync writer's check FIRES (QA: one refusal per writer)", () => {
+  /** Snapshot of everything a refused write must leave untouched. */
+  async function state() {
+    return {
+      copies: await copyCount(),
+      record: (
+        await sql<{ n: number }>(`select coalesce(sum(quantity), 0)::int n from dex_presence`)
+      )[0].n,
+      snapshots: await sql<{ id: string }>(`select id from last_sync_snapshot order by id`),
+      entries: await sql<{ id: string; status: string }>(
+        `select id, status from unresolved_entry order by id`,
+      ),
+    };
+  }
+
+  async function refusal(run: () => Promise<unknown>): Promise<CountMismatchError> {
+    let err: unknown = null;
+    try {
+      await run();
+    } catch (x) {
+      err = x;
+    }
+    expect(err).toBeInstanceOf(CountMismatchError);
+    return err as CountMismatchError;
+  }
+
+  it("IMPORT: a plan that would leave a card over Dex's count is refused whole, the card named", async () => {
+    await importFile([A]);
+    const before = await state();
+    const { bundle } = await runSyncPipeline(client(), exportBytes([A, B]));
+    // A wrong diff: one Charmander more than the file lists. Nothing in the pipeline produces this — the
+    // check exists for the day something does.
+    bundle.plan.creates.push({
+      kind: "create",
+      catalogCardId: "sv03-026",
+      dexVariantRaw: "Normal",
+      variant: "normal",
+    });
+    const err = await refusal(() => executeApply(client(), bundle, OWNER));
+    expect(err.message).toMatch(/Charmander/);
+    expect(err.message).toMatch(/extra/);
+    expect(err.keys).toEqual([
+      { catalog_card_id: "sv03-026", dex_variant_raw: "Normal", dex: 2, removed: 0, have: 3 },
+    ]);
+    // Refused WHOLE: not the extra, not Charmeleon, not the new record, not the snapshot.
+    expect(await state()).toEqual(before);
+  });
+
+  it("RETRY: a promotion that would leave its card over Dex's count is refused whole, the card named", async () => {
+    // One Dex row fills xy7-012; an unknown-set row will resolve to the SAME card once zz1 -> xy7 is known.
+    const R1 = row("Ancient Origins", "xy7-12", "12", "Card Twelve", "Normal", 1);
+    await importFile([R1, S1, S2]);
+    await manualMatch(
+      client(),
+      (await waitingEntries()).find((w) => w.dex_id === "zz1-13")!.id,
+      "xy7-013",
+    );
+    const before = await state();
+    const { bundle } = await runSyncPipeline(client(), null);
+    expect(bundle.queue.archiveEntryIds).toHaveLength(1); // zz1-12 -> xy7-012 will be promoted
+    // A wrong diff again: one copy more than record 1 + promoted 1. (An extra copy already IN the
+    // collection cannot provoke this: a Retry's diff counts it against the promoted row, and the result
+    // adds up. Only a wrong plan can reach the check, which is exactly what it is for.)
+    bundle.plan.creates.push({
+      kind: "create",
+      catalogCardId: "xy7-012",
+      dexVariantRaw: "Normal",
+      variant: "normal",
+    });
+    const err = await refusal(() => executeApply(client(), bundle, OWNER));
+    expect(err.message).toMatch(/Card Twelve/);
+    expect(err.message).toMatch(/waiting cards are still waiting/);
+    expect(err.keys).toEqual([
+      { catalog_card_id: "xy7-012", dex_variant_raw: "Normal", dex: 2, removed: 0, have: 3 },
+    ]);
+    expect(await state()).toEqual(before);
+  });
+
+  it("UNDO: an Undo that would leave a card over the restored record's count is refused whole", async () => {
+    await importFile([A]);
+    await importFile([A, B]);
+    // One Charmander more than either file lists, in its presence group.
+    const [g] = await sql<{ id: string }>(
+      `select id from presence_group where catalog_card_id = 'sv03-026'`,
+    );
+    await sql(`insert into copy (owner_id, catalog_card_id, variant, dex_variant_raw, presence_group_id, role)
+               values ('${OWNER}', 'sv03-026', 'normal', 'Normal', '${g.id}', 'haul')`);
+    const before = await state();
+    const err = await refusal(() => executeUndo(client()));
+    expect(err.message).toMatch(/Undo was not applied/);
+    expect(err.message).toMatch(/Charmander/);
+    expect(err.keys).toContainEqual({
+      catalog_card_id: "sv03-026",
+      dex_variant_raw: "Normal",
+      dex: 2,
+      removed: 0,
+      have: 3,
+    });
+    // Refused WHOLE: Charmeleon not deleted, record not restored, no tombstone — B is still undoable.
+    expect(await state()).toEqual(before);
+  });
+});
+
 describe("UIL-100 · a double is refused, and the refusal says what to do", () => {
   it("a hand match onto a card that already holds one copy too many is refused, nothing written, card named", async () => {
     await importFile([A, M[0]]);
