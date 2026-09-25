@@ -279,6 +279,35 @@ describe("UIL-099 E2 · Add it back", () => {
     expect(await memory()).toBe(2);
   });
 
+  it("a row of 2 with 1 removed adds back only the 1 held back (no import recorded)", async () => {
+    // QA's case. The match adds 1 and holds back 1; Add it back must return the ONE she removed, not the
+    // row's whole quantity. Unrecorded there is no check to catch a second copy, so a missing cap here
+    // would silently give her one card too many.
+    const id = await parked(2);
+    await unrecorded();
+    await removed(1);
+    const matched = await manualMatch(pgliteClient(db), id, CARD);
+    expect(matched.created).toBe(1);
+    expect(matched.withheld?.count).toBe(1);
+
+    expect(await restoreWithheldForEntry(pgliteClient(db), id)).toEqual({ restored: 1 });
+    expect(await copiesOf()).toBe(2);
+    expect(await memory()).toBeNull();
+  });
+
+  it("…and the same with an import recorded: it adds up, and the check lets it through", async () => {
+    const id = await parked(2);
+    await removed(1);
+    const matched = await manualMatch(pgliteClient(db), id, CARD);
+    expect(matched.created).toBe(1);
+    expect(matched.withheld?.count).toBe(1);
+
+    expect(await restoreWithheldForEntry(pgliteClient(db), id)).toEqual({ restored: 1 });
+    expect(await copiesOf()).toBe(2);
+    expect(await memory()).toBeNull();
+    expect(await nextImport(2)).toEqual({ parks: 0, creates: [], retires: 0 });
+  });
+
   it("is refused on a row that is not matched, and writes nothing", async () => {
     const id = await parked(1);
     await removed(1);
