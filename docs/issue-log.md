@@ -7483,8 +7483,11 @@ second attempt at all.
 
   **Third message, same day.** In her words: "Well there's a difference between the haul plan's manual
   add and the manual add after the sync".
-- **Status:** Open — **re-specced 2026-09-23 by Karvi's second and third messages; owners in the order
-  she set.** Her rule: inventory enters ONLY through a Dex import, which includes the manual match she
+- **Status:** Open — **parts (1), (2) and (3) DONE and deployed; only (4), the database guard (migration
+  `0023`), remains, with the Tech Lead (new).** No screen in the app creates a copy any more: after PR
+  [#331](https://github.com/viantihu/pokemon-tcg-tracker/pull/331) `lib/sync/exec.ts` (import, Undo re-insert, Sync manual match) is the only
+  `insert_copy` emitter on `develop`. **Re-specced 2026-09-23 by Karvi's second and third messages; owners
+  in the order she set.** Her rule: inventory enters ONLY through a Dex import, which includes the manual match she
   makes on the Sync page for a Dex row the import could not resolve (that copy still comes from her Dex
   row and carries its presence group). The Haul Plan's add-by-hand is not that, so her first ruling
   stands: "if adding cards in the haul plan will cause data integrity issues, that option should not
@@ -7509,13 +7512,24 @@ second attempt at all.
   `36148588002`); the add form, source picker and notes are gone, the server refuses a row that is not a
   queued copy and treats an already-placed copy as done with zero writes, and `lib/plan/commit.ts` emits
   no `insert_copy` (Dev 2: 9 mutants killed; QA: 4; the Tech Lead's review is on the PR, confirmed at
-  `a38b848`). Backfill half: Full Stack Dev - 2, after UIL-099 E2; `lib/backfill/commit.ts:60` is the
-  only copy emitter left outside `lib/sync/exec.ts`. (4) The Tech Lead's audit is accepted: the only legitimate creators are the import, Retry, Undo
+  `a38b848`). Backfill half DONE: PR [#331](https://github.com/viantihu/pokemon-tcg-tracker/pull/331) MERGED (`666cf83`) and deployed
+  2026-09-25 (Deploy run `36158808086`). Backfill now PLACES copies her import made and never creates one:
+  its four "card she owns" pickers search only cards waiting in her haul (printing + Dex variant + count,
+  the variant shown, not chosen), the server picks that many waiting copies of the key oldest-first using
+  the Haul Plan queue's own predicate, and it refuses a shortage before any write, naming the card ("add
+  it in Dex, import it on the Sync page, then pick it here"). **Senior BA's rulings:** (a) only a line
+  whose FILLED stage names a card not waiting in her haul is refused, everything else saves, and her
+  entries for that line stay on screen; (b) no migration. **Parked follow-up (b):** the Haul Plan and
+  Backfill placing the same copy in the same moment: last write wins, and can leave a slot FILLED for a
+  copy placed elsewhere (the UIL-087 shape); closing it needs a conditional place-only-if-waiting op and a
+  migration. Gate: the Tech Lead's review on the PR at `39889f9`; Dev 2 16 mutants killed, QA 4 groups
+  killed; the shared test client's `.order()` now chains like PostgREST (QA: develop's suite passes
+  unchanged with it, so it hid no production bug). (4) The Tech Lead's audit is accepted: the only legitimate creators are the import, Retry, Undo
   and the Sync manual match (all carry the Dex row's presence group); the database guard is migration
   `0023` (`copy.presence_group_id` NOT NULL, FK ON DELETE RESTRICT), built by the Tech Lead after part
-  3, gated on a read showing zero ungrouped copies; defects in the legitimate paths are UIL-099. **Until
-  the Backfill half ships:** bring cards in only through a Dex import and place them from the Haul Plan's
-  queue; do not use Backfill, which still creates copies.
+  3, gated on a read showing zero ungrouped copies; defects in the legitimate paths are UIL-099. **Since
+  the Backfill half shipped (2026-09-25):** every screen places only cards her Dex import brought in; the
+  earlier interim warning is retired.
 - **Priority:** High (Karvi's ruling; Senior BA agrees) — every hand-created copy is a future duplicate
   that only UIL-089's merge can clean up, and she is about to re-enter her whole collection after the
   2026-09-23 wipe.
@@ -7645,11 +7659,25 @@ legitimately do, creating too many), **UIL-089** (the removed-presence memory E2
   sure that the total number of cards in the collection equal the dex import file. This will ensure that
   cards are not double counted during the matching process or manual add process (which is where I
   suspect the issue occurred)."
-- **Status:** Open — **assigned to the Tech Lead (new) 2026-09-23; design approved by the Senior BA;
-  Undo behaviour ruled by Karvi; migration `0022`.** Karvi will not re-import until this and UIL-099
-  E1/E2 are deployed. The design and the ruling are recorded below. Testing was refreshed to empty after
-  her Undo (see "Refresh" below), so her next import is the first the check will see; until then the
-  panel reads "No import checked yet".
+- **Status:** **Fixed** — PR [#329](https://github.com/viantihu/pokemon-tcg-tracker/pull/329) MERGED to `develop` 2026-09-25 (squash `2196bc8`), QA-gated
+  (final head `f79bdd1`, 1363 tests; one refusal test per writer after QA's hold; arming-rule mutant 13
+  red); migration `0022` applied on Testing (Deploy run `36155457103`). The Senior BA's BEFORE (run
+  `36151667823`: both tables absent) and AFTER (run `36155659990`: both present with 0 rows, every other
+  count identical) match. Awaiting Karvi's confirmation. **Her step:** re-import her Dex file once; that
+  import arms the check, and the Count check panel then shows her Dex total adding up, or lists each card
+  that does not. Assigned to the Tech Lead (new) 2026-09-23; design approved by the Senior BA; Undo
+  behaviour ruled by Karvi. **Arming (added in review, because Karvi re-imported at
+  2026-09-24T01:12Z before this shipped, so 0022 met 720 existing copies and no record):** the check is a
+  no-op until a `dex_import` row exists, so her existing cards are never shown as mismatches and nothing
+  is refused before that import; the panel reads "Count check: starts at your next import. Re-import your
+  Dex file once to turn it on". Her first re-import is also the repair path for a double that already
+  exists inside a presence group: the preview retires the extra (least-committed copy first, so the one
+  waiting in the Haul Plan goes and the shelved one stays) for her to review; "remove" is never advised,
+  since it records a card as traded away. **Also fixed in #329:** a Retry that promotes a Dex row onto a
+  card another row already fills now adds to that card instead of retiring the other row's copies
+  without review (card-entry audit finding 3). The removal path is deliberately not checked: it moves
+  copies and removals together, so it cannot create a mismatch, and checking it would only block her
+  remedy.
 - **Priority:** High (Senior BA's read; Karvi to confirm) — a silent wrong count on import is exactly the
   defect class UIL-098 and UIL-099 exist to close.
 - **Area:** Sync
