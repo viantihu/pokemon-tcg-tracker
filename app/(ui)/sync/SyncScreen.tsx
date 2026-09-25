@@ -24,6 +24,7 @@ import {
   loadSyncState,
   manualMatchEntry,
   previewSync,
+  restoreWithheldAction,
   retryUnresolvedNow,
   searchCatalog,
   undismissEntryAction,
@@ -65,6 +66,11 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [matching, setMatching] = useState<QueueEntryView | null>(null);
+  /**
+   * Cards a match held back because she had removed them (UIL-099 E2). A panel, not a toast: it carries the
+   * one action that returns them, and it stays until she chooses.
+   */
+  const [withheld, setWithheld] = useState<WithheldView | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -202,6 +208,30 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
 
       <CountCheckPanel check={state.countCheck} />
 
+      {withheld ? (
+        <WithheldNotice
+          notice={withheld}
+          busy={busy}
+          onKeep={() => setWithheld(null)}
+          onAddBack={() =>
+            run(null, async () => {
+              const r = await restoreWithheldAction(withheld.entryId);
+              if (r.ok) {
+                setWithheld(null);
+                setToast(
+                  r.alreadyRestored
+                    ? "Already added back."
+                    : r.restored > 0
+                      ? `Added back ${r.restored} ${withheld.name}. Ready to place.`
+                      : "Nothing to add back: the removal no longer applies.",
+                );
+              }
+              return r;
+            })
+          }
+        />
+      ) : null}
+
       <UndoBar
         state={state}
         busy={busy}
@@ -276,16 +306,23 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
             return r;
           }}
           onPicked={async (tcgdexId) => {
-            const entryId = matching.id;
+            const entry = matching;
             setMatching(null);
             await run(null, async () => {
-              const r = await manualMatchEntry(entryId, tcgdexId);
-              if (r.ok)
+              const r = await manualMatchEntry(entry.id, tcgdexId);
+              if (!r.ok) return r;
+              if (r.withheld > 0) {
+                // The notice says what happened; a "ready to place" toast would be wrong when nothing was added.
+                setWithheld({ entryId: entry.id, name: entry.dexName, count: r.withheld });
+              } else {
                 setToast(
-                  r.drainedSet
-                    ? "Matched — learned the set; retry to drain the rest of the set."
-                    : "Matched and ready to place.",
+                  r.alreadyMatched
+                    ? "Already matched. Nothing was added twice."
+                    : r.drainedSet
+                      ? "Matched — learned the set; retry to drain the rest of the set."
+                      : "Matched and ready to place.",
                 );
+              }
               return r;
             });
           }}
@@ -297,6 +334,61 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
           {toast}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** What a match held back for a removal, as the notice shows it (UIL-099 E2). */
+export interface WithheldView {
+  entryId: string;
+  /** The card's name as her Dex export spells it. */
+  name: string;
+  count: number;
+}
+
+/**
+ * "You removed this card, so the match did not bring it back" (UIL-099 E2). The match itself landed; this
+ * is the visible half of honouring her removal, with the one way to take the removal back.
+ */
+export function WithheldNotice({
+  notice,
+  busy,
+  onAddBack,
+  onKeep,
+}: {
+  notice: WithheldView;
+  busy: boolean;
+  onAddBack: () => void;
+  onKeep: () => void;
+}) {
+  const one = notice.count === 1;
+  const it = one ? "it" : "them";
+  return (
+    <div
+      className="panel"
+      role="status"
+      style={{
+        padding: 12,
+        fontSize: 12,
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 8,
+        alignItems: "center",
+      }}
+    >
+      <b style={{ flexBasis: "100%" }}>
+        Matched, but {notice.count} {notice.name} {one ? "was" : "were"} not added: you removed{" "}
+        {one ? "this card" : "these cards"} from the app earlier.
+      </b>
+      <span style={{ flexBasis: "100%", color: "var(--ink-2)" }}>
+        If you do have {it}, add {it} back and {one ? "it goes" : "they go"} to your Haul Plan.
+      </span>
+      <button type="button" className="btn btn-primary" onClick={onAddBack} disabled={busy}>
+        Add {it} back
+      </button>
+      <button type="button" className="btn" onClick={onKeep} disabled={busy}>
+        Keep {it} removed
+      </button>
     </div>
   );
 }

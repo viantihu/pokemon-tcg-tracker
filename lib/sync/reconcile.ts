@@ -200,6 +200,14 @@ export interface ReconcileInput {
  * / custom-list rows (`Type != "collection"`) are dropped here and can never become owned presence —
  * this is the step that prevents the silent collection corruption called out in the architecture.
  */
+/**
+ * A Dex row's quantity as presence counts it: a whole number, never negative, 0 when unreadable. Shared by
+ * the import and the Sync page's manual match (UIL-099 E2), so one row cannot count two different ways.
+ */
+export function dexQuantity(quantity: number): number {
+  return Number.isFinite(quantity) ? Math.max(0, Math.trunc(quantity)) : 0;
+}
+
 export function buildDesiredPresence(rows: ResolvedRow[]): {
   desired: ReturnType<typeof toPresenceMap>;
   unresolved: UnresolvedRow[];
@@ -209,7 +217,7 @@ export function buildDesiredPresence(rows: ResolvedRow[]): {
   const counts: PresenceCount[] = [];
   const unresolved: UnresolvedRow[] = [];
   for (const r of owned) {
-    const qty = Number.isFinite(r.quantity) ? Math.max(0, Math.trunc(r.quantity)) : 0;
+    const qty = dexQuantity(r.quantity);
     if (r.catalogCardId) {
       counts.push({ catalogCardId: r.catalogCardId, dexVariantRaw: r.dexVariantRaw, count: qty });
     } else {

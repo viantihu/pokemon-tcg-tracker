@@ -136,4 +136,20 @@ export const removedPresenceRepo = {
     if (error) throw error;
     return data ?? [];
   },
+
+  /** The memory for one presence key, or null (UIL-099 E2: what a manual match must not hand back). */
+  async findByKey(
+    db: DbClient,
+    catalogCardId: string,
+    dexVariantRaw: string,
+  ): Promise<Row<"removed_presence"> | null> {
+    const { data, error } = await db
+      .from("removed_presence")
+      .select("*")
+      .eq("catalog_card_id", catalogCardId)
+      .eq("dex_variant_raw", dexVariantRaw)
+      .maybeSingle();
+    if (error) throw error;
+    return data ?? null;
+  },
 };

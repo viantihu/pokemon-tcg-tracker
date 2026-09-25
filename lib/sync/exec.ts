@@ -17,10 +17,10 @@ import {
   dexImportRepo,
   dexPresenceRepo,
   lastSyncSnapshotRepo,
-  removedPresenceRepo,
   evolutionLineRepo,
   lineSlotRepo,
   presenceGroupRepo,
+  removedPresenceRepo,
   setAliasRepo,
   unresolvedEntryRepo,
 } from "@/lib/repo";
@@ -30,11 +30,13 @@ import { localeOfId, normalizeLocale } from "@/lib/catalog/locale";
 import { entryAsDexRow, loadAliasMap } from "./pipeline";
 import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
+import { dexQuantity } from "./reconcile";
 import type { SyncPlanBundle } from "./pipeline";
 import { CountMismatchError, parseCountRefusal, type CardLabel } from "./count-check";
 import type { PresenceKeyRef } from "@/lib/repo/write-ops";
 import {
   assertFreshBase,
+  derivedUuid,
   latestSnapshot,
   planDigest,
   refusalAfterRace,
@@ -229,6 +231,9 @@ const NEXT_STEP = {
     "it out when you apply. Then match. (Do not remove a copy yourself — removing records it as traded away.)",
 
   undo: "Undo was not applied: your collection is as it was before you pressed it. Report this (UIL-100).",
+  restore:
+    "Nothing was added back. Import your Dex file again first: the preview shows what does not add up. " +
+    "Then add it back. (UIL-099)",
 } as const;
 
 /**
@@ -772,6 +777,96 @@ export interface ManualMatchResult {
    */
   aliasSkippedReason?: string | null;
   created: number;
+  /**
+   * Copies the match did NOT create because she had removed that many of this card while Dex still
+   * listed it (UIL-099 E2). Null when nothing was held back. The Sync page names them and offers
+   * `restoreWithheldForEntry`; a notice, not a failure: the row IS matched.
+   */
+  withheld?: WithheldForRemoval | null;
+  /**
+   * True when this row was already matched to this card, so NOTHING was written: a second press, a second
+   * tab, or a retry after a lost response. Reported as success, because the match did land.
+   */
+  alreadyMatched?: boolean;
+}
+
+/** What a manual match held back, keyed exactly like `removed_presence` (UIL-099 E2). */
+export interface WithheldForRemoval {
+  count: number;
+  catalogCardId: string;
+  dexVariantRaw: string;
+}
+
+/** Why a Match press on an already-resolved row is refused (UIL-099). Exported so tests and screen agree. */
+export const MATCH_REFUSED = {
+  /** Resolved to a DIFFERENT card: matching again would add this row's cards a second time. */
+  matchedElsewhere: (cardId: string) =>
+    `This row is already matched to ${cardId}. Matching it again would add its cards a second time. ` +
+    `Reload the Sync page to see it.`,
+  /** Resolved by an import (a Retry, or a learned set), which already created its copies. */
+  resolvedByImport:
+    "An import already resolved this row and added its cards, so matching it would add them a second " +
+    "time. Reload the Sync page to see it.",
+} as const;
+
+/**
+ * WHAT ONE PRESENCE KEY HOLDS, for the two writes that change it by hand (UIL-099 E1/E2 on UIL-100's
+ * record): whether a Dex import has been RECORDED (the `dex_import` header — one read, never inferred from
+ * the key, because a key Dex never listed reads record 0 in an armed collection), what the record says for
+ * this key BEFORE removals, what she removed, and the copies its presence group holds now.
+ */
+async function keyState(
+  db: DbClient,
+  catalogCardId: string,
+  dexVariantRaw: string,
+  groupId: string | null,
+): Promise<{ armed: boolean; record: number; removed: number; current: number }> {
+  const [header, record, memory, copies] = await Promise.all([
+    dexImportRepo.get(db),
+    dexPresenceRepo.findByKey(db, catalogCardId, dexVariantRaw),
+    removedPresenceRepo.findByKey(db, catalogCardId, dexVariantRaw),
+    groupId ? copyRepo.listByPresenceGroup(db, groupId) : Promise.resolve([]),
+  ]);
+  return {
+    armed: header !== null,
+    record: record?.quantity ?? 0,
+    removed: memory?.count ?? 0,
+    current: copies.length,
+  };
+}
+
+/**
+ * The copy ids a manual match writes: DERIVED from the entry, not random (UIL-099; the E5 pattern). Two
+ * presses of one match that both pass the status check build the SAME ids, so the second transaction
+ * collides on the primary key instead of inserting the row's cards twice. `retry_count` is bumped by the
+ * match itself, so a row that is ever legitimately matched again derives new ids.
+ */
+function matchCopyId(entry: Row<"unresolved_entry">, i: number): string {
+  return derivedUuid(`match:${entry.id}:${entry.retry_count}:${i}`);
+}
+
+/**
+ * THE STATUS CHECK a Match press makes before building anything (UIL-099, found while building E2).
+ * `manualMatch` never looked: a second press on a RESOLVED row re-inserted its whole quantity, the E5
+ * doubling on the Sync page's other write. A row already matched to the SAME card gets this no-op result;
+ * a row resolved any other way is refused by `refuseResolved`.
+ */
+function alreadyMatchedResult(): ManualMatchResult {
+  return {
+    learnedAlias: null,
+    aliasSkippedReason: null,
+    created: 0,
+    withheld: null,
+    alreadyMatched: true,
+  };
+}
+
+function refuseResolved(entry: Row<"unresolved_entry">): never {
+  throw new Error(
+    entry.manual_match_id
+      ? MATCH_REFUSED.matchedElsewhere(entry.manual_match_id)
+      : MATCH_REFUSED.resolvedByImport,
+  );
 }
 
 /**
@@ -903,11 +998,42 @@ async function matchOps(
     });
   }
 
-  const qty = Math.max(1, entry.quantity);
-  for (let i = 0; i < qty; i++) {
+  /**
+   * HOW MANY COPIES (UIL-099 E2). The row's quantity as presence counts it (`dexQuantity`, the import's own
+   * normaliser), so a match and the next import of the same row cannot count it two ways. The quantity is
+   * already at least 1 here: `parseQuantity` reads a blank or 0 cell as one copy before a row parks.
+   *
+   * MINUS what she removed of this key (E2). `removed_presence` is what stops an import handing back a card
+   * she removed while Dex still lists it (UIL-089), and a manual match is an import of one row that never
+   * read it, so matching a row for a card she had traded away silently re-created it. The memory itself is
+   * left alone: the next import subtracts it from the same key again, so the two agree, and
+   * `restoreWithheldForEntry` is the visible way to take a removal back.
+   *
+   * THE DIFFERENCE, NOT THE QUANTITY (E1). Once an import is recorded, the key must end holding what Dex
+   * lists for it — the record plus this row — minus what she removed: max(0, record + qty − removed). The
+   * match inserts only what is missing from that, so a second Dex row onto a key that already has copies
+   * adds up instead of stacking, and a removal already spent against another row's copies is not spent
+   * again. `withheld` is what the removal kept back, the part of `qty` not inserted. Before any import is
+   * recorded there is nothing to be exact against, and the match withholds up to `removed` of its own rows.
+   *
+   * ONLY ON A KEY THAT ADDS UP BEFORE THE MATCH. A key already holding more or fewer copies than Dex lists
+   * minus removals is not repaired silently by a match that happens to touch it: the match inserts as the
+   * unrecorded rule would, and UIL-100's check refuses it with the re-import remedy, because a disagreement
+   * is surfaced and repaired through an import she previews, never absorbed (the Tech Lead's design).
+   */
+  const qty = dexQuantity(entry.quantity);
+  const matchedKey = { catalog_card_id: target.tcgdexId, dex_variant_raw: entry.dex_variant_raw };
+  const k = await keyState(db, target.tcgdexId, entry.dex_variant_raw, groupExisting?.id ?? null);
+  const addsUp = k.current === Math.max(0, k.record - k.removed);
+  const created =
+    k.armed && addsUp
+      ? Math.max(0, Math.max(0, k.record + qty - k.removed) - k.current)
+      : qty - Math.min(qty, k.removed);
+  const withheld = qty - created;
+  for (let i = 0; i < created; i++) {
     ops.push({
       op: "insert_copy",
-      id: crypto.randomUUID(),
+      id: matchCopyId(entry, i),
       catalog_card_id: target.tcgdexId,
       variant: "normal",
       dex_variant_raw: entry.dex_variant_raw,
@@ -931,14 +1057,30 @@ async function matchOps(
 
   /**
    * UIL-100: the matched Dex row moves from "waiting" into the Dex record, and THE CHECK runs on this card
-   * last, in the same transaction. The quantity is the one this match inserts, so the two cannot disagree.
+   * last, in the same transaction. The record takes the row's Dex quantity, never the copies inserted: the
+   * check compares copies with what Dex SAID, minus what she removed, which is what `created` produces.
    * If the card already disagrees with Dex (a copy she already holds), the match is refused and says so.
    */
-  const matchedKey = { catalog_card_id: target.tcgdexId, dex_variant_raw: entry.dex_variant_raw };
   ops.push({ op: "add_dex_presence", ...matchedKey, quantity: qty });
   ops.push({ op: "assert_presence_counts", keys: [matchedKey] });
 
-  return { ops, groupId, result: { learnedAlias, aliasSkippedReason, created: qty } };
+  return {
+    ops,
+    groupId,
+    result: {
+      learnedAlias,
+      aliasSkippedReason,
+      created,
+      withheld:
+        withheld > 0
+          ? {
+              count: withheld,
+              catalogCardId: target.tcgdexId,
+              dexVariantRaw: entry.dex_variant_raw,
+            }
+          : null,
+    },
+  };
 }
 
 /**
@@ -946,6 +1088,11 @@ async function matchOps(
  * creates the unplaced copies, marks the entry RESOLVED, and — when the miss was UNKNOWN_SET —
  * learns the `(locale, dexCode) → tcgdexSetId` alias so the rest of that set drains on the next
  * retry ("one match drains the set"). Applied in one transaction.
+ *
+ * APPLIED ONCE (UIL-099). A row already matched to this card writes nothing and says so; a row resolved any
+ * other way is refused (`alreadyMatched`). Two presses that race past that check collide on the derived copy
+ * ids, or on presence_group's unique key when both would create the group, and the loser re-reads the row to
+ * tell "the other press landed" from a real failure — never the error text (#325's lesson).
  */
 export async function manualMatch(
   db: DbClient,
@@ -956,6 +1103,10 @@ export async function manualMatch(
   if (!entry) throw new Error("Unresolved entry not found.");
   const card = await catalogCardRepo.getByPk(db, tcgdexId);
   if (!card) throw new Error("Catalog card not found.");
+  if (entry.status === "RESOLVED") {
+    if (entry.manual_match_id === tcgdexId) return alreadyMatchedResult();
+    refuseResolved(entry);
+  }
 
   const { ops, groupId, result } = await matchOps(
     db,
@@ -966,9 +1117,112 @@ export async function manualMatch(
   try {
     await applyWriteOps(db, { ops, resyncGroupIds: [groupId] });
   } catch (err) {
+    // A press that raced this one and landed first is success, not a failure (#325's lesson: re-read the
+    // row, never the error text). Only then is it the count check refusing, or a real failure.
+    const now = await unresolvedEntryRepo.getByPk(db, entryId);
+    if (now?.status === "RESOLVED" && now.manual_match_id === tcgdexId)
+      return alreadyMatchedResult();
     throw (await asCountRefusal(db, err, NEXT_STEP.match)) ?? err;
   }
   return result;
+}
+
+export interface RestoreWithheldResult {
+  /** Copies added back to her haul. */
+  restored: number;
+  /** True when this row's held-back cards were already added back, so nothing was written. */
+  alreadyRestored?: boolean;
+}
+
+/** Why "Add it back" is refused (UIL-099 E2). */
+export const RESTORE_REFUSED = {
+  notMatched:
+    "This row is not matched to a card, so there is nothing to add back. Reload the Sync page.",
+} as const;
+
+/** Derived like `matchCopyId`, so a double-pressed "Add it back" collides instead of adding twice. */
+function restoreCopyId(entry: Row<"unresolved_entry">, i: number): string {
+  return derivedUuid(`restore:${entry.id}:${entry.retry_count}:${i}`);
+}
+
+/**
+ * "Add it back" (UIL-099 E2): the cards a manual match held back because she had removed them, returned to
+ * her haul, with the removal memory shrunk by the same number in the SAME transaction. Afterwards the key
+ * holds what Dex lists, and the next import agrees, because it subtracts the smaller memory.
+ *
+ * Recomputed here rather than trusted from the screen: at most the row's own quantity, and at most what the
+ * memory still holds.
+ *
+ * ONCE per match. The copies are written at ids derived from the entry, so a second press — sequential or
+ * racing — finds (or collides with) the first press's copy and reports `alreadyRestored` instead of adding
+ * more, which matters most when she removed more of this card than this row lists.
+ */
+export async function restoreWithheldForEntry(
+  db: DbClient,
+  entryId: string,
+): Promise<RestoreWithheldResult> {
+  const entry = await unresolvedEntryRepo.getByPk(db, entryId);
+  if (!entry || entry.status !== "RESOLVED" || !entry.manual_match_id) {
+    throw new Error(RESTORE_REFUSED.notMatched);
+  }
+  const catalogCardId = entry.manual_match_id;
+  const dexVariantRaw = entry.dex_variant_raw;
+  const firstId = restoreCopyId(entry, 0);
+  if (await copyRepo.getByPk(db, firstId)) return { restored: 0, alreadyRestored: true };
+
+  const group = await presenceGroupRepo.findByKey(db, catalogCardId, dexVariantRaw);
+  if (!group) throw new Error(RESTORE_REFUSED.notMatched);
+  const k = await keyState(db, catalogCardId, dexVariantRaw, group.id);
+  const restore = Math.min(dexQuantity(entry.quantity), k.removed);
+  if (restore === 0) return { restored: 0 };
+  /**
+   * What the memory must shrink to so the key adds up afterwards. Recorded: the key will hold
+   * current + restore copies against a record that lists `record`, so the memory is whatever of the record
+   * is still NOT held — which can be less than `removed − restore`, because a memory may exceed what Dex now
+   * lists (the import never shrinks one while Dex still names the key). Not recorded — or a key that does
+   * not add up before, which the check then refuses rather than this absorbing — by what came back.
+   */
+  const addsUp = k.current === Math.max(0, k.record - k.removed);
+  const newMemory =
+    k.armed && addsUp ? Math.max(0, k.record - (k.current + restore)) : k.removed - restore;
+  const shrinkBy = k.removed - newMemory;
+
+  const now = nowIso();
+  const ops: WriteOp[] = [];
+  for (let i = 0; i < restore; i++) {
+    ops.push({
+      op: "insert_copy",
+      id: restoreCopyId(entry, i),
+      catalog_card_id: catalogCardId,
+      variant: "normal",
+      dex_variant_raw: dexVariantRaw,
+      presence_group_id: group.id,
+      role: "haul",
+      acquired_at: now,
+    });
+  }
+  // Column-computed (0022's `shrink_removed_presence`): the row is deleted when the shrink takes it to
+  // zero or below, since the table refuses a count below 1.
+  if (shrinkBy > 0) {
+    ops.push({
+      op: "shrink_removed_presence",
+      catalog_card_id: catalogCardId,
+      dex_variant_raw: dexVariantRaw,
+      by: shrinkBy,
+    });
+  }
+  // THE CHECK, last (UIL-100): a no-op until an import is recorded.
+  ops.push({
+    op: "assert_presence_counts",
+    keys: [{ catalog_card_id: catalogCardId, dex_variant_raw: dexVariantRaw }],
+  });
+  try {
+    await applyWriteOps(db, { ops, resyncGroupIds: [group.id] });
+  } catch (err) {
+    if (await copyRepo.getByPk(db, firstId)) return { restored: 0, alreadyRestored: true };
+    throw (await asCountRefusal(db, err, NEXT_STEP.restore)) ?? err;
+  }
+  return { restored: restore };
 }
 
 /**
@@ -1013,6 +1267,14 @@ export async function manualMatchStandIn(
       norm(c.set_name) === norm(input.setName) &&
       norm(c.local_id) === norm(input.localId),
   );
+  // Applied once, like `manualMatch` (UIL-099): a second press on a row already matched to THIS stand-in is
+  // that match landing, not a twin; any other resolution is refused before a second stand-in is made.
+  if (entry.status === "RESOLVED") {
+    if (twin && entry.manual_match_id === twin.tcgdex_id) {
+      return { ...alreadyMatchedResult(), standInId: twin.tcgdex_id };
+    }
+    refuseResolved(entry);
+  }
   if (twin) throw new StandInTwinError(twin);
 
   const standInId = newStandInId();
@@ -1036,6 +1298,12 @@ export async function manualMatchStandIn(
   try {
     await applyWriteOps(db, { ops, resyncGroupIds: [match.groupId] });
   } catch (err) {
+    // A racing second press: its stand-in rolled back with the rest of its transaction, so the row's
+    // match is the one that landed. Re-read, as `manualMatch` does; then the count check; then rethrow.
+    const now = await unresolvedEntryRepo.getByPk(db, entryId);
+    if (now?.status === "RESOLVED" && now.manual_match_id && isStandInId(now.manual_match_id)) {
+      return { ...alreadyMatchedResult(), standInId: now.manual_match_id };
+    }
     throw (await asCountRefusal(db, err, NEXT_STEP.match)) ?? err;
   }
   return { ...match.result, standInId };
