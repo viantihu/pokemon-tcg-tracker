@@ -9,6 +9,12 @@
  * once a query of two-plus characters has been typed and the debounced fetch has answered, which a
  * static render in a node environment cannot drive. So the tag is what is pinned. (The text list is now
  * deleted, so the remaining risk this guards is a site quietly dropping the grid.)
+ *
+ * UIL-098 split the five sites in two, and this pins the split. The FOUR that pick a card she owns search
+ * only what is waiting in her haul (the memoised `search` from `useWaitingSearch`) and say "import it
+ * first" when nothing matches; ONE — the species picker that starts a line — still searches the catalog,
+ * because it chooses a chain, not a copy. A site drifting back to `lookupCatalog` would let Backfill offer
+ * a card with no copy behind it.
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -34,21 +40,35 @@ describe("UIL-071 · every Backfill type-ahead is the image-first grid", () => {
     expect(sites.map(placeholderOf)).toEqual([
       "Set + number or name…", // front half · in order
       "Pick a species in this line (any stage)…", // back half · start a line
-      "Which printing?", // stage row · the owned printing
+      "Which card?", // stage row · the owned card
       "Which duplicate was repurposed?", // stage row · a repurposed-dup block
       "Set + number or name…", // specialty · flat list
     ]);
   });
 
-  it("each site passes exactly the contract: search, onPick, placeholder", () => {
-    for (const props of sites) {
-      expect(props).toMatch(/\bsearch=\{lookupCatalog\}/);
+  const SPECIES = "Pick a species in this line (any stage)…";
+
+  it("the species picker alone searches the catalog, with exactly the contract", () => {
+    const species = sites.filter((p) => placeholderOf(p) === SPECIES);
+    expect(species).toHaveLength(1);
+    expect(species[0]).toMatch(/\bsearch=\{lookupCatalog\}/);
+    const names = [...species[0].matchAll(/(\w+)=/g)].map((m) => m[1]).sort();
+    expect(names).toEqual(["onPick", "placeholder", "search"]);
+  });
+
+  it("the four card-she-owns pickers search her haul and say to import first (UIL-098)", () => {
+    const owned = sites.filter((p) => placeholderOf(p) !== SPECIES);
+    expect(owned).toHaveLength(4);
+    for (const props of owned) {
+      expect(props).toMatch(/\bsearch=\{search\}/);
+      expect(props).not.toMatch(/lookupCatalog/);
+      expect(props).toMatch(/\bemptyText=\{NOT_WAITING_EMPTY\}/);
       expect(props).toMatch(/\bonPick=\{\w+\}/);
-      expect(placeholderOf(props)).not.toBeNull();
-      // Nothing beyond the contract crept in with the swap.
       const names = [...props.matchAll(/(\w+)=/g)].map((m) => m[1]).sort();
-      expect(names).toEqual(["onPick", "placeholder", "search"]);
+      expect(names).toEqual(["emptyText", "onPick", "placeholder", "search"]);
     }
+    // Every `search` on the screen is the waiting search.
+    expect(src.match(/const search = useWaitingSearch\(/g)).toHaveLength(3);
   });
 });
 

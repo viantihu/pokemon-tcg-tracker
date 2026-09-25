@@ -4,6 +4,18 @@
  */
 
 import type { BackfillBinder, BackfillCollection, BandOption, CommitCounts } from "@/lib/backfill";
+import type { LookupCard } from "../plan/plan-types";
+
+/**
+ * A printing + Dex variant waiting in her haul, as Backfill's card pickers offer it (UIL-098). One tile
+ * per key; picking it asks the server to place one of the `waiting` copies.
+ */
+export interface WaitingCard extends LookupCard {
+  dexVariantRaw: string;
+  waiting: number;
+  /** "Reverse Holo · 2 waiting" — the tile's extra line. */
+  badge: string;
+}
 
 /** What `loadContext` returns for the screen to render its pickers. */
 export interface BackfillContextPayload {

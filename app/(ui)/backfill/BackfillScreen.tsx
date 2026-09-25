@@ -12,16 +12,21 @@
  *   • SPECIALTY  — a flat list, each card optionally tagged into collections.
  *
  * All catalog access + writes are server-side via server actions; the client never touches TCGdex.
+ *
+ * EVERY CARD SHE OWNS IS PICKED FROM HER HAUL (UIL-098). Backfill places copies her Dex import made and
+ * creates none, so the four card-she-owns pickers (front half, a FILLED stage, a repurposed duplicate,
+ * specialty) search only what is waiting (`searchWaiting`), one tile per printing + Dex variant with how
+ * many are waiting. The variant is Dex's, shown and never chosen. The species picker that starts a line
+ * still searches the catalog: it chooses a chain, not a card she owns.
  */
 
-import { useEffect, useState } from "react";
-import { band, type LineStatus, type SlotState, type Variant } from "@/lib/engine";
+import { useEffect, useMemo, useState } from "react";
+import { band, type LineStatus, type SlotState } from "@/lib/engine";
 import type { BackLineStageInfo, BackLineStageInput, ResolvedBackLine } from "@/lib/backfill";
 import { BandChip } from "../_components/BandChip";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
 import { CardResultsGrid } from "../_components/CardResultsGrid";
-import { VariantSelector } from "../_components/VariantSelector";
 import { bandMeta } from "../_components/plan-meta";
 import type { LookupCard } from "../plan/plan-types";
 import {
@@ -31,8 +36,9 @@ import {
   loadContext,
   lookupCatalog,
   resolveLine,
+  searchWaiting,
 } from "./actions";
-import type { BackfillContextPayload } from "./backfill-types";
+import type { BackfillContextPayload, WaitingCard } from "./backfill-types";
 
 type Mode = "front" | "back" | "specialty";
 
@@ -43,6 +49,42 @@ function newId(): string {
 }
 
 type Banner = { kind: "ok" | "err"; text: string } | null;
+
+/** What a card-she-owns picker says when nothing waiting matches (UIL-098). */
+export const NOT_WAITING_EMPTY =
+  "Not waiting in your haul. Add it in Dex, import it on the Sync page, then pick it here.";
+
+type Pick = { tcgdexId: string; dexVariantRaw: string };
+const pickKey = (p: Pick) => `${p.tcgdexId} ${p.dexVariantRaw}`;
+
+/**
+ * The waiting search minus what this form has already picked, so a tile never offers the same copy twice
+ * and its count is what is really left. Memoised on the picks: the grid re-runs its search whenever the
+ * function changes, so a fresh closure every render would search in a loop.
+ */
+function useWaitingSearch(picks: Pick[]): (query: string) => Promise<WaitingCard[]> {
+  const sig = picks.map(pickKey).sort().join("|");
+  return useMemo(() => {
+    const used = new Map<string, number>();
+    for (const k of sig ? sig.split("|") : []) used.set(k, (used.get(k) ?? 0) + 1);
+    return async (query: string) =>
+      (await searchWaiting(query)).flatMap((c) => {
+        const left = c.waiting - (used.get(pickKey(c)) ?? 0);
+        return left > 0
+          ? [{ ...c, waiting: left, badge: `${c.dexVariantRaw} · ${left} waiting` }]
+          : [];
+      });
+  }, [sig]);
+}
+
+/** A picked card's Dex variant, shown as the row's variant: Dex owns it (sync-architecture §1.1). */
+function WaitingTag({ card }: { card: WaitingCard }) {
+  return (
+    <span className="tag u" title="From your Dex import">
+      Waiting from sync · {card.dexVariantRaw}
+    </span>
+  );
+}
 
 export function BackfillScreen() {
   const [ctx, setCtx] = useState<BackfillContextPayload | null>(null);
@@ -170,8 +212,7 @@ export function BackfillScreen() {
 
 interface FrontRow {
   id: string;
-  card: LookupCard;
-  variant: Variant;
+  card: WaitingCard;
 }
 
 /**
@@ -183,12 +224,10 @@ export function FrontRowItem({
   row,
   typeColorMap,
   onRemove,
-  onVariant,
 }: {
   row: FrontRow;
   typeColorMap: Record<string, string>;
   onRemove: () => void;
-  onVariant: (v: Variant) => void;
 }) {
   // The engine's canonical derivation (UIL-080), not a local copy: effectiveType first — a Trainer
   // resolves to its trainerType or "Trainer", an Energy to "Colorless" — then the map, falling back to
@@ -218,7 +257,7 @@ export function FrontRowItem({
           ✕
         </button>
       </span>
-      <VariantSelector variants={row.card.variants} value={row.variant} onChange={onVariant} />
+      <WaitingTag card={row.card} />
     </span>
   );
 }
@@ -234,12 +273,10 @@ function FrontHalfPanel({
 }) {
   const [rows, setRows] = useState<FrontRow[]>([]);
   const [saving, setSaving] = useState(false);
+  const search = useWaitingSearch(rows.map((r) => r.card));
 
-  function add(card: LookupCard) {
-    setRows((r) => [...r, { id: newId(), card, variant: card.variants[0] ?? "normal" }]);
-  }
-  function setVariant(id: string, v: Variant) {
-    setRows((r) => r.map((row) => (row.id === id ? { ...row, variant: v } : row)));
+  function add(card: WaitingCard) {
+    setRows((r) => [...r, { id: newId(), card }]);
   }
   function remove(id: string) {
     setRows((r) => r.filter((row) => row.id !== id));
@@ -252,10 +289,13 @@ function FrontHalfPanel({
       const res = await commitFrontAction({
         binderId,
         half: "front",
-        cards: rows.map((r) => ({ tcgdexId: r.card.tcgdexId, variant: r.variant })),
+        cards: rows.map((r) => ({
+          tcgdexId: r.card.tcgdexId,
+          dexVariantRaw: r.card.dexVariantRaw,
+        })),
       });
       if (res.ok) {
-        onResult({ kind: "ok", text: `Saved ${res.counts.copies} card(s) to the front half.` });
+        onResult({ kind: "ok", text: `Saved ${res.counts.placed} card(s) to the front half.` });
         setRows([]);
       } else onResult({ kind: "err", text: res.error });
     } catch (e) {
@@ -268,12 +308,17 @@ function FrontHalfPanel({
   return (
     <div className="entry panel">
       <div className="hd u">Front half · in order</div>
-      <CardResultsGrid search={lookupCatalog} onPick={add} placeholder="Set + number or name…" />
+      <CardResultsGrid
+        search={search}
+        onPick={add}
+        placeholder="Set + number or name…"
+        emptyText={NOT_WAITING_EMPTY}
+      />
 
       {rows.length === 0 ? (
         <p style={{ marginTop: 14, fontSize: 11, color: "var(--ink-2)", lineHeight: 1.8 }}>
-          Add cards in the physical order they sit. The colour band is computed from each
-          card&apos;s type — you never type it.
+          Add cards in the physical order they sit, from the cards waiting in your haul. The colour
+          band is computed from each card&apos;s type — you never type it.
         </p>
       ) : (
         <div className="seq" style={{ marginTop: 12 }}>
@@ -283,7 +328,6 @@ function FrontHalfPanel({
               row={r}
               typeColorMap={ctx.typeColorMap}
               onRemove={() => remove(r.id)}
-              onVariant={(v) => setVariant(r.id, v)}
             />
           ))}
         </div>
@@ -312,11 +356,11 @@ function FrontHalfPanel({
 interface StageEntry {
   info: BackLineStageInfo;
   decision: SlotState;
-  filledCard: LookupCard | null;
-  filledVariant: Variant;
+  /** FILLED: the copy she owns, picked from her haul (UIL-098). */
+  filledCard: WaitingCard | null;
   blockMaterial: "basicEnergy" | "repurposedDuplicate";
-  blockCard: LookupCard | null;
-  blockVariant: Variant;
+  /** A repurposed duplicate is a card she owns too, so it is picked from her haul as well. */
+  blockCard: WaitingCard | null;
   pocketCount: number;
 }
 
@@ -325,10 +369,8 @@ function defaultEntry(info: BackLineStageInfo): StageEntry {
     info,
     decision: info.sameColorPrintingExists ? "placeholder" : "block",
     filledCard: null,
-    filledVariant: "normal",
     blockMaterial: "basicEnergy",
     blockCard: null,
-    blockVariant: "normal",
     pocketCount: 1,
   };
 }
@@ -370,11 +412,9 @@ function BackHalfPanel({
       setEntries(
         r.stages.map((info) => {
           const e = defaultEntry(info);
-          if (info.stageIndex === r.seedStageIndex) {
-            e.decision = "filled";
-            e.filledCard = card;
-            e.filledVariant = card.variants[0] ?? "normal";
-          }
+          // The stage she picked the species by is one she owns — but the species picker searches the
+          // catalog, so the COPY still comes from her haul, picked in the stage's own row (UIL-098).
+          if (info.stageIndex === r.seedStageIndex) e.decision = "filled";
           return e;
         }),
       );
@@ -428,7 +468,7 @@ function BackHalfPanel({
             ...base,
             decision: "filled" as const,
             filledTcgdexId: e.filledCard!.tcgdexId,
-            filledVariant: e.filledVariant,
+            filledDexVariantRaw: e.filledCard!.dexVariantRaw,
           };
         }
         if (e.decision === "placeholder") {
@@ -445,7 +485,7 @@ function BackHalfPanel({
           decision: "block" as const,
           blockMaterial: e.blockMaterial,
           blockCopyTcgdexId: e.blockCard?.tcgdexId ?? null,
-          blockCopyVariant: e.blockVariant,
+          blockCopyDexVariantRaw: e.blockCard?.dexVariantRaw ?? null,
           pocketCount: e.pocketCount,
         };
       });
@@ -526,22 +566,12 @@ function BackHalfPanel({
             <StageRow
               key={e.info.stageIndex}
               entry={e}
+              otherPicks={entries.filter((o) => o !== e).flatMap(stagePicks)}
               terminated={terminated}
               onDecision={(d) => patch(e.info.stageIndex, { decision: d })}
-              onFilled={(card) =>
-                patch(e.info.stageIndex, {
-                  filledCard: card,
-                  filledVariant: card.variants[0] ?? "normal",
-                })
-              }
-              onFilledVariant={(v) => patch(e.info.stageIndex, { filledVariant: v })}
+              onFilled={(card) => patch(e.info.stageIndex, { filledCard: card })}
               onBlockMaterial={(m) => patch(e.info.stageIndex, { blockMaterial: m })}
-              onBlockCard={(card) =>
-                patch(e.info.stageIndex, {
-                  blockCard: card,
-                  blockVariant: card.variants[0] ?? "normal",
-                })
-              }
+              onBlockCard={(card) => patch(e.info.stageIndex, { blockCard: card })}
               onPocketCount={(n) => patch(e.info.stageIndex, { pocketCount: n })}
             />
           ))}
@@ -577,26 +607,37 @@ function BackHalfPanel({
   );
 }
 
+/** The waiting copies a stage takes as entered: its FILLED card, or its repurposed duplicate. */
+function stagePicks(e: StageEntry): WaitingCard[] {
+  if (e.decision === "filled" && e.filledCard) return [e.filledCard];
+  if (e.decision === "block" && e.blockMaterial === "repurposedDuplicate" && e.blockCard) {
+    return [e.blockCard];
+  }
+  return [];
+}
+
 function StageRow({
   entry,
+  otherPicks,
   terminated,
   onDecision,
   onFilled,
-  onFilledVariant,
   onBlockMaterial,
   onBlockCard,
   onPocketCount,
 }: {
   entry: StageEntry;
+  /** What the line's OTHER stages have picked, so this stage's picker counts what is really left. */
+  otherPicks: WaitingCard[];
   terminated: boolean;
   onDecision: (d: SlotState) => void;
-  onFilled: (card: LookupCard) => void;
-  onFilledVariant: (v: Variant) => void;
+  onFilled: (card: WaitingCard) => void;
   onBlockMaterial: (m: "basicEnergy" | "repurposedDuplicate") => void;
-  onBlockCard: (card: LookupCard) => void;
+  onBlockCard: (card: WaitingCard) => void;
   onPocketCount: (n: number) => void;
 }) {
   const { info, decision } = entry;
+  const search = useWaitingSearch(otherPicks);
   const faceClass = decision === "placeholder" ? "f ph" : decision === "block" ? "f blk" : "f";
 
   return (
@@ -649,21 +690,16 @@ function StageRow({
               </div>
             ) : (
               <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
-                Pick the printing you own:
+                Pick the card you own from your haul:
               </span>
             )}
             <CardResultsGrid
-              search={lookupCatalog}
+              search={search}
               onPick={onFilled}
-              placeholder="Which printing?"
+              placeholder="Which card?"
+              emptyText={NOT_WAITING_EMPTY}
             />
-            {entry.filledCard ? (
-              <VariantSelector
-                variants={entry.filledCard.variants}
-                value={entry.filledVariant}
-                onChange={onFilledVariant}
-              />
-            ) : null}
+            {entry.filledCard ? <WaitingTag card={entry.filledCard} /> : null}
           </div>
         )}
 
@@ -688,9 +724,10 @@ function StageRow({
             </div>
             {entry.blockMaterial === "repurposedDuplicate" && (
               <CardResultsGrid
-                search={lookupCatalog}
+                search={search}
                 onPick={onBlockCard}
                 placeholder="Which duplicate was repurposed?"
+                emptyText={NOT_WAITING_EMPTY}
               />
             )}
             <label
@@ -762,8 +799,7 @@ function StageRow({
 
 interface SpecRow {
   id: string;
-  card: LookupCard;
-  variant: Variant;
+  card: WaitingCard;
   collectionIds: string[];
 }
 
@@ -778,15 +814,10 @@ function SpecialtyPanel({
 }) {
   const [rows, setRows] = useState<SpecRow[]>([]);
   const [saving, setSaving] = useState(false);
+  const search = useWaitingSearch(rows.map((r) => r.card));
 
-  function add(card: LookupCard) {
-    setRows((r) => [
-      ...r,
-      { id: newId(), card, variant: card.variants[0] ?? "normal", collectionIds: [] },
-    ]);
-  }
-  function patch(id: string, next: Partial<SpecRow>) {
-    setRows((r) => r.map((row) => (row.id === id ? { ...row, ...next } : row)));
+  function add(card: WaitingCard) {
+    setRows((r) => [...r, { id: newId(), card, collectionIds: [] }]);
   }
   function toggleCollection(id: string, collectionId: string) {
     setRows((r) =>
@@ -814,14 +845,14 @@ function SpecialtyPanel({
         binderId,
         cards: rows.map((r) => ({
           tcgdexId: r.card.tcgdexId,
-          variant: r.variant,
+          dexVariantRaw: r.card.dexVariantRaw,
           collectionIds: r.collectionIds,
         })),
       });
       if (res.ok) {
         onResult({
           kind: "ok",
-          text: `Saved ${res.counts.copies} card(s) to the specialty binder.`,
+          text: `Saved ${res.counts.placed} card(s) to the specialty binder.`,
         });
         setRows([]);
       } else onResult({ kind: "err", text: res.error });
@@ -835,7 +866,12 @@ function SpecialtyPanel({
   return (
     <div className="entry panel">
       <div className="hd u">Specialty · flat list with collection tags</div>
-      <CardResultsGrid search={lookupCatalog} onPick={add} placeholder="Set + number or name…" />
+      <CardResultsGrid
+        search={search}
+        onPick={add}
+        placeholder="Set + number or name…"
+        emptyText={NOT_WAITING_EMPTY}
+      />
 
       {rows.length === 0 ? (
         <p style={{ marginTop: 14, fontSize: 11, color: "var(--ink-2)", lineHeight: 1.8 }}>
@@ -859,11 +895,7 @@ function SpecialtyPanel({
                     : ""}
                 </div>
                 <div style={{ marginTop: 6 }}>
-                  <VariantSelector
-                    variants={r.card.variants}
-                    value={r.variant}
-                    onChange={(v) => patch(r.id, { variant: v })}
-                  />
+                  <WaitingTag card={r.card} />
                 </div>
                 {ctx.collections.length > 0 && (
                   <div className="taglist" role="group" aria-label="Collection tags">

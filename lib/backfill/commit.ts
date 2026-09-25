@@ -17,11 +17,17 @@
  * but the ops below omit it so the column defaults to `auth.uid()` under the SECURITY INVOKER
  * function and 0002's `owner_all` RLS `with check` enforces it — identical to the other two paths.
  * `created_at` is likewise left to the DB default (`now()`), which is what a transcription means.
+ *
+ * PLACES, NEVER CREATES (UIL-098). Every card she transcribes is a copy her Dex import made, waiting in her
+ * haul; the payload PATCHES its placement (`update_copy`) and has no op that creates a copy. Each executor
+ * loads the waiting pool (the Haul Plan's own queue, ./waiting), refuses before writing anything when the
+ * save asks for a card that is not waiting — naming each card and its variant — and only then plans.
  */
 
 import { applyWriteOps, type DbClient, type WriteOp, type WritePayload } from "@/lib/repo";
-import { loadBackfillContext, planDeps } from "./context";
+import { loadBackfillContext, planDeps, type BackfillContext } from "./context";
 import { planBackLine, planFrontHalf, planSpecialty } from "./plan";
+import { demandsOf, loadWaiting, NotWaitingError, shortagesOf, takerFor } from "./waiting";
 import {
   countWrites,
   type BackfillWrites,
@@ -35,10 +41,10 @@ import {
  * Turn a planned write set into ONE ordered op list (PURE — no I/O).
  *
  * The order is the FK-safe order the previous per-row writes used, and the RPC applies it verbatim:
- * lines → copies → slots → the deferred `copy.line_slot_id` patch → blocks → wishlist → decisions →
+ * lines → placements → slots → the deferred `copy.line_slot_id` patch → blocks → wishlist → decisions →
  * collection tags. `copy.line_slot_id` is deferred because copy ↔ line_slot is a circular FK: the
- * copy goes in with NULL and is patched once its slot exists. Blocks come after copies because a
- * repurposed-duplicate block references the sacrificed copy.
+ * placement writes NULL and the link is patched once its slot exists. Blocks come after placements
+ * because a repurposed-duplicate block references the sacrificed copy.
  */
 export function buildBackfillPayload(writes: BackfillWrites): WritePayload {
   const ops: WriteOp[] = [];
@@ -55,19 +61,19 @@ export function buildBackfillPayload(writes: BackfillWrites): WritePayload {
     });
   }
 
-  for (const c of writes.copies) {
+  // Every placement column named explicitly: `CopyPatch` writes exactly the keys present, and a missing
+  // key would leave a stale placement. `variant` / `dex_variant_raw` / `haul_id` are Dex's, not ours.
+  for (const pl of writes.placements) {
     ops.push({
-      op: "insert_copy",
-      id: c.id!,
-      catalog_card_id: c.catalog_card_id,
-      variant: c.variant ?? "normal",
-      haul_id: c.haul_id ?? null,
-      acquired_at: c.acquired_at ?? null,
-      role: c.role ?? "shelved",
-      binder_id: c.binder_id ?? null,
-      binder_half: c.binder_half ?? null,
-      color_band: c.color_band ?? null,
-      line_slot_id: null, // deferred — patched below once the slot rows exist (circular FK)
+      op: "update_copy",
+      id: pl.copyId,
+      patch: {
+        role: pl.role,
+        binder_id: pl.binder_id,
+        binder_half: pl.binder_half,
+        color_band: pl.color_band,
+        line_slot_id: null, // deferred — patched below once the slot rows exist (circular FK)
+      },
     });
   }
 
@@ -155,24 +161,60 @@ export async function applyWrites(db: DbClient, writes: BackfillWrites): Promise
   return countWrites(writes);
 }
 
+/**
+ * Load, refuse a card that is not waiting, then plan and apply (UIL-098). The refusal comes before any
+ * write, so a refused save changes nothing — and, for a line, refuses only that line.
+ */
+async function commitWaiting(
+  db: DbClient,
+  ownerId: string,
+  picks: { tcgdexId: string; dexVariantRaw: string }[],
+  scope: "line" | "list",
+  plan: (deps: ReturnType<typeof planDeps>) => BackfillWrites,
+): Promise<CommitCounts> {
+  const [ctx, pool] = await Promise.all([loadBackfillContext(db), loadWaiting(db)]);
+  const short = shortagesOf(demandsOf(picks), pool);
+  if (short.length > 0) throw new NotWaitingError(short, nameIn(ctx), scope);
+  return applyWrites(db, plan(planDeps(ctx, ownerId, takerFor(pool))));
+}
+
+const nameIn = (ctx: BackfillContext) => (tcgdexId: string) =>
+  ctx.catalogById.get(tcgdexId)?.name ?? tcgdexId;
+
+/** The waiting copies a line takes: each FILLED stage, and each repurposed duplicate. */
+function linePicks(input: BackLineCommit): { tcgdexId: string; dexVariantRaw: string }[] {
+  const picks: { tcgdexId: string; dexVariantRaw: string }[] = [];
+  for (const s of input.stages) {
+    if (s.decision === "filled" && s.filledTcgdexId) {
+      picks.push({ tcgdexId: s.filledTcgdexId, dexVariantRaw: s.filledDexVariantRaw ?? "" });
+    }
+    if (
+      s.decision === "block" &&
+      s.blockMaterial === "repurposedDuplicate" &&
+      s.blockCopyTcgdexId
+    ) {
+      picks.push({ tcgdexId: s.blockCopyTcgdexId, dexVariantRaw: s.blockCopyDexVariantRaw ?? "" });
+    }
+  }
+  return picks;
+}
+
 /** Commit a front-half flat entry. */
 export async function commitFrontHalf(
   db: DbClient,
   ownerId: string,
   input: FrontHalfCommit,
 ): Promise<CommitCounts> {
-  const ctx = await loadBackfillContext(db);
-  return applyWrites(db, planFrontHalf(input, planDeps(ctx, ownerId)));
+  return commitWaiting(db, ownerId, input.cards, "list", (deps) => planFrontHalf(input, deps));
 }
 
-/** Commit a back-half line entry. */
+/** Commit a back-half line entry. Refuses THIS line when a card it names is not waiting. */
 export async function commitBackLine(
   db: DbClient,
   ownerId: string,
   input: BackLineCommit,
 ): Promise<CommitCounts> {
-  const ctx = await loadBackfillContext(db);
-  return applyWrites(db, planBackLine(input, planDeps(ctx, ownerId)));
+  return commitWaiting(db, ownerId, linePicks(input), "line", (deps) => planBackLine(input, deps));
 }
 
 /** Commit a specialty flat entry (with collection tags). */
@@ -181,6 +223,5 @@ export async function commitSpecialty(
   ownerId: string,
   input: SpecialtyCommit,
 ): Promise<CommitCounts> {
-  const ctx = await loadBackfillContext(db);
-  return applyWrites(db, planSpecialty(input, planDeps(ctx, ownerId)));
+  return commitWaiting(db, ownerId, input.cards, "list", (deps) => planSpecialty(input, deps));
 }
