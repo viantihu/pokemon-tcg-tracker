@@ -7403,8 +7403,23 @@ the same card.
 - **Reported:** 2026-09-23 (Karvi). In her words: "I tried logging into the app on Chrome on my
   iPad. When I opened the "magic link" from the gmal app, it opened a chrome tab asking me to enter
   my email again. At that point, I'd exhausted my attempts, so I was unable to log in from my iPad."
-- **Status:** Open — **re-scoped 2026-09-23: code fix assigned to Full Stack Dev - 2 (after UIL-099's E5
-  and UIL-098 parts 2 and 3); config half merged.** Config half: PR
+- **Status:** **Fixed** — code half: PR [#333](https://github.com/viantihu/pokemon-tcg-tracker/pull/333) MERGED to `develop` 2026-09-25 (squash
+  `3bc25ec`), deployed green. The link is requested in the implicit flow and lands on `/auth/confirm`, which
+  wipes the URL fragment before any network call, sets the session server-side, re-checks the allow-list,
+  and ROTATES the refresh token the link carried (the Tech Lead's security review, R1); a session she
+  already has is never overwritten (R2, ruled in by the Senior BA). `/auth/callback` is unchanged, so an
+  older link still works in the browser that asked for it. The login-page safety net finishes a link that
+  fell back to the Site URL in place (a deviation the Senior BA accepted as safer than forwarding). The
+  rate-limit message is readable. Runbook PR [#336](https://github.com/viantihu/pokemon-tcg-tracker/pull/336) (`920faa3`) names Production's Redirect URL.
+  **Karvi's step before she tests:** Testing project → Authentication → URL Configuration → Redirect URLs
+  → add `https://pokemon-tcg-tracker-git-develop-viantihus-projects.vercel.app/**`; then request a link on
+  the laptop and open it from Gmail on the iPad. Awaiting that test, which is the only end-to-end
+  verification (no test runs against real Supabase). **Not fixed here, stated in the PR:** the built-in
+  sender's 2 emails per hour (custom SMTP before cutover), and an iPad home-screen app's separate cookie
+  jar. **Follow-up R2b** (a second link opened where she is already signed in leaves its new session
+  alive; revoke it by session id, never by refreshing hers): PR [#342](https://github.com/viantihu/pokemon-tcg-tracker/pull/342), in review. **Was:**
+  re-scoped 2026-09-23: code fix assigned to Full Stack Dev - 2 (after UIL-099's E5 and UIL-098 parts 2
+  and 3); config half merged. Config half: PR
   [#315](https://github.com/viantihu/pokemon-tcg-tracker/pull/315) MERGED (`07ff166`) with the token_hash
   Magic Link template for local dev and the Production cutover checklist; PR
   [#318](https://github.com/viantihu/pokemon-tcg-tracker/pull/318) MERGED (`cfebc0b`) pins the Supabase
@@ -7827,8 +7842,17 @@ the queue, rather than guessing further now.
 ## UIL-102 — A card matched by hand on the Sync page is stored as a Normal copy whatever its Dex variant, so a hand-matched Reverse Holo or Holo is recorded as Normal
 
 - **Reported:** 2026-09-25 (not from Karvi — found by QA while gating #330)
-- **Status:** Open: assigned to Full Stack Dev - 2, right after UIL-099's #330 merges and ahead of
-  UIL-094 (High before Medium). The fix derives the flag in `matchOps` and in #330's Add-it-back path the
+- **Status:** **Fixed** — PR [#340](https://github.com/viantihu/pokemon-tcg-tracker/pull/340) MERGED to `develop` 2026-09-25 (squash `bb98df4`), deployed
+  green (Deploy run `36167567433`); the Tech Lead's card-entry approval on the PR at `48ebbb0`; QA: 9 mutants
+  killed. A hand match and "Add it back" now derive the flag with the import's own `deriveVariantFlag`, and
+  every import audits each copy's stored flag against its Dex variant and corrects any that differ, as a
+  reviewed (never fast-path) import whose preview names each card and marks the ones already placed "was
+  placed while recorded as Normal; check its pocket"; nothing is re-placed automatically, and Undo puts the
+  flags back. A flag fix never changes the copy's group or Dex variant, so UIL-100's count is unaffected
+  (pinned). **Expected at her next import** (the Senior BA's read, run `36163592989`): "3 variant flags
+  corrected", all 3 Dex "Holo" copies already shelved. Awaiting Karvi's confirmation. Follow-up: the apply
+  toast will mention flag fixes too (display only). **Was:** Open: assigned to Full Stack Dev - 2, right
+  after UIL-099's #330 merges and ahead of UIL-094 (High before Medium). The fix derives the flag in `matchOps` and in #330's Add-it-back path the
   same way the import does, AND repairs copies already stored wrong: Testing holds 6 hand matches today,
   and Production is promoted from Testing.
 - **Priority:** High (Senior BA's read; Karvi to confirm) — the stored variant decides holo swaps
@@ -7937,8 +7961,14 @@ re-import).
 ## UIL-104 — A row dismissed on the Sync page makes the next import of a file that still lists it fail whole, and a dismissed row that later leaves the file is never forgotten, so the Count check reads "doesn't add up"
 
 - **Reported:** 2026-09-25 (not from Karvi — found by the Tech Lead while building migration 0024)
-- **Status:** Open: assigned to the Tech Lead (new). **Interim: do not press Dismiss on the Sync page
-  until (b) ships.** Testing currently has 0 dismissed entries, so nothing is blocked yet.
+- **Status:** Open: assigned to the Tech Lead (new). **(b) DONE:** PR [#339](https://github.com/viantihu/pokemon-tcg-tracker/pull/339) MERGED to
+  `develop` 2026-09-25 (squash `72d9c6b`), deployed green (Deploy run `36166517935`): a re-import of a file
+  that still lists a dismissed row refreshes that entry and keeps it DISMISSED (QA: 5 mutants killed; the
+  pre-fix control reproduces the unique-key failure). Dismiss is safe to use again. **(a)** rides in the
+  Tech Lead's migration `0024` PR (the file-level check), with the preview line "1 dismissed row is no
+  longer in your Dex file and will be forgotten". **Was:** Open: assigned to the Tech Lead (new). Interim:
+  do not press Dismiss on the Sync page until (b) ships. Testing had 0 dismissed entries, so nothing was
+  blocked.
 - **Priority:** High (Senior BA's read; Karvi to confirm) — it blocks her import.
 - **Area:** Sync
 - **Env:** Testing, `develop` `f99bb90`
