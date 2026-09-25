@@ -181,10 +181,20 @@ describe("CONTROL — the pre-fix move (placement only, no chase-list write)", (
     await asOwner(db);
     await applyOps(db, {
       ops: [
+        // Every copy has a presence group since 0023 (UIL-098 part 4).
+        {
+          op: "insert_presence_group",
+          id: "99999999-0000-4000-8000-00000000c0de",
+          catalog_card_id: "cardA",
+          dex_variant_raw: "Normal",
+          desired_count: 0,
+        },
         {
           op: "insert_copy",
           id: CARD,
           catalog_card_id: "cardA",
+          dex_variant_raw: "Normal",
+          presence_group_id: "99999999-0000-4000-8000-00000000c0de",
           role: "shelved",
           binder_id: SPEC,
           binder_half: null,
@@ -443,7 +453,13 @@ describe("a move cannot half-apply (UIL-023)", () => {
     // Trailing op references a catalog card that does not exist → FK violation after the earlier ops.
     const poisoned: WriteOp[] = [
       ...ops,
-      { op: "insert_copy", id: crypto.randomUUID(), catalog_card_id: "ghost", role: "bulk" },
+      {
+        op: "insert_copy",
+        presence_group_id: "00000000-0000-4000-8000-00000000900d",
+        id: crypto.randomUUID(),
+        catalog_card_id: "ghost",
+        role: "bulk",
+      },
     ];
     await expect(applyOps(db, { ops: poisoned })).rejects.toThrow();
 
@@ -486,7 +502,15 @@ describe("a move cannot half-apply (UIL-023)", () => {
     });
     await expect(
       applyOps(db, {
-        ops: [...ops, { op: "insert_copy", id: crypto.randomUUID(), catalog_card_id: "ghost" }],
+        ops: [
+          ...ops,
+          {
+            op: "insert_copy",
+            presence_group_id: "00000000-0000-4000-8000-00000000900d",
+            id: crypto.randomUUID(),
+            catalog_card_id: "ghost",
+          },
+        ],
       }),
     ).rejects.toThrow();
     await asSuperuser(db);

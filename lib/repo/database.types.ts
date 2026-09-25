@@ -410,7 +410,7 @@ export type Database = {
           catalog_card_id: string;
           variant: string;
           dex_variant_raw: string | null;
-          presence_group_id: string | null;
+          presence_group_id: string;
           haul_id: string | null;
           acquired_at: string | null;
           role: string;
@@ -426,7 +426,7 @@ export type Database = {
           catalog_card_id: string;
           variant?: string;
           dex_variant_raw?: string | null;
-          presence_group_id?: string | null;
+          presence_group_id: string;
           haul_id?: string | null;
           acquired_at?: string | null;
           role?: string;
@@ -442,7 +442,7 @@ export type Database = {
           catalog_card_id?: string;
           variant?: string;
           dex_variant_raw?: string | null;
-          presence_group_id?: string | null;
+          presence_group_id?: string;
           haul_id?: string | null;
           acquired_at?: string | null;
           role?: string;

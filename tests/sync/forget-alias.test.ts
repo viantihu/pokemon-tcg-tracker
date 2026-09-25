@@ -204,7 +204,13 @@ describe("forget alias — delete_set_alias through apply_write_ops (PGlite)", (
     await asOwner(db);
     const ops: WritePayload["ops"] = [
       ...buildForgetAliasOps(JA_M6, ENTRIES),
-      { op: "insert_copy", id: crypto.randomUUID(), catalog_card_id: "ghost", role: "bulk" },
+      {
+        op: "insert_copy",
+        presence_group_id: "00000000-0000-4000-8000-00000000900d",
+        id: crypto.randomUUID(),
+        catalog_card_id: "ghost",
+        role: "bulk",
+      },
     ];
     await expect(applyOps(db, { ops })).rejects.toThrow();
     await asSuperuser(db);

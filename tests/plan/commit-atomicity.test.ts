@@ -267,6 +267,7 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
         ...payload.ops.slice(0, 4),
         {
           op: "insert_copy",
+          presence_group_id: "00000000-0000-4000-8000-00000000900d", // a group that does not exist: this op must fail (0023)
           id: crypto.randomUUID(),
           catalog_card_id: "does-not-exist-in-catalog",
           variant: "normal",

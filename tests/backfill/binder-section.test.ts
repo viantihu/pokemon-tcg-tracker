@@ -182,9 +182,18 @@ async function applyWrites(db: PGlite, w: BackfillWrites) {
   }
   // The copies her import made, waiting in her haul — what the planner's placements point at.
   for (const c of TAKEN) {
+    // In its presence group, as the import made it (0023: every copy has one).
+    const g = await db.query<{ id: string }>(
+      `insert into presence_group (owner_id, catalog_card_id, dex_variant_raw, desired_count)
+       values ($1,$2,$3,0)
+       on conflict (owner_id, catalog_card_id, dex_variant_raw) do update set desired_count = presence_group.desired_count
+       returning id`,
+      [OWNER, c.tcgdexId, c.dexVariantRaw],
+    );
     await db.query(
-      `insert into copy (id, owner_id, catalog_card_id, dex_variant_raw, role) values ($1,$2,$3,$4,'haul')`,
-      [c.id, OWNER, c.tcgdexId, c.dexVariantRaw],
+      `insert into copy (id, owner_id, catalog_card_id, dex_variant_raw, presence_group_id, role)
+       values ($1,$2,$3,$4,$5,'haul')`,
+      [c.id, OWNER, c.tcgdexId, c.dexVariantRaw, g.rows[0].id],
     );
   }
   for (const p of w.placements) {

@@ -392,7 +392,13 @@ describe("a removal cannot half-apply", () => {
     // Trailing op references a catalog card that does not exist → FK violation after the earlier ops.
     const poisoned: WriteOp[] = [
       ...ops,
-      { op: "insert_copy", id: crypto.randomUUID(), catalog_card_id: "ghost", role: "bulk" },
+      {
+        op: "insert_copy",
+        presence_group_id: "00000000-0000-4000-8000-00000000900d",
+        id: crypto.randomUUID(),
+        catalog_card_id: "ghost",
+        role: "bulk",
+      },
     ];
     await expect(applyOps(db, { ops: poisoned })).rejects.toThrow();
 

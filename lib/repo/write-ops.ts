@@ -83,7 +83,8 @@ export type WriteOp =
       catalog_card_id: string;
       variant?: string;
       dex_variant_raw?: string | null;
-      presence_group_id?: string | null;
+      /** REQUIRED since 0023 (UIL-098 part 4): an ungrouped copy is invisible to the next import. */
+      presence_group_id: string;
       haul_id?: string | null;
       acquired_at?: string | null;
       role?: string;

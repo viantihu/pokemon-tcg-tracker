@@ -65,8 +65,38 @@ export async function freshRpcDb(): Promise<PGlite> {
     grant usage on schema public to authenticated, service_role, anon;
     grant all on all tables in schema public to authenticated, service_role;
   `);
+  await db.exec(FIXTURE_AUTOGROUP);
   return db;
 }
+
+/**
+ * FIXTURE SEEDING ONLY: a copy the bootstrap SUPERUSER inserts with no presence group gets one, keyed like an
+ * import would key it (owner, card, Dex variant — `'Normal'` when the fixture names none). UIL-098 part 4.
+ *
+ * Why: 0023 makes `copy.presence_group_id` NOT NULL, because every real copy comes from a Dex import or a
+ * Sync-page match and carries its group. Fixtures written before 0023 seed "a copy she already has" without
+ * one; this gives them the group their real counterpart would have, instead of hand-editing every seed.
+ *
+ * Why it cannot hide an app bug: it fires ONLY for a superuser. App code runs as `authenticated` (the owner,
+ * via `asOwner`), exactly as in production, and gets no help — an app path that writes an ungrouped copy
+ * still fails on 0023's NOT NULL. tests/copy/copy-group-required.test.ts pins both halves.
+ */
+const FIXTURE_AUTOGROUP = `
+  create or replace function test_fixture_autogroup() returns trigger language plpgsql as $$
+  begin
+    if new.presence_group_id is null
+       and (select rolsuper from pg_roles where rolname = current_user) then
+      insert into presence_group (owner_id, catalog_card_id, dex_variant_raw, desired_count)
+        values (new.owner_id, new.catalog_card_id, coalesce(new.dex_variant_raw, 'Normal'), 0)
+        on conflict (owner_id, catalog_card_id, dex_variant_raw) do update
+          set desired_count = presence_group.desired_count
+        returning id into new.presence_group_id;
+    end if;
+    return new;
+  end $$;
+  create trigger test_fixture_autogroup before insert on copy
+    for each row execute function test_fixture_autogroup();
+`;
 
 /** Switch the session to the authenticated owner (RLS on; auth.uid() = OWNER). */
 export async function asOwner(db: PGlite): Promise<void> {

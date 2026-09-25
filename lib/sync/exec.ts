@@ -120,6 +120,14 @@ function toEntryPrior(e: Row<"unresolved_entry">): SnapshotEntryPrior {
 
 /** A retired copy (snapshot shape) → the op that reinserts it verbatim, id + placement preserved. */
 function reinsertCopyOp(c: SnapshotCopy): WriteOp {
+  // A sync only ever retires a copy out of a presence group (reconcile's `current` is built from groups),
+  // so a snapshot's retired copy always carries one. 0023 makes the group required; a snapshot that somehow
+  // lacked it is refused here, by name, rather than written as a copy the next import cannot see.
+  if (!c.presence_group_id) {
+    throw new Error(
+      `Undo cannot restore copy ${c.id}: its snapshot has no presence group (UIL-098).`,
+    );
+  }
   return {
     op: "insert_copy",
     id: c.id,

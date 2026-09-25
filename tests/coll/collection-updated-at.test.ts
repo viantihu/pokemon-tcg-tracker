@@ -77,10 +77,20 @@ describe("UIL-052 · collection.updated_at bumps on every real write path", () =
 
     await applyOps(db, {
       ops: [
+        // Every copy has a presence group since 0023 (UIL-098 part 4).
+        {
+          op: "insert_presence_group",
+          id: "99999999-0000-4000-8000-00000000c0de",
+          catalog_card_id: "cardA",
+          dex_variant_raw: "Normal",
+          desired_count: 0,
+        },
         {
           op: "insert_copy",
           id: crypto.randomUUID(),
           catalog_card_id: "cardA",
+          dex_variant_raw: "Normal",
+          presence_group_id: "99999999-0000-4000-8000-00000000c0de",
           role: "shelved",
           binder_id: SPEC,
           binder_half: null,
@@ -239,10 +249,20 @@ describe("UIL-052 · collection.updated_at bumps on every real write path", () =
 
     await applyOps(db, {
       ops: [
+        // Every copy has a presence group since 0023 (UIL-098 part 4).
+        {
+          op: "insert_presence_group",
+          id: "99999999-0000-4000-8000-00000000c0de",
+          catalog_card_id: "cardA",
+          dex_variant_raw: "Normal",
+          desired_count: 0,
+        },
         {
           op: "insert_copy",
           id: crypto.randomUUID(),
           catalog_card_id: "cardA",
+          dex_variant_raw: "Normal",
+          presence_group_id: "99999999-0000-4000-8000-00000000c0de",
           role: "shelved",
           binder_id: SPEC,
           binder_half: null,

@@ -178,6 +178,7 @@ describe("UIL-060 · create a stand-in and match the entry to it, in one transac
           },
           {
             op: "insert_copy",
+            presence_group_id: "00000000-0000-4000-8000-00000000900d", // a group that does not exist: this op must fail (0023)
             id: "c0000000-0000-0000-0000-0000000000c1",
             catalog_card_id: "user:22222222-2222-4222-8222-222222222222",
             role: "not-a-role" as never,
