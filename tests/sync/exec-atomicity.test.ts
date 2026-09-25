@@ -138,7 +138,13 @@ describe("sync apply/undo/manual-match atomicity (RPC layer, PGlite)", () => {
       ops: [
         ...good.ops,
         // References a catalog card that does not exist → FK violation after the earlier ops.
-        { op: "insert_copy", id: crypto.randomUUID(), catalog_card_id: "nope", role: "bulk" },
+        {
+          op: "insert_copy",
+          presence_group_id: "00000000-0000-4000-8000-00000000900d",
+          id: crypto.randomUUID(),
+          catalog_card_id: "nope",
+          role: "bulk",
+        },
       ],
       resyncGroupIds: [GID],
     };
@@ -273,7 +279,13 @@ describe("sync apply/undo/manual-match atomicity (RPC layer, PGlite)", () => {
         ops: [
           ...goodOps,
           { op: "delete_copy", id: crypto.randomUUID() },
-          { op: "insert_copy", id: crypto.randomUUID(), catalog_card_id: "ghost", role: "bulk" },
+          {
+            op: "insert_copy",
+            presence_group_id: "00000000-0000-4000-8000-00000000900d",
+            id: crypto.randomUUID(),
+            catalog_card_id: "ghost",
+            role: "bulk",
+          },
         ],
         resyncGroupIds: [gid],
       }),

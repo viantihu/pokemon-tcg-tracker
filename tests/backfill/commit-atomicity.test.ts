@@ -442,6 +442,7 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
     // copy.catalog_card_id → catalog_card AFTER the line + earlier copies have already inserted.
     const poison: WriteOp = {
       op: "insert_copy",
+      presence_group_id: "00000000-0000-4000-8000-00000000900d", // a group that does not exist: this op must fail (0023)
       id: crypto.randomUUID(),
       catalog_card_id: "does-not-exist-in-catalog",
       variant: "normal",
@@ -573,6 +574,7 @@ describe("backfill specialty commit atomicity + collection tagging (fresh Postgr
         ...payload.ops,
         {
           op: "insert_copy",
+          presence_group_id: "00000000-0000-4000-8000-00000000900d", // a group that does not exist: this op must fail (0023)
           id: crypto.randomUUID(),
           catalog_card_id: "does-not-exist-in-catalog",
           variant: "normal",

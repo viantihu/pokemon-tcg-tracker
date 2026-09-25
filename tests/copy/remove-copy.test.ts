@@ -147,24 +147,19 @@ describe("UIL-089 · a removed Dex copy stays removed", () => {
     expect(await memory()).toHaveLength(1); // still remembered
   });
 
-  it("a HAND-TYPED copy needs no memory — no import counts it, so none can re-create it", async () => {
-    const client = pgliteClient(db);
-    await asSuperuser(db);
-    const hand = "c0000000-0000-0000-0000-00000000aa01";
-    // `dex_variant_raw` IS set here on purpose. The column is nullable and nothing forbids a value on a
-    // hand-typed row, so a guard written as "has a variant string" would read this as Dex's and remember it.
-    // The fact that decides it is the PRESENCE GROUP: no group means no import counts this copy, so none
-    // can re-create it, and remembering it would suppress a future genuine Dex row for the same printing.
-    await db.query(
-      `insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band,
-         dex_variant_raw, presence_group_id)
-         values ($1, $2, $3, 'shelved', $4, 'front', 'red', 'Normal', null)`,
-      [hand, OWNER, CARD, B1],
-    );
+  it("since 0023 a HAND-TYPED copy cannot exist: the database refuses a copy with no presence group", async () => {
+    // Before UIL-098 part 4 this test removed a hand-typed (ungrouped) copy and checked that no memory was
+    // written, since no import counted it. 0023 makes that copy impossible to create at all: the import sees
+    // only grouped copies, so an ungrouped one was a twin waiting to happen. As the owner — the role app code
+    // runs as — a direct insert with no group is refused outright.
     await asOwner(db);
-
-    const res = await applyCopyRemoval(client, hand);
-    expect(res).toMatchObject({ ok: true, remembered: false });
+    await expect(
+      db.query(
+        `insert into copy (id, owner_id, catalog_card_id, role, dex_variant_raw, presence_group_id)
+           values ('c0000000-0000-0000-0000-00000000aa01', $1, $2, 'shelved', 'Normal', null)`,
+        [OWNER, CARD],
+      ),
+    ).rejects.toThrow(/presence_group_id/);
     expect(await memory()).toHaveLength(0);
   });
 });
@@ -272,61 +267,51 @@ describe("UIL-089 · what a removal releases", () => {
   });
 });
 
-describe("UIL-089 · two records, one card", () => {
-  /** Her incident: a copy she typed and shelved, plus the Dex twin still waiting in the haul. */
+describe("UIL-089 · two records, one card — unreachable since 0023", () => {
+  /**
+   * Merge joined a copy she typed by hand (NO presence group) to its Dex twin, which adopted the twin's
+   * group. Since 0023 every copy has a group, so there is no untracked survivor left to adopt one: merge can
+   * only ever meet two tracked copies, and it refuses those (`bothTracked`) without writing. The survivor
+   * test below seeds her old incident's shape the only way it can now exist: both records tracked.
+   */
   async function seedDuplicate(): Promise<{ survivor: string; twin: string }> {
-    const client = pgliteClient(db);
     await importOnce(); // the Dex twin, role 'haul', in a presence group
-    const twin = (await copies())[0];
     await asSuperuser(db);
+    const [twin] = (
+      await db.query<{ id: string; dex_variant_raw: string; presence_group_id: string }>(
+        `select id, dex_variant_raw, presence_group_id from copy where catalog_card_id = '${CARD}'`,
+      )
+    ).rows;
     const survivor = "c0000000-0000-0000-0000-00000000bb01";
     await db.query(
-      `insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band)
-         values ($1, $2, $3, 'shelved', $4, 'front', 'red')`,
-      [survivor, OWNER, CARD, B1],
+      `insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band, dex_variant_raw,
+         presence_group_id)
+         values ($1, $2, $3, 'shelved', $4, 'front', 'red', $5, $6)`,
+      [survivor, OWNER, CARD, B1, twin.dex_variant_raw, twin.presence_group_id],
     );
     await asOwner(db);
-    void client;
     return { survivor, twin: twin.id };
   }
 
-  it("the survivor adopts the twin's identity, and a re-import creates nothing", async () => {
+  it("two tracked records of one card: merge refuses (bothTracked) and writes nothing", async () => {
     const client = pgliteClient(db);
     const { survivor, twin } = await seedDuplicate();
+    expect(await applyCopyMerge(client, survivor, twin)).toEqual({
+      ok: false,
+      error: MERGE_REFUSALS.bothTracked,
+    });
     expect(await copies()).toHaveLength(2);
-
-    const res = await applyCopyMerge(client, survivor, twin);
-    expect(res).toMatchObject({ ok: true, survivorCopyId: survivor, removedCopyId: twin });
-
-    const left = await copies();
-    expect(left).toHaveLength(1);
-    expect(left[0].id).toBe(survivor);
-    expect(left[0].presence_group_id).not.toBeNull(); // it IS the Dex record now
-    expect(left[0].role).toBe("shelved"); // and it kept its own placement
-
-    // NO memory row: nothing was lost, so nothing has to be remembered. This is why the merge is smaller
-    // than removing the twin — that route needs the memory forever, for a card she still owns.
     expect(await memory()).toHaveLength(0);
-
-    const again = await runSyncPipeline(client, exportBytes());
-    expect(again.bundle.plan.creates).toHaveLength(0);
-    expect(again.bundle.plan.retires).toHaveLength(0);
   });
 
-  it("refuses every ambiguous pairing rather than destroying a copy she owns", async () => {
+  it("still refuses a copy merged with itself", async () => {
     const client = pgliteClient(db);
-    const { survivor, twin } = await seedDuplicate();
-
+    const { twin } = await seedDuplicate();
     expect(await applyCopyMerge(client, twin, twin)).toEqual({
       ok: false,
       error: MERGE_REFUSALS.same,
     });
-    // Two hand-typed records have no identity to adopt: merging them is a removal wearing a merge's name.
-    expect(await applyCopyMerge(client, twin, survivor)).toEqual({
-      ok: false,
-      error: MERGE_REFUSALS.neitherTracked,
-    });
-    expect(await copies()).toHaveLength(2); // nothing written by either refusal
+    expect(await copies()).toHaveLength(2);
   });
 });
 

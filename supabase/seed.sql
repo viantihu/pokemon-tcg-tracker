@@ -68,13 +68,21 @@ insert into collection (id, owner_id, name, definition_type, current_binder_ids,
 -- Ralts sits shelved in Binder 1 front (Psychic → purple band). line_slot_id is wired up after the
 -- slots exist (circular FK).
 -- =============================================================================
-insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band) values
-  ('00000000-0000-0000-0000-0000000000c1', :'owner', 'sv03-026', 'normal', 'shelved',
-   '00000000-0000-0000-0000-0000000000b1', 'back', 'red'),
-  ('00000000-0000-0000-0000-0000000000c2', :'owner', 'sv03-027', 'normal', 'shelved',
-   '00000000-0000-0000-0000-0000000000b1', 'back', 'red'),
-  ('00000000-0000-0000-0000-0000000000c3', :'owner', 'sv01-084', 'normal', 'shelved',
-   '00000000-0000-0000-0000-0000000000b1', 'front', 'purple');
+-- Every copy belongs to a presence group since 0023 (UIL-098 part 4): the import sees only grouped copies, so
+-- the seed's cards are the ones an import of "one Normal of each" would have made.
+insert into presence_group (id, owner_id, catalog_card_id, dex_variant_raw, desired_count) values
+  ('00000000-0000-0000-0000-0000000000d1', :'owner', 'sv03-026', 'Normal', 1),
+  ('00000000-0000-0000-0000-0000000000d2', :'owner', 'sv03-027', 'Normal', 1),
+  ('00000000-0000-0000-0000-0000000000d3', :'owner', 'sv01-084', 'Normal', 1);
+
+insert into copy (id, owner_id, catalog_card_id, variant, dex_variant_raw, presence_group_id, role,
+                  binder_id, binder_half, color_band) values
+  ('00000000-0000-0000-0000-0000000000c1', :'owner', 'sv03-026', 'normal', 'Normal',
+   '00000000-0000-0000-0000-0000000000d1', 'shelved', '00000000-0000-0000-0000-0000000000b1', 'back', 'red'),
+  ('00000000-0000-0000-0000-0000000000c2', :'owner', 'sv03-027', 'normal', 'Normal',
+   '00000000-0000-0000-0000-0000000000d2', 'shelved', '00000000-0000-0000-0000-0000000000b1', 'back', 'red'),
+  ('00000000-0000-0000-0000-0000000000c3', :'owner', 'sv01-084', 'normal', 'Normal',
+   '00000000-0000-0000-0000-0000000000d3', 'shelved', '00000000-0000-0000-0000-0000000000b1', 'front', 'purple');
 
 -- =============================================================================
 -- The Fire Charmander evolution line (red, back half of Binder 1). Root + Stage 1 both filled;

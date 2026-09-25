@@ -93,6 +93,7 @@ const IDS = {
   line: "aaaaaaa5-0000-4000-8000-000000000001",
   copyShelved: "aaaaaaa6-0000-4000-8000-000000000001",
   copyBulk: "aaaaaaa6-0000-4000-8000-000000000002",
+  presenceGroupBulk: "aaaaaaa4-0000-4000-8000-000000000002",
   slotFilled: "aaaaaaa7-0000-4000-8000-000000000001",
   slotPlaceholder: "aaaaaaa7-0000-4000-8000-000000000002",
   wishlist: "aaaaaaa8-0000-4000-8000-000000000001",
@@ -151,9 +152,16 @@ async function seedCollection(db: PGlite, owner: string): Promise<void> {
      values ($1, $2, 'sv03-026', 'reverse', 'Reverse Holo', $3, $4, 'shelved', $5, 'back', 'red')`,
     [IDS.copyShelved, owner, IDS.presenceGroup, IDS.haul, IDS.binder],
   );
+  // Every copy has a presence group since 0023 (UIL-098 part 4): the import sees only grouped copies.
   await db.query(
-    `insert into copy (id, owner_id, catalog_card_id, haul_id, role) values ($1, $2, 'sv01-084', $3, 'bulk')`,
-    [IDS.copyBulk, owner, IDS.haul],
+    `insert into presence_group (id, owner_id, catalog_card_id, dex_variant_raw, desired_count)
+     values ($1, $2, 'sv01-084', 'Normal', 1)`,
+    [IDS.presenceGroupBulk, owner],
+  );
+  await db.query(
+    `insert into copy (id, owner_id, catalog_card_id, dex_variant_raw, presence_group_id, haul_id, role)
+     values ($1, $2, 'sv01-084', 'Normal', $3, $4, 'bulk')`,
+    [IDS.copyBulk, owner, IDS.presenceGroupBulk, IDS.haul],
   );
   await db.query(
     `insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)

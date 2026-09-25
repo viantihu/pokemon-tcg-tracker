@@ -676,7 +676,13 @@ describe("a line-join move cannot half-apply", () => {
           line_slot_id: SLOT_ROOT,
         },
       },
-      { op: "insert_copy", id: crypto.randomUUID(), catalog_card_id: "ghost", role: "bulk" }, // poison
+      {
+        op: "insert_copy",
+        presence_group_id: "00000000-0000-4000-8000-00000000900d",
+        id: crypto.randomUUID(),
+        catalog_card_id: "ghost",
+        role: "bulk",
+      }, // poison
     ];
     await expect(applyOps(db, { ops })).rejects.toThrow();
 
