@@ -13,6 +13,8 @@ import { isNoop, migrationKey, requiresPreview } from "./apply";
 /** Catalog display facts for one card, joined from the mirror. */
 export interface CardMeta {
   name: string;
+  /** Set name, for naming a card she has to go and find (UIL-102's flag fixes). */
+  setName?: string | null;
   imageUrl: string | null;
   localId: string | null;
   /** Printed set total, for the full "099/182" form (UIL-077). Null when TCGdex reports none. */
@@ -51,6 +53,44 @@ export interface VariantRow {
   toVariantRaw: string;
 }
 
+/**
+ * A card whose stored flag was corrected (UIL-102), NAMED so she can find it: the Actions log cannot carry
+ * card names, so this list is how she learns which cards to check. Nothing is re-placed.
+ */
+export interface FlagFixRow {
+  copyId: string;
+  catalogCardId: string;
+  name: string;
+  setName: string | null;
+  imageUrl: string | null;
+  localId: string | null;
+  setCardCountOfficial: number | null;
+  bandKey: string;
+  dexVariantRaw: string;
+  /** "recorded as Normal, now Holo". */
+  change: string;
+  /** Set only for a copy placed while it carried the wrong flag: where to look, and why. */
+  placedNote: string | null;
+}
+
+/** A stored flag in her words — the Dex spelling of each of the five (reconcile.ts `deriveVariantFlag`). */
+export function flagLabel(flag: string): string {
+  switch (flag) {
+    case "normal":
+      return "Normal";
+    case "holo":
+      return "Holo";
+    case "reverse":
+      return "Reverse Holo";
+    case "firstEdition":
+      return "1st Edition";
+    case "wPromo":
+      return "W Promo";
+    default:
+      return flag;
+  }
+}
+
 export interface AdditionRow {
   catalogCardId: string;
   name: string;
@@ -77,6 +117,8 @@ export interface SyncPreview {
   summary: {
     removed: number;
     variantChanges: number;
+    /** Stored flags corrected (UIL-102). */
+    flagFixes: number;
     added: number;
     waiting: number;
     unchanged: number;
@@ -85,6 +127,7 @@ export interface SyncPreview {
   sections: {
     removals: RemovalRow[];
     variantChanges: VariantRow[];
+    flagFixes: FlagFixRow[];
     additions: AdditionRow[];
     unresolved: { newParks: UnresolvedRowView[]; stillWaiting: number };
     unchanged: number;
@@ -118,6 +161,9 @@ export function summaryLine(s: SyncPreview["summary"]): string {
   const parts: string[] = [];
   if (s.removed > 0) parts.push(`${s.removed} removed`);
   if (s.variantChanges > 0) parts.push(`${s.variantChanges} variant changes`);
+  if (s.flagFixes > 0) {
+    parts.push(`${s.flagFixes} variant flag${s.flagFixes === 1 ? "" : "s"} corrected`);
+  }
   if (s.added > 0) parts.push(`${s.added} added`);
   if (s.waiting > 0) parts.push(`${s.waiting} waiting on catalog`);
   parts.push(`${s.unchanged} unchanged`);
@@ -174,6 +220,28 @@ export function buildPreview(plan: ReconcilePlan, enr: PreviewEnrichment): SyncP
     };
   });
 
+  const flagFixes: FlagFixRow[] = (plan.flagFixes ?? []).map((f) => {
+    const m = meta(f.catalogCardId);
+    const was = flagLabel(f.fromVariant);
+    const where = enr.placementByCopyId[f.copyId];
+    return {
+      copyId: f.copyId,
+      catalogCardId: f.catalogCardId,
+      name: m.name,
+      setName: m.setName ?? null,
+      imageUrl: m.imageUrl,
+      localId: m.localId,
+      setCardCountOfficial: m.setCardCountOfficial,
+      bandKey: m.bandKey,
+      dexVariantRaw: f.dexVariantRaw,
+      change: `recorded as ${was}, now ${flagLabel(f.toVariant)}`,
+      // The Senior BA's wording. Nothing is moved: she decides whether the pocket is still right.
+      placedNote: f.placed
+        ? `was placed while recorded as ${was}; check its pocket${where ? ` (${where})` : ""}`
+        : null,
+    };
+  });
+
   // Additions are aggregated per (card, variant) so N new copies read as one "×N" row.
   const addMap = new Map<string, AdditionRow>();
   for (const c of plan.creates) {
@@ -212,6 +280,7 @@ export function buildPreview(plan: ReconcilePlan, enr: PreviewEnrichment): SyncP
   const summary = {
     removed: plan.retires.length,
     variantChanges: plan.variantUpdates.length,
+    flagFixes: flagFixes.length,
     added: plan.creates.length,
     waiting: enr.stillWaiting,
     unchanged: enr.counts.unchanged,
@@ -238,6 +307,7 @@ export function buildPreview(plan: ReconcilePlan, enr: PreviewEnrichment): SyncP
     sections: {
       removals,
       variantChanges,
+      flagFixes,
       additions,
       unresolved: { newParks, stillWaiting: enr.stillWaiting },
       unchanged: enr.counts.unchanged,

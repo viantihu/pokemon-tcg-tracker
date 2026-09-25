@@ -139,7 +139,7 @@ export function tombstoneIdFor(undoneSnapshotId: string): string {
  * which is deterministic for one file against one state, so two previews of one export digest the same.
  */
 export function planDigest(bundle: {
-  plan: { creates: unknown; retires: unknown; variantUpdates: unknown };
+  plan: { creates: unknown; retires: unknown; variantUpdates: unknown; flagFixes?: unknown[] };
   queue: { parks: unknown; archiveEntryIds: unknown; dropEntryIds: unknown };
 }): string {
   const body = JSON.stringify([
@@ -149,6 +149,9 @@ export function planDigest(bundle: {
     bundle.queue.parks,
     bundle.queue.archiveEntryIds,
     bundle.queue.dropEntryIds,
+    // UIL-102's flag fixes, only when there are any: a plan without them digests exactly as it did before,
+    // so a snapshot written before this change is still recognised as "this same preview".
+    ...(bundle.plan.flagFixes?.length ? [bundle.plan.flagFixes] : []),
   ]);
   return createHash("sha256").update(body).digest("hex");
 }

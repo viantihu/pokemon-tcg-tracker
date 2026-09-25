@@ -393,6 +393,7 @@ function bundleWithCreates(
     creates: creates.map((c) => ({ kind: "create", ...c })) as ReconcilePlan["creates"],
     retires: [],
     variantUpdates: [],
+    flagFixes: [], // UIL-102: every copy carries the flag its Dex variant derives.
     forgetRemoved: [], // UIL-089: nothing removed, nothing to forget.
     unchanged: 0,
     unresolved: [],

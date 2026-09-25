@@ -10,7 +10,7 @@
 
 import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
-import type { SyncOverrides, SyncPlanBundle, SyncPreview } from "@/lib/sync";
+import type { FlagFixRow, SyncOverrides, SyncPlanBundle, SyncPreview } from "@/lib/sync";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
 import { BandChip } from "../_components/BandChip";
@@ -393,6 +393,46 @@ export function WithheldNotice({
   );
 }
 
+/**
+ * Cards whose stored variant flag this import corrects (UIL-102), each NAMED — the public Actions log cannot
+ * carry card names, so this is where she learns which to check. A card placed while it carried the wrong
+ * flag says so; nothing is moved for her.
+ */
+export function FlagFixSection({ rows }: { rows: FlagFixRow[] }) {
+  return (
+    <section>
+      <div className="hd u">Variant flags corrected · nothing moved</div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {rows.map((f) => {
+          const number = formatCollectorNumber(f.localId, f.setCardCountOfficial);
+          return (
+            <div key={f.copyId} className="plate" style={{ padding: 10 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <CardFace name={f.name} imageUrl={f.imageUrl} size="s" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700 }}>
+                    {f.name}
+                    {f.setName ? ` · ${f.setName}` : ""}
+                    {number ? <span className="no"> {number}</span> : null}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--ink-2)" }}>
+                    Dex: {f.dexVariantRaw} · {f.change}
+                  </div>
+                  {f.placedNote ? (
+                    <div style={{ fontSize: 11, marginTop: 4 }}>
+                      <b>{f.placedNote}</b>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function UndoBar({
   state,
   busy,
@@ -409,6 +449,7 @@ function UndoBar({
         s.creates ? `${s.creates} added` : null,
         s.retires ? `${s.retires} removed` : null,
         s.variantUpdates ? `${s.variantUpdates} variant changes` : null,
+        s.flagFixes ? `${s.flagFixes} variant flags corrected` : null,
         s.promotions ? `${s.promotions} resolved` : null,
       ].filter(Boolean)
     : [];
@@ -517,6 +558,8 @@ export function PreviewPanel({
           </div>
         </section>
       ) : null}
+
+      {sections.flagFixes.length > 0 ? <FlagFixSection rows={sections.flagFixes} /> : null}
 
       {sections.variantChanges.length > 0 ? (
         <section>
