@@ -7269,12 +7269,14 @@ the card; it must never let her make a second one.
 ## UIL-094 — Placement history loses the card it is about: `placement_decision.copy_id` is ON DELETE SET NULL, so every retired or removed copy leaves a decision row that names no card unless its free-text reason happens to
 
 - **Reported:** 2026-09-23 (found by Full Stack Dev - 2 while designing UIL-089; body by the Senior BA)
-- **Status:** Open — unassigned; after UIL-089 and UIL-091 in Full Stack Dev - 2's queue. UIL-089 works
+- **Status:** Open — assigned to Full Stack Dev - 2, last in its queue (after UIL-099 E1/E2, the Backfill
+  half of UIL-098 and UIL-097). UIL-089 works
   around it by writing a self-describing `reason` ("Removed — <card id> <variant>, was <placement>"), which
   is the only surviving identity of a removed copy; this entry is the proper fix, a nullable
   `catalog_card_id` (and `variant`) on `placement_decision`, back-filled from `copy` where the link still
-  exists, so history is queryable instead of grep-able. Its own migration when assigned (next free number
-  at that time; `0020` is UIL-089's).
+  exists, so history is queryable instead of grep-able. Its migration is `0024` (allocated `0022` on
+  2026-09-23, moved 2026-09-23 by the Senior BA when UIL-100 took `0022`, since UIL-100 lands first and
+  the migration-order check refuses a number behind one already merged; `0020` is UIL-089's).
 - **Priority:** Medium (Senior BA's read) — UIL-042 promised that history is never deleted, and the rows do
   survive; but a row whose copy is gone says "removed" or "retired" about nothing in particular, so the
   promise is kept in the letter and thin in practice. Not a placement error.
@@ -7295,8 +7297,14 @@ UIL-089 carries a working stopgap.
 - **Reported:** 2026-09-23 (found by Full Stack Dev - 2 while wiring UIL-091's pick into the slot; body by
   the Senior BA). Latent: no user report; the shape is the one UIL-014, UIL-023 and UIL-033 exist to
   forbid.
-- **Status:** Open — **assigned to Full Stack Dev - 2 after UIL-091, ahead of UIL-094; design proposal
-  reviewed and ruled 2026-09-23; one PR with migration `0021`.** Two `apply_write_ops` ops the RPC lacks,
+- **Status:** **Fixed** — PR [#323](https://github.com/viantihu/pokemon-tcg-tracker/pull/323) MERGED to `develop` 2026-09-23 (squash `7ef273e`),
+  QA-gated; migration `0021` applied on Testing (Deploy run `35884382712`, Vercel success 15:50:12Z), and
+  the Senior BA's AFTER read (run `35884560892`) matched the BEFORE (run `35881568689`) on every count.
+  Nothing she sees changes: a line decision now lands whole or not at all. QA's gate added one ruling
+  before merge: the upsert COALESCES the columns the decision path does not decide (`held_for_binder_id`,
+  `required_dex_id`, `required_type`, `required_stage`) and overwrites only what it decides. Awaiting
+  Karvi's confirmation. **As designed (assigned to Full Stack Dev - 2 after UIL-091, ahead of UIL-094;
+  design proposal reviewed and ruled 2026-09-23; one PR with migration `0021`):** Two `apply_write_ops` ops the RPC lacks,
   both keyed on the SLOT rather than a row id: `resolve_wishlist_for_slot` (set `resolved_at` on the open
   row for a slot) and `upsert_wishlist_for_slot` (update the open row for a slot, else insert), expressed as
   `insert … on conflict do update` against a new partial unique index `(owner_id, line_slot_id) where
@@ -7496,13 +7504,18 @@ second attempt at all.
   read-then-write, so two simultaneous adds can leave two open rows that both read as one wish. (2)
   DONE: the Database Engineer removed the 11 copies created that way at 15:08:28Z (copy 11 → 0,
   placement_decision 12 → 1 with her list-only removal kept, every collection row byte-identical; no
-  snapshot, her call), confirmed by the Senior BA's read (run 35879421633). (3) Dev 2, next after UIL-099's
-  E5. (4) The Tech Lead's audit is accepted: the only legitimate creators are the import, Retry, Undo
+  snapshot, her call), confirmed by the Senior BA's read (run 35879421633). (3) Haul Plan half DONE: PR
+  [#327](https://github.com/viantihu/pokemon-tcg-tracker/pull/327) MERGED (`aa7a4a2`) and deployed 2026-09-25 (Deploy run
+  `36148588002`); the add form, source picker and notes are gone, the server refuses a row that is not a
+  queued copy and treats an already-placed copy as done with zero writes, and `lib/plan/commit.ts` emits
+  no `insert_copy` (Dev 2: 9 mutants killed; QA: 4; the Tech Lead's review is on the PR, confirmed at
+  `a38b848`). Backfill half: Full Stack Dev - 2, after UIL-099 E2; `lib/backfill/commit.ts:60` is the
+  only copy emitter left outside `lib/sync/exec.ts`. (4) The Tech Lead's audit is accepted: the only legitimate creators are the import, Retry, Undo
   and the Sync manual match (all carry the Dex row's presence group); the database guard is migration
   `0023` (`copy.presence_group_id` NOT NULL, FK ON DELETE RESTRICT), built by the Tech Lead after part
   3, gated on a read showing zero ungrouped copies; defects in the legitimate paths are UIL-099. **Until
-  part 3 ships:** bring cards in only through a Dex import and place them from the Haul Plan's queue; do
-  not use the Haul Plan's add form or Backfill, both of which still create copies.
+  the Backfill half ships:** bring cards in only through a Dex import and place them from the Haul Plan's
+  queue; do not use Backfill, which still creates copies.
 - **Priority:** High (Karvi's ruling; Senior BA agrees) — every hand-created copy is a future duplicate
   that only UIL-089's merge can clean up, and she is about to re-enter her whole collection after the
   2026-09-23 wipe.
@@ -7550,14 +7563,22 @@ removed-presence merge that is the only current cleanup for a hand-created dupli
 
 - **Reported:** 2026-09-23 (not from Karvi — found by the Tech Lead's card-entry audit, the audit her
   UIL-098 ruling charged)
-- **Status:** Open — **assigned to Full Stack Dev - 2; E5 first, right after UIL-095, because her first
-  import after the 2026-09-23 wipe is imminent; E1 and E2 after UIL-098 parts 2 and 3; E3 and E4 are
-  tests, fixed only if they fail.** E5: the apply re-checks freshness server-side and refuses a stale or
+- **Status:** Open — **E5 DONE; E2 (with the E3/E4 tests) next; E1 after UIL-100's storage.** Assigned
+  to Full Stack Dev - 2. E5 went first, right after UIL-095, because her first import after the
+  2026-09-23 wipe was imminent: PR [#325](https://github.com/viantihu/pokemon-tcg-tracker/pull/325) MERGED (`3bac29c`) and deployed 2026-09-23
+  (Deploy run `35885418141`; the Tech Lead's approval on the PR at `95a2c8b`; QA: 8 mutants killed,
+  pre-fix 11 of 19 fail). **Re-ordered 2026-09-23 by the Senior BA** after Karvi said she will not
+  re-import until the doubling fix is in: E1/E2 moved ahead of the Backfill half of UIL-098. Then, on the
+  Tech Lead's UIL-100 design, E1 builds on UIL-100's per-key Dex record (`dex_presence`, migration `0022`),
+  because "desired" is unknowable at match time without it (other Dex rows can map to the same key and
+  the file is gone); the insert becomes (Dex quantity for the key + the entry's quantity) − removed −
+  current. E2 does not depend on it. E3 and E4 are tests, fixed only if they fail. E5: the apply re-checks freshness server-side and refuses a stale or
   already-applied bundle in the same transaction, the second apply of one preview writes nothing; E1: a
   manual match inserts desired minus current for the key; E2: a manual match honours the removal memory
   and the Sync screen says so, with a way to forget it. The Tech Lead reviews each PR against its audit
-  before QA. **Until E5 ships:** apply an import once, from one tab, and wait for the result before
-  pressing anything again.
+  before QA. **Since E5 shipped:** a Sync preview left open from before the deploy is refused with
+  "import the file again", which is the safe answer. Parked here: N2, an Undo racing an Apply, which needs
+  an in-transaction check and its own migration.
 - **Priority:** High (Senior BA's read) — E5 can double her entire collection with one extra click on
   the import she is about to run; E1 and E2 create inventory Dex does not list, the class UIL-098 exists
   to close.
@@ -7624,7 +7645,11 @@ legitimately do, creating too many), **UIL-089** (the removed-presence memory E2
   sure that the total number of cards in the collection equal the dex import file. This will ensure that
   cards are not double counted during the matching process or manual add process (which is where I
   suspect the issue occurred)."
-- **Status:** Open — cause undetermined until she names the cards; assignment follows.
+- **Status:** Open — **assigned to the Tech Lead (new) 2026-09-23; design approved by the Senior BA;
+  Undo behaviour ruled by Karvi; migration `0022`.** Karvi will not re-import until this and UIL-099
+  E1/E2 are deployed. The design and the ruling are recorded below. Testing was refreshed to empty after
+  her Undo (see "Refresh" below), so her next import is the first the check will see; until then the
+  panel reads "No import checked yet".
 - **Priority:** High (Senior BA's read; Karvi to confirm) — a silent wrong count on import is exactly the
   defect class UIL-098 and UIL-099 exist to close.
 - **Area:** Sync
@@ -7646,6 +7671,12 @@ state*, not against a remembered "what the last export actually said."
 51 cards owned in two variants — so the totals in the export itself are consistent; the divergence, if
 real, is introduced somewhere between the export and what landed as copies, not in the export.
 
+**Correction (the Tech Lead, 2026-09-23): the aggregate did NOT agree if she imported the Sep 7 file.**
+Its 685 owned rows at the quantities above make 710 cards over 685 keys (the 51 two-variant cards are
+already separate rows); she had 717 copies over 691 groups, so about 7 copies over about 6 keys the file
+does not have, or has fewer of. She may have imported a newer export, so neither figure names the cards;
+that is why this check ships before she re-imports.
+
 **Per-card cause: UNDETERMINED.** Candidates, not yet distinguished: Dex genuinely says quantity 2 for
 some of these cards (correct behavior, not a bug); one card legitimately owned in two variants (also
 correct); or UIL-099's E1 (a manual match adds its quantity on top of a group that already has copies
@@ -7658,6 +7689,57 @@ session — and she has been asked to re-attach it.
 copy), 0 unresolved. Whatever the exact cause was for the specific cards she saw, it can no longer be
 read back from Testing — the next occurrence (or her naming the cards from memory) is what would
 distinguish the candidates above.
+
+**A second candidate mechanism, found in the design review (the Tech Lead, verified in
+`lib/sync/undo.ts:138-149` and `lib/sync/exec.ts`).** Undo deletes the import's own copies and the entries
+it parked, but a manual match writes no snapshot, so a card she matched by hand after an import SURVIVES
+the Undo as an orphan while its entry (with the `manual_match_id` memory) is deleted. Re-import the file
+and the row parks again; match it again and `matchOps` adds on top of the orphan: two copies of one card.
+This is exactly her 21:17Z sequence (4 hand-matched copies survived her Undo) and plausibly explains some
+of the doubles she saw.
+
+**Refresh.** At Karvi's go-ahead the Database Engineer ran the standard wipe at 21:31:14Z (guarded
+in-transaction against any import since her Undo; `set_alias` and `collection` byte-identical by md5),
+and the Senior BA's independent read (run `35923052405`) shows every card table at 0, `set_alias` 25,
+`collection` 11, `binder` 3, `catalog_card` 36,331. Every Testing baseline from the 2026-09-23 import is
+void.
+
+**Design, approved by the Senior BA 2026-09-23 (the Tech Lead builds it).**
+1. **Dex's quantity is stored, per key, in the same transaction as the copies:** a new `dex_presence`
+   table (owner, `catalog_card_id`, `dex_variant_raw`, quantity; unique on the three) and `dex_import`
+   (owner, file total, row count, imported at), migration `0022`, which also replaces `apply_write_ops`.
+   A full import REPLACES the record with the file's resolved map (raw Dex quantities, before removals);
+   a Retry, a manual match and a stand-in each ADD their entry's quantity to the key; Undo restores the
+   record per Karvi's ruling below. An in-request check is not enough, because a manual match and a Retry
+   happen later without the file, and `presence_group.desired_count` cannot be reused (it is overwritten
+   with the copy count and does not exist for a key with no copies).
+2. **What she sees:** a "Count check" panel on the Sync page, on load and after every import, manual
+   match and Retry, never silent: "Dex file N = in your collection + waiting to match + dismissed + removed
+   by you". On a mismatch it turns red and names each card (name, set, number, variant, "Dex says N, you
+   have M", extra or missing). Copies with no presence group are listed separately as "not linked to your
+   Dex import".
+3. **A sync write that would miscount is refused in the database:** after its copy writes,
+   `apply_write_ops` checks every key it touched and raises, naming the keys, if copies ≠ max(0, Dex −
+   removed). Nothing is written and the panel names the cards. A refusal is never a dead end: it says
+   which cards and what to do next. The check runs on sync paths only (import, Retry, manual match,
+   stand-in, Undo, the removal memory's write); placing, moving and collection edits are never blocked by
+   it.
+4. **A removal never reads as a mismatch:** expected = max(0, Dex − removed), the same rule as
+   `applyRemovedMemory` (`lib/sync/diff.ts:219`), which the TypeScript check calls directly; one test pins
+   that the SQL and the TypeScript agree. (An earlier "kept variant" exception was dropped: a rejected
+   variant migration already retires the old-variant copy and creates one under Dex's variant, so counts
+   always equal Dex after an apply.)
+5. **Named idempotence cases:** her real 2026-09-23 sequence (import, manual matches, shelve some, Undo,
+   re-import): zero re-matching, zero doubles, no false refusal. Also a removal then a re-import, a rejected
+   variant migration then a re-import (zero mismatches), a stand-in promotion (UIL-099 E4), and a Retry
+   after an alias is learned.
+
+**Karvi's ruling on Undo, 2026-09-23:** "Remove them, remember matches". Undo takes back everything that
+import added, including cards she matched by hand after it; her matches are remembered (the entry stays
+RESOLVED with `manual_match_id`), so re-importing the same file puts them straight back with no
+re-matching (the UIL-082 path). Hand-matched cards she had shelved leave their slots on Undo, like every
+other card from that import. She chose it over "remove them, forget matches" and over keeping today's
+behaviour, which leaves the orphans above.
 
 **Cross-reference UIL-098** (paths that create a copy with no Dex row at all — ruled out here, since
 every copy in the pre-Undo read had a presence group) **and UIL-099**, specifically **E1** (a manual
