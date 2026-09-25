@@ -243,6 +243,15 @@ describe("UIL-100 · assert_presence_counts at the database", () => {
     expect(header.rows[0].file_total).toBe(3);
   });
 
+  it("add_dex_presence is a no-op before any import has written a header", async () => {
+    await applyOps(db, {
+      ops: [
+        { op: "add_dex_presence", catalog_card_id: CHAR, dex_variant_raw: "Normal", quantity: 2 },
+      ],
+    });
+    expect(await counts()).toMatchObject({ record: 0, header: 0 });
+  });
+
   it("replace_dex_record replaces; clear_dex_record removes the record and the header", async () => {
     await applyOps(db, { ops: [record([{ card: CHAR, variant: "Normal", qty: 4 }], 4)] });
     await applyOps(db, { ops: [record([{ card: CHARM, variant: "Normal", qty: 1 }], 1)] });

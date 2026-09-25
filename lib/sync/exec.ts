@@ -225,8 +225,9 @@ const NEXT_STEP = {
     "or report this (UIL-100).",
   match:
     "Nothing was saved. The app already holds more of this card than your Dex file lists, so this match " +
-    "would count one twice. Report this (UIL-100); do not remove a copy to make room — removing records " +
-    "the card as traded away, and the count would still disagree.",
+    "would count one twice. Import your Dex file again first: the preview lists the extra copy and takes " +
+    "it out when you apply. Then match. (Do not remove a copy yourself — removing records it as traded away.)",
+
   undo: "Undo was not applied: your collection is as it was before you pressed it. Report this (UIL-100).",
 } as const;
 

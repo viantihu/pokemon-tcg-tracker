@@ -23,8 +23,8 @@ export function CountCheckPanel({ check }: { check: CountCheckView }) {
   if (check.status === "none") {
     return (
       <div className="panel" style={{ padding: 12, fontSize: 12 }} data-testid="count-check">
-        <b>Count check:</b> no import checked yet. Import your Dex file and the app checks your
-        collection against it from then on.
+        <b>Count check:</b> starts at your next import. Re-import your Dex file once to turn it on;
+        from then on every import, match and undo is checked against it.
       </div>
     );
   }
@@ -91,7 +91,7 @@ export function CountCheckPanel({ check }: { check: CountCheckView }) {
           ? "for a card not linked to your import, use Merge on its card page; "
           : ""}
         {extra.length > 0
-          ? "an extra copy of a card from your import is a bug to report (UIL-100) — do not remove it, because removing records the card as traded away; "
+          ? "for an extra copy, import your Dex file again — the preview lists the extra copies and takes them out when you apply (do not remove one yourself: removing records it as traded away); "
           : ""}
         anything still listed after that, report it (UIL-100).
       </div>

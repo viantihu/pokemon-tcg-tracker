@@ -544,9 +544,10 @@ begin
         delete from dex_import;
 
       -- A Retry promotion or a manual match moves a Dex row from "waiting" into the record. The file-level
-      -- total does not change: that row was already counted, as a waiting entry.
+      -- total does not change: that row was already counted, as a waiting entry. Only once an import has
+      -- recorded a file: before that there is no record to add to, and the next import writes it whole.
       when 'add_dex_presence' then
-        if (op ->> 'quantity')::int > 0 then
+        if (op ->> 'quantity')::int > 0 and exists (select 1 from dex_import) then
           insert into dex_presence (catalog_card_id, dex_variant_raw, quantity)
             values (op ->> 'catalog_card_id', op ->> 'dex_variant_raw', (op ->> 'quantity')::int)
             on conflict (owner_id, catalog_card_id, dex_variant_raw) do update

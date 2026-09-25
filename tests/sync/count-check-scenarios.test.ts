@@ -278,9 +278,9 @@ describe("UIL-100 · a double is refused, and the refusal says what to do", () =
     expect(message).toMatch(/Nothing was changed/);
     expect(message).toMatch(/Charmander/);
     expect(message).toMatch(/extra/);
-    // And it does not send her to "remove" — that records the card as traded away, a dead end here.
-    expect(message).toMatch(/Report this \(UIL-100\)/);
-    expect(message).toMatch(/do not remove a copy/);
+    // It points at the repair path — re-import, whose preview takes the extra out — and never at "remove".
+    expect(message).toMatch(/Import your Dex file again first/);
+    expect(message).toMatch(/Do not remove a copy yourself/);
     // Nothing written: the entry still waits, no copy was added.
     expect(await copyCount()).toBe(before);
     expect((await waitingEntries()).length).toBe(1);
@@ -308,8 +308,9 @@ describe("UIL-100 · a double is refused, and the refusal says what to do", () =
     expect(res.ok).toBe(true);
     // It is also REMEMBERED (traded away), so Dex 2 − removed 1 = 1 is now expected and she still holds 2:
     // the page keeps naming it rather than pretending it is fixed. This state cannot arise any more (the
-    // check refuses the write that would make it, and Undo no longer leaves hand matches behind); the
-    // panel's advice therefore says to report it, not to remove it.
+    // check refuses the write that would make it, and Undo no longer leaves hand matches behind). If one
+    // exists, a re-import retires the extra through its preview (count-check-arming.test.ts), which is why
+    // the page's advice is "import again", not "remove".
     const check = await loadCountCheck(client());
     expect(check.mismatches.map((m) => m.direction)).toEqual(["extra"]);
   });

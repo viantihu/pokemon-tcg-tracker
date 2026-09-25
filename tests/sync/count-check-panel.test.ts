@@ -13,8 +13,9 @@ const render = (check: CountCheckView) =>
   renderToStaticMarkup(createElement(CountCheckPanel, { check })).replace(/<!-- -->/g, "");
 
 describe("UIL-100 · the Count check panel", () => {
-  it("before her first import it says there is nothing checked yet", () => {
-    expect(render(emptyCountCheck())).toContain("no import checked yet");
+  it("before her first import it says the check starts at her next one, and asks for one re-import", () => {
+    expect(render(emptyCountCheck())).toContain("starts at your next import");
+    expect(render(emptyCountCheck())).toContain("Re-import your Dex file once");
   });
 
   it("when it adds up it shows the whole sum", () => {
@@ -34,7 +35,7 @@ describe("UIL-100 · the Count check panel", () => {
     expect(html).toContain("<b>2</b> you removed");
   });
 
-  it("when it does not, it names every card, says extra or missing, and never advises removing", () => {
+  it("when it does not, it names every card, says extra or missing, and points at re-import, not removal", () => {
     const html = render({
       ...emptyCountCheck(),
       status: "mismatch",
@@ -75,7 +76,9 @@ describe("UIL-100 · the Count check panel", () => {
     expect(html).toContain("Charmeleon · Obsidian Flames 027 · Reverse Holo");
     expect(html).toContain("Dex says 1, you have 0 (1 missing)");
     expect(html).toContain("import your Dex file again");
-    expect(html).toContain("do not remove it");
+    // The repair path for an extra copy is a re-import (its preview takes the extra out), never "remove".
+    expect(html).toContain("the preview lists the extra copies and takes them out when you apply");
+    expect(html).toContain("do not remove one yourself");
     expect(html).not.toMatch(/remove a duplicate/);
   });
 
