@@ -227,6 +227,50 @@ export class CountMismatchError extends Error {
   }
 }
 
+/**
+ * What she is told when the record and the queue no longer add up to the file (0024), in the SAME words the
+ * Sync page uses at rest — so she never meets a refusal the page did not already warn her about.
+ */
+export const FILE_TOTAL_REMEDY = "Import your Dex file again to refresh the record.";
+
+/**
+ * A sync write the database refused because the file total would no longer add up (0024): the record would
+ * grow without the same quantity leaving the queue — a card from her Dex file counted twice. Nothing was
+ * written.
+ */
+export class FileTotalMismatchError extends Error {
+  readonly fileTotal: number;
+  readonly record: number;
+  readonly queued: number;
+
+  constructor(fileTotal: number, record: number, queued: number) {
+    super(
+      `Nothing was saved: this would count a card from your Dex file twice. ${FILE_TOTAL_REMEDY}`,
+    );
+    this.name = "FileTotalMismatchError";
+    this.fileTotal = fileTotal;
+    this.record = record;
+    this.queued = queued;
+  }
+}
+
+/** Is this RPC error 0024's file-total refusal? Returns its figures, or null for any other error. */
+export function parseFileTotalRefusal(
+  err: unknown,
+): { fileTotal: number; record: number; queued: number } | null {
+  const e = err as { message?: unknown; details?: unknown; detail?: unknown } | null;
+  if (!e || typeof e.message !== "string" || !/file total check failed/.test(e.message))
+    return null;
+  const raw =
+    typeof e.details === "string" ? e.details : typeof e.detail === "string" ? e.detail : "{}";
+  try {
+    const d = JSON.parse(raw) as { file_total?: number; record?: number; queued?: number };
+    return { fileTotal: d.file_total ?? 0, record: d.record ?? 0, queued: d.queued ?? 0 };
+  } catch {
+    return { fileTotal: 0, record: 0, queued: 0 };
+  }
+}
+
 /** Is this RPC error the count check's refusal? Returns the refused keys, or null for any other error. */
 export function parseCountRefusal(err: unknown): { keys: RefusedKey[]; total: number } | null {
   const e = err as { message?: unknown; details?: unknown; detail?: unknown } | null;

@@ -291,6 +291,11 @@ export type WriteOp =
   | { op: "shrink_removed_presence"; catalog_card_id: string; dex_variant_raw: string; by: number }
   | { op: "assert_presence_counts"; keys?: PresenceKeyRef[]; all?: boolean }
   /**
+   * THE FILE TOTAL (0024): the record plus the queue must still add up to the file. Emitted last by the
+   * writers that add to the record (manual match, stand-in, Retry). No header yet: it passes.
+   */
+  | { op: "assert_file_total" }
+  /**
    * A user-created STAND-IN catalog card (0015, UIL-060 Half 1): a row of her own for a card TCGdex
    * lacks, in the `user:` id namespace with `source = 'user'`. Emitted FIRST by lib/sync/exec.ts
    * `manualMatchStandIn`, in the same transaction as the match that points at it, so a stand-in never
