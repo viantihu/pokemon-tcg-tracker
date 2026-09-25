@@ -66,6 +66,8 @@ export interface ApplyOutcome {
   added: number;
   removed: number;
   variantChanges: number;
+  /** Stored variant flags the apply corrected (UIL-102). */
+  flagFixes: number;
   waiting: number;
   fastPath: boolean;
   notification: string;

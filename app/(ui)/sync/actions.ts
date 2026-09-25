@@ -90,6 +90,7 @@ export async function applySync(
       added: r.added,
       removed: r.removed,
       variantChanges: r.variantChanges,
+      flagFixes: r.flagFixes,
       waiting: r.waiting,
       fastPath: r.fastPath,
       notification: fastPathNotification(r.added, r.waiting),
