@@ -9,8 +9,10 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { isAllowedEmail } from "@/lib/auth/allowlist";
+import { publicEnv } from "@/lib/env";
 
 export type SignInState =
   { status: "idle" } | { status: "error"; message: string } | { status: "sent"; email: string };
@@ -23,6 +25,31 @@ async function requestOrigin(): Promise<string> {
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
   const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   return `${proto}://${host}`;
+}
+
+/** What she reads when Supabase's hourly email limit is hit — the message she used to get was Supabase's. */
+export const RATE_LIMITED =
+  "Too many sign-in emails were sent in the last hour. The limit resets on the hour. If an earlier " +
+  "link is still in your inbox, open that one.";
+
+/**
+ * The client that REQUESTS the link, in the IMPLICIT flow (UIL-097).
+ *
+ * `@supabase/ssr` forces PKCE, which ties the link to the browser that asked for it: the proof is a cookie
+ * in that browser, so the link failed when the Gmail app opened it in Chrome. In the implicit flow the
+ * request carries no code challenge, and Supabase's verify link redirects with the session in the URL
+ * fragment, which any browser can finish (app/auth/confirm). It stores nothing — no session is kept on
+ * the server — so it is safe to create per request.
+ */
+function linkClient() {
+  return createSupabaseClient(publicEnv.supabaseUrl, publicEnv.supabaseAnonKey, {
+    auth: {
+      flowType: "implicit",
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
 }
 
 /**
@@ -41,17 +68,19 @@ export async function signIn(_prev: SignInState, formData: FormData): Promise<Si
     return { status: "error", message: "That email is not authorised for this binder." };
   }
 
-  const supabase = await createClient();
   const origin = await requestOrigin();
-  const { error } = await supabase.auth.signInWithOtp({
+  const { error } = await linkClient().auth.signInWithOtp({
     email,
     options: {
-      emailRedirectTo: `${origin}/auth/callback`,
+      emailRedirectTo: `${origin}/auth/confirm`,
       shouldCreateUser: true,
     },
   });
 
   if (error) {
+    if (error.status === 429 || error.code === "over_email_send_rate_limit") {
+      return { status: "error", message: RATE_LIMITED };
+    }
     return { status: "error", message: error.message };
   }
   return { status: "sent", email };

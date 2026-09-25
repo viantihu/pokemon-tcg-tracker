@@ -21,8 +21,8 @@ export function LoginForm() {
           Check your email
         </b>
         <p style={{ fontSize: 12, lineHeight: 1.7 }}>
-          A sign-in link is on its way to <strong>{state.email}</strong>. Open it on this device to
-          finish signing in. The link expires shortly.
+          A sign-in link is on its way to <strong>{state.email}</strong>. Open it on the device you
+          want to sign in on, in any browser. The link works once and expires shortly.
         </p>
       </div>
     );

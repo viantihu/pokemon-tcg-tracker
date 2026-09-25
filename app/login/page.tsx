@@ -6,12 +6,15 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { FragmentSignIn } from "../auth/confirm/FragmentSignIn";
 import { LoginForm } from "./LoginForm";
 
 export const metadata = { title: "Sign in · Binder Ops" };
 
 const ERROR_MESSAGES: Record<string, string> = {
   auth: "That sign-in link was invalid or has expired. Request a new one below.",
+  // Supabase's own answer for a link that was already used or has run out (UIL-097).
+  expired: "That sign-in link has already been used or has expired. Request a new one below.",
   forbidden: "That account is not authorised for this binder.",
 };
 
@@ -49,6 +52,8 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
           This binder is private. Enter the owner email to receive a one-time sign-in link.
         </p>
         <LoginForm />
+        {/* UIL-097's safety net: a link sent to the Site URL arrives here, fragment intact. */}
+        <FragmentSignIn onEmpty="ignore" />
       </div>
     </main>
   );
