@@ -36,6 +36,7 @@ import type {
   StandInOutcome,
   SyncState,
 } from "./sync-types";
+import { CountCheckPanel } from "./CountCheckPanel";
 
 type Phase = "idle" | "parsing" | "preview" | "working";
 
@@ -198,6 +199,8 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
           {error}
         </div>
       ) : null}
+
+      <CountCheckPanel check={state.countCheck} />
 
       <UndoBar
         state={state}

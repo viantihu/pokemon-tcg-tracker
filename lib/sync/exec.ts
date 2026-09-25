@@ -14,7 +14,10 @@ import {
   applyWriteOps,
   catalogCardRepo,
   copyRepo,
+  dexImportRepo,
+  dexPresenceRepo,
   lastSyncSnapshotRepo,
+  removedPresenceRepo,
   evolutionLineRepo,
   lineSlotRepo,
   presenceGroupRepo,
@@ -28,6 +31,8 @@ import { entryAsDexRow, loadAliasMap } from "./pipeline";
 import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
 import type { SyncPlanBundle } from "./pipeline";
+import { CountMismatchError, parseCountRefusal, type CardLabel } from "./count-check";
+import type { PresenceKeyRef } from "@/lib/repo/write-ops";
 import {
   assertFreshBase,
   latestSnapshot,
@@ -46,6 +51,7 @@ import {
   type SnapshotEntryPrior,
   type SnapshotSlot,
   type SnapshotVariantPrior,
+  type PriorDexRecord,
 } from "./undo";
 
 export interface ApplyResult {
@@ -154,6 +160,77 @@ function reinsertEntryOp(e: SnapshotEntry): WriteOp {
   };
 }
 
+/* ------------------------------ the Dex record (UIL-100) ------------------------------ */
+
+/** The Dex record as it stands now — what an Undo of the sync about to run would put back. */
+async function readDexRecord(db: DbClient): Promise<PriorDexRecord | null> {
+  const header = await dexImportRepo.get(db);
+  if (!header) return null;
+  const rows = await dexPresenceRepo.listAll(db);
+  return {
+    rows: rows.map((r) => ({
+      catalog_card_id: r.catalog_card_id,
+      dex_variant_raw: r.dex_variant_raw,
+      quantity: r.quantity,
+    })),
+    fileTotal: header.file_total,
+    rowCount: header.row_count,
+    importedAt: header.imported_at,
+  };
+}
+
+/** The op that puts a prior record back: replace it, or clear it when there was none before. */
+function restoreDexRecordOp(prior: PriorDexRecord | null): WriteOp {
+  return prior
+    ? {
+        op: "replace_dex_record",
+        rows: prior.rows,
+        file_total: prior.fileTotal,
+        row_count: prior.rowCount,
+        imported_at: prior.importedAt,
+      }
+    : { op: "clear_dex_record" };
+}
+
+/**
+ * If `err` is the count check refusing this write (UIL-100), the same refusal in her words — cards named
+ * from the catalog, extra or missing, and what to do next. Otherwise null, and the caller rethrows `err`.
+ */
+async function asCountRefusal(
+  db: DbClient,
+  err: unknown,
+  nextStep: string,
+): Promise<CountMismatchError | null> {
+  const parsed = parseCountRefusal(err);
+  if (!parsed) return null;
+  const labels = new Map<string, CardLabel>();
+  for (const k of parsed.keys.slice(0, 10)) {
+    const card = await catalogCardRepo.getByPk(db, k.catalog_card_id);
+    if (card)
+      labels.set(k.catalog_card_id, {
+        name: card.name,
+        setName: card.set_name,
+        localId: card.local_id,
+      });
+  }
+  return new CountMismatchError(parsed.keys, parsed.total, labels, nextStep);
+}
+
+const NEXT_STEP = {
+  import:
+    "Your collection is exactly as it was. Import the file again; if the same cards are named, that is a " +
+    "bug to report (UIL-100) — nothing has been changed.",
+  retry:
+    "Nothing was saved, and the waiting cards are still waiting. Match them by hand from the list below, " +
+    "or report this (UIL-100).",
+  match:
+    "Nothing was saved. The app already holds more of this card than your Dex file lists, so this match " +
+    "would count one twice. Import your Dex file again first: the preview lists the extra copy and takes " +
+    "it out when you apply. Then match. (Do not remove a copy yourself — removing records it as traded away.)",
+
+  undo: "Undo was not applied: your collection is as it was before you pressed it. Report this (UIL-100).",
+} as const;
+
 /**
  * Apply a plan bundle: fold in the preview overrides, then build + apply (in one transaction) the
  * copy/placement/queue writes and the single undo snapshot (B.4).
@@ -187,6 +264,7 @@ export async function executeApply(
   const touchedGroupIds = new Set<string>();
 
   const createdCopyIds: string[] = [];
+  const createdCopyKeys: { catalog_card_id: string; dex_variant_raw: string }[] = [];
   const retiredCopies: SnapshotCopy[] = [];
   const slotReverts: SnapshotSlot[] = [];
   const variantReverts: SnapshotVariantPrior[] = [];
@@ -274,6 +352,7 @@ export async function executeApply(
       acquired_at: now,
     });
     createdCopyIds.push(id);
+    createdCopyKeys.push({ catalog_card_id: c.catalogCardId, dex_variant_raw: c.dexVariantRaw });
   }
 
   // 4. Retires — release placement under the removal rule (§1.6). Blocks are NEVER auto-reverted.
@@ -342,6 +421,29 @@ export async function executeApply(
     ops.push({ op: "delete_unresolved_entry", id });
   }
 
+  /**
+   * 7a. The Dex record (UIL-100), in THIS transaction so it can never disagree with the copies it describes.
+   *     An import replaces it with what the file says; a retry adds the rows it promotes (only once an import
+   *     has recorded a file — before that there is nothing to add to). The record as it stood goes into the
+   *     undo snapshot, so an Undo puts it back exactly.
+   *     A bundle with no `dexRecord` was previewed before 0022 deployed: it writes no record, and no check
+   *     runs for it, exactly as before.
+   */
+  const priorDexRecord =
+    bundle.dexRecord || bundle.dexAdds?.length ? await readDexRecord(db) : undefined;
+  const dexAdds = priorDexRecord ? (bundle.dexAdds ?? []) : [];
+  if (bundle.dexRecord) {
+    ops.push({
+      op: "replace_dex_record",
+      rows: bundle.dexRecord.rows,
+      file_total: bundle.dexRecord.fileTotal,
+      row_count: bundle.dexRecord.rowCount,
+      imported_at: now,
+    });
+  }
+  for (const a of dexAdds) ops.push({ op: "add_dex_presence", ...a });
+  const recordTouched = Boolean(bundle.dexRecord) || dexAdds.length > 0;
+
   // 7. Write the single undo snapshot LAST (overwrite-per-owner) as part of the same transaction.
   const fastPath = plan.retires.length === 0 && plan.variantUpdates.length === 0;
   const snapshot: AppliedSnapshot = {
@@ -353,11 +455,14 @@ export async function executeApply(
     fastPath,
     counts: bundle.counts,
     createdCopyIds,
+    createdCopyKeys,
     retiredCopies,
     slotReverts,
     variantReverts,
     touchedGroupIds: [...touchedGroupIds],
     queue: q,
+    // Absent unless this sync wrote the record: an Undo then leaves the record exactly alone.
+    ...(recordTouched ? { priorDexRecord: priorDexRecord ?? null } : {}),
   };
   // 7b. Forget the removal memories this export no longer contradicts (UIL-089). Dex has stopped listing
   //     these keys, so the disagreement each row recorded is over; keeping them would suppress a genuine
@@ -377,6 +482,22 @@ export async function executeApply(
   const snapshotId = snapshotIdForBase(bundle.baseSnapshotId, ownerScope);
   ops.push({ op: "insert_snapshot", id: snapshotId, snapshot: snapshot as unknown as Json });
 
+  /**
+   * 7c. THE CHECK, LAST (UIL-100): the collection must add up to the Dex file. An import checks EVERY key —
+   *     it has just reconciled every key to the file, so any disagreement left is this import's own. A retry
+   *     checks the keys it promoted. Refused: nothing above survives, and she is told which cards and why.
+   */
+  if (bundle.dexRecord) ops.push({ op: "assert_presence_counts", all: true });
+  else if (dexAdds.length > 0) {
+    ops.push({
+      op: "assert_presence_counts",
+      keys: dexAdds.map((a) => ({
+        catalog_card_id: a.catalog_card_id,
+        dex_variant_raw: a.dex_variant_raw,
+      })),
+    });
+  }
+
   // 8. Touched groups' desired_count is recomputed by the RPC after all copy writes (§C).
   try {
     await applyWriteOps(db, { ops, resyncGroupIds: [...touchedGroupIds] });
@@ -392,6 +513,8 @@ export async function executeApply(
       digest,
     );
     if (refusal) throw refusal;
+    const countRefusal = await asCountRefusal(db, err, NEXT_STEP[bundle.mode]);
+    if (countRefusal) throw countRefusal;
     throw err;
   }
 
@@ -422,25 +545,77 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
   const snap = latest.snapshot as unknown as AppliedSnapshot;
   const undo = invertSnapshot(snap);
 
+  /**
+   * KARVI'S RULING (UIL-100, condition 2 — option A', "Remove them, remember matches"): Undo takes back
+   * EVERYTHING that import added, INCLUDING the cards she matched by hand after it, and REMEMBERS her
+   * matches, so importing the same file again puts them straight back with no re-matching (UIL-082's path).
+   *
+   * Before this, a card matched by hand after an import SURVIVED its Undo: a manual match writes no snapshot,
+   * so its copies were not in `createdCopyIds`, while the entry that justified them — parked by the import —
+   * was deleted with it. The copy was left an orphan; the re-import re-parked the row with no memory of the
+   * match; re-matching added a second copy on top. A double, from Undo alone.
+   *
+   * WHICH ENTRIES: those this import parked or dedupe-updated (the only ones that could be WAITING for her to
+   * match after it) that are now RESOLVED to a card she chose. They STAY resolved, with their match.
+   * WHICH COPIES: in that match's presence group, created after this sync (the snapshot row's own
+   * `created_at` — the database's clock, the same one that stamped the copies) and not by it. Nothing but a
+   * manual match, a stand-in match or "add it back" creates a grouped copy between syncs, and each of those
+   * is a hand match of one of these entries.
+   */
+  const syncedAt = new Date(latest.created_at).getTime();
+  const createdByThisSync = new Set(snap.createdCopyIds);
+  const priorStatus = new Map(snap.queue.updatedPrior.map((p) => [p.id, p.status]));
+  const keptMatches: Row<"unresolved_entry">[] = [];
+  for (const id of [...snap.queue.parkedIds, ...priorStatus.keys()]) {
+    const e = await unresolvedEntryRepo.getByPk(db, id);
+    if (!e || e.status !== "RESOLVED" || !e.manual_match_id) continue;
+    if (priorStatus.has(id) && priorStatus.get(id) === "RESOLVED") continue; // already matched before it
+    keptMatches.push(e);
+  }
+  const keptMatchIds = new Set(keptMatches.map((e) => e.id));
+  const handMatchedCopyIds: string[] = [];
+  const handMatchedGroupIds = new Set<string>();
+  const seenCopy = new Set<string>();
+  for (const e of keptMatches) {
+    const group = await presenceGroupRepo.findByKey(
+      db,
+      e.manual_match_id as string,
+      e.dex_variant_raw,
+    );
+    if (!group) continue;
+    for (const c of await copyRepo.listByPresenceGroup(db, group.id)) {
+      if (createdByThisSync.has(c.id) || seenCopy.has(c.id)) continue;
+      if (new Date(c.created_at).getTime() <= syncedAt) continue; // there before this sync: not a hand match of it
+      seenCopy.add(c.id);
+      handMatchedCopyIds.push(c.id);
+      handMatchedGroupIds.add(group.id);
+    }
+  }
+
   const ops: WriteOp[] = [];
 
   // Restore queue first (no FK dependence on copies).
   for (const e of undo.reinsertEntries) ops.push(reinsertEntryOp(e));
   for (const p of undo.restoreEntries) {
+    // A match she made after this sync is REMEMBERED (A'): the entry keeps RESOLVED and its manual match;
+    // every other field goes back to what it was.
+    const keep = keptMatchIds.has(p.id);
     ops.push({
       op: "update_unresolved_entry",
       id: p.id,
       patch: {
-        status: p.status,
+        ...(keep ? {} : { status: p.status, manual_match_id: p.manual_match_id }),
         quantity: p.quantity,
         retry_count: p.retry_count,
         last_retry_sync: p.last_retry_sync,
         reason: p.reason,
-        manual_match_id: p.manual_match_id,
       },
     });
   }
-  for (const id of undo.deleteEntryIds) ops.push({ op: "delete_unresolved_entry", id });
+  for (const id of undo.deleteEntryIds) {
+    if (keptMatchIds.has(id)) continue; // A': this import parked it, she matched it — keep the match
+    ops.push({ op: "delete_unresolved_entry", id });
+  }
 
   // Bring retired copies back (with placement), then re-point their freed slots.
   for (const c of undo.reinsertCopies) ops.push(reinsertCopyOp(c));
@@ -475,7 +650,46 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
    * override) demotes. The retire path's `null` is documented as a deliberate choice and is left alone
    * rather than changed here under a different entry.
    */
-  for (const id of undo.deleteCopyIds) {
+  /**
+   * A removal she made against a card THIS sync created goes with the Undo too (UIL-100): the card is being
+   * taken back anyway, and a memory left behind would make the next import subtract it from a card she
+   * still owns. Created copies that no longer exist are those she removed (or merged) since; the memory on
+   * their key shrinks by that many, never below zero. Needs the created copies' keys, which snapshots record
+   * from 0022 on; an older snapshot leaves memories exactly as Undo always did.
+   */
+  if (snap.createdCopyKeys && snap.createdCopyKeys.length === snap.createdCopyIds.length) {
+    const goneByKey = new Map<string, PresenceKeyRef & { n: number }>();
+    for (const [i, id] of snap.createdCopyIds.entries()) {
+      if (await copyRepo.getByPk(db, id)) continue;
+      const k = snap.createdCopyKeys[i];
+      const kk = `${k.catalog_card_id}\u0000${k.dex_variant_raw}`;
+      const cur = goneByKey.get(kk) ?? { ...k, n: 0 };
+      cur.n += 1;
+      goneByKey.set(kk, cur);
+    }
+    if (goneByKey.size > 0) {
+      const memories = new Map(
+        (await removedPresenceRepo.listAll(db)).map((m) => [
+          `${m.catalog_card_id}\u0000${m.dex_variant_raw}`,
+          m.count,
+        ]),
+      );
+      for (const [kk, g] of goneByKey) {
+        const held = memories.get(kk) ?? 0;
+        const by = Math.min(held, g.n);
+        if (by > 0) {
+          ops.push({
+            op: "shrink_removed_presence",
+            catalog_card_id: g.catalog_card_id,
+            dex_variant_raw: g.dex_variant_raw,
+            by,
+          });
+        }
+      }
+    }
+  }
+
+  for (const id of [...undo.deleteCopyIds, ...handMatchedCopyIds]) {
     const copy = await copyRepo.getByPk(db, id);
     if (copy?.line_slot_id) {
       const slot = await lineSlotRepo.getByPk(db, copy.line_slot_id);
@@ -506,18 +720,45 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
   ops.push({ op: "delete_snapshot", id: latest.id });
   ops.push({ op: "insert_snapshot", id: tombstoneId, snapshot: tombstone as unknown as Json });
 
+  /**
+   * The Dex record goes back to what it was before this sync (UIL-100), then THE CHECK runs over every key
+   * either record names — every key this Undo could have moved. An Undo of her first recorded import clears
+   * the record; the check then has no header and passes. A snapshot from before 0022 wrote no record, so its
+   * Undo leaves the record alone and checks nothing, as before.
+   */
+  if (snap.priorDexRecord !== undefined) {
+    const current = (await dexPresenceRepo.listAll(db)).map((r) => ({
+      catalog_card_id: r.catalog_card_id,
+      dex_variant_raw: r.dex_variant_raw,
+    }));
+    ops.push(restoreDexRecordOp(snap.priorDexRecord));
+    const keys = new Map<string, PresenceKeyRef>();
+    for (const k of [...current, ...(snap.priorDexRecord?.rows ?? [])]) {
+      keys.set(`${k.catalog_card_id}\u0000${k.dex_variant_raw}`, {
+        catalog_card_id: k.catalog_card_id,
+        dex_variant_raw: k.dex_variant_raw,
+      });
+    }
+    if (keys.size > 0) ops.push({ op: "assert_presence_counts", keys: [...keys.values()] });
+  }
+
   try {
-    await applyWriteOps(db, { ops, resyncGroupIds: undo.resyncGroupIds });
+    await applyWriteOps(db, {
+      ops,
+      resyncGroupIds: [...new Set([...undo.resyncGroupIds, ...handMatchedGroupIds])],
+    });
   } catch (err) {
     // A racing Undo of this same snapshot committed first (a double click): this one rolled back whole.
     const now = latestSnapshot(await lastSyncSnapshotRepo.list(db));
     if (now?.id === tombstoneId) throw new Error("That sync has already been undone.");
+    const countRefusal = await asCountRefusal(db, err, NEXT_STEP.undo);
+    if (countRefusal) throw countRefusal;
     throw err;
   }
 
   return {
     restoredCopies: undo.reinsertCopies.length,
-    removedCopies: undo.deleteCopyIds.length,
+    removedCopies: undo.deleteCopyIds.length + handMatchedCopyIds.length,
     revertedVariants: undo.revertVariants.length,
   };
 }
@@ -688,6 +929,15 @@ async function matchOps(
     },
   });
 
+  /**
+   * UIL-100: the matched Dex row moves from "waiting" into the Dex record, and THE CHECK runs on this card
+   * last, in the same transaction. The quantity is the one this match inserts, so the two cannot disagree.
+   * If the card already disagrees with Dex (a copy she already holds), the match is refused and says so.
+   */
+  const matchedKey = { catalog_card_id: target.tcgdexId, dex_variant_raw: entry.dex_variant_raw };
+  ops.push({ op: "add_dex_presence", ...matchedKey, quantity: qty });
+  ops.push({ op: "assert_presence_counts", keys: [matchedKey] });
+
   return { ops, groupId, result: { learnedAlias, aliasSkippedReason, created: qty } };
 }
 
@@ -713,7 +963,11 @@ export async function manualMatch(
     { tcgdexId, setId: card.set_id },
     nowIso(),
   );
-  await applyWriteOps(db, { ops, resyncGroupIds: [groupId] });
+  try {
+    await applyWriteOps(db, { ops, resyncGroupIds: [groupId] });
+  } catch (err) {
+    throw (await asCountRefusal(db, err, NEXT_STEP.match)) ?? err;
+  }
   return result;
 }
 
@@ -779,7 +1033,11 @@ export async function manualMatchStandIn(
   ];
   const match = await matchOps(db, entry, { tcgdexId: standInId, setId: input.setId }, nowIso());
   ops.push(...match.ops);
-  await applyWriteOps(db, { ops, resyncGroupIds: [match.groupId] });
+  try {
+    await applyWriteOps(db, { ops, resyncGroupIds: [match.groupId] });
+  } catch (err) {
+    throw (await asCountRefusal(db, err, NEXT_STEP.match)) ?? err;
+  }
   return { ...match.result, standInId };
 }
 

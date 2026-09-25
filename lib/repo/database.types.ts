@@ -311,6 +311,64 @@ export type Database = {
           },
         ];
       };
+      dex_presence: {
+        Row: {
+          id: string;
+          owner_id: string;
+          catalog_card_id: string;
+          dex_variant_raw: string;
+          quantity: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id?: string;
+          catalog_card_id: string;
+          dex_variant_raw: string;
+          quantity: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          catalog_card_id?: string;
+          dex_variant_raw?: string;
+          quantity?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "dex_presence_catalog_card_id_fkey";
+            columns: ["catalog_card_id"];
+            referencedRelation: "catalog_card";
+            referencedColumns: ["tcgdex_id"];
+          },
+        ];
+      };
+      dex_import: {
+        Row: {
+          owner_id: string;
+          file_total: number;
+          row_count: number;
+          imported_at: string;
+        };
+        Insert: {
+          owner_id?: string;
+          file_total: number;
+          row_count: number;
+          imported_at?: string;
+        };
+        Update: {
+          owner_id?: string;
+          file_total?: number;
+          row_count?: number;
+          imported_at?: string;
+        };
+        Relationships: [];
+      };
       presence_group: {
         Row: {
           id: string;

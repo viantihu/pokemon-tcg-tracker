@@ -85,6 +85,14 @@ export interface SyncCounts {
   unchanged: number;
 }
 
+/** The Dex record as it stood before a sync (UIL-100): what Undo puts back. */
+export interface PriorDexRecord {
+  rows: { catalog_card_id: string; dex_variant_raw: string; quantity: number }[];
+  fileTotal: number;
+  rowCount: number;
+  importedAt: string;
+}
+
 export interface AppliedSnapshot {
   version: 1;
   /**
@@ -98,6 +106,19 @@ export interface AppliedSnapshot {
   counts: SyncCounts;
   /** Copies created this sync — deleted on undo. */
   createdCopyIds: string[];
+  /**
+   * The (card, Dex variant) of each created copy, parallel to `createdCopyIds` (UIL-100). Lets Undo take
+   * back a removal memory she recorded against a card this sync created: the card goes with the Undo, so
+   * the memory must too, or the next import would subtract a removal from a card she still owns. Optional:
+   * snapshots written before 0022 carry none, and Undo then leaves memories exactly as it always did.
+   */
+  createdCopyKeys?: { catalog_card_id: string; dex_variant_raw: string }[];
+  /**
+   * The Dex record this sync REPLACED or added to (UIL-100), restored verbatim on undo. `null`: there was
+   * no record before this sync (her first recorded import), so Undo clears it. Absent: written before 0022,
+   * when no record existed, so Undo leaves the record alone.
+   */
+  priorDexRecord?: PriorDexRecord | null;
   /** Copies retired this sync — re-inserted verbatim on undo. */
   retiredCopies: SnapshotCopy[];
   /** Line slots freed by a retire — restored to their filled state on undo. */

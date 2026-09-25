@@ -18,6 +18,7 @@ import {
   catalogCardRepo,
   colorBandRepo,
   copyRepo,
+  dexPresenceRepo,
   lastSyncSnapshotRepo,
   presenceGroupRepo,
   removedPresenceRepo,
@@ -40,6 +41,8 @@ import {
 import type { DexRow } from "./types";
 import type { RemovedPresence } from "./diff";
 import { latestSnapshotId } from "./apply-guard";
+import { dexRecordFromRows, type DexRecord } from "./count-check";
+import type { DexRecordRow } from "@/lib/repo/write-ops";
 import type { SyncCounts } from "./undo";
 import { buildPreview, type CardMeta, type PreviewEnrichment, type SyncPreview } from "./preview";
 
@@ -54,6 +57,13 @@ export interface SyncPlanBundle {
    * double click or a retry cannot apply one preview twice. See lib/sync/apply-guard.ts.
    */
   baseSnapshotId: string | null;
+  /**
+   * What this IMPORT's file says, for the Dex record (UIL-100): replaces the record in the apply's
+   * transaction. Null/absent on a retry, which only ADDS the rows it promotes (`dexAdds`).
+   */
+  dexRecord?: DexRecord | null;
+  /** The rows a RETRY promotes into the record (UIL-100); empty on an import. */
+  dexAdds?: DexRecordRow[];
   plan: ReconcilePlan;
   current: CurrentGroup[];
   queue: {
@@ -262,6 +272,37 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
     }
   }
 
+  /**
+   * A RETRY's desired count for a key is what the Dex record ALREADY holds for it plus the row it promotes
+   * (UIL-100). Without the record term, a promoted row whose key another Dex row already fills read as
+   * "desired = this row only", and the diff retired the other row's copies — unreviewed, since a retry
+   * applies with no preview (the Tech Lead's card-entry audit, finding 3). The record is exactly that other
+   * row's quantity, so adding it back makes the retry purely additive, as it was always meant to be.
+   * Before her first recorded import the record is empty and nothing changes.
+   */
+  const dexAdds: DexRecordRow[] = [];
+  if (!bytes && resolvedRows.length > 0) {
+    const promoted = dexRecordFromRows(resolvedRows);
+    dexAdds.push(...promoted.rows);
+    const recordByKey = new Map(
+      (await dexPresenceRepo.listAll(db)).map((r) => [
+        key(r.catalog_card_id, r.dex_variant_raw),
+        r,
+      ]),
+    );
+    for (const add of promoted.rows) {
+      const existing = recordByKey.get(key(add.catalog_card_id, add.dex_variant_raw));
+      if (!existing) continue;
+      resolvedRows.push({
+        type: "collection",
+        catalogCardId: existing.catalog_card_id,
+        dexVariantRaw: existing.dex_variant_raw,
+        quantity: existing.quantity,
+        raw: { dexId: "", setName: "", series: "", number: "", name: "", locale: "" },
+      });
+    }
+  }
+
   // An IMPORT is a full-snapshot reconciliation (a card gone from the export is a real REMOVED). A
   // RETRY is purely additive — it must NOT diff against the whole collection, or every card the tiny
   // promoted set omits would classify REMOVED. So retry reconciles only against the promoted keys
@@ -317,6 +358,9 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
   const bundle: SyncPlanBundle = {
     mode,
     baseSnapshotId,
+    // Built from the rows BEFORE any retry augmentation above, which only ever runs without bytes.
+    dexRecord: bytes ? dexRecordFromRows(resolvedRows) : null,
+    dexAdds,
     plan,
     current: reconcileCurrent,
     queue: { parks, archiveEntryIds, dropEntryIds, stillWaiting },

@@ -84,6 +84,11 @@ export const OWNER_TABLES = [
   // Production's first import re-create every card she removed on Testing. FK is to
   // catalog_card only, which SHARED_TABLES lands first.
   "removed_presence",
+  // 0022 (UIL-100): what her last Dex import said, and that import's file-level header. They travel so
+  // Production's Sync page checks her collection from the first day; Production's first import replaces
+  // both anyway. FKs are to catalog_card only (SHARED_TABLES land first); dex_import's key is owner_id.
+  "dex_presence",
+  "dex_import",
   "evolution_line",
   "copy",
   "line_slot",

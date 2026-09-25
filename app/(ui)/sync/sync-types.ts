@@ -45,6 +45,8 @@ export interface LearnedAliasView {
 }
 
 /** The queue + undo status the screen loads on mount and after every mutation (sync-ui-spec §A.9). */
+import type { CountCheckView } from "@/lib/sync/count-check";
+
 export interface SyncState {
   waiting: { unknownSet: QueueEntryView[]; unknownCard: QueueEntryView[] };
   /** Every card type the band map knows (type_color_map.card_type), for the stand-in form (UIL-060). */
@@ -54,6 +56,8 @@ export interface SyncState {
   undo: { available: boolean; createdAt: string | null; summary: SyncCounts | null };
   /** Every learned alias, hers first (manual before name-resolved), newest first within each. */
   aliases: LearnedAliasView[];
+  /** UIL-100: does the collection add up to her last Dex file, and which cards do not. */
+  countCheck: CountCheckView;
 }
 
 /** Result of an apply (fast-path or gated) — carries the fast-path notification text. */

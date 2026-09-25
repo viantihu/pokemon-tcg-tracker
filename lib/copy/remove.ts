@@ -92,6 +92,13 @@ export function describeFormerPlacement(
  * to be taught to guard against. Releasing it in the same transaction is what keeps that from being
  * possible at all.
  */
+/*
+ * NO COUNT CHECK HERE, deliberately (UIL-100). A removal takes one copy away AND records one removal
+ * against the same key, so copies and max(0, dex − removed) fall together: it can never turn a card that
+ * adds up into one that does not. Asserting would therefore only ever fire on a card that ALREADY
+ * disagreed with Dex — and refuse the very removal that is her remedy for a double. A merge keeps the
+ * count as well (one record out, the survivor in).
+ */
 export function buildRemoveCopyOps(plan: RemoveCopyPlan): WriteOp[] {
   const ops: WriteOp[] = [
     ...releaseSlotOps(plan.reopenSlotId, plan.demoteLineId),
