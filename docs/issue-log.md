@@ -7933,3 +7933,45 @@ reachable today, and no user-facing urgency exists either way.
 **Cross-reference UIL-089** (the incident and the original merge feature), **UIL-098 part 4** (0023
 itself, PR #334), and **UIL-100** (the count-truing behavior a same-key double already has today via
 re-import).
+
+## UIL-104 — A row dismissed on the Sync page makes the next import of a file that still lists it fail whole, and a dismissed row that later leaves the file is never forgotten, so the Count check reads "doesn't add up"
+
+- **Reported:** 2026-09-25 (not from Karvi — found by the Tech Lead while building migration 0024)
+- **Status:** Open: assigned to the Tech Lead (new). **Interim: do not press Dismiss on the Sync page
+  until (b) ships.** Testing currently has 0 dismissed entries, so nothing is blocked yet.
+- **Priority:** High (Senior BA's read; Karvi to confirm) — it blocks her import.
+- **Area:** Sync
+- **Env:** Testing, `develop` `f99bb90`
+
+**Two bugs, one root cause: every place that re-checks an unresolved row against the file only looks at
+WAITING status, never DISMISSED.**
+
+**(b) — a dismissed row still in the file makes the whole import fail, predates 0022.** The park step
+([`lib/sync/exec.ts:392-427`](../lib/sync/exec.ts:392)) dedupes a parked row against
+`unresolvedEntryRepo.listWaiting(db)` only. A row whose entry is DISMISSED isn't in that list, so its key
+is treated as new and gets a second `insert_unresolved_entry` — colliding with the DISMISSED row already
+in the table on the unique constraint `(owner_id, dex_id, dex_variant_raw)`
+([`supabase/migrations/0002_domain.sql:258`](../supabase/migrations/0002_domain.sql:258), Postgres's
+default name for it is exactly `unresolved_entry_owner_id_dex_id_dex_variant_raw_key`). The whole apply
+transaction fails, not just that one row.
+
+**(a) — a dismissed row that leaves the file is never dropped, so the Count check goes stale.** The
+drop-candidate scan in `reconcileExport` ([`lib/sync/pipeline.ts:183-239`](../lib/sync/pipeline.ts:183))
+walks `waiting` — the same `listWaiting(db)` result — and only that set can land in `dropEntryIds`
+([`:236-239`](../lib/sync/pipeline.ts:236)). A DISMISSED entry is invisible to this scan too, so once
+its card leaves her Dex file entirely it is never dropped and stays DISMISSED forever. `loadCountCheck`
+([`lib/sync/count-check-load.ts:60-61`](../lib/sync/count-check-load.ts:60)) sums both
+`waitingQuantity` and `dismissedQuantity` into the check — the stale DISMISSED quantity keeps counting
+against a file total that no longer includes it, so the Count check reads "doesn't add up" for a card
+that isn't even wrong anymore.
+
+**Rulings, 2026-09-25 (Senior BA), Karvi being told and may overrule (a):**
+
+- **(b) ships first, its own PR, High.** A DISMISSED entry still present in the file is refreshed (same
+  `update_unresolved_entry` shape the WAITING path already uses) and stays DISMISSED — it should never
+  have been eligible for a second insert in the first place.
+- **(a) ships inside the Tech Lead's migration 0024 PR.** A DISMISSED entry whose row left the file is
+  dropped exactly like a WAITING one; the preview names it, and Undo restores it if she wants it back.
+
+**Cross-reference UIL-100** (the Count check this corrupts — the mechanism the sum relies on is sound;
+the input feeding it is stale) and **UIL-099** (the same park/dedupe machinery, a different edge of it).
