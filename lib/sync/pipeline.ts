@@ -331,11 +331,19 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
   // Classify parks against existing WAITING for the no-op check: benign retry-bumps of an identical
   // unresolved row are NOT a collection change (idempotent re-import stays a no-op).
   const waitingByKey = new Map(waiting.map((e) => [key(e.dex_id, e.dex_variant_raw), e]));
+  // A row she dismissed stays dismissed when the file lists it again (lib/sync/exec.ts refreshes it in place),
+  // so it is neither a new waiting card nor one still waiting — only an import reads this.
+  const dismissedKeys = bytes
+    ? new Set(
+        (await unresolvedEntryRepo.listDismissed(db)).map((e) => key(e.dex_id, e.dex_variant_raw)),
+      )
+    : new Set<string>();
   let newParks = 0;
   let meaningfulUpdates = 0;
   const parkKeys = new Set<string>();
   for (const p of parks) {
     const rk = key(p.dexId, p.dexVariantRaw);
+    if (dismissedKeys.has(rk)) continue;
     parkKeys.add(rk);
     const prior = waitingByKey.get(rk);
     if (!prior) newParks += 1;

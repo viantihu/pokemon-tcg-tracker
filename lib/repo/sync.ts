@@ -49,6 +49,22 @@ export const unresolvedEntryRepo = {
    * the row and proposed retiring the copies the match had created. Same complete-read guard as
    * `listWaiting`: a truncated list would silently forget matches past the cap.
    */
+  /**
+   * Rows she DISMISSED (not a card, or not hers to match). The import reconciles them against the file like
+   * waiting rows — refreshed while the file still lists them, never re-parked as a duplicate — because the
+   * table is unique on (owner, dex_id, dex_variant_raw) and a second insert failed the whole import.
+   */
+  async listDismissed(db: DbClient): Promise<Row<"unresolved_entry">[]> {
+    const { data, error, count } = await db
+      .from("unresolved_entry")
+      .select("*", { count: "exact" })
+      .eq("status", "DISMISSED");
+    if (error) throw error;
+    const rows = data ?? [];
+    assertReadComplete("unresolved_entry", rows, count);
+    return rows;
+  },
+
   async listManualMatches(db: DbClient): Promise<Row<"unresolved_entry">[]> {
     const { data, error, count } = await db
       .from("unresolved_entry")
