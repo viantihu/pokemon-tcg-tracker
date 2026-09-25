@@ -132,8 +132,13 @@ const PARSERS = {
 class PgQuery {
   private cols = "*";
   private filters: Filter[] = [];
-  private orderCol: string | null = null;
-  private orderAsc = true;
+  /**
+   * Every `.order()` in call order, as PostgREST applies them: the first is the primary sort and each
+   * later one breaks its ties. This used to keep only the LAST call, so `.order("created_at").order("id")`
+   * — the Haul Plan queue's "oldest first" — sorted by id alone here while production sorted oldest
+   * first; caught by UIL-098's Backfill tests, which place the oldest waiting copy.
+   */
+  private orders: { col: string; asc: boolean; nullsFirst?: boolean }[] = [];
   private limitOffset: { from: number; to: number } | null = null;
   private wantCount = false;
   private mode: "select" | "insert" | "update" | "upsert" = "select";
@@ -281,11 +286,11 @@ class PgQuery {
     return this;
   }
 
-  order(col: string, opts?: { ascending?: boolean }): this {
-    this.orderCol = col;
+  order(col: string, opts?: { ascending?: boolean; nullsFirst?: boolean }): this {
     // Honoured rather than ignored: silently sorting ascending for a `{ ascending: false }` caller is
-    // the shape of double that certifies wrong behaviour (see tests/catalog/card-search.test.ts).
-    this.orderAsc = opts?.ascending ?? true;
+    // the shape of double that certifies wrong behaviour (see tests/catalog/card-search.test.ts). Same
+    // for `nullsFirst`, which Postgres otherwise defaults the opposite way for a descending sort.
+    this.orders.push({ col, asc: opts?.ascending ?? true, nullsFirst: opts?.nullsFirst });
     return this;
   }
 
@@ -351,8 +356,14 @@ class PgQuery {
     const sql =
       `select ${this.cols} from ${quoteIdent(this.table)}` +
       this.whereClause(params) +
-      (this.orderCol
-        ? ` order by ${quoteIdent(this.orderCol)} ${this.orderAsc ? "asc" : "desc"}`
+      (this.orders.length > 0
+        ? ` order by ${this.orders
+            .map(
+              (o) =>
+                `${quoteIdent(o.col)} ${o.asc ? "asc" : "desc"}` +
+                (o.nullsFirst === undefined ? "" : o.nullsFirst ? " nulls first" : " nulls last"),
+            )
+            .join(", ")}`
         : "") +
       (this.limitOffset
         ? ` limit ${this.limitOffset.to - this.limitOffset.from + 1} offset ${this.limitOffset.from}`
@@ -377,9 +388,9 @@ class PgQuery {
   private async total(): Promise<number> {
     const saved = this.limitOffset;
     const savedCols = this.cols;
-    const savedOrder = this.orderCol;
+    const savedOrder = this.orders;
     this.limitOffset = null;
-    this.orderCol = null;
+    this.orders = [];
     this.cols = "count(*)::int as n";
     try {
       const [sql, params] = this.compile();
@@ -388,7 +399,7 @@ class PgQuery {
     } finally {
       this.limitOffset = saved;
       this.cols = savedCols;
-      this.orderCol = savedOrder;
+      this.orders = savedOrder;
     }
   }
 

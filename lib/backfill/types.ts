@@ -10,7 +10,7 @@
  * (`resolve.ts`), the commit executors (`commit.ts`), the server actions, and the tests.
  */
 
-import type { SlotState, Variant } from "@/lib/engine";
+import type { SlotState } from "@/lib/engine";
 import type { Insert } from "@/lib/repo";
 
 /* --------------------------------- context -------------------------------- */
@@ -72,10 +72,13 @@ export interface ResolvedBackLine {
 
 /* --------------------------------- commits -------------------------------- */
 
-/** A front-half copy being transcribed (band auto-computed server-side from the card's type). */
+/**
+ * A front-half card being transcribed: a printing + its Dex variant, waiting in her haul (UIL-098). The
+ * server places the oldest waiting copy of that key; band auto-computed server-side from the card's type.
+ */
 export interface FrontHalfCard {
   tcgdexId: string;
-  variant: Variant;
+  dexVariantRaw: string;
 }
 
 export interface FrontHalfCommit {
@@ -90,9 +93,9 @@ export interface BackLineStageInput {
   stage: string;
   dexId: number;
   decision: SlotState; // "filled" | "placeholder" | "block"
-  /** FILLED: the exact printing the collector owns + its variant. */
+  /** FILLED: the printing she owns + its Dex variant — a copy waiting in her haul (UIL-098). */
   filledTcgdexId?: string | null;
-  filledVariant?: Variant;
+  filledDexVariantRaw?: string | null;
   /** placeholder: wishlist target + ranked alternates + specialty-only flag. */
   targetCatalogCardId?: string | null;
   alternateCatalogCardIds?: string[];
@@ -100,7 +103,8 @@ export interface BackLineStageInput {
   /** block: how the pocket run was filled, and — for a repurposed duplicate — WHICH card. */
   blockMaterial?: "basicEnergy" | "repurposedDuplicate";
   blockCopyTcgdexId?: string | null;
-  blockCopyVariant?: Variant;
+  /** The repurposed duplicate's Dex variant — it too is a copy waiting in her haul (UIL-098). */
+  blockCopyDexVariantRaw?: string | null;
   pocketCount?: number;
 }
 
@@ -114,10 +118,10 @@ export interface BackLineCommit {
   stages: BackLineStageInput[];
 }
 
-/** A specialty copy being transcribed, optionally tagged into one or more collections. */
+/** A specialty card being transcribed (a waiting copy, UIL-098), optionally tagged into collections. */
 export interface SpecialtyCard {
   tcgdexId: string;
-  variant: Variant;
+  dexVariantRaw: string;
   collectionIds: string[];
 }
 
@@ -135,8 +139,11 @@ export interface SpecialtyCommit {
  */
 export interface BackfillWrites {
   lines: Insert<"evolution_line">[];
-  /** Copies are inserted with `line_slot_id` NULL; the links below patch it after slots exist. */
-  copies: Insert<"copy">[];
+  /**
+   * Waiting copies given a home (UIL-098). Backfill PLACES copies her Dex import made; it has no way to
+   * create one. `line_slot_id` is set by the links below, once the slots exist.
+   */
+  placements: CopyPlacement[];
   slots: Insert<"line_slot">[];
   blocks: Insert<"binder_block">[];
   wishlist: Insert<"wishlist_item">[];
@@ -147,8 +154,18 @@ export interface BackfillWrites {
   collectionTags: { collectionId: string; catalogCardId: string }[];
 }
 
+/** One waiting copy's new home — the placement columns only; Dex owns the variant and the rest. */
+export interface CopyPlacement {
+  copyId: string;
+  role: "shelved" | "block";
+  binder_id: string;
+  binder_half: "front" | "back" | null;
+  color_band: string | null;
+}
+
 export interface CommitCounts {
-  copies: number;
+  /** Waiting copies placed. Backfill never creates one (UIL-098). */
+  placed: number;
   lines: number;
   slots: number;
   blocks: number;
@@ -160,7 +177,7 @@ export interface CommitCounts {
 export function emptyWrites(): BackfillWrites {
   return {
     lines: [],
-    copies: [],
+    placements: [],
     slots: [],
     blocks: [],
     wishlist: [],
@@ -173,7 +190,7 @@ export function emptyWrites(): BackfillWrites {
 /** Per-table counts of a write set (for the commit summary). */
 export function countWrites(w: BackfillWrites): CommitCounts {
   return {
-    copies: w.copies.length,
+    placed: w.placements.length,
     lines: w.lines.length,
     slots: w.slots.length,
     blocks: w.blocks.length,

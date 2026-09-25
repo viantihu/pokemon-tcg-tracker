@@ -7,6 +7,10 @@
  * frozen migrations 0001–0004 (config included), then reads the derived view back. Drives the view
  * from planner output so the two never drift. Uses the same Supabase shims as
  * `tests/catalog/migration.test.ts` (PGlite lacks `auth.uid()` and the anon/authenticated roles).
+ *
+ * Backfill PLACES copies her Dex import left waiting (UIL-098): the taker below records which card each
+ * copy it hands out is, `applyWrites` seeds those copies as waiting (`role = 'haul'`), and the planner's
+ * placements are applied to them as updates.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -65,6 +69,9 @@ const FIXTURES = [
   ARVEN_SV03_186,
 ];
 
+/** Every copy the planners took, and which (card, Dex variant) it is — seeded as waiting before placing. */
+const TAKEN: { id: string; tcgdexId: string; dexVariantRaw: string }[] = [];
+
 function makeDeps(): PlanDeps {
   return {
     ownerId: OWNER,
@@ -78,6 +85,11 @@ function makeDeps(): PlanDeps {
     collectionNameById: new Map(),
     // Real uuids — the id columns are uuid in the schema.
     newId: () => crypto.randomUUID(),
+    takeCopy: (tcgdexId, dexVariantRaw) => {
+      const id = crypto.randomUUID();
+      TAKEN.push({ id, tcgdexId, dexVariantRaw });
+      return id;
+    },
     now: "2026-09-08T00:00:00.000Z",
   };
 }
@@ -90,8 +102,8 @@ function buildWrites(): BackfillWrites {
       binderId: BINDER,
       half: "front",
       cards: [
-        { tcgdexId: CHARMANDER_SV03_026.tcgdexId, variant: "normal" }, // Fire → red
-        { tcgdexId: ARVEN_SV03_186.tcgdexId, variant: "normal" }, // Trainer → white
+        { tcgdexId: CHARMANDER_SV03_026.tcgdexId, dexVariantRaw: "Normal" }, // Fire → red
+        { tcgdexId: ARVEN_SV03_186.tcgdexId, dexVariantRaw: "Normal" }, // Trainer → white
       ],
     },
     deps,
@@ -110,7 +122,7 @@ function buildWrites(): BackfillWrites {
           dexId: 4,
           decision: "filled",
           filledTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-          filledVariant: "normal",
+          filledDexVariantRaw: "Normal",
         },
         {
           stageIndex: 1,
@@ -128,7 +140,7 @@ function buildWrites(): BackfillWrites {
           decision: "block",
           blockMaterial: "repurposedDuplicate",
           blockCopyTcgdexId: SCIZOR_SV03_141.tcgdexId,
-          blockCopyVariant: "holo",
+          blockCopyDexVariantRaw: "Holo",
           pocketCount: 2,
         },
       ],
@@ -138,7 +150,7 @@ function buildWrites(): BackfillWrites {
   // Merge the two write sets (front has no lines/slots/blocks/wishlist).
   return {
     lines: [...front.lines, ...back.lines],
-    copies: [...front.copies, ...back.copies],
+    placements: [...front.placements, ...back.placements],
     slots: [...front.slots, ...back.slots],
     blocks: [...front.blocks, ...back.blocks],
     wishlist: [...front.wishlist, ...back.wishlist],
@@ -152,7 +164,7 @@ function buildWrites(): BackfillWrites {
 async function applyWrites(db: PGlite, w: BackfillWrites) {
   // Catalog rows every FK depends on.
   const catalogIds = new Set<string>();
-  for (const c of w.copies) catalogIds.add(c.catalog_card_id);
+  for (const c of TAKEN) catalogIds.add(c.tcgdexId);
   for (const s of w.slots) if (s.target_catalog_card_id) catalogIds.add(s.target_catalog_card_id);
   for (const id of catalogIds) {
     await db.query(
@@ -168,20 +180,17 @@ async function applyWrites(db: PGlite, w: BackfillWrites) {
       [l.id, l.owner_id, l.root_dex_id, l.color_band, l.binder_id, l.half, l.status],
     );
   }
-  for (const c of w.copies) {
+  // The copies her import made, waiting in her haul — what the planner's placements point at.
+  for (const c of TAKEN) {
     await db.query(
-      `insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band, line_slot_id)
-       values ($1,$2,$3,$4,$5,$6,$7,$8, null)`,
-      [
-        c.id,
-        c.owner_id,
-        c.catalog_card_id,
-        c.variant,
-        c.role,
-        c.binder_id,
-        c.binder_half,
-        c.color_band,
-      ],
+      `insert into copy (id, owner_id, catalog_card_id, dex_variant_raw, role) values ($1,$2,$3,$4,'haul')`,
+      [c.id, OWNER, c.tcgdexId, c.dexVariantRaw],
+    );
+  }
+  for (const p of w.placements) {
+    await db.query(
+      `update copy set role = $2, binder_id = $3, binder_half = $4, color_band = $5 where id = $1`,
+      [p.copyId, p.role, p.binder_id, p.binder_half, p.color_band],
     );
   }
   for (const s of w.slots) {

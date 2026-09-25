@@ -78,9 +78,14 @@ export function resolveBackLineFromContext(
   return resolveBackLine(picked, bandKey, [...ctx.catalogById.values()], ctx.typeColorMap);
 }
 
-/** Assemble the pure-planner deps from a loaded context + owner. */
-export function planDeps(ctx: BackfillContext, ownerId: string): PlanDeps {
+/** Assemble the pure-planner deps from a loaded context + owner + the waiting-copy source. */
+export function planDeps(
+  ctx: BackfillContext,
+  ownerId: string,
+  takeCopy: PlanDeps["takeCopy"],
+): PlanDeps {
   return {
+    takeCopy,
     ownerId,
     catalogById: ctx.catalogById,
     typeColorMap: ctx.typeColorMap,

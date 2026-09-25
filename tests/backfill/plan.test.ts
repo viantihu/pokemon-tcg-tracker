@@ -5,6 +5,10 @@
  * `tests/plan/plan-run.test.ts` suite exercises the M6 cascade. Covers band auto-computation, the
  * back-half chain resolution (placeholder / cap / block evidence), the terminated-line invariant
  * ("a terminated line never offers a back-half slot"), and the exact rows each step writes.
+ *
+ * Every card is a copy waiting in her haul (UIL-098): the planners take copy ids from `takeCopy` and emit
+ * PLACEMENTS, never new copies. `makeDeps`' taker hands out ids that name the key they came from, so a
+ * test can see which (printing, Dex variant) each placement took.
  */
 
 import { describe, expect, it } from "vitest";
@@ -73,6 +77,7 @@ function makeDeps(catalog: CatalogCard[]): PlanDeps {
     bandDisplayByKey: BAND_DISPLAY,
     collectionNameById: new Map([["coll-okubo", "OKUBO cards"]]),
     newId: () => `id-${++n}`,
+    takeCopy: (tcgdexId, dexVariantRaw) => `waiting:${tcgdexId}:${dexVariantRaw}:${++n}`,
     now: "2026-09-08T00:00:00.000Z",
   };
 }
@@ -181,16 +186,20 @@ describe("planFrontHalf", () => {
         binderId: B1,
         half: "front",
         cards: [
-          { tcgdexId: CHARMANDER_SV03_026.tcgdexId, variant: "normal" },
-          { tcgdexId: ARVEN_SV03_186.tcgdexId, variant: "normal" },
+          { tcgdexId: CHARMANDER_SV03_026.tcgdexId, dexVariantRaw: "Normal" },
+          { tcgdexId: ARVEN_SV03_186.tcgdexId, dexVariantRaw: "Normal" },
         ],
       },
       deps,
     );
-    expect(w.copies).toHaveLength(2);
-    expect(w.copies.map((c) => c.color_band)).toEqual(["red", "white"]); // Fire→red, Trainer→white
-    expect(w.copies.every((c) => c.role === "shelved" && c.binder_half === "front")).toBe(true);
-    expect(w.copies.every((c) => c.haul_id === null)).toBe(true);
+    expect(w.placements).toHaveLength(2);
+    expect(w.placements.map((c) => c.color_band)).toEqual(["red", "white"]); // Fire→red, Trainer→white
+    expect(w.placements.every((c) => c.role === "shelved" && c.binder_half === "front")).toBe(true);
+    // Each placement is a WAITING copy of the key she picked, taken in her order.
+    expect(w.placements.map((c) => c.copyId.split(":").slice(0, 3).join(":"))).toEqual([
+      `waiting:${CHARMANDER_SV03_026.tcgdexId}:Normal`,
+      `waiting:${ARVEN_SV03_186.tcgdexId}:Normal`,
+    ]);
     expect(w.decisions).toHaveLength(2);
     expect(w.decisions.every((d) => d.resolved_by === "user" && d.haul_id === null)).toBe(true);
   });
@@ -214,7 +223,7 @@ describe("planBackLine", () => {
         dexId: 4,
         decision: "filled",
         filledTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-        filledVariant: "normal",
+        filledDexVariantRaw: "Normal",
       },
       {
         stageIndex: 1,
@@ -232,7 +241,7 @@ describe("planBackLine", () => {
         decision: "block",
         blockMaterial: "repurposedDuplicate",
         blockCopyTcgdexId: SCIZOR_SV03_141.tcgdexId,
-        blockCopyVariant: "holo",
+        blockCopyDexVariantRaw: "Holo",
         pocketCount: 2,
       },
     ]);
@@ -241,26 +250,27 @@ describe("planBackLine", () => {
     expect(w.lines[0].status).toBe("open");
     expect(w.slots.map((s) => s.state)).toEqual(["filled", "placeholder", "block"]);
 
-    // Filled stage → a shelved back-half copy, wired to its slot.
-    const filledCopy = w.copies.find((c) => c.role === "shelved")!;
+    // Filled stage → a waiting copy placed in the back half, wired to its slot.
+    const filledCopy = w.placements.find((c) => c.role === "shelved")!;
     expect(filledCopy.binder_half).toBe("back");
     expect(filledCopy.color_band).toBe("red");
+    expect(filledCopy.copyId).toMatch(`waiting:${CHARMANDER_SV03_026.tcgdexId}:Normal:`);
     expect(w.copyLineSlotLinks).toHaveLength(1);
-    expect(w.copyLineSlotLinks[0].copyId).toBe(filledCopy.id);
+    expect(w.copyLineSlotLinks[0].copyId).toBe(filledCopy.copyId);
+    expect(w.slots[0].copy_id).toBe(filledCopy.copyId);
 
     // Placeholder → a wishlist item on its slot.
     expect(w.wishlist).toHaveLength(1);
     expect(w.wishlist[0].chosen_catalog_card_id).toBe(CHARMELEON_SV03_027.tcgdexId);
     expect(w.wishlist[0].required_type).toBe("Fire");
 
-    // Repurposed-duplicate block → a role=block copy that RECORDS which card, and a sized block.
-    const blockCopy = w.copies.find((c) => c.role === "block")!;
-    expect(blockCopy.catalog_card_id).toBe(SCIZOR_SV03_141.tcgdexId);
-    expect(blockCopy.variant).toBe("holo");
+    // Repurposed-duplicate block → the waiting copy of THAT card placed as role=block, and a sized block.
+    const blockCopy = w.placements.find((c) => c.role === "block")!;
+    expect(blockCopy.copyId).toMatch(`waiting:${SCIZOR_SV03_141.tcgdexId}:Holo:`);
     expect(w.blocks).toHaveLength(1);
     expect(w.blocks[0].pocket_count).toBe(2);
     expect(w.blocks[0].material).toBe("repurposedDuplicate");
-    expect(w.blocks[0].copy_id).toBe(blockCopy.id);
+    expect(w.blocks[0].copy_id).toBe(blockCopy.copyId);
 
     // A decision per physical copy (filled + repurposed block), never for the placeholder.
     expect(w.decisions).toHaveLength(2);
@@ -275,7 +285,7 @@ describe("planBackLine", () => {
         dexId: 4,
         decision: "filled",
         filledTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-        filledVariant: "normal",
+        filledDexVariantRaw: "Normal",
       },
       {
         stageIndex: 1,
@@ -287,34 +297,34 @@ describe("planBackLine", () => {
       },
     ]);
     expect(w.lines[0].status).toBe("terminated");
-    // A basic-energy block still reserves pockets but creates no copy.
+    // A basic-energy block still reserves pockets but places no copy.
     expect(w.blocks[0].material).toBe("basicEnergy");
     expect(w.blocks[0].copy_id).toBeNull();
-    expect(w.copies.filter((c) => c.role === "block")).toHaveLength(0);
+    expect(w.placements.filter((c) => c.role === "block")).toHaveLength(0);
   });
 });
 
 describe("planSpecialty", () => {
   const deps = makeDeps([CHARIZARD_EX_SV035_006]);
 
-  it("writes single-section copies (no half/band) and tags them into collections", () => {
+  it("places single-section copies (no half/band) and tags them into collections", () => {
     const w = planSpecialty(
       {
         binderId: SPEC,
         cards: [
           {
             tcgdexId: CHARIZARD_EX_SV035_006.tcgdexId,
-            variant: "holo",
+            dexVariantRaw: "Holo",
             collectionIds: ["coll-okubo"],
           },
         ],
       },
       deps,
     );
-    expect(w.copies).toHaveLength(1);
-    expect(w.copies[0].binder_half).toBeNull();
-    expect(w.copies[0].color_band).toBeNull();
-    expect(w.copies[0].binder_id).toBe(SPEC);
+    expect(w.placements).toHaveLength(1);
+    expect(w.placements[0].binder_half).toBeNull();
+    expect(w.placements[0].color_band).toBeNull();
+    expect(w.placements[0].binder_id).toBe(SPEC);
     expect(w.collectionTags).toEqual([
       { collectionId: "coll-okubo", catalogCardId: CHARIZARD_EX_SV035_006.tcgdexId },
     ]);

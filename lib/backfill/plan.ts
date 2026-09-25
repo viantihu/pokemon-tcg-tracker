@@ -8,7 +8,12 @@
  * deterministic.
  *
  * Backfill is a transcription of what is already on the shelf, so `PlacementDecision.resolved_by` is
- * always `user` and there is no Haul (`haul_id` NULL): these copies pre-date the app.
+ * always `user` and there is no Haul (`haul_id` NULL).
+ *
+ * EVERY CARD IS A COPY WAITING IN HER HAUL (UIL-098). The planners take their copy ids from
+ * `deps.takeCopy`, which hands out the waiting copies of a (printing, Dex variant) key oldest first, and
+ * emit PLACEMENTS of them. There is no path here that creates a copy: Dex is the source of truth, and a
+ * copy made outside the import is a twin the next import cannot see.
  */
 
 import type { CatalogCard, TypeColorMap } from "@/lib/engine";
@@ -32,6 +37,8 @@ export interface PlanDeps {
   collectionNameById: Map<string, string>;
   /** Injected so ids are deterministic in tests. */
   newId: () => string;
+  /** The next waiting copy of a key, oldest first (`takerFor` in ./waiting). Never mints an id. */
+  takeCopy: (tcgdexId: string, dexVariantRaw: string) => string;
   /** Injected clock (ISO string). */
   now: string;
 }
@@ -60,7 +67,7 @@ function decision(
 }
 
 /**
- * Front half, entered as a flat ordered sequence (system-design §7A). One shelved Copy per card,
+ * Front half, entered as a flat ordered sequence (system-design §7A). One waiting copy placed per card,
  * band auto-computed from the card's type. Physical order is the input order — never re-sorted.
  */
 export function planFrontHalf(input: FrontHalfCommit, deps: PlanDeps): BackfillWrites {
@@ -68,19 +75,13 @@ export function planFrontHalf(input: FrontHalfCommit, deps: PlanDeps): BackfillW
   for (const c of input.cards) {
     const card = deps.catalogById.get(c.tcgdexId);
     const bandKey = bandKeyForTypes(card?.types ?? [], deps.typeColorMap);
-    const copyId = deps.newId();
-    w.copies.push({
-      id: copyId,
-      owner_id: deps.ownerId,
-      catalog_card_id: c.tcgdexId,
-      variant: c.variant,
-      haul_id: null,
-      acquired_at: null,
+    const copyId = deps.takeCopy(c.tcgdexId, c.dexVariantRaw);
+    w.placements.push({
+      copyId,
       role: "shelved",
       binder_id: input.binderId,
       binder_half: input.half,
       color_band: bandKey,
-      line_slot_id: null,
     });
     w.decisions.push(
       decision(
@@ -96,7 +97,7 @@ export function planFrontHalf(input: FrontHalfCommit, deps: PlanDeps): BackfillW
 
 /**
  * Back half, entered line by line (system-design §7A). Builds the EvolutionLine, one LineSlot per
- * stage (filled / placeholder / block), a shelved Copy for each filled stage, a WishlistItem for
+ * stage (filled / placeholder / block), a waiting copy placed for each filled stage, a WishlistItem for
  * each placeholder (sticky note → shopping list), and a BinderBlock for each block — recording WHICH
  * duplicate copy was repurposed when that is the material.
  */
@@ -122,19 +123,13 @@ export function planBackLine(input: BackLineCommit, deps: PlanDeps): BackfillWri
     const slotId = deps.newId();
 
     if (s.decision === "filled") {
-      const copyId = deps.newId();
-      w.copies.push({
-        id: copyId,
-        owner_id: deps.ownerId,
-        catalog_card_id: s.filledTcgdexId!,
-        variant: s.filledVariant ?? "normal",
-        haul_id: null,
-        acquired_at: null,
+      const copyId = deps.takeCopy(s.filledTcgdexId!, s.filledDexVariantRaw!);
+      w.placements.push({
+        copyId, // linked to its slot below, once the slot exists (circular FK)
         role: "shelved",
         binder_id: input.binderId,
         binder_half: "back",
         color_band: input.bandKey,
-        line_slot_id: null, // linked after the slot exists (circular FK)
       });
       w.slots.push({
         id: slotId,
@@ -190,19 +185,13 @@ export function planBackLine(input: BackLineCommit, deps: PlanDeps): BackfillWri
     // block — a physically reserved pocket run (basic energy, or a repurposed duplicate).
     let blockCopyId: string | null = null;
     if (s.blockMaterial === "repurposedDuplicate" && s.blockCopyTcgdexId) {
-      blockCopyId = deps.newId();
-      w.copies.push({
-        id: blockCopyId,
-        owner_id: deps.ownerId,
-        catalog_card_id: s.blockCopyTcgdexId,
-        variant: s.blockCopyVariant ?? "normal",
-        haul_id: null,
-        acquired_at: null,
+      blockCopyId = deps.takeCopy(s.blockCopyTcgdexId, s.blockCopyDexVariantRaw!);
+      w.placements.push({
+        copyId: blockCopyId,
         role: "block",
         binder_id: input.binderId,
         binder_half: "back",
         color_band: null,
-        line_slot_id: null,
       });
       w.decisions.push(
         decision(
@@ -242,26 +231,20 @@ export function planBackLine(input: BackLineCommit, deps: PlanDeps): BackfillWri
 }
 
 /**
- * Specialty binder, entered as a flat list with collection tags (system-design §7A). One shelved
- * Copy per card (a specialty binder is a single section — no half, no band) and, per tagged
+ * Specialty binder, entered as a flat list with collection tags (system-design §7A). One waiting
+ * copy placed per card (a specialty binder is a single section — no half, no band) and, per tagged
  * collection, a target-membership add so the collection-claim cascade rule can later fire.
  */
 export function planSpecialty(input: SpecialtyCommit, deps: PlanDeps): BackfillWrites {
   const w = emptyWrites();
   for (const c of input.cards) {
-    const copyId = deps.newId();
-    w.copies.push({
-      id: copyId,
-      owner_id: deps.ownerId,
-      catalog_card_id: c.tcgdexId,
-      variant: c.variant,
-      haul_id: null,
-      acquired_at: null,
+    const copyId = deps.takeCopy(c.tcgdexId, c.dexVariantRaw);
+    w.placements.push({
+      copyId,
       role: "shelved",
       binder_id: input.binderId,
       binder_half: null,
       color_band: null,
-      line_slot_id: null,
     });
     const tags = c.collectionIds
       .map((id) => deps.collectionNameById.get(id))

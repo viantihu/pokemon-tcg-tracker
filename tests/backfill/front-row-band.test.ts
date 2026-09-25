@@ -14,6 +14,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { FrontRowItem } from "@/app/(ui)/backfill/BackfillScreen";
 import type { LookupCard } from "@/app/(ui)/plan/plan-types";
+import type { WaitingCard } from "@/app/(ui)/backfill/backfill-types";
 
 const card = (over: Partial<LookupCard>): LookupCard => ({
   tcgdexId: "sv03-186",
@@ -41,13 +42,20 @@ const MAP: Record<string, string> = {
   white: "white",
 };
 
+/** A front row is a card waiting in her haul (UIL-098). */
+const waiting = (c: LookupCard): WaitingCard => ({
+  ...c,
+  dexVariantRaw: "Normal",
+  waiting: 1,
+  badge: "Normal · 1 waiting",
+});
+
 const render = (c: LookupCard, map = MAP) =>
   renderToStaticMarkup(
     createElement(FrontRowItem, {
-      row: { id: "r1", card: c, variant: "normal" },
+      row: { id: "r1", card: waiting(c) },
       typeColorMap: map,
       onRemove: () => {},
-      onVariant: () => {},
     }),
   );
 

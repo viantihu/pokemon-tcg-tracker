@@ -25,17 +25,26 @@ import { localeTag, stripLocaleNamespace } from "@/lib/catalog/locale";
 import { CardFace } from "./CardFace";
 import type { LookupCard } from "../plan/plan-types";
 
-export function CardResultsGrid({
+/**
+ * A result tile's card. `badge` is an optional line under the number — Backfill uses it for the Dex
+ * variant and how many copies are waiting (UIL-098); every other site leaves it out.
+ */
+export type GridCard = LookupCard & { badge?: string };
+
+export function CardResultsGrid<T extends GridCard = LookupCard>({
   search,
   onPick,
   placeholder = "Set + number or name…",
+  emptyText,
 }: {
-  search: (query: string) => Promise<LookupCard[]>;
-  onPick: (card: LookupCard) => void;
+  search: (query: string) => Promise<T[]>;
+  onPick: (card: T) => void;
   placeholder?: string;
+  /** The no-match line, for a site whose search is not the whole catalog. */
+  emptyText?: string;
 }) {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<LookupCard[]>([]);
+  const [results, setResults] = useState<T[]>([]);
   const [loading, setLoading] = useState(false);
   /**
    * The search FAILED, as distinct from finding nothing (UIL-035). Before this the dropdown reported
@@ -83,7 +92,7 @@ export function CardResultsGrid({
     return () => clearTimeout(t);
   }, [query, search]);
 
-  function pick(card: LookupCard) {
+  function pick(card: T) {
     onPick(card);
     setQuery("");
     setResults([]);
@@ -102,7 +111,13 @@ export function CardResultsGrid({
         aria-label="Card lookup"
       />
       {query.trim().length >= 2 && (
-        <CardResultTiles results={results} loading={loading} failed={failed} onPick={pick} />
+        <CardResultTiles
+          results={results}
+          loading={loading}
+          failed={failed}
+          onPick={pick}
+          emptyText={emptyText}
+        />
       )}
     </div>
   );
@@ -113,16 +128,18 @@ export function CardResultsGrid({
  * a grid of tiles, or one of the three non-result states. A failure is
  * shown ABOVE whatever results were already there — never instead of them, never as "no match".
  */
-export function CardResultTiles({
+export function CardResultTiles<T extends GridCard = LookupCard>({
   results,
   loading,
   failed,
   onPick,
+  emptyText = "No card found — check the number or try the card name.",
 }: {
-  results: LookupCard[];
+  results: T[];
   loading: boolean;
   failed: string | null;
-  onPick: (card: LookupCard) => void;
+  onPick: (card: T) => void;
+  emptyText?: string;
 }) {
   return (
     <div className="cresults" style={{ marginTop: 8, display: "grid", gap: 8 }}>
@@ -140,7 +157,7 @@ export function CardResultTiles({
         </div>
       ) : results.length === 0 ? (
         <div className="hint u" role="status">
-          No card found — check the number or try the card name.
+          {emptyText}
         </div>
       ) : null}
 
@@ -150,7 +167,7 @@ export function CardResultTiles({
             const number = formatCollectorNumber(c.localId, c.setCardCountOfficial);
             return (
               <button
-                key={c.tcgdexId}
+                key={`${c.tcgdexId} ${c.badge ?? ""}`}
                 type="button"
                 className="ccard"
                 role="option"
@@ -164,6 +181,7 @@ export function CardResultTiles({
                   {localeTag(c.tcgdexId) ? ` · ${localeTag(c.tcgdexId)}` : ""}
                 </div>
                 {number ? <div className="cno">{number}</div> : null}
+                {c.badge ? <div className="cno">{c.badge}</div> : null}
                 {c.cardClass === "specialty" ? (
                   <span className="cpill wish u">Specialty</span>
                 ) : null}

@@ -11,6 +11,10 @@
  *   - a poison op mid-batch leaves ZERO rows across copy / evolution_line / line_slot / binder_block /
  *     wishlist_item / placement_decision AND leaves `collection.target_catalog_card_ids` untouched;
  *   - the collection union is idempotent — re-tagging the same card never duplicates an id.
+ *
+ * Every card is a copy her Dex import left WAITING in her haul (UIL-098): `HAUL` seeds them, in presence
+ * groups as an import leaves them, and the planners place them. So "zero rows" after a rollback now reads
+ * "every copy still waiting, and no copy created" — the copy table's count never changes.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
@@ -43,6 +47,7 @@ import {
   seedBinders,
   seedCatalogCards,
   seedCollections,
+  seedHaulCopies,
 } from "../support/pglite-rpc";
 
 const B1 = "1c000000-0000-0000-0000-0000000000b1"; // general binder
@@ -57,6 +62,53 @@ const FIXTURES = [
   SCIZOR_SV03_141,
   ARVEN_SV03_186,
 ];
+
+/** The copies waiting in her haul — one per pocket the tests below fill, keyed by (card, Dex variant). */
+const HAUL = [
+  {
+    id: "a0000000-0000-4000-8000-000000000001",
+    catalogCardId: CHARMANDER_SV03_026.tcgdexId,
+    variant: "normal",
+    dexVariantRaw: "Normal",
+  },
+  {
+    id: "a0000000-0000-4000-8000-000000000002",
+    catalogCardId: ARVEN_SV03_186.tcgdexId,
+    variant: "reverse",
+    dexVariantRaw: "Reverse Holo",
+  },
+  {
+    id: "a0000000-0000-4000-8000-000000000003",
+    catalogCardId: SCIZOR_SV03_141.tcgdexId,
+    variant: "holo",
+    dexVariantRaw: "Holo",
+  },
+  {
+    id: "a0000000-0000-4000-8000-000000000004",
+    catalogCardId: CHARIZARD_BASE1_4.tcgdexId,
+    variant: "holo",
+    dexVariantRaw: "Holo",
+  },
+  {
+    id: "a0000000-0000-4000-8000-000000000005",
+    catalogCardId: CHARIZARD_EX_SV035_183.tcgdexId,
+    variant: "holo",
+    dexVariantRaw: "Holo",
+  },
+];
+
+/** A taker over `HAUL`, the way `takerFor` hands out a real pool: each key's copies once, in order. */
+function haulTaker(): PlanDeps["takeCopy"] {
+  const used = new Set<string>();
+  return (tcgdexId, dexVariantRaw) => {
+    const c = HAUL.find(
+      (h) => h.catalogCardId === tcgdexId && h.dexVariantRaw === dexVariantRaw && !used.has(h.id),
+    );
+    if (!c) throw new Error(`no waiting ${tcgdexId} (${dexVariantRaw}) in the fixture`);
+    used.add(c.id);
+    return c.id;
+  };
+}
 
 /** The confirmed type→band map (0003_config.sql), as the planners see it. */
 const TYPE_COLOR_MAP: TypeColorMap = {
@@ -91,6 +143,7 @@ function deps(): PlanDeps {
     ]),
     collectionNameById: new Map([[COLL, "Charizard through the years"]]),
     newId: () => crypto.randomUUID(), // real uuids — every id column is uuid
+    takeCopy: haulTaker(),
     now: "2026-09-08T00:00:00.000Z",
   };
 }
@@ -107,9 +160,15 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
   return (await db.query<T>(sql, params)).rows;
 }
 
-/** Seed the catalog + binders a payload references, plus the collection, then act as the owner. */
+/**
+ * Seed the catalog + binders a payload references, the collection, and every waiting copy in `HAUL`, then
+ * act as the owner.
+ */
 async function seedFor(payload: WritePayload, collTargets: string[] = []): Promise<void> {
-  await seedCatalogCards(db, referencedCatalogIds(payload));
+  await seedCatalogCards(db, [
+    ...new Set([...referencedCatalogIds(payload), ...HAUL.map((h) => h.catalogCardId)]),
+  ]);
+  await seedHaulCopies(db, HAUL);
   await seedBinders(db, [
     { id: B1, type: "general", name: "Binder 1" },
     { id: SPEC, type: "specialty", name: "Specialty A" },
@@ -118,6 +177,11 @@ async function seedFor(payload: WritePayload, collTargets: string[] = []): Promi
     { id: COLL, name: "Charizard through the years", targetCatalogCardIds: collTargets },
   ]);
   await asOwner(db);
+}
+
+/** Copies still waiting in her haul (unplaced). */
+async function waiting(): Promise<number> {
+  return (await q<{ n: number }>(`select count(*)::int n from copy where role = 'haul'`))[0].n;
 }
 
 async function collectionTargets(): Promise<string[]> {
@@ -164,21 +228,24 @@ describe("backfill front-half commit atomicity (fresh Postgres via PGlite)", () 
         binderId: B1,
         half: "front",
         cards: [
-          { tcgdexId: CHARMANDER_SV03_026.tcgdexId, variant: "normal" }, // Fire → red
-          { tcgdexId: ARVEN_SV03_186.tcgdexId, variant: "reverse" }, // Trainer (no types) → white
+          { tcgdexId: CHARMANDER_SV03_026.tcgdexId, dexVariantRaw: "Normal" }, // Fire → red
+          { tcgdexId: ARVEN_SV03_186.tcgdexId, dexVariantRaw: "Reverse Holo" }, // Trainer (no types) → white
         ],
       },
       deps(),
     );
 
-  it("writes one shelved copy per card with its auto-computed band + a PlacementDecision each", async () => {
+  it("places one waiting copy per card with its auto-computed band + a PlacementDecision each", async () => {
     const w = writes();
     const payload = buildBackfillPayload(w);
+    // UIL-098: the payload creates nothing. Pre-fix it held one insert_copy per card.
+    expect(payload.ops.filter((o) => o.op === "insert_copy")).toEqual([]);
     await seedFor(payload);
     await applyOps(db, payload);
     await asSuperuser(db);
 
-    expect(await count(db, "copy")).toBe(2);
+    expect(await count(db, "copy")).toBe(HAUL.length); // no copy created
+    expect(await waiting()).toBe(HAUL.length - 2);
     expect(await count(db, "placement_decision")).toBe(2);
     // A flat front-half entry touches nothing else.
     expect(await count(db, "evolution_line")).toBe(0);
@@ -186,18 +253,38 @@ describe("backfill front-half commit atomicity (fresh Postgres via PGlite)", () 
     expect(await count(db, "binder_block")).toBe(0);
     expect(await count(db, "wishlist_item")).toBe(0);
 
-    const copies = await q<{ catalog_card_id: string; color_band: string; variant: string }>(
-      `select catalog_card_id, color_band, variant from copy
+    const copies = await q<{
+      id: string;
+      catalog_card_id: string;
+      color_band: string;
+      variant: string;
+      grouped: boolean;
+    }>(
+      `select id, catalog_card_id, color_band, variant, presence_group_id is not null as grouped
+         from copy
         where role = 'shelved' and binder_id = $1 and binder_half = 'front'
         order by catalog_card_id`,
       [B1],
     );
+    // The SAME rows her import made, still in their presence groups; the variant is Dex's, untouched.
     expect(copies).toEqual([
-      { catalog_card_id: CHARMANDER_SV03_026.tcgdexId, color_band: "red", variant: "normal" },
-      { catalog_card_id: ARVEN_SV03_186.tcgdexId, color_band: "white", variant: "reverse" },
+      {
+        id: HAUL[0].id,
+        catalog_card_id: CHARMANDER_SV03_026.tcgdexId,
+        color_band: "red",
+        variant: "normal",
+        grouped: true,
+      },
+      {
+        id: HAUL[1].id,
+        catalog_card_id: ARVEN_SV03_186.tcgdexId,
+        color_band: "white",
+        variant: "reverse",
+        grouped: true,
+      },
     ]);
 
-    // Backfill pre-dates the app: no haul, and the audit trail is always the collector's own call.
+    // Backfill is a transcription: no haul row, and the audit trail is always the collector's own call.
     const audit = await q<{ resolved_by: string; haul_id: string | null; reason: string }>(
       `select resolved_by, haul_id, reason from placement_decision`,
     );
@@ -241,7 +328,7 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
             dexId: 4,
             decision: "filled",
             filledTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-            filledVariant: "normal",
+            filledDexVariantRaw: "Normal",
           },
           {
             stageIndex: 1,
@@ -259,7 +346,7 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
             decision: "block",
             blockMaterial: "repurposedDuplicate",
             blockCopyTcgdexId: SCIZOR_SV03_141.tcgdexId,
-            blockCopyVariant: "holo",
+            blockCopyDexVariantRaw: "Holo",
             pocketCount: 2,
           },
         ],
@@ -267,16 +354,18 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
       deps(),
     );
 
-  it("writes the line, all three slots, both copies, the wishlist item, and the binder_block", async () => {
+  it("writes the line, all three slots, places both copies, the wishlist item, and the binder_block", async () => {
     const w = writes();
     const payload = buildBackfillPayload(w);
+    expect(payload.ops.filter((o) => o.op === "insert_copy")).toEqual([]);
     await seedFor(payload);
     await applyOps(db, payload);
     await asSuperuser(db);
 
     expect(await count(db, "evolution_line")).toBe(1);
     expect(await count(db, "line_slot")).toBe(3);
-    expect(await count(db, "copy")).toBe(2); // the FILLED copy + the sacrificed duplicate
+    expect(await count(db, "copy")).toBe(HAUL.length); // no copy created
+    expect(await waiting()).toBe(HAUL.length - 2); // the FILLED copy + the sacrificed duplicate placed
     expect(await count(db, "wishlist_item")).toBe(1);
     expect(await count(db, "binder_block")).toBe(1);
     expect(await count(db, "placement_decision")).toBe(2);
@@ -367,7 +456,6 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
     await asSuperuser(db);
 
     for (const t of [
-      "copy",
       "evolution_line",
       "line_slot",
       "binder_block",
@@ -376,6 +464,9 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
     ]) {
       expect(await count(db, t)).toBe(0);
     }
+    // Every copy is back where it was: waiting, unplaced.
+    expect(await count(db, "copy")).toBe(HAUL.length);
+    expect(await waiting()).toBe(HAUL.length);
   });
 
   it("an unknown op tag raises and rolls the whole batch back", async () => {
@@ -387,7 +478,7 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
     await expect(applyOps(db, { ops: [...payload.ops, bogus] })).rejects.toThrow(/unknown op/);
     await asSuperuser(db);
     expect(await count(db, "evolution_line")).toBe(0);
-    expect(await count(db, "copy")).toBe(0);
+    expect(await waiting()).toBe(HAUL.length);
   });
 });
 
@@ -399,15 +490,19 @@ describe("backfill specialty commit atomicity + collection tagging (fresh Postgr
       {
         binderId: SPEC,
         cards: [
-          { tcgdexId: CHARIZARD_BASE1_4.tcgdexId, variant: "holo", collectionIds: [COLL] },
-          { tcgdexId: CHARIZARD_EX_SV035_183.tcgdexId, variant: "holo", collectionIds: [COLL] },
-          { tcgdexId: SCIZOR_SV03_141.tcgdexId, variant: "holo", collectionIds: [] }, // untagged
+          { tcgdexId: CHARIZARD_BASE1_4.tcgdexId, dexVariantRaw: "Holo", collectionIds: [COLL] },
+          {
+            tcgdexId: CHARIZARD_EX_SV035_183.tcgdexId,
+            dexVariantRaw: "Holo",
+            collectionIds: [COLL],
+          },
+          { tcgdexId: SCIZOR_SV03_141.tcgdexId, dexVariantRaw: "Holo", collectionIds: [] }, // untagged
         ],
       },
       deps(),
     );
 
-  it("writes the copies and UNIONS the tagged ids into the collection, preserving prior members", async () => {
+  it("places the copies and UNIONS the tagged ids into the collection, preserving prior members", async () => {
     const w = writes();
     const payload = buildBackfillPayload(w);
     // The collection already targets one card; the union must keep it and append, not replace.
@@ -420,7 +515,8 @@ describe("backfill specialty commit atomicity + collection tagging (fresh Postgr
     await applyOps(db, payload);
     await asSuperuser(db);
 
-    expect(await count(db, "copy")).toBe(3);
+    expect(await count(db, "copy")).toBe(HAUL.length); // no copy created
+    expect(await waiting()).toBe(HAUL.length - 3);
     expect(await count(db, "placement_decision")).toBe(3);
     // A specialty binder is a single section: no half, no band.
     const spec = await q<{ n: number }>(
@@ -445,7 +541,7 @@ describe("backfill specialty commit atomicity + collection tagging (fresh Postgr
     await applyOps(db, payload);
 
     // Re-tag the very same cards: once as a second commit of just the union ops (re-applying the
-    // whole payload would collide on the copy PKs), once with the id repeated inside a single op.
+    // whole payload would re-insert its decision rows), once with the id repeated inside a single op.
     const unions = payload.ops.filter((o) => o.op === "union_collection_targets");
     expect(unions).toHaveLength(1);
     await applyOps(db, { ops: unions });
@@ -488,7 +584,7 @@ describe("backfill specialty commit atomicity + collection tagging (fresh Postgr
     await asSuperuser(db);
 
     expect(await collectionTargets()).toEqual(before);
-    expect(await count(db, "copy")).toBe(0);
+    expect(await waiting()).toBe(HAUL.length);
     expect(await count(db, "placement_decision")).toBe(0);
   });
 

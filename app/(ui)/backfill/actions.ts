@@ -15,16 +15,60 @@ import {
   commitFrontHalf,
   commitSpecialty,
   loadBackfillContext,
+  loadWaiting,
+  matchWaiting,
   resolveBackLineFromContext,
   type BackLineCommit,
   type FrontHalfCommit,
   type ResolvedBackLine,
   type SpecialtyCommit,
 } from "@/lib/backfill";
-import { catalogCardRepo } from "@/lib/repo";
+import { catalogCardRepo, type Row } from "@/lib/repo";
 import { errorMessage } from "@/lib/errors";
 import type { LookupCard } from "../plan/plan-types";
-import type { BackfillContextPayload, CommitResult } from "./backfill-types";
+import type { BackfillContextPayload, CommitResult, WaitingCard } from "./backfill-types";
+
+/** A `catalog_card` row as a type-ahead tile's card. */
+function toLookupCard(r: Row<"catalog_card">): LookupCard {
+  // The engine's derivation of category/trainerType, reused not re-spelled (UIL-080).
+  const engine = toCatalogCard(r);
+  return {
+    tcgdexId: r.tcgdex_id,
+    name: r.name,
+    setId: r.set_id,
+    setName: r.set_name,
+    localId: r.local_id,
+    setCardCountOfficial: r.set_card_count_official,
+    stage: r.stage,
+    types: r.types ?? [],
+    category: engine.category ?? "Pokemon",
+    trainerType: engine.trainerType ?? null,
+    cardClass: r.card_class === "specialty" ? "specialty" : "standard",
+    imageUrl: r.image_url,
+    variants: availableVariants(toCardVariants(r.variants)),
+  };
+}
+
+/**
+ * Type-ahead over the cards WAITING IN HER HAUL (UIL-098) — what Backfill's card-she-owns pickers search.
+ * A card that is not waiting cannot be picked, because Backfill places copies her Dex import made and
+ * creates none. Throws on failure like `lookupCatalog` (UIL-035): empty must mean "nothing waiting".
+ */
+export async function searchWaiting(query: string): Promise<WaitingCard[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  try {
+    const { db } = await getOwnerContext();
+    return matchWaiting(q, await loadWaiting(db)).map((w) => ({
+      ...toLookupCard(w.card),
+      dexVariantRaw: w.dexVariantRaw,
+      waiting: w.copyIds.length,
+      badge: `${w.dexVariantRaw} · ${w.copyIds.length} waiting`,
+    }));
+  } catch (err) {
+    throw new Error(`Could not search your haul: ${errorMessage(err)}`);
+  }
+}
 
 /** Type-ahead against the local mirror. Returns [] on error so typing never breaks. */
 export async function lookupCatalog(query: string): Promise<LookupCard[]> {
@@ -33,25 +77,7 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
   try {
     const { db } = await getOwnerContext();
     const rows = await catalogCardRepo.search(db, q, 12);
-    return rows.map((r) => {
-      // The engine's derivation of category/trainerType, reused not re-spelled (UIL-080).
-      const engine = toCatalogCard(r);
-      return {
-        tcgdexId: r.tcgdex_id,
-        name: r.name,
-        setId: r.set_id,
-        setName: r.set_name,
-        localId: r.local_id,
-        setCardCountOfficial: r.set_card_count_official,
-        stage: r.stage,
-        types: r.types ?? [],
-        category: engine.category ?? "Pokemon",
-        trainerType: engine.trainerType ?? null,
-        cardClass: r.card_class === "specialty" ? "specialty" : "standard",
-        imageUrl: r.image_url,
-        variants: availableVariants(toCardVariants(r.variants)),
-      };
-    });
+    return rows.map(toLookupCard);
   } catch (err) {
     // Throws rather than returning [] (UIL-035): an empty result must mean "the mirror had nothing",
     // not "the request failed". See lookupCatalog in ../plan/actions.ts for why a throw and not a
