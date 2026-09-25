@@ -390,8 +390,17 @@ export async function executeApply(
   }
 
   // 5. Park CSV rows still unresolved — deduped on (dex_id, dex_variant_raw) (A.6).
-  const liveWaiting = await unresolvedEntryRepo.listWaiting(db);
-  const waitingByKey = new Map(liveWaiting.map((e) => [`${e.dex_id} ${e.dex_variant_raw}`, e]));
+  // A row she DISMISSED is the same row: refresh it, keep it dismissed (the patch below sets no status).
+  // Parking it again inserted a second entry for one (dex_id, variant) — the table's unique key — and failed
+  // the WHOLE import. Its quantity follows the file, so the Count check's sum stays exact. Undo restores it
+  // through `updatedPrior`, status included.
+  const [liveWaiting, liveDismissed] = await Promise.all([
+    unresolvedEntryRepo.listWaiting(db),
+    unresolvedEntryRepo.listDismissed(db),
+  ]);
+  const waitingByKey = new Map(
+    [...liveWaiting, ...liveDismissed].map((e) => [`${e.dex_id} ${e.dex_variant_raw}`, e]),
+  );
   for (const p of bundle.queue.parks) {
     const prior = waitingByKey.get(`${p.dexId} ${p.dexVariantRaw}`);
     if (prior) {
