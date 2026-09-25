@@ -7483,8 +7483,16 @@ second attempt at all.
 
   **Third message, same day.** In her words: "Well there's a difference between the haul plan's manual
   add and the manual add after the sync".
-- **Status:** Open — **parts (1), (2) and (3) DONE and deployed; only (4), the database guard (migration
-  `0023`), remains, with the Tech Lead (new).** No screen in the app creates a copy any more: after PR
+- **Status:** **Fixed** — all four parts deployed. **Part (4) DONE:** PR [#334](https://github.com/viantihu/pokemon-tcg-tracker/pull/334) MERGED to
+  `develop` 2026-09-25 (squash `aea0d0d`), migration `0023` applied on Testing (Deploy run `36163623828`):
+  `copy.presence_group_id` is NOT NULL with its FK changed from ON DELETE SET NULL to RESTRICT, behind a
+  pre-check that refuses to migrate while any ungrouped copy exists, and the TypeScript write types require
+  the group, so dropping it from any emitter is a compile error. The Senior BA's BEFORE (run `36161983970`:
+  ungrouped 0, the hard gate) and AFTER (run `36163797659`: identical, ungrouped 0) match. QA: 4 mutant
+  groups killed; the test harness's superuser-only fixture shim ruled acceptable (4 named tests fail if it
+  ever fires for the owner role). Awaiting Karvi's confirmation. Follow-up: UIL-103 (Lookup's merge action
+  is unreachable once no copy can be ungrouped). **Was:** parts (1), (2) and (3) DONE and deployed; only
+  (4), the database guard (migration `0023`), remained, with the Tech Lead (new). No screen in the app creates a copy any more: after PR
   [#331](https://github.com/viantihu/pokemon-tcg-tracker/pull/331) `lib/sync/exec.ts` (import, Undo re-insert, Sync manual match) is the only
   `insert_copy` emitter on `develop`. **Re-specced 2026-09-23 by Karvi's second and third messages; owners
   in the order she set.** Her rule: inventory enters ONLY through a Dex import, which includes the manual match she
@@ -7577,7 +7585,21 @@ removed-presence merge that is the only current cleanup for a hand-created dupli
 
 - **Reported:** 2026-09-23 (not from Karvi — found by the Tech Lead's card-entry audit, the audit her
   UIL-098 ruling charged)
-- **Status:** Open — **E5 DONE; E2 (with the E3/E4 tests) next; E1 after UIL-100's storage.** Assigned
+- **Status:** **Fixed** — E5 by #325 (below); **E1, E2, E3 and E4 by PR [#330](https://github.com/viantihu/pokemon-tcg-tracker/pull/330)**, MERGED to
+  `develop` 2026-09-25 (squash `abf64fc`, Deploy run `36162605875`), the Tech Lead's review on the PR at
+  `1d1079d`, QA-gated (1426+ tests; the restore-cap survivor pinned by two tests QA asked for). **E2:** a
+  manual match onto a card she removed does not bring it back; a notice names the card with "Add it back" /
+  "Keep it removed". **E1:** closed by #330 on top of UIL-100's Dex record: a match adds only the
+  difference, two Dex rows onto one card add up, and a card that already disagrees with Dex is refused with
+  "import your Dex file again" instead of growing; no live E1 double remains (Dev 2 and the Tech Lead), so
+  it is tests-only from here. **Also fixed, found by Dev 2 on develop and reproduced by the Tech Lead:**
+  pressing Match a second time on the same row (double click, second tab, retry) re-inserted the whole
+  quantity, and once the count check armed it inflated the Dex record by the same amount, so the check
+  could not see it; a second press now adds nothing and says "Already matched". **E3/E4:** tests only, both
+  pass and are proven able to fail. The database-level backstop for a doubled record add (the file-level
+  identity checked inside every non-import writer, migration `0024`) is the Tech Lead's, logged under
+  UIL-100 when it merges. Awaiting Karvi's confirmation. **Was:** E5 DONE; E2 (with the E3/E4 tests) next;
+  E1 after UIL-100's storage. Assigned
   to Full Stack Dev - 2. E5 went first, right after UIL-095, because her first import after the
   2026-09-23 wipe was imminent: PR [#325](https://github.com/viantihu/pokemon-tcg-tracker/pull/325) MERGED (`3bac29c`) and deployed 2026-09-23
   (Deploy run `35885418141`; the Tech Lead's approval on the PR at `95a2c8b`; QA: 8 mutants killed,
