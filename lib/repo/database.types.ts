@@ -695,6 +695,9 @@ export type Database = {
           created_at: string;
           line_id: string | null;
           line_slot_id: string | null;
+          catalog_card_id: string | null;
+          variant: string | null;
+          dex_variant_raw: string | null;
         };
         Insert: {
           id?: string;
@@ -707,6 +710,9 @@ export type Database = {
           created_at?: string;
           line_id?: string | null;
           line_slot_id?: string | null;
+          catalog_card_id?: string | null;
+          variant?: string | null;
+          dex_variant_raw?: string | null;
         };
         Update: {
           id?: string;
@@ -719,6 +725,9 @@ export type Database = {
           created_at?: string;
           line_id?: string | null;
           line_slot_id?: string | null;
+          catalog_card_id?: string | null;
+          variant?: string | null;
+          dex_variant_raw?: string | null;
         };
         Relationships: [
           {
