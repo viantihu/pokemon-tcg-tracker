@@ -75,6 +75,17 @@ async function flags(): Promise<
   await asOwner(db);
   return r.rows;
 }
+/** Each copy's KEY: its Dex variant and its presence group. */
+async function keys(): Promise<
+  { id: string; dex_variant_raw: string; presence_group_id: string }[]
+> {
+  await asSuperuser(db);
+  const r = await db.query<{ id: string; dex_variant_raw: string; presence_group_id: string }>(
+    "select id, dex_variant_raw, presence_group_id from copy order by id",
+  );
+  await asOwner(db);
+  return r.rows;
+}
 /** What a pre-UIL-102 manual match left behind: the Dex variant is Holo, the stored flag "normal". */
 async function misflag(opts: { placed: boolean }) {
   await asSuperuser(db);
@@ -154,6 +165,7 @@ describe("UIL-102 · the import audits the flag and corrects it, naming each car
     await importAndApply(bytes(resolved("Holo")));
     await misflag({ placed: true });
     const before = await flags();
+    const keysBefore = await keys();
 
     const run = await runSyncPipeline(client(), bytes(resolved("Holo")));
     const res = await executeApply(client(), run.bundle, OWNER);
@@ -162,6 +174,11 @@ describe("UIL-102 · the import audits the flag and corrects it, naming each car
     expect(res.fastPath).toBe(false);
     const after = await flags();
     expect(after).toEqual(before.map((c) => ({ ...c, variant: "holo" })));
+    // ONLY the flag moves: never the Dex variant or the presence group, which are the copy's KEY (the Tech
+    // Lead's pin — a drifted key is invisible to the count check, which keys on the group).
+    expect(await keys()).toEqual(keysBefore);
+    const fixOps = run.bundle.plan.flagFixes;
+    expect(fixOps).toHaveLength(1);
     // The flag is not part of the key (UIL-100): nothing disagrees with Dex after it.
     const check = await loadCountCheck(client());
     expect(check.mismatches).toEqual([]);
