@@ -71,8 +71,11 @@ export function snapshotIdForBase(baseSnapshotId: string | null, ownerScope: str
   return derivedUuid(baseSnapshotId ? `base:${baseSnapshotId}` : `none:${ownerScope}`);
 }
 
-/** A v5-shaped uuid from a seed — deterministic, so two writers of one seed collide on a primary key. */
-function derivedUuid(seed: string): string {
+/**
+ * A v5-shaped uuid from a seed — deterministic, so two writers of one seed collide on a primary key. Also
+ * the copy ids of a manual match and of its "add it back" (lib/sync/exec.ts), for the same reason.
+ */
+export function derivedUuid(seed: string): string {
   const h = createHash("sha1").update(`binderops.sync.apply:${seed}`).digest();
   h[6] = (h[6] & 0x0f) | 0x50; // version 5
   h[8] = (h[8] & 0x3f) | 0x80; // RFC 4122 variant

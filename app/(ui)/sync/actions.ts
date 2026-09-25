@@ -21,6 +21,7 @@ import {
   forgetSetAlias,
   manualMatch,
   reparkCandidates,
+  restoreWithheldForEntry,
   runSyncPipeline,
   undismissEntry,
   type SyncOverrides,
@@ -317,15 +318,39 @@ export async function forgetSetAliasAction(
   }
 }
 
-/** Manual-match an entry to a catalog card; learns the set alias when the set was unknown (A.8). */
+/**
+ * Manual-match an entry to a catalog card; learns the set alias when the set was unknown (A.8).
+ * `withheld` is how many copies were held back because she had removed that card (UIL-099 E2), and
+ * `alreadyMatched` says a second press found the match already in place, with nothing written.
+ */
 export async function manualMatchEntry(
   entryId: string,
   tcgdexId: string,
-): Promise<{ ok: true; drainedSet: boolean } | ActionError> {
+): Promise<
+  { ok: true; drainedSet: boolean; withheld: number; alreadyMatched: boolean } | ActionError
+> {
   try {
     const { db } = await getOwnerContext();
     const r = await manualMatch(db, entryId, tcgdexId);
-    return { ok: true, drainedSet: r.learnedAlias !== null };
+    return {
+      ok: true,
+      drainedSet: r.learnedAlias !== null,
+      withheld: r.withheld?.count ?? 0,
+      alreadyMatched: r.alreadyMatched === true,
+    };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/** "Add it back": return the cards a manual match held back for a removal (UIL-099 E2). */
+export async function restoreWithheldAction(
+  entryId: string,
+): Promise<{ ok: true; restored: number; alreadyRestored: boolean } | ActionError> {
+  try {
+    const { db } = await getOwnerContext();
+    const r = await restoreWithheldForEntry(db, entryId);
+    return { ok: true, restored: r.restored, alreadyRestored: r.alreadyRestored === true };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }

@@ -101,6 +101,22 @@ export const setAliasRepo = {
  */
 export const dexPresenceRepo = {
   ...createRepo("dex_presence"),
+
+  /** The record for one presence key, or null when Dex does not list it (UIL-099 E1). */
+  async findByKey(
+    db: DbClient,
+    catalogCardId: string,
+    dexVariantRaw: string,
+  ): Promise<Row<"dex_presence"> | null> {
+    const { data, error } = await db
+      .from("dex_presence")
+      .select("*")
+      .eq("catalog_card_id", catalogCardId)
+      .eq("dex_variant_raw", dexVariantRaw)
+      .maybeSingle();
+    if (error) throw error;
+    return data ?? null;
+  },
 };
 
 /** Her last Dex import, file level (UIL-100): one row per owner, or none before her first import. */
