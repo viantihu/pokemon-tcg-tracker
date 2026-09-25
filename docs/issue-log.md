@@ -7801,3 +7801,59 @@ the queue, rather than guessing further now.
 
 **Cross-reference UIL-098** (part 1, #319, the single-add fix this entry asks to extend) **and UIL-039**
 (the original grid-search bulk-add feature this path was built for).
+
+## UIL-102 — A card matched by hand on the Sync page is stored as a Normal copy whatever its Dex variant, so a hand-matched Reverse Holo or Holo is recorded as Normal
+
+- **Reported:** 2026-09-25 (not from Karvi — found by QA while gating #330)
+- **Status:** Open, unassigned, pre-existing (not introduced by #330).
+- **Priority:** (Senior BA's call — see the placement-impact finding below, which meets the condition
+  given for raising this to High)
+- **Area:** Sync
+- **Env:** Testing, `develop` `666cf83`
+
+**Confirmed: `matchOps` hardcodes the variant flag instead of deriving it, while the regular import path
+right next to it does the derivation correctly.** `matchOps`
+([`lib/sync/exec.ts:827-913`](../lib/sync/exec.ts:827)) writes `variant: "normal"`
+([`:912`](../lib/sync/exec.ts:912)) unconditionally on every `insert_copy`, while
+`dex_variant_raw: entry.dex_variant_raw` ([`:913`](../lib/sync/exec.ts:913)) is stored correctly on the
+same op.
+The regular import-add path derives the flag instead:
+[`reconcile.ts:368`](../lib/sync/reconcile.ts:368) calls `deriveVariantFlag(e.dexVariantRaw)` for a
+fresh create, and [`apply.ts:154`](../lib/sync/apply.ts:154) does the same for a variant migration.
+`matchOps` is the one insert-copy path that never calls `deriveVariantFlag` at all — a hand match for a
+Reverse Holo or Holo entry gets `variant: "normal"` regardless of what `entry.dex_variant_raw` actually
+says.
+
+**#330's new "Add it back" path inherits the identical line, confirmed in its diff** (not yet on
+`develop` — PR [#330](https://github.com/viantihu/pokemon-tcg-tracker/pull/330), open): its restore
+op also writes `variant: "normal"` rather than deriving it from the row it's restoring. Pre-existing bug,
+carried into new code, not introduced by it.
+
+**Impact, checked rather than assumed — this DOES reach placement, not just display.**
+`resolveDuplicate` ([`lib/engine/cascade.ts:326`](../lib/engine/cascade.ts:326), cascade step 3) is the
+consumer that matters: `duplicateOf` ([`lib/engine/duplicate.ts:36-40`](../lib/engine/duplicate.ts:36))
+explicitly *prefers* a `variant === "normal"` shelved copy as the duplicate-match target so a later holo
+can swap into its slot, and the swap itself fires on `incomingVariant === "holo" && match.variant ===
+"normal"` ([`duplicate.ts:85`](../lib/engine/duplicate.ts:85)). A hand-matched Holo or Reverse Holo
+mis-stored as Normal is therefore exposed to the holo-swap path on the *next* card of that printing
+routed through the cascade: either it gets wrongly preferred as the swap target and displaced to bulk
+when a genuinely normal copy of the same printing arrives, or (if she later hand-matches or imports the
+actual normal), the mis-stored copy is what a real holo would swap into — the wrong copy moves, not just
+a wrong label on screen. This is a placement effect, meeting the condition for raising Priority to High
+rather than Medium.
+
+**The next import's reconcile will NOT catch this or prompt her about it — checked directly.**
+Variant-migration detection in `reconcile.ts` ([`:339-352`](../lib/sync/reconcile.ts:339)) is keyed on
+`dex_variant_raw` moving from one presence-group key to another between exports — it never re-derives or
+audits the stored `variant` flag on a copy whose key hasn't moved. Since `dex_variant_raw` was already
+stored correctly by `matchOps` and doesn't change on a plain re-import, the presence-group key stays the
+same and no migration is proposed. The wrong `variant` sits there permanently unless something else
+touches that copy — she will not see it surface as an "unexplained change."
+
+**Suggested fix.** Replace `matchOps`'s `variant: "normal"` with `deriveVariantFlag(entry.dex_variant_raw)`
+— the same call the import path already makes two files over — and thread the same fix into #330's
+"Add it back" restore op before that PR merges, since it's the same line duplicated into new code.
+
+**Cross-reference UIL-100** (ruled out for the count/duplication question — `dex_variant_raw` is right,
+so the presence group and #329's Count check panel are unaffected; only the five-flag `variant` is
+wrong) and **UIL-099** (the same `matchOps` function E1/E2/#330 are already fixing for a different field).
