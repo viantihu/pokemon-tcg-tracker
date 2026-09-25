@@ -210,6 +210,10 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
   const resolvedRows: ResolvedRow[] = [];
   const archiveEntryIds: string[] = [];
   const dropEntryIds: string[] = [];
+  // Rows she DISMISSED — reconciled against an import's file like waiting rows (UIL-104). Retry never reads them.
+  const dismissed = bytes ? await unresolvedEntryRepo.listDismissed(db) : [];
+  /** Dismissed rows this import drops because the file no longer lists them — the preview must say so. */
+  let forgottenDismissed = 0;
 
   if (bytes) {
     const dexRows = filterOwned(parseDexCsv(decodeDexCsv(bytes)));
@@ -240,6 +244,23 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
       if (resolvedCsvKeys.has(rk)) archiveEntryIds.push(e.id);
       else if (!csvKeys.has(rk)) dropEntryIds.push(e.id);
       // still-unresolved-in-CSV → dedupe-updated via `parks` at apply.
+    }
+    /**
+     * Dismissed rows, the same way (UIL-104, the Senior BA's ruling (a)). One the file no longer lists is
+     * DROPPED — the dismissal is forgotten, the preview says how many, and an Undo puts it back. One the
+     * catalog can now resolve is ARCHIVED: its row is in this import's record now, and a dismissed entry
+     * left beside it would count that card twice. One still unresolved stays dismissed (refreshed at
+     * apply, #339). This keeps every queued row a row of the current file, which the Count check's sum —
+     * and 0024's in-transaction version of it — depend on: a dismissed row that outlived its file was
+     * counted forever, and every later match and Retry would have been refused with no way out.
+     */
+    for (const e of dismissed) {
+      const rk = key(e.dex_id, e.dex_variant_raw);
+      if (resolvedCsvKeys.has(rk)) archiveEntryIds.push(e.id);
+      else if (!csvKeys.has(rk)) {
+        dropEntryIds.push(e.id);
+        forgottenDismissed += 1;
+      }
     }
   } else {
     // Retry-only: promote every WAITING entry that now resolves (self-heal, A.5). Same prefetch, same
@@ -335,11 +356,7 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
   const waitingByKey = new Map(waiting.map((e) => [key(e.dex_id, e.dex_variant_raw), e]));
   // A row she dismissed stays dismissed when the file lists it again (lib/sync/exec.ts refreshes it in place),
   // so it is neither a new waiting card nor one still waiting — only an import reads this.
-  const dismissedKeys = bytes
-    ? new Set(
-        (await unresolvedEntryRepo.listDismissed(db)).map((e) => key(e.dex_id, e.dex_variant_raw)),
-      )
-    : new Set<string>();
+  const dismissedKeys = new Set(dismissed.map((e) => key(e.dex_id, e.dex_variant_raw)));
   let newParks = 0;
   let meaningfulUpdates = 0;
   const parkKeys = new Set<string>();
@@ -379,6 +396,7 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
   };
 
   const enrichment = await loadEnrichment(db, plan, reconcileCurrent, parks, stillWaiting, counts);
+  enrichment.forgottenDismissed = forgottenDismissed;
   const preview = buildPreview(plan, enrichment);
 
   return { bundle, preview };

@@ -32,7 +32,13 @@ import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
 import { deriveVariantFlag, dexQuantity } from "./reconcile";
 import type { SyncPlanBundle } from "./pipeline";
-import { CountMismatchError, parseCountRefusal, type CardLabel } from "./count-check";
+import {
+  CountMismatchError,
+  FileTotalMismatchError,
+  parseCountRefusal,
+  parseFileTotalRefusal,
+  type CardLabel,
+} from "./count-check";
 import type { PresenceKeyRef } from "@/lib/repo/write-ops";
 import {
   assertFreshBase,
@@ -212,7 +218,11 @@ async function asCountRefusal(
   db: DbClient,
   err: unknown,
   nextStep: string,
-): Promise<CountMismatchError | null> {
+): Promise<CountMismatchError | FileTotalMismatchError | null> {
+  // 0024's file-total refusal first: it carries no cards to name, and its remedy is the same everywhere.
+  const fileTotal = parseFileTotalRefusal(err);
+  if (fileTotal)
+    return new FileTotalMismatchError(fileTotal.fileTotal, fileTotal.record, fileTotal.queued);
   const parsed = parseCountRefusal(err);
   if (!parsed) return null;
   const labels = new Map<string, CardLabel>();
@@ -540,7 +550,8 @@ export async function executeApply(
         catalog_card_id: a.catalog_card_id,
         dex_variant_raw: a.dex_variant_raw,
       })),
-    });
+    }); // 0024: every promoted row left the queue exactly as it joined the record.
+    ops.push({ op: "assert_file_total" });
   }
 
   // 8. Touched groups' desired_count is recomputed by the RPC after all copy writes (§C).
@@ -610,31 +621,88 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
    */
   const syncedAt = new Date(latest.created_at).getTime();
   const createdByThisSync = new Set(snap.createdCopyIds);
-  const priorStatus = new Map(snap.queue.updatedPrior.map((p) => [p.id, p.status]));
-  const keptMatches: Row<"unresolved_entry">[] = [];
-  for (const id of [...snap.queue.parkedIds, ...priorStatus.keys()]) {
+  /**
+   * WHICH HAND MATCHES THE UNDO TAKES BACK (the Senior BA's ruling on UIL-100's 0024 case, option (i)). The
+   * snapshot itself says which rows this sync brought: `queue.parkedIds` are rows it PARKED — new to this
+   * file — while `queue.updatedPrior` are rows that were already WAITING before it, from the earlier import's
+   * file, which this sync only refreshed. A match of a row this sync brought is taken back (A'); a match of a
+   * row that was already in the earlier file SURVIVES — card kept, entry RESOLVED, and the row's quantity
+   * joins the restored record — because this sync did not add that row, and the match is as valid in the
+   * earlier file's world as in this one's. Taking it back left the row's quantity in neither the record nor
+   * the queue: a false "does not add up" on the Sync page, and a refusal from 0024's file-total check.
+   */
+  const priorById = new Map(snap.queue.updatedPrior.map((p) => [p.id, p]));
+  const keptMatches: { entry: Row<"unresolved_entry">; predates: boolean }[] = [];
+  for (const id of [...snap.queue.parkedIds, ...priorById.keys()]) {
     const e = await unresolvedEntryRepo.getByPk(db, id);
     if (!e || e.status !== "RESOLVED" || !e.manual_match_id) continue;
-    if (priorStatus.has(id) && priorStatus.get(id) === "RESOLVED") continue; // already matched before it
-    keptMatches.push(e);
+    const prior = priorById.get(id);
+    if (prior && prior.status === "RESOLVED") continue; // already matched before this sync
+    keptMatches.push({ entry: e, predates: prior !== undefined });
   }
-  const keptMatchIds = new Set(keptMatches.map((e) => e.id));
+  const keptMatchIds = new Set(keptMatches.map((k) => k.entry.id));
+
+  /** A kept match's own cards, by the ids #330 derives for them (match: / restore:). Empty for older matches. */
+  async function derivedCopiesOf(e: Row<"unresolved_entry">): Promise<Set<string>> {
+    const ids = new Set<string>();
+    const n = Math.max(1, e.quantity);
+    for (let i = 0; i < n; i++) {
+      for (const id of [
+        derivedUuid(`match:${e.id}:${e.retry_count - 1}:${i}`),
+        derivedUuid(`restore:${e.id}:${e.retry_count}:${i}`),
+      ]) {
+        if (await copyRepo.getByPk(db, id)) ids.add(id);
+      }
+    }
+    return ids;
+  }
+
   const handMatchedCopyIds: string[] = [];
   const handMatchedGroupIds = new Set<string>();
-  const seenCopy = new Set<string>();
-  for (const e of keptMatches) {
-    const group = await presenceGroupRepo.findByKey(
+  const survivingMatches: { key: PresenceKeyRef; quantity: number }[] = [];
+  const byKey = new Map<string, typeof keptMatches>();
+  for (const k of keptMatches) {
+    const kk = `${k.entry.manual_match_id}\u0000${k.entry.dex_variant_raw}`;
+    byKey.set(kk, [...(byKey.get(kk) ?? []), k]);
+  }
+  for (const group of byKey.values()) {
+    const { entry } = group[0];
+    const pg = await presenceGroupRepo.findByKey(
       db,
-      e.manual_match_id as string,
-      e.dex_variant_raw,
+      entry.manual_match_id as string,
+      entry.dex_variant_raw,
     );
-    if (!group) continue;
-    for (const c of await copyRepo.listByPresenceGroup(db, group.id)) {
-      if (createdByThisSync.has(c.id) || seenCopy.has(c.id)) continue;
-      if (new Date(c.created_at).getTime() <= syncedAt) continue; // there before this sync: not a hand match of it
-      seenCopy.add(c.id);
-      handMatchedCopyIds.push(c.id);
-      handMatchedGroupIds.add(group.id);
+    // Cards added to this key after this sync, and not by it: nothing but a hand match creates one.
+    const since = pg
+      ? (await copyRepo.listByPresenceGroup(db, pg.id))
+          .filter(
+            (c) => !createdByThisSync.has(c.id) && new Date(c.created_at).getTime() > syncedAt,
+          )
+          .map((c) => c.id)
+      : [];
+    let takeBack: string[];
+    if (group.every((k) => k.predates)) takeBack = [];
+    else if (group.every((k) => !k.predates)) takeBack = since;
+    else {
+      // Both kinds on one card: only the brought rows' own cards go — by their derived ids. Without them (a
+      // match made before #330), everything since goes, as before this ruling, and the count check decides.
+      const own = new Set<string>();
+      for (const k of group.filter((g) => !g.predates))
+        for (const id of await derivedCopiesOf(k.entry)) own.add(id);
+      takeBack = own.size > 0 ? since.filter((id) => own.has(id)) : since;
+    }
+    if (takeBack.length > 0 && pg) handMatchedGroupIds.add(pg.id);
+    handMatchedCopyIds.push(...takeBack);
+    for (const k of group) {
+      if (!k.predates) continue;
+      const prior = priorById.get(k.entry.id)!;
+      survivingMatches.push({
+        key: {
+          catalog_card_id: k.entry.manual_match_id as string,
+          dex_variant_raw: k.entry.dex_variant_raw,
+        },
+        quantity: Math.max(0, prior.quantity),
+      });
     }
   }
 
@@ -778,6 +846,10 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
       dex_variant_raw: r.dex_variant_raw,
     }));
     ops.push(restoreDexRecordOp(snap.priorDexRecord));
+    // A hand match of a row that was already in the earlier file survives (see above): its row joins the
+    // restored record, exactly as the match first moved it there.
+    for (const m of survivingMatches)
+      ops.push({ op: "add_dex_presence", ...m.key, quantity: m.quantity });
     const keys = new Map<string, PresenceKeyRef>();
     for (const k of [...current, ...(snap.priorDexRecord?.rows ?? [])]) {
       keys.set(`${k.catalog_card_id}\u0000${k.dex_variant_raw}`, {
@@ -786,6 +858,8 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
       });
     }
     if (keys.size > 0) ops.push({ op: "assert_presence_counts", keys: [...keys.values()] });
+    // 0024: the restored record and queue add up to the restored file.
+    ops.push({ op: "assert_file_total" });
   }
 
   try {
@@ -1106,6 +1180,9 @@ async function matchOps(
    */
   ops.push({ op: "add_dex_presence", ...matchedKey, quantity: qty });
   ops.push({ op: "assert_presence_counts", keys: [matchedKey] });
+  // 0024: the row moved from the queue into the record, so the file total still adds up — unless this row
+  // was already counted in the record (a second press, say), which the per-card check above cannot see.
+  ops.push({ op: "assert_file_total" });
 
   return {
     ops,

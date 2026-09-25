@@ -11,6 +11,7 @@
 import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
 import type { FlagFixRow, SyncOverrides, SyncPlanBundle, SyncPreview } from "@/lib/sync";
+import { forgottenDismissedLine } from "@/lib/sync/preview";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
 import { BandChip } from "../_components/BandChip";
@@ -645,6 +646,15 @@ export function PreviewPanel({
             {sections.unresolved.newParks.length} newly parked · {sections.unresolved.stillWaiting}{" "}
             waiting total. These are safe — nothing is lost; they resolve automatically once the
             card is in the catalog.
+          </div>
+        </section>
+      ) : null}
+
+      {sections.unresolved.forgottenDismissed > 0 ? (
+        <section>
+          <div className="hd u">Dismissed rows</div>
+          <div style={{ fontSize: 11, color: "var(--ink-2)" }} data-testid="forgotten-dismissed">
+            {forgottenDismissedLine(sections.unresolved.forgottenDismissed)}
           </div>
         </section>
       ) : null}

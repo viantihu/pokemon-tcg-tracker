@@ -129,7 +129,7 @@ export interface SyncPreview {
     variantChanges: VariantRow[];
     flagFixes: FlagFixRow[];
     additions: AdditionRow[];
-    unresolved: { newParks: UnresolvedRowView[]; stillWaiting: number };
+    unresolved: { newParks: UnresolvedRowView[]; stillWaiting: number; forgottenDismissed: number };
     unchanged: number;
   };
   /**
@@ -179,6 +179,8 @@ export interface PreviewEnrichment {
   newParks: UnresolvedRow[];
   stillWaiting: number;
   counts: SyncCounts;
+  /** Dismissed rows this import forgets because the file no longer lists them (UIL-104). */
+  forgottenDismissed?: number;
 }
 
 /** Build the full preview view-model from a (possibly override-adjusted) plan (PURE). */
@@ -309,9 +311,23 @@ export function buildPreview(plan: ReconcilePlan, enr: PreviewEnrichment): SyncP
       variantChanges,
       flagFixes,
       additions,
-      unresolved: { newParks, stillWaiting: enr.stillWaiting },
+      unresolved: {
+        newParks,
+        stillWaiting: enr.stillWaiting,
+        forgottenDismissed: enr.forgottenDismissed ?? 0,
+      },
       unchanged: enr.counts.unchanged,
     },
     retireOptions,
   };
+}
+
+/**
+ * What the preview says about dismissed rows this import forgets (UIL-104 — never silent). Exported so the
+ * screen and its test read the same sentence.
+ */
+export function forgottenDismissedLine(n: number): string {
+  return n === 1
+    ? "1 dismissed row is no longer in your Dex file and will be forgotten."
+    : `${n} dismissed rows are no longer in your Dex file and will be forgotten.`;
 }

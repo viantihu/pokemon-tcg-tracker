@@ -184,6 +184,9 @@ describe("UIL-099 E2 · a manual match does not hand back a card she removed", (
     const id = await parked(1);
     await asSuperuser(db);
     await db.query("update unresolved_entry set quantity = 0 where id = $1", [id]);
+    // Keep the at-rest state legal for 0024's file-total check: a file whose row held 0 counts one card
+    // fewer. Without this the fixture itself reads as "a card counted twice", and the match is refused.
+    await db.query("update dex_import set file_total = file_total - 1");
     await asOwner(db);
     const res = await manualMatch(pgliteClient(db), id, CARD);
     expect(await copiesOf()).toBe(0);

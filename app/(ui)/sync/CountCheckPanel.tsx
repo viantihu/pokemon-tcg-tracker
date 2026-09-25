@@ -5,6 +5,7 @@
  * import, match, retry and undo (the screen reloads its whole state after each). Never silent: when it does
  * not add up, it says by how much, names every card, and says what to do.
  */
+import { FILE_TOTAL_REMEDY } from "@/lib/sync/count-check";
 import type { CountCheckView, NamedCountMismatch } from "@/lib/sync/count-check";
 
 function where(m: NamedCountMismatch): string {
@@ -81,8 +82,8 @@ export function CountCheckPanel({ check }: { check: CountCheckView }) {
       ) : null}
       {!check.fileAddsUp ? (
         <div>
-          The saved record of your last Dex file no longer matches that file&apos;s total. Import
-          the file again to refresh it.
+          The saved record of your last Dex file no longer matches that file&apos;s total: a card
+          from it is counted twice. {FILE_TOTAL_REMEDY}
         </div>
       ) : null}
       <div style={{ color: "var(--ink-2)" }}>
