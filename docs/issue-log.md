@@ -7805,9 +7805,13 @@ the queue, rather than guessing further now.
 ## UIL-102 — A card matched by hand on the Sync page is stored as a Normal copy whatever its Dex variant, so a hand-matched Reverse Holo or Holo is recorded as Normal
 
 - **Reported:** 2026-09-25 (not from Karvi — found by QA while gating #330)
-- **Status:** Open, unassigned, pre-existing (not introduced by #330).
-- **Priority:** (Senior BA's call — see the placement-impact finding below, which meets the condition
-  given for raising this to High)
+- **Status:** Open: assigned to Full Stack Dev - 2, right after UIL-099's #330 merges and ahead of
+  UIL-094 (High before Medium). The fix derives the flag in `matchOps` and in #330's Add-it-back path the
+  same way the import does, AND repairs copies already stored wrong: Testing holds 6 hand matches today,
+  and Production is promoted from Testing.
+- **Priority:** High (Senior BA's read; Karvi to confirm) — the stored variant decides holo swaps
+  (`resolveDuplicate`), so a hand-matched Reverse Holo or Holo can be placed wrongly, and the next import
+  will not correct it.
 - **Area:** Sync
 - **Env:** Testing, `develop` `666cf83`
 
@@ -7857,3 +7861,53 @@ touches that copy — she will not see it surface as an "unexplained change."
 **Cross-reference UIL-100** (ruled out for the count/duplication question — `dex_variant_raw` is right,
 so the presence group and #329's Count check panel are unaffected; only the five-flag `variant` is
 wrong) and **UIL-099** (the same `matchOps` function E1/E2/#330 are already fixing for a different field).
+
+## UIL-103 — The "merge two records" action (UIL-089) can no longer be reached once migration 0023 lands, because it needs a copy outside any Dex group and 0023 makes that impossible
+
+- **Reported:** 2026-09-25 (not from Karvi — found reviewing the Tech Lead's 0023 work)
+- **Status:** Open, unassigned, decision pending.
+- **Priority:** Low (Senior BA's read).
+- **Area:** Lookup (not Collections — the action lives entirely in `app/(ui)/look/`, confirmed below).
+- **Env:** `develop` `c02a4a7` plus PR #334 (migration 0023, open).
+
+**Confirmed: the merge action's own gate requires exactly the state 0023 eliminates.**
+`mergeableTwinOf` ([`app/(ui)/look/LookupScreen.tsx:375-380`](<../app/(ui)/look/LookupScreen.tsx>:375))
+only offers a merge when the candidate copy is `!copy.dexTracked` — its own doc comment states the shape
+plainly: "one copy she typed by hand (in no presence group, so `dexTracked` is false) and one the import
+created" (UIL-089's incident). The server side agrees: `applyCopyMerge`
+([`lib/copy/remove.ts:249-258`](../lib/copy/remove.ts:249)) refuses with `bothTracked` when both records
+came from Dex, and with `neitherTracked` when neither did — it only proceeds for the one-tracked,
+one-not case. Migration 0023 ([`0023_copy_group_required.sql`](../supabase/migrations/0023_copy_group_required.sql),
+PR #334) makes `copy.presence_group_id` `NOT NULL`, so no copy can ever be untracked again: after it
+lands, `mergeableTwinOf` always returns `null` (the button never appears) and a direct call to
+`applyCopyMerge` would always hit `bothTracked` (a refusal, not a merge). The action isn't removed by
+0023 — it just becomes permanently unreachable, dead code with no path to it.
+
+**Two options, recorded for Karvi's choice, not decided here.**
+
+1. **Retire it.** Delete `mergeCopies`, `mergeableTwinOf`, `applyCopyMerge` and their UI. The
+   UIL-089-specific incident this served can't recur once 0023 is enforced, so there is nothing left for
+   the action to do.
+2. **Repurpose it as "these two are the same card"** for a **same-key double** — two records that are
+   *both* Dex-tracked, which is exactly `applyCopyMerge`'s existing `bothTracked` refusal case ("Both of
+   those came from your Dex export, so Dex says you own two. Fix the count in Dex, or remove one here.").
+   The distinction from today's existing remedy: a plain removal
+   ([`lib/copy/remove.ts:96-99`](../lib/copy/remove.ts:96)) deliberately records a `removed_presence`
+   memory so a future re-import doesn't silently re-add the card she removed on purpose; "these two are
+   the same card" would be a removal that records **no** such memory, since nothing was traded away —
+   Dex's own count was just double-counted, and the next import should be free to true it back up without
+   being told she doesn't want it. That is a real behavioral difference, not a relabeling.
+
+**Not a new repair path — re-importing already fixes a same-key double, this is about labeling.**
+UIL-100 already established that the count itself self-corrects: Dex's next export is the source of
+truth for how many she owns, and a re-import reconciles to it. Option 2 wouldn't be a NEW way to fix the
+double — it would be a same-day, no-import-needed shortcut with cleaner bookkeeping (no removal memory
+for a card that wasn't actually removed) than telling her to "remove one and wait for the next sync."
+
+**Suggested next step.** Ask Karvi to choose between the two options above once this reaches the front
+of the queue — not asked yet, per the Senior BA. Low priority: 0023 hasn't merged, so the action is still
+reachable today, and no user-facing urgency exists either way.
+
+**Cross-reference UIL-089** (the incident and the original merge feature), **UIL-098 part 4** (0023
+itself, PR #334), and **UIL-100** (the count-truing behavior a same-key double already has today via
+re-import).
