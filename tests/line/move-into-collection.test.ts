@@ -51,9 +51,11 @@ import {
   orphanedCopies,
   OWNER,
   referencedCatalogIds,
+  haulRow,
   seedBinders,
   seedCatalogCards,
   seedCollections,
+  seedHaulRows,
 } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -547,14 +549,14 @@ function planContext(): PlanContext {
 describe("Plan-screen placement override into a collection (haul commit, already atomic)", () => {
   it("the commit payload joins the destination collection's chase list — no orphan", async () => {
     const pc = planContext();
+    // A copy her import made, waiting in her haul (UIL-098 part 2): the commit places it.
     const draft: DraftItem[] = [
-      { id: "d-charmeleon", tcgdexId: CHARMELEON_SV03_027.tcgdexId, variant: "normal" },
+      haulRow("d0000000-0000-4000-8000-0000000c0e01", CHARMELEON_SV03_027.tcgdexId),
     ];
     const { planned } = planFromDraft(pc, draft);
     const { payload } = buildHaulCommitPayload(pc, planned, {
-      source: "show",
       draft,
-      overrides: { "d-charmeleon": { kind: "collection", binderId: SPEC, collectionId: COL2 } },
+      overrides: { [draft[0].id]: { kind: "collection", binderId: SPEC, collectionId: COL2 } },
     });
 
     // The union rides in the SAME payload as the copy, so it commits with it or not at all.
@@ -574,6 +576,7 @@ describe("Plan-screen placement override into a collection (haul commit, already
     await seedCollections(db, [
       { id: COL2, name: "Kagemaru", targetCatalogCardIds: [], currentBinderIds: [SPEC] },
     ]);
+    await seedHaulRows(db, draft);
     await asOwner(db);
     await applyOps(db, payload);
     await asSuperuser(db);
@@ -588,7 +591,7 @@ describe("Plan-screen placement override into a collection (haul commit, already
   it("a bulk or shelf override still joins nothing", async () => {
     const pc = planContext();
     const draft: DraftItem[] = [
-      { id: "d-vaporeon", tcgdexId: VAPOREON_SV035_134.tcgdexId, variant: "normal" },
+      haulRow("d0000000-0000-4000-8000-0000000c0e02", VAPOREON_SV035_134.tcgdexId),
     ];
     const { planned } = planFromDraft(pc, draft);
     for (const dest of [
@@ -596,9 +599,8 @@ describe("Plan-screen placement override into a collection (haul commit, already
       { kind: "shelf", binderId: GEN, half: "front", band: "light_blue" } as const,
     ]) {
       const { payload } = buildHaulCommitPayload(pc, planned, {
-        source: "show",
         draft,
-        overrides: { "d-vaporeon": dest },
+        overrides: { [draft[0].id]: dest },
       });
       expect(payload.ops.some((o) => o.op === "union_collection_targets")).toBe(false);
     }

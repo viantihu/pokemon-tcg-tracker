@@ -39,7 +39,9 @@ import {
   asOwner,
   asSuperuser,
   freshRpcDb,
+  haulRow,
   seedBinders,
+  seedHaulRows,
 } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -54,8 +56,9 @@ const JA_S1 = "c0000000-0000-0000-0000-00000000f002";
 const EN_ROOT = "c0000000-0000-0000-0000-00000000f003";
 const EN_S1 = "c0000000-0000-0000-0000-00000000f004";
 
-const EN_CRUEL: DraftItem = { id: "d-en-cruel", tcgdexId: "sv09-089", variant: "normal" };
-const JA_CRUEL: DraftItem = { id: "d-ja-cruel", tcgdexId: "ja:SV9-089", variant: "normal" };
+/** The Toedscruels she is placing: copies her import made, waiting in her haul (UIL-098 part 2). */
+const EN_CRUEL: DraftItem = haulRow("d0000000-0000-4000-8000-00000000f0e1", "sv09-089");
+const JA_CRUEL: DraftItem = haulRow("d0000000-0000-4000-8000-00000000f0e2", "ja:SV9-089");
 const BACK_ORANGE = { kind: "shelf", binderId: KB2, half: "back", band: "orange" } as const;
 
 let db: PGlite;
@@ -77,6 +80,7 @@ beforeEach(async () => {
       [id, name, [dex], stage, from, locale],
     );
   }
+  await seedHaulRows(db, [EN_CRUEL, JA_CRUEL]);
 });
 afterEach(async () => {
   await db.close();
@@ -121,7 +125,6 @@ async function commit(card: DraftItem) {
   await asOwner(db);
   try {
     return await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card,
       override: { ...BACK_ORANGE, lineJoin: { mode: "new" } },
     });
@@ -325,7 +328,7 @@ describe("UIL-090 · D2 through the CASCADE and the Lines screen, not only the p
     await seedJaBasicCopy();
 
     await asOwner(db);
-    await commitCardPlacement(pgliteClient(db), { source: "bulk-bin", card: JA_CRUEL });
+    await commitCardPlacement(pgliteClient(db), { card: JA_CRUEL });
     await asSuperuser(db);
 
     // The English line's slot is untouched — pre-fix the Japanese card filled it.
@@ -356,7 +359,6 @@ describe("UIL-090 · D2 through the CASCADE and the Lines screen, not only the p
     // And confirming it moves nothing, because the engine never claimed that stage was filled.
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card: EN_CRUEL,
       confirmedPulls: [JA_ROOT],
     });
@@ -385,10 +387,11 @@ describe("UIL-090 · D2 through the CASCADE and the Lines screen, not only the p
       [EN_ROOT, OWNER, KB2],
     );
     // Start an English line from the English BASIC, so the Stage1 stage is a placeholder to be targeted.
+    const enCool = haulRow("d0000000-0000-4000-8000-00000000f0e3", "sv09-088");
+    await seedHaulRows(db, [enCool]);
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
-      card: { id: "d-en-cool", tcgdexId: "sv09-088", variant: "normal" },
+      card: enCool,
       override: { ...BACK_ORANGE, lineJoin: { mode: "new" } },
     });
     await asSuperuser(db);
@@ -453,13 +456,14 @@ describe("UIL-090 · two cards, one payload, two locales — the in-pass key is 
    * reasoning as UIL-084's binder case.
    */
   it("gives each regional variant its own new line instead of folding the second into the first", async () => {
-    await asOwner(db);
-    const pc = await loadPlanContext(pgliteClient(db));
-    await asSuperuser(db);
     const cards: DraftItem[] = [EN_CRUEL, JA_CRUEL];
+    await asOwner(db);
+    const pc = await loadPlanContext(pgliteClient(db), {
+      excludeOwnedCopyIds: cards.map((c) => c.id),
+    });
+    await asSuperuser(db);
     const { planned } = planFromDraft(pc, cards);
     const built = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
       draft: cards,
       overrides: {
         [EN_CRUEL.id]: { ...BACK_ORANGE, lineJoin: { mode: "new" } },
@@ -478,14 +482,16 @@ describe("UIL-090 · two cards, one payload, two locales — the in-pass key is 
   it("two cards of the SAME locale in one payload each get their own line when she asks (UIL-096)", async () => {
     // Was a refusal of the second card. With the rule gone, each explicit "new line" is honoured — the
     // in-pass key now only keeps the bookkeeping straight, it no longer decides anything.
-    await asOwner(db);
-    const pc = await loadPlanContext(pgliteClient(db));
-    await asSuperuser(db);
-    const second: DraftItem = { id: "d-en-cruel-2", tcgdexId: "sv09-089", variant: "normal" };
+    // Built, not applied, so the second copy needs no row — only the id that makes it a haul copy.
+    const second = haulRow("d0000000-0000-4000-8000-00000000f0e4", "sv09-089");
     const cards: DraftItem[] = [EN_CRUEL, second];
+    await asOwner(db);
+    const pc = await loadPlanContext(pgliteClient(db), {
+      excludeOwnedCopyIds: cards.map((c) => c.id),
+    });
+    await asSuperuser(db);
     const { planned } = planFromDraft(pc, cards);
     const { payload } = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
       draft: cards,
       overrides: {
         [EN_CRUEL.id]: { ...BACK_ORANGE, lineJoin: { mode: "new" } },

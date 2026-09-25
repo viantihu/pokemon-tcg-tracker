@@ -6,7 +6,6 @@ import type { BlockNeedCandidate } from "@/lib/line/types";
 
 import type { CardCategory, Variant } from "@/lib/engine";
 import type { CommitCounts, PlanBandGroup } from "@/lib/plan";
-import type { MoveDestination } from "@/lib/line/types";
 
 export type { CommitCounts };
 
@@ -35,20 +34,19 @@ export interface LookupCard {
   variants: Variant[];
 }
 
-/** A card the collector has added to the current haul draft, with the chosen variant. */
+/** A copy waiting in her haul, as the plan screen works it. */
 export interface DraftCard {
-  /** Client-generated draft id — becomes the incoming id through the cascade. */
+  /** The draft id — the copy id, stable across reloads — and the incoming id through the cascade. */
   id: string;
   card: LookupCard;
   variant: Variant;
   /**
-   * Set when the row is an existing unplaced copy waiting to be routed rather than a new card being
-   * taken in (UIL-003). The commit updates that copy's placement instead of creating another one, so
-   * placing sync's additions can never double her counts. Its variant is Dex-owned and read-only
-   * here (sync-architecture §1.1).
+   * The copy her Dex import created, which the commit PLACES (UIL-003). Required since UIL-098 part 2:
+   * the Plan no longer takes in a hand-typed card, because a copy made anywhere but the import is a twin
+   * the next import cannot see. Its variant is Dex-owned and read-only here (sync-architecture §1.1).
    */
-  existingCopyId?: string | null;
-  /** Raw Dex variant string, shown instead of the variant selector on a routed row. */
+  existingCopyId: string;
+  /** Raw Dex variant string, shown as the row's variant. */
   dexVariantRaw?: string | null;
 }
 
@@ -67,15 +65,6 @@ export interface DraftPayloadItem {
   id: string;
   tcgdexId: string;
   variant: Variant;
-  /** An existing unplaced copy to route (UIL-003); absent for typed intake. */
-  existingCopyId?: string | null;
-}
-
-/** Argument to the commit server action. */
-export interface CommitActionInput {
-  source: "bulk-bin" | "pack-rip" | "show" | "trade";
-  notes?: string | null;
-  draft: DraftPayloadItem[];
-  /** Per-draft-id placement overrides from the spotlight move panel (M7). */
-  overrides?: Record<string, MoveDestination>;
+  /** The copy waiting in her haul (UIL-003). Required: the server refuses a row without one (UIL-098). */
+  existingCopyId: string;
 }

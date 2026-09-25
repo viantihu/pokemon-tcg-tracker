@@ -11,12 +11,15 @@
  *
  * What they pin:
  *   - one card commits on its own and the OTHERS ARE NOT WRITTEN (the whole point);
- *   - the sitting stays ONE haul across many per-card transactions;
  *   - a failing card leaves that card's rows out entirely — per-card atomicity survives;
  *   - N sequential per-card commits reach the same database state as one whole-haul commit of the same
  *     N cards, so this is a change of transaction boundary and not of outcome;
  *   - a card whose cascade depends on an earlier card's line still works, because the context is
  *     re-read from the database instead of from an in-payload mirror.
+ *
+ * Every card is a copy waiting in her haul (UIL-098 part 2), seeded before the commit, which PLACES it.
+ * "Not written" therefore means "still in the haul, with no decision" rather than "no copy row". The
+ * sitting-is-one-haul case went with the haul row itself: only a hand-typed card ever opened one.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
@@ -42,10 +45,12 @@ import {
   asSuperuser,
   count,
   freshRpcDb,
+  haulRow,
   OWNER,
   referencedCatalogIds,
   seedBinders,
   seedCatalogCards,
+  seedHaulRows,
 } from "../support/pglite-rpc";
 
 const B1 = "1c000000-0000-0000-0000-0000000000b1";
@@ -88,9 +93,26 @@ const CATALOG = [
   VAPOREON_SV035_134,
 ];
 
-function makeContext(owned: Row<"copy">[] = []): PlanContext {
+/**
+ * `haul` is the card(s) being placed: in `copyRowById` but NOT in `owned`, exactly as `loadPlanContext`
+ * builds it with `excludeOwnedCopyIds`.
+ */
+function makeContext(owned: Row<"copy">[] = [], haul: DraftItem[] = []): PlanContext {
   const catalogById = new Map(CATALOG.map((c) => [c.tcgdexId, c]));
-  const copyRowById = new Map(owned.map((c) => [c.id, c]));
+  const haulRows = haul.map(
+    (d) =>
+      ({
+        id: d.id,
+        catalog_card_id: d.tcgdexId,
+        variant: d.variant,
+        role: "haul",
+        binder_id: null,
+        binder_half: null,
+        color_band: null,
+        line_slot_id: null,
+      }) as unknown as Row<"copy">,
+  );
+  const copyRowById = new Map([...owned, ...haulRows].map((c) => [c.id, c]));
   const ctx: EngineContext = {
     typeColorMap: TYPE_COLOR_MAP,
     catalog: CATALOG,
@@ -133,9 +155,9 @@ function makeContext(owned: Row<"copy">[] = []): PlanContext {
 
 /** Three cards that do not interact: independent bands, no shared evolution chain. */
 const INDEPENDENT: DraftItem[] = [
-  { id: "d-scyther", tcgdexId: SCYTHER_SV035_123.tcgdexId, variant: "normal" },
-  { id: "d-eevee", tcgdexId: EEVEE_SV035_133.tcgdexId, variant: "normal" },
-  { id: "d-nestball", tcgdexId: NEST_BALL_SV01_181.tcgdexId, variant: "normal" },
+  haulRow("d0000000-0000-4000-8000-0000000005c1", SCYTHER_SV035_123.tcgdexId),
+  haulRow("d0000000-0000-4000-8000-0000000005c2", EEVEE_SV035_133.tcgdexId),
+  haulRow("d0000000-0000-4000-8000-0000000005c3", NEST_BALL_SV01_181.tcgdexId),
 ];
 
 async function seedFor(db: PGlite, payload: WritePayload, extra: string[] = []): Promise<void> {
@@ -144,17 +166,23 @@ async function seedFor(db: PGlite, payload: WritePayload, extra: string[] = []):
     { id: B1, type: "general" },
     { id: SPEC, type: "specialty" },
   ]);
+  // The whole sitting's haul copies exist before any card is placed, as the import leaves them.
+  await seedHaulRows(db, INDEPENDENT);
 }
 
 /** Commit one card the way `commitCardPlacement` does, but against a hand-built context. */
-function buildCard(card: DraftItem, haulId: string | null, owned: Row<"copy">[] = []) {
-  const pc = makeContext(owned);
+function buildCard(card: DraftItem, owned: Row<"copy">[] = []) {
+  const pc = makeContext(owned, [card]);
   const { planned } = planFromDraft(pc, [card]);
-  return buildHaulCommitPayload(pc, planned, {
-    source: "bulk-bin",
-    draft: [card],
-    existingHaulId: haulId,
-  });
+  return buildHaulCommitPayload(pc, planned, { draft: [card] });
+}
+
+/** Catalog ids of the copies that have been placed — out of the haul. */
+async function placedIds(db: PGlite): Promise<string[]> {
+  const r = await db.query<{ catalog_card_id: string }>(
+    `select catalog_card_id from copy where role <> 'haul' order by catalog_card_id`,
+  );
+  return r.rows.map((row) => row.catalog_card_id);
 }
 
 /** The whole database state that both models must agree on. */
@@ -188,7 +216,7 @@ afterEach(async () => {
 
 describe("one card commits on its own (UIL-027)", () => {
   it("writes ONLY the decided card — the rest of the haul stays unwritten", async () => {
-    const { payload, haulId } = buildCard(INDEPENDENT[0], null);
+    const { payload } = buildCard(INDEPENDENT[0]);
     await seedFor(
       db,
       payload,
@@ -198,60 +226,29 @@ describe("one card commits on its own (UIL-027)", () => {
     await applyOps(db, payload);
     await asSuperuser(db);
 
-    // The other two cards she has not reached yet must not exist. This is the whole complaint:
-    // previously nothing was written until a click that wrote everything.
-    expect(await count(db, "copy")).toBe(1);
-    const only = await db.query<{ catalog_card_id: string }>(`select catalog_card_id from copy`);
-    expect(only.rows[0].catalog_card_id).toBe(SCYTHER_SV035_123.tcgdexId);
+    // The other two cards she has not reached yet must still be waiting, undecided. This is the whole
+    // complaint: previously nothing was written until a click that wrote everything.
+    expect(await placedIds(db)).toEqual([SCYTHER_SV035_123.tcgdexId]);
+    expect(await count(db, "copy where role = 'haul'")).toBe(2);
     expect(await count(db, "placement_decision")).toBe(1);
-    expect(haulId).not.toBeNull();
-  });
-
-  it("keeps the sitting as ONE haul across three separate transactions", async () => {
-    let haulId: string | null = null;
-    await seedCatalogCards(
-      db,
-      CATALOG.map((c) => c.tcgdexId),
-    );
-    await seedBinders(db, [
-      { id: B1, type: "general" },
-      { id: SPEC, type: "specialty" },
-    ]);
-    await asOwner(db);
-    for (const card of INDEPENDENT) {
-      const built = buildCard(card, haulId);
-      await applyOps(db, built.payload);
-      haulId = built.haulId;
-    }
-    await asSuperuser(db);
-
-    expect(await count(db, "copy")).toBe(3);
-    // One haul row, not three — the sitting survives as a unit of provenance even though each card
-    // was its own transaction.
-    expect(await count(db, "haul")).toBe(1);
-    const stamped = await db.query<{ n: number }>(
-      `select count(*)::int as n from copy where haul_id = $1`,
-      [haulId],
-    );
-    expect(stamped.rows[0].n).toBe(3);
+    // And placing a card from the haul opens no haul row (UIL-098): only a typed card ever did.
+    expect(await count(db, "haul")).toBe(0);
   });
 
   it("a failing card leaves ITS OWN rows out, and the already-shelved cards standing", async () => {
-    await seedCatalogCards(
+    await seedFor(
       db,
+      { ops: [] },
       CATALOG.map((c) => c.tcgdexId),
     );
-    await seedBinders(db, [
-      { id: B1, type: "general" },
-      { id: SPEC, type: "specialty" },
-    ]);
     await asOwner(db);
 
-    const first = buildCard(INDEPENDENT[0], null);
+    const first = buildCard(INDEPENDENT[0]);
     await applyOps(db, first.payload);
 
-    // Card two poisoned: a copy referencing a catalog row that does not exist.
-    const second = buildCard(INDEPENDENT[1], first.haulId);
+    // Card two poisoned: a copy referencing a catalog row that does not exist — the TEST's op, since the
+    // builder no longer emits `insert_copy` (UIL-098).
+    const second = buildCard(INDEPENDENT[1]);
     const poisoned: WritePayload = {
       ops: [
         ...second.payload.ops,
@@ -268,10 +265,13 @@ describe("one card commits on its own (UIL-027)", () => {
 
     await asSuperuser(db);
     // Card one is still shelved — the failure did not reach back and undo real work she had done.
-    expect(await count(db, "copy")).toBe(1);
-    // And card two wrote nothing at all: per-card atomicity held.
-    const ids = await db.query<{ catalog_card_id: string }>(`select catalog_card_id from copy`);
-    expect(ids.rows.map((r) => r.catalog_card_id)).toEqual([SCYTHER_SV035_123.tcgdexId]);
+    expect(await placedIds(db)).toEqual([SCYTHER_SV035_123.tcgdexId]);
+    // And card two wrote nothing at all: still in the haul, no decision. Per-card atomicity held.
+    const two = await db.query<{ role: string }>(`select role from copy where id = $1`, [
+      INDEPENDENT[1].id,
+    ]);
+    expect(two.rows[0].role).toBe("haul");
+    expect(await count(db, "placement_decision")).toBe(1);
   });
 });
 
@@ -284,9 +284,9 @@ describe("per-card commits reach the same state as one whole-haul commit", () =>
   it("three independent cards: identical database state either way", async () => {
     // (a) whole haul, one transaction
     const whole = (() => {
-      const pc = makeContext();
+      const pc = makeContext([], INDEPENDENT);
       const { planned } = planFromDraft(pc, INDEPENDENT);
-      return buildHaulCommitPayload(pc, planned, { source: "bulk-bin", draft: INDEPENDENT });
+      return buildHaulCommitPayload(pc, planned, { draft: INDEPENDENT });
     })();
     await seedFor(
       db,
@@ -301,20 +301,15 @@ describe("per-card commits reach the same state as one whole-haul commit", () =>
 
     // (b) same three cards, one transaction each
     db = await freshRpcDb();
-    await seedCatalogCards(
+    await seedFor(
       db,
+      { ops: [] },
       CATALOG.map((c) => c.tcgdexId),
     );
-    await seedBinders(db, [
-      { id: B1, type: "general" },
-      { id: SPEC, type: "specialty" },
-    ]);
     await asOwner(db);
-    let haulId: string | null = null;
     for (const card of INDEPENDENT) {
-      const built = buildCard(card, haulId);
+      const built = buildCard(card);
       await applyOps(db, built.payload);
-      haulId = built.haulId;
     }
     await asSuperuser(db);
     const perCardState = await snapshot(db);
@@ -331,40 +326,18 @@ describe("a routed copy commits per card too (UIL-003 path)", () => {
       { id: B1, type: "general" },
       { id: SPEC, type: "specialty" },
     ]);
-    await db.query(
-      `insert into copy (id, owner_id, catalog_card_id, variant, role, acquired_at)
-       values ($1, $2, $3, 'normal', 'bulk', now())`,
-      [COPY, OWNER, SCYTHER_SV035_123.tcgdexId],
-    );
+    const card = haulRow(COPY, SCYTHER_SV035_123.tcgdexId);
+    await seedHaulRows(db, [card]);
 
-    const card: DraftItem = {
-      id: COPY,
-      tcgdexId: SCYTHER_SV035_123.tcgdexId,
-      variant: "normal",
-      existingCopyId: COPY,
-    };
-    const pending = {
-      id: COPY,
-      catalog_card_id: SCYTHER_SV035_123.tcgdexId,
-      variant: "normal",
-      role: "bulk",
-      binder_id: null,
-      binder_half: null,
-      color_band: null,
-      line_slot_id: null,
-    } as unknown as Row<"copy">;
-
-    const pc = makeContext([pending]);
     // The routed copy is withheld from `owned`, as loadPlanContext does for a routing pass.
-    pc.ctx.owned = [];
+    const pc = makeContext([], [card]);
     const { planned } = planFromDraft(pc, [card]);
-    const built = buildHaulCommitPayload(pc, planned, { source: "bulk-bin", draft: [card] });
+    const built = buildHaulCommitPayload(pc, planned, { draft: [card] });
 
     await asOwner(db);
     await applyOps(db, built.payload);
     await asSuperuser(db);
 
-    expect(built.haulId).toBeNull();
     expect(await count(db, "haul")).toBe(0);
     expect(await count(db, "copy")).toBe(1); // routed, not duplicated
     const row = await db.query<{ role: string; haul_id: string | null }>(

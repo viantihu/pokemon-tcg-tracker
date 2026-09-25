@@ -2,21 +2,24 @@
  * Commit a haul (dev-spec §5 M6; system-design §4, §7B step 6).
  *
  * Re-runs the cascade over the draft (deterministic against current DB state) and writes every
- * record it implies: the Haul, a Copy per card, EvolutionLine + LineSlots for new lines, slot fills
- * for existing lines, holo-swap displacements, WishlistItems for placeholders, and a
- * PlacementDecision per card (reason + resolvedBy — the audit trail is not optional, dev-spec §4).
+ * record it implies: the copy's placement, EvolutionLine + LineSlots for new lines, slot fills for
+ * existing lines, holo-swap displacements, WishlistItems for placeholders, and a PlacementDecision
+ * per card (reason + resolvedBy — the audit trail is not optional, dev-spec §4).
  *
- * TWO KINDS OF DRAFT ENTRY (UIL-003). An entry either takes in a NEW card (typed intake → a fresh
- * `copy` row stamped with this haul) or ROUTES AN EXISTING unplaced one (`existingCopyId` set → the
- * placement columns of that row are updated in place). The second kind is how sync's additions reach
- * the cascade: sync creates copies unplaced on purpose (sync-architecture §1.1) and the plan is where
- * they get a home. Creating new rows for them instead would DOUBLE her counts, so the distinction is
- * load-bearing, not cosmetic.
+ * ONE KIND OF DRAFT ENTRY (UIL-098 part 2): a copy her Dex import created, waiting in her haul. The
+ * commit PLACES that copy — it patches the placement columns of the row sync already created — and
+ * never creates one. Dex is the source of truth for what she owns, and a copy made anywhere but the
+ * import belongs to no presence group, so the next import's reconcile cannot see it and creates a SECOND
+ * one when Dex lists the card: two records for one physical card. The Plan's typed intake ("add by set,
+ * number or name") was exactly such a path, and it is gone; `commitCardPlacement` refuses any row that
+ * does not name a copy in her haul, so a stale tab or a hand-built request cannot bring it back. The only
+ * file that may emit `insert_copy` is lib/sync/exec.ts (UIL-098's rule; its database guard is part 4).
  *
- * A routed copy is never stamped with a `haul_id` — it was not acquired in this haul — and its
- * `variant` / `dex_variant_raw` are left alone, because Dex owns the variant field (sync-architecture
- * §1.1) and the next import would overwrite anything we wrote. A pass made up entirely of routed
- * copies writes NO haul row at all; its decisions carry `haul_id: null`.
+ * WHAT WENT WITH IT. A typed card was the only thing that opened a `haul` row, so the Plan no longer
+ * writes one: its source, notes and the sitting's haul id are gone, and every decision carries
+ * `haul_id: null`, which is what a routed copy's decision always carried. The copy's `variant` /
+ * `dex_variant_raw` are left alone, because Dex owns the variant field (sync-architecture §1.1) and the
+ * next import would overwrite anything we wrote.
  *
  * ATOMICITY (M10). The whole write set is computed here in TS — the cascade/decision logic stays
  * pure — then applied in ONE transaction by the `apply_write_ops` RPC (migration 0006). Row UUIDs are
@@ -29,7 +32,7 @@
 
 import { localeOfId } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
-import { lineLocaleOf, effectiveType, type Role } from "@/lib/engine";
+import { lineLocaleOf, effectiveType, isPlaced, type Role } from "@/lib/engine";
 import {
   applyWriteOps,
   type DbClient,
@@ -62,6 +65,19 @@ const REFUSE = {
   slotFilled: "That slot has already been filled — reload the screen and pick again.",
   catalogMissing: "That card's catalog entry is missing — reload and try again.",
 } as const;
+
+/**
+ * The refusals for a row that is not a card waiting in her haul (UIL-098 part 2). Exported so the tests
+ * and the screen agree on the wording.
+ */
+export const NOT_A_HAUL_COPY = {
+  /** No copy at all: a hand-typed row, which the Plan no longer accepts. */
+  notFromImport:
+    "Only cards from your Dex import can be placed here. Add the card in Dex, then import it on the " +
+    "Sync page, and it will be waiting in your haul.",
+  /** The copy it named has gone — removed, or merged into another copy, since the plan was run. */
+  copyGone: "That card is no longer in your collection. Reload the plan to see what is waiting.",
+} as const;
 import { copyPlacementFromTarget } from "./placement";
 import { loadPlanContext, planFromDraft, type DraftItem, type PlanContext } from "./context";
 import { derivePlacementFrom, placementDigest } from "./spotlight";
@@ -93,11 +109,7 @@ export class PlacementChangedError extends Error {
   }
 }
 
-export type HaulSource = "bulk-bin" | "pack-rip" | "show" | "trade";
-
 export interface CommitInput {
-  source: HaulSource;
-  notes?: string | null;
   draft: DraftItem[];
   /**
    * Per-incoming-card placement overrides (M7 — placement override on ALL cards; keyed by draft id).
@@ -106,19 +118,10 @@ export interface CommitInput {
    * Absent/empty ⇒ identical to the pure cascade commit.
    */
   overrides?: Record<string, MoveDestination>;
-  /**
-   * Join an existing haul instead of opening a new one (UIL-027). A per-card commit threads the id the
-   * FIRST card returned through the rest of the sitting, so the sitting remains one haul in the audit
-   * trail even though every card is now its own transaction. Absent ⇒ a haul is opened if the pass
-   * takes in any new card, exactly as before.
-   */
-  existingHaulId?: string | null;
 }
 
 export interface CommitCounts {
-  /** NEW copy rows written (typed intake). */
-  copies: number;
-  /** EXISTING unplaced copies given a placement (UIL-003) — no new rows. */
+  /** Copies in her haul given a placement (UIL-003). The Plan never creates a copy (UIL-098). */
   routed: number;
   lines: number;
   slots: number;
@@ -127,13 +130,12 @@ export interface CommitCounts {
 }
 
 export interface CommitResult {
-  /** Null when the pass only routed existing copies, so no acquisition event happened. */
-  haulId: string | null;
   counts: CommitCounts;
   /**
-   * True when this exact draft row had already been committed, so nothing was written (UIL-092 part 2).
-   * Every count is zero. The caller treats it as success — the card IS shelved — rather than as an error,
-   * which is the point: the failure mode being fixed is a successful write reported as a failure.
+   * True when the copy had ALREADY been placed, so nothing was written (UIL-092 part 2, re-scoped by
+   * UIL-098 part 2). Every count is zero. The caller treats it as success — the card IS placed — rather
+   * than as an error, because the usual cause is a retry after a lost response: the first press landed,
+   * and reporting the second as a failure is the failure mode UIL-092 fixed.
    */
   alreadyCommitted?: boolean;
 }
@@ -145,29 +147,6 @@ export interface CommitResult {
  */
 export function existingCopyIds(draft: DraftItem[]): string[] {
   return draft.map((d) => d.existingCopyId).filter((id): id is string => !!id);
-}
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * The copy id a TYPED draft row writes: the row's own id, not a fresh uuid (UIL-092 part 2).
- *
- * This is the whole idempotency key. A typed row has no `existingCopyId` to route, so every attempt used
- * to mint a new uuid — and the one attempt that matters is the SECOND one. The per-card commit's `catch`
- * leaves the row actionable after a transport failure, so a write that succeeded server-side but lost its
- * response was re-pressed and inserted a second copy. Karvi hit exactly that: two hand-added Meditite
- * copies for one card she typed once. Deriving the id from the row makes the retry collide with itself
- * instead, and `commitCardPlacement` turns that collision into "already done" before writing anything.
- *
- * Keyed on the ROW, never on the catalog card: she legitimately owns duplicates, and two typed rows of the
- * same printing must still become two copies. Two presses of ONE row must not.
- *
- * A row id that is not a uuid falls back to a fresh one. The client generates uuids, but its pre-UIL-092
- * fallback did not, and a parked draft from such a build would otherwise fail the whole transaction on a
- * uuid column — losing the card to save the retry. That path gives up idempotency, and only that path.
- */
-export function copyIdForTypedRow(incomingId: string): string {
-  return UUID_RE.test(incomingId) ? incomingId : crypto.randomUUID();
 }
 
 /**
@@ -240,14 +219,10 @@ interface MutableSlot {
 export async function commitCardPlacement(
   db: DbClient,
   input: {
-    source: HaulSource;
-    notes?: string | null;
-    /** The single card being shelved — a typed entry, or a routed existing copy (UIL-003). */
+    /** The single card being shelved: a copy waiting in her haul (UIL-003, UIL-098). */
     card: DraftItem;
     /** Her explicit placement for this card, if she overrode the cascade (M7). */
     override?: MoveDestination | null;
-    /** The haul this sitting already opened; null/absent opens one on the first new card. */
-    haulId?: string | null;
     /**
      * Copy ids she ticked to relocate into the line this card starts (UIL-061). Absent means MOVE
      * NOTHING — the default is deliberately the safe one, so a caller that forgets to thread it
@@ -287,33 +262,32 @@ export async function commitCardPlacement(
   if (input.override && !isMoveDestinationComplete(input.override)) {
     throw new Error(REFUSE.incomplete);
   }
+  // UIL-098 part 2: a row that names no copy is a hand-typed card, and placing it would CREATE one — the
+  // twin the next import cannot see. Refused before any I/O.
+  if (!input.card.existingCopyId) throw new Error(NOT_A_HAUL_COPY.notFromImport);
 
   const draft = [input.card];
   const pc = await loadPlanContext(db, { excludeOwnedCopyIds: existingCopyIds(draft) });
 
   /**
-   * ALREADY COMMITTED, so write nothing (UIL-092 part 2).
-   *
-   * A typed row writes its copy at its OWN id (`copyIdForTypedRow`), so a copy already sitting at that id
-   * means this exact row was already committed — a retry after a lost response, or a second press. The
-   * write is not repeated and, crucially, no second copy is minted. Costs no I/O: `loadPlanContext` has
+   * THE COPY MUST STILL BE WAITING IN HER HAUL (UIL-098 part 2). Costs no I/O: `loadPlanContext` has
    * already read every copy, and `copyRowById` is built before the `excludeOwnedCopyIds` filter.
    *
-   * The existing row's `haul_id` goes back rather than the caller's: a client whose response was lost has
-   * no haul id, and returning null would let the next card open a SECOND haul for one sitting (UIL-027).
+   * Gone ⇒ refuse: it was removed or merged since the plan was run, and there is nothing to place.
    *
-   * Only for a typed row. A routed copy (`existingCopyId`) re-runs `update_copy` with the same patch,
-   * which is already idempotent, and its id belongs to a copy that legitimately existed beforehand.
+   * Already placed ⇒ write NOTHING, and say so as success (UIL-092 part 2's rule, now for the only kind of
+   * row there is). The usual cause is a retry after a lost response, where the first press landed; the
+   * other is a second tab. Either way the card has a home, and re-running the cascade over it would MOVE
+   * a card she has already put in a binder — the plan re-derives against current state, so a second write
+   * can land somewhere other than the pocket she used.
    */
-  if (!input.card.existingCopyId) {
-    const already = pc.copyRowById.get(copyIdForTypedRow(input.card.id));
-    if (already) {
-      return {
-        haulId: already.haul_id ?? input.haulId ?? null,
-        counts: { copies: 0, routed: 0, lines: 0, slots: 0, wishlist: 0, decisions: 0 },
-        alreadyCommitted: true,
-      };
-    }
+  const copy = pc.copyRowById.get(input.card.existingCopyId);
+  if (!copy) throw new Error(NOT_A_HAUL_COPY.copyGone);
+  if (isPlaced(copy.role as Role)) {
+    return {
+      counts: { routed: 0, lines: 0, slots: 0, wishlist: 0, decisions: 0 },
+      alreadyCommitted: true,
+    };
   }
 
   const { planned } = planFromDraft(pc, draft);
@@ -349,16 +323,13 @@ export async function commitCardPlacement(
     }
   }
 
-  const { payload, haulId, counts } = buildHaulCommitPayload(pc, withConsent, {
-    source: input.source,
-    notes: input.notes ?? null,
+  const { payload, counts } = buildHaulCommitPayload(pc, withConsent, {
     draft,
     overrides: input.override ? { [input.card.id]: input.override } : undefined,
-    existingHaulId: input.haulId ?? null,
   });
   assertPlacementBandsConfigured(payload, pc);
   await applyWriteOps(db, payload);
-  return { haulId, counts };
+  return { counts };
 }
 
 /**
@@ -412,17 +383,15 @@ export function buildHaulCommitPayload(
   pc: PlanContext,
   planned: PlannedCard[],
   input: CommitInput,
-): { payload: WritePayload; haulId: string | null; counts: CommitCounts } {
+): { payload: WritePayload; counts: CommitCounts } {
   const ops: WriteOp[] = [];
   const counts: CommitCounts = {
-    copies: 0,
     routed: 0,
     lines: 0,
     slots: 0,
     wishlist: 0,
     decisions: 0,
   };
-  const now = new Date().toISOString();
 
   // Live-slot mirror: seeded from the DB snapshot, mutated as fills are recorded this pass.
   const slotsByLine = new Map<string, MutableSlot[]>();
@@ -441,21 +410,7 @@ export function buildHaulCommitPayload(
   // Lines created THIS pass, so a second card of the same (root, band) fills instead of duplicating.
   const passLines = new Map<string, { lineId: string }>();
 
-  // Only a pass that actually takes in a new card is an acquisition event. A pure routing pass over
-  // copies sync already created gets no haul row (see the file header).
-  // A haul row is opened once per sitting, not once per card: `existingHaulId` is how cards two
-  // onward join the one the first card opened. Only a pass that takes in a NEW card is an acquisition
-  // event at all — a pure routing pass over sync's copies still writes no haul (see the header).
-  const hasNewCards = planned.some((p) => !p.existingCopyId);
-  const joinedHaulId = input.existingHaulId ?? null;
-  const haulId = joinedHaulId ?? (hasNewCards ? crypto.randomUUID() : null);
-  if (haulId && !joinedHaulId) {
-    ops.push({ op: "insert_haul", id: haulId, source: input.source, notes: input.notes ?? null });
-  }
-
   for (const p of planned) {
-    // A routed copy belongs to no haul, even when the same pass also takes in new cards.
-    const decisionHaulId = p.existingCopyId ? null : haulId;
     const override = input.overrides?.[p.incomingId];
     // UIL-069: by this point a mismatch has already been resolved one way or the other —
     // `commitCardPlacement` refuses before reaching here (its only caller now that the whole-haul
@@ -465,24 +420,14 @@ export function buildHaulCommitPayload(
     const mismatch = p.result.bandMismatch;
     if (override) {
       // Manual placement wins: place the copy where she said, skip all cascade side effects.
-      const copyId = writeOverriddenCard(
-        ops,
-        haulId,
-        p,
-        override,
-        pc,
-        slotsByLine,
-        passLines,
-        now,
-        counts,
-      );
+      const copyId = writeOverriddenCard(ops, p, override, pc, slotsByLine, passLines, counts);
       const reason = mismatch
         ? "Colour mismatch resolved at intake (her call, UIL-069): filed by its own colour rather " +
           "than joining the existing line."
         : `Manual placement override at intake (your call, cascade skipped): ${p.result.reason}`;
       ops.push({
         op: "insert_decision",
-        haul_id: decisionHaulId,
+        haul_id: null,
         copy_id: copyId,
         decision: mismatch ? "colour-mismatch-own-color" : "placement-override",
         reason,
@@ -491,14 +436,14 @@ export function buildHaulCommitPayload(
       counts.decisions += 1;
       continue;
     }
-    const copyId = writeCard(ops, haulId, p, pc, slotsByLine, passLines, now, counts);
+    const copyId = writeCard(ops, p, pc, slotsByLine, passLines, counts);
     const reason = mismatch
       ? "Colour mismatch resolved at intake (her call, UIL-069): joined the existing line over " +
         "filing by its own colour."
       : p.result.reason;
     ops.push({
       op: "insert_decision",
-      haul_id: decisionHaulId,
+      haul_id: null,
       copy_id: copyId,
       decision: mismatch ? "colour-mismatch-join-line" : p.result.step,
       reason,
@@ -507,18 +452,16 @@ export function buildHaulCommitPayload(
     counts.decisions += 1;
   }
 
-  return { payload: { ops }, haulId, counts };
+  return { payload: { ops }, counts };
 }
 
 /** Emit the incoming copy with its placement, then the step's line/swap side effects. Returns id. */
 function writeCard(
   ops: WriteOp[],
-  haulId: string | null,
   p: PlannedCard,
   pc: PlanContext,
   slotsByLine: Map<string, MutableSlot[]>,
   passLines: Map<string, { lineId: string }>,
-  now: string,
   counts: CommitCounts,
 ): string {
   const { result } = p;
@@ -534,7 +477,7 @@ function writeCard(
       }
     : copyPlacementFromTarget(result.target);
 
-  const copyId = emitIncomingCopy(ops, haulId, p, placement, now, counts);
+  const copyId = emitIncomingCopy(ops, p, placement, counts);
 
   if (swap) {
     // Incoming holo takes over the line slot, if any; the displaced normal goes to bulk.
@@ -631,13 +574,11 @@ function writeCard(
  */
 function writeOverriddenCard(
   ops: WriteOp[],
-  haulId: string | null,
   p: PlannedCard,
   dest: MoveDestination,
   pc: PlanContext,
   slotsByLine: Map<string, MutableSlot[]>,
   passLines: Map<string, { lineId: string }>,
-  now: string,
   counts: CommitCounts,
 ): string {
   const placement = placementForMove(dest);
@@ -705,7 +646,6 @@ function writeOverriddenCard(
 
   const copyId = emitIncomingCopy(
     ops,
-    haulId,
     p,
     {
       role: placement.role,
@@ -714,7 +654,6 @@ function writeOverriddenCard(
       colorBand: placement.color_band,
       lineSlotId: existingJoin?.slotId ?? placement.line_slot_id,
     },
-    now,
     counts,
   );
   // Becoming a binder block writes the row that closes the open need (UIL-030), same builder as applyMove.
@@ -768,18 +707,17 @@ function writeOverriddenCard(
 }
 
 /**
- * Write the incoming card's placement and return the copy id it lives on.
+ * Write the incoming card's placement and return the copy id it lives on: the copy waiting in her haul.
  *
- * The ONE place the new-vs-routed split is decided (UIL-003): a typed card gets a fresh `copy` row
- * stamped with the haul, while an entry carrying `existingCopyId` patches the placement of the row
- * sync already created. The routed patch names all five placement columns explicitly because
- * `CopyPatch` writes exactly the keys present (a missing key is left unchanged, which would strand a
- * stale placement); it deliberately omits `variant` / `dex_variant_raw` / `haul_id`, which are not
- * this pass's to change.
+ * It PATCHES that row and never inserts one (UIL-098 part 2). This used to be the one place the
+ * new-vs-routed split was decided (UIL-003), with an `insert_copy` branch for a hand-typed card; that
+ * branch is gone, and this function refuses a row without `existingCopyId` (below) rather than write one.
+ * The patch names all five placement columns explicitly because `CopyPatch` writes exactly the keys
+ * present (a missing key is left unchanged, which would strand a stale placement); it deliberately omits
+ * `variant` / `dex_variant_raw` / `haul_id`, which are not this pass's to change.
  */
 function emitIncomingCopy(
   ops: WriteOp[],
-  haulId: string | null,
   p: PlannedCard,
   placement: {
     // `Role`, not just shelved/bulk: a move override can place a card as a repurposed binder block.
@@ -789,41 +727,25 @@ function emitIncomingCopy(
     colorBand: string | null;
     lineSlotId?: string | null;
   },
-  now: string,
   counts: CommitCounts,
 ): string {
-  if (p.existingCopyId) {
-    ops.push({
-      op: "update_copy",
-      id: p.existingCopyId,
-      patch: {
-        role: placement.role,
-        binder_id: placement.binderId,
-        binder_half: placement.binderHalf,
-        color_band: placement.colorBand,
-        line_slot_id: placement.lineSlotId ?? null,
-      },
-    });
-    counts.routed += 1;
-    return p.existingCopyId;
-  }
-
-  const copyId = copyIdForTypedRow(p.incomingId);
+  // The builder's refusal of a hand-typed row (UIL-098), not only `commitCardPlacement`'s: the builder is
+  // exported, so a caller that skipped the per-card guard must still not turn a typed row into a copy.
+  // Every card reaches here, and `ops` is local, so a throw returns no payload at all.
+  if (!p.existingCopyId) throw new Error(NOT_A_HAUL_COPY.notFromImport);
   ops.push({
-    op: "insert_copy",
-    id: copyId,
-    catalog_card_id: p.tcgdexId,
-    variant: p.variant,
-    haul_id: haulId,
-    acquired_at: now,
-    role: placement.role,
-    binder_id: placement.binderId,
-    binder_half: placement.binderHalf,
-    color_band: placement.colorBand,
-    line_slot_id: placement.lineSlotId ?? null,
+    op: "update_copy",
+    id: p.existingCopyId,
+    patch: {
+      role: placement.role,
+      binder_id: placement.binderId,
+      binder_half: placement.binderHalf,
+      color_band: placement.colorBand,
+      line_slot_id: placement.lineSlotId ?? null,
+    },
   });
-  counts.copies += 1;
-  return copyId;
+  counts.routed += 1;
+  return p.existingCopyId;
 }
 
 /** Create the proposed line + its slots + wishlist, or fill the incoming's slot if the line exists. */

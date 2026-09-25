@@ -33,7 +33,7 @@ import type { MoveDestination } from "@/lib/line/types";
 import { catalogCardRepo, type Row } from "@/lib/repo";
 import { errorMessage } from "@/lib/errors";
 import type { CommitCounts, DraftCard, LookupCard, RunPlanResult } from "./plan-types";
-import type { CommitActionInput, DraftPayloadItem } from "./plan-types";
+import type { DraftPayloadItem } from "./plan-types";
 
 /** A `catalog_card` row trimmed to what the intake UI renders. */
 function toLookupCard(r: Row<"catalog_card">): LookupCard {
@@ -146,9 +146,9 @@ export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
  * "Commit the haul" click wrote the entire draft, decided or not. Each call is one
  * `apply_write_ops` transaction for one card.
  *
- * `haulId` threads the sitting: pass null for the first card and hand back whatever this returns for
- * the rest, so the sitting stays one haul in the audit trail. A routed copy (UIL-003) never opens or
- * joins a haul — it was not acquired here — and returns null.
+ * Every card is a copy waiting in her haul (UIL-098 part 2): the Plan places copies her Dex import made,
+ * and `commitCardPlacement` refuses a row that names none. There is no haul to thread any more — only a
+ * typed card ever opened one.
  *
  * `stamp` is the state stamp AFTER the write. Without it the resume cache (UIL-006) would be discarded
  * on every single Done click: shelving changes the copy count, which is part of the stamp by design.
@@ -158,11 +158,8 @@ export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
  * when what is displayed has drifted.
  */
 export async function shelveCardAction(input: {
-  source: CommitActionInput["source"];
-  notes?: string | null;
   card: DraftPayloadItem;
   override?: MoveDestination | null;
-  haulId?: string | null;
   /** Copy ids still queued, so the returned stamp matches what the screen will hold next. */
   pendingCopyIds?: string[];
   /**
@@ -175,7 +172,7 @@ export async function shelveCardAction(input: {
   /** Her resolution of a colour mismatch, when the spotlight showed one (UIL-069). Absent ⇒ unresolved. */
   bandChoice?: "line" | "own-color" | null;
 }): Promise<
-  | { ok: true; haulId: string | null; counts: CommitCounts; stamp: string }
+  | { ok: true; counts: CommitCounts; stamp: string }
   /**
    * Not a failure: the placement moved under her, nothing was written, and the screen should show
    * `fresh` and let her look again. Distinguished from `ok: false` so the UI does not offer "retry"
@@ -187,8 +184,6 @@ export async function shelveCardAction(input: {
   try {
     const { db } = await getOwnerContext();
     const res = await commitCardPlacement(db, {
-      source: input.source,
-      notes: input.notes ?? null,
       card: {
         id: input.card.id,
         tcgdexId: input.card.tcgdexId,
@@ -196,13 +191,12 @@ export async function shelveCardAction(input: {
         existingCopyId: input.card.existingCopyId ?? null,
       },
       override: input.override ?? null,
-      haulId: input.haulId ?? null,
       expectedDigest: input.expectedDigest ?? null,
       confirmedPulls: input.confirmedPulls ?? [],
       bandChoice: input.bandChoice ?? null,
     });
     const stamp = await loadPlanFingerprint(db, input.pendingCopyIds ?? []);
-    return { ok: true, haulId: res.haulId, counts: res.counts, stamp };
+    return { ok: true, counts: res.counts, stamp };
   } catch (err) {
     if (err instanceof PlacementChangedError) {
       // `actualDigest` is what the server just derived, so the next Done is still guarded rather than

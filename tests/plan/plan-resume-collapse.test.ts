@@ -102,8 +102,6 @@ afterEach(() => {
 
 const base = {
   stamp: STAMP,
-  source: "bulk-bin",
-  notes: "",
   draft: [],
   plan: PLAN,
   done: [],
@@ -147,7 +145,7 @@ describe("UIL-018 × UIL-006 · folded bands in the resume payload", () => {
     expect(html).not.toContain("RESUMED");
     expect(html).not.toContain("Greencard");
     // Back to the intake form.
-    expect(html).toContain("New haul");
+    expect(html).toContain("Your haul");
   });
 
   it("treats a plan parked before this feature as fully expanded", () => {
@@ -192,6 +190,6 @@ describe("UIL-075 × UIL-006 · folded sub-groups in the resume payload", () => 
     park({ ...base, collapsedSubgroups: ["red:nonbasic"] });
     const html = screen('{"v":2,"copies":[["shelved",null,null,"red",null,1]]}');
     expect(html).not.toContain("RESUMED");
-    expect(html).toContain("New haul");
+    expect(html).toContain("Your haul");
   });
 });

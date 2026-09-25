@@ -22,7 +22,9 @@ import {
   asSuperuser,
   freshRpcDb,
   OWNER,
+  haulRow,
   seedBinders,
+  seedHaulRows,
 } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -110,14 +112,22 @@ describe("UIL-030 · the count and the candidates", () => {
 });
 
 describe("UIL-030 · the Haul Plan override writes the block", () => {
+  /** A second Charmander, waiting in her haul (UIL-098 part 2): the duplicate she repurposes. */
+  const DUP = haulRow("d0000000-0000-4000-8000-0000000000c9", "sv03-026");
+  beforeEach(async () => {
+    await asSuperuser(db);
+    await seedHaulRows(db, [DUP]);
+    await asOwner(db);
+  });
+  const contextPlacing = () => loadPlanContext(pgliteClient(db), { excludeOwnedCopyIds: [DUP.id] });
+
   it("copy role 'block' in the line's binder back half + binder_block row (line-terminated, repurposedDuplicate, copy, line) + slot note", async () => {
-    const pc = await loadPlanContext(pgliteClient(db));
-    const draft = [{ id: "d1", tcgdexId: "sv03-026", variant: "normal" as const }];
+    const pc = await contextPlacing();
+    const draft = [DUP];
     const { planned } = planFromDraft(pc, draft);
     const { payload } = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
       draft,
-      overrides: { d1: { kind: "block", lineId: LINE, slotId: SLOT_BLOCK, binderId: B1 } },
+      overrides: { [DUP.id]: { kind: "block", lineId: LINE, slotId: SLOT_BLOCK, binderId: B1 } },
     });
     await applyOps(db, payload);
     await asSuperuser(db);
@@ -126,7 +136,7 @@ describe("UIL-030 · the Haul Plan override writes the block", () => {
       binder_id: string;
       binder_half: string;
       color_band: string | null;
-    }>(`select role, binder_id, binder_half, color_band from copy where id <> '${OWNED}'`);
+    }>(`select role, binder_id, binder_half, color_band from copy where id = '${DUP.id}'`);
     expect(copy).toEqual({ role: "block", binder_id: B1, binder_half: "back", color_band: null });
     const [block] = await q<Record<string, unknown>>(
       `select purpose, material, line_id, binder_id, half, pocket_count, (copy_id is not null) as has_copy from binder_block`,
@@ -149,15 +159,14 @@ describe("UIL-030 · the Haul Plan override writes the block", () => {
   });
 
   it("refuses a block override whose need is already filled", async () => {
-    const pc = await loadPlanContext(pgliteClient(db));
-    const draft = [{ id: "d1", tcgdexId: "sv03-026", variant: "normal" as const }];
+    const pc = await contextPlacing();
+    const draft = [DUP];
     const { planned } = planFromDraft(pc, draft);
     const stale = { ...pc, blockNeeds: [] }; // the snapshot says: nothing open any more
     expect(() =>
       buildHaulCommitPayload(stale, planned, {
-        source: "bulk-bin",
         draft,
-        overrides: { d1: { kind: "block", lineId: LINE, slotId: SLOT_BLOCK, binderId: B1 } },
+        overrides: { [DUP.id]: { kind: "block", lineId: LINE, slotId: SLOT_BLOCK, binderId: B1 } },
       }),
     ).toThrow(/already filled/);
   });

@@ -42,8 +42,10 @@ import {
   asSuperuser,
   freshRpcDb,
   OWNER,
+  haulRow,
   seedBinders,
   seedCatalogCardsFull,
+  seedHaulRows,
 } from "../support/pglite-rpc";
 
 const B1 = "1c000000-0000-0000-0000-0000000000b1";
@@ -70,6 +72,8 @@ const TYPE_COLOR_MAP: Record<string, string> = {
   Colorless: "white",
   Trainer: "white",
 };
+/** The incoming Charmeleon in the typed-intake-era cases, now a copy waiting in her haul. */
+const INCOMING_COPY = "d0000000-0000-4000-8000-00000000c0a1";
 const CATALOG = [CHARMANDER_SV03_026, CHARMELEON_SV03_027];
 
 function ctxFor(
@@ -224,7 +228,6 @@ describe("UIL-062 · overriding a card OUT of a line releases the slot it leaves
     pc.ctx.owned = []; // withheld for a routing pass, as loadPlanContext does
     const { planned } = planFromDraft(pc, [card]);
     const built = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
       draft: [card],
       overrides: { [COPY]: { kind: "bulk" } },
     });
@@ -268,7 +271,6 @@ describe("UIL-062 · overriding a card OUT of a line releases the slot it leaves
     pc.ctx.owned = [];
     const { planned } = planFromDraft(pc, [card]);
     const built = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
       draft: [card],
       overrides: { [COPY]: { kind: "bulk" } },
     });
@@ -321,7 +323,6 @@ describe("UIL-062 · overriding a card OUT of a line releases the slot it leaves
     pc.ctx.owned = [];
     const { planned } = planFromDraft(pc, [card]);
     const built = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
       draft: [card],
       overrides: { [COPY]: { kind: "bulk" } },
     });
@@ -370,17 +371,16 @@ describe("UIL-063 · the FIRST Done on a card joining an existing line sets both
         [LINE],
       )
     ).rows;
-    const copies = (await db.query<Row<"copy">>(`select * from copy`)).rows;
-
-    // Charmeleon arrives this haul and the cascade should fill stage 1.
-    const incoming: DraftItem = {
-      id: "d-charmeleon",
-      tcgdexId: CHARMELEON_SV03_027.tcgdexId,
-      variant: "normal",
-    };
+    // Charmeleon arrives this haul and the cascade should fill stage 1: a copy her import made, waiting in
+    // her haul (UIL-098 part 2), and withheld from `owned` as `loadPlanContext` withholds it.
+    const incoming = haulRow(INCOMING_COPY, CHARMELEON_SV03_027.tcgdexId);
+    await seedHaulRows(db, [incoming]);
+    const copies = (
+      await db.query<Row<"copy">>(`select * from copy where id <> $1`, [INCOMING_COPY])
+    ).rows;
     const pc = ctxFor(copies, slots);
     const { planned } = planFromDraft(pc, [incoming]);
-    const built = buildHaulCommitPayload(pc, planned, { source: "bulk-bin", draft: [incoming] });
+    const built = buildHaulCommitPayload(pc, planned, { draft: [incoming] });
 
     await asOwner(db);
     await applyOps(db, built.payload);
@@ -445,11 +445,8 @@ describe("UIL-063 · an unresolvable slot fails the commit instead of half-writi
     ).rows;
     const copies = (await db.query<Row<"copy">>(`select * from copy`)).rows;
 
-    const incoming: DraftItem = {
-      id: "d-charmeleon",
-      tcgdexId: CHARMELEON_SV03_027.tcgdexId,
-      variant: "normal",
-    };
+    // Throws before any write, so the haul copy needs no row — only the id that makes it one.
+    const incoming = haulRow(INCOMING_COPY, CHARMELEON_SV03_027.tcgdexId);
     const pc = ctxFor(copies, slots);
     // The desync: the engine still sees the line and picks its open stage, but the commit's slot
     // snapshot has nothing for it. Exactly the state in which the old code wrote half a fact.
@@ -458,8 +455,8 @@ describe("UIL-063 · an unresolvable slot fails the commit instead of half-writi
     const { planned } = planFromDraft(pc, [incoming]);
     expect(planned[0].result.filledExistingSlot).toBeTruthy(); // the branch under test is reached
 
-    expect(() =>
-      buildHaulCommitPayload(pc, planned, { source: "bulk-bin", draft: [incoming] }),
-    ).toThrow(/not in the loaded line state/);
+    expect(() => buildHaulCommitPayload(pc, planned, { draft: [incoming] })).toThrow(
+      /not in the loaded line state/,
+    );
   });
 });

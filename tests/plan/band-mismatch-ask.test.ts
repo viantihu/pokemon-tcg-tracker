@@ -29,8 +29,10 @@ import {
   asSuperuser,
   freshRpcDb,
   OWNER,
+  haulRow,
   seedBinders,
   seedCatalogCardsFull,
+  seedHaulRows,
 } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -42,18 +44,18 @@ const OWNED_CHARMANDER = "c0000000-0000-0000-0000-0000000000e1";
 
 const CATALOG = [CHARMANDER_SV03_026, CHARMELEON_SV03_027];
 
-/** The card in this haul: a Charmeleon, natural band "red". */
-const INCOMING: DraftItem = {
-  id: "d-charmeleon",
-  tcgdexId: CHARMELEON_SV03_027.tcgdexId,
-  variant: "normal",
-};
+/** The card in this haul: a Charmeleon, natural band "red" — a copy her import made (UIL-098). */
+const INCOMING: DraftItem = haulRow(
+  "d0000000-0000-4000-8000-0000000000c1",
+  CHARMELEON_SV03_027.tcgdexId,
+);
 
 let db: PGlite;
 beforeEach(async () => {
   db = await freshRpcDb();
   await seedCatalogCardsFull(db, CATALOG);
   await seedBinders(db, [{ id: B1, type: "general", name: "Binder 1" }]);
+  await seedHaulRows(db, [INCOMING]);
   clearCatalogCache();
 });
 afterEach(async () => {
@@ -83,6 +85,15 @@ async function seedMismatchedLine(): Promise<void> {
     update copy set line_slot_id = '${SLOT_BASIC}' where id = '${OWNED_CHARMANDER}';
   `);
 }
+
+/** The incoming copy as the import left it: in her haul, placed nowhere. "Nothing written" reads as this. */
+const UNPLACED = {
+  role: "haul",
+  binder_id: null,
+  binder_half: null,
+  color_band: null,
+  line_slot_id: null,
+};
 
 async function chargedCopyRow(): Promise<{
   role: string;
@@ -168,12 +179,12 @@ describe("UIL-069 · commitCardPlacement refuses an unresolved mismatch", () => 
     const client = pgliteClient(db);
     await asOwner(db);
 
-    await expect(
-      commitCardPlacement(client, { source: "bulk-bin", card: INCOMING }),
-    ).rejects.toThrow(/pick which one wins/i);
+    await expect(commitCardPlacement(client, { card: INCOMING })).rejects.toThrow(
+      /pick which one wins/i,
+    );
 
     await asSuperuser(db);
-    expect(await chargedCopyRow()).toBeNull(); // nothing written
+    expect(await chargedCopyRow()).toMatchObject(UNPLACED); // nothing written: still in her haul
   });
 
   it("a digest ALONE — with no bandChoice — is NOT enough: it rides along on every card regardless", async () => {
@@ -184,14 +195,13 @@ describe("UIL-069 · commitCardPlacement refuses an unresolved mismatch", () => 
 
     await expect(
       commitCardPlacement(client, {
-        source: "bulk-bin",
         card: INCOMING,
         expectedDigest: placement!.digest,
       }),
     ).rejects.toThrow(/pick which one wins/i);
 
     await asSuperuser(db);
-    expect(await chargedCopyRow()).toBeNull();
+    expect(await chargedCopyRow()).toMatchObject(UNPLACED);
   });
 });
 
@@ -203,7 +213,6 @@ describe('UIL-069 · picking "join the line"', () => {
     const placement = await deriveSpotlightPlacement(client, INCOMING);
 
     await commitCardPlacement(client, {
-      source: "bulk-bin",
       card: INCOMING,
       expectedDigest: placement!.digest,
       bandChoice: "line",
@@ -244,11 +253,11 @@ describe('UIL-069 · picking "join the line"', () => {
     // regardless of whether she was ever actually asked — the digest is what proves THIS derivation,
     // with THIS mismatch, is the one she looked at.
     await expect(
-      commitCardPlacement(client, { source: "bulk-bin", card: INCOMING, bandChoice: "line" }),
+      commitCardPlacement(client, { card: INCOMING, bandChoice: "line" }),
     ).rejects.toThrow(/pick which one wins/i);
 
     await asSuperuser(db);
-    expect(await chargedCopyRow()).toBeNull();
+    expect(await chargedCopyRow()).toMatchObject(UNPLACED);
   });
 });
 
@@ -260,7 +269,6 @@ describe('UIL-069 · picking "file by its own colour"', () => {
     const placement = await deriveSpotlightPlacement(client, INCOMING);
 
     await commitCardPlacement(client, {
-      source: "bulk-bin",
       card: INCOMING,
       override: placement!.bandMismatch!.ownColorMoveDestination,
     });

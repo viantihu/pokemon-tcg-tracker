@@ -27,7 +27,9 @@ import {
   asOwner,
   asSuperuser,
   freshRpcDb,
+  haulRow,
   seedBinders,
+  seedHaulRows,
 } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -44,7 +46,8 @@ const PENDING_DRAKE = "c0000000-0000-0000-0000-0000000000b3"; // a synced, unpla
 const EMBERLING_DEX = 9601;
 const EMBERDRAKE_DEX = 9602;
 
-const DRAFT: DraftItem = { id: "d-drake", tcgdexId: "emberdrake", variant: "normal" };
+/** The Emberdrake she is holding: a copy her import made, waiting in her haul (UIL-098 part 2). */
+const DRAFT: DraftItem = haulRow("d0000000-0000-4000-8000-0000000000d1", "emberdrake");
 const BACK_RED = { kind: "shelf", binderId: GEN, half: "back", band: "red" } as const;
 
 let db: PGlite;
@@ -65,6 +68,7 @@ beforeEach(async () => {
       [id, name, [dex], stage, from],
     );
   }
+  await seedHaulRows(db, [DRAFT]);
 });
 afterEach(async () => {
   await db.close();
@@ -123,10 +127,11 @@ async function linesWithBinder() {
 }
 
 /** The real loaded context, so the builder runs against production shapes rather than a hand-built map. */
-async function planContext() {
+/** The plan context a pass over `placing` reads, withholding those copies as `commitCardPlacement` does. */
+async function planContext(placing: string[] = []) {
   await asOwner(db);
   try {
-    return await loadPlanContext(pgliteClient(db));
+    return await loadPlanContext(pgliteClient(db), { excludeOwnedCopyIds: placing });
   } finally {
     await asSuperuser(db);
   }
@@ -135,12 +140,16 @@ async function planContext() {
 async function commit(override: MoveDestination, card: DraftItem = DRAFT) {
   await asOwner(db);
   try {
-    return await commitCardPlacement(pgliteClient(db), { source: "bulk-bin", card, override });
+    return await commitCardPlacement(pgliteClient(db), { card, override });
   } finally {
     await asSuperuser(db);
   }
 }
 
+/**
+ * The Emberdrakes the commit has PLACED — every one not still waiting in her haul. The haul copies exist
+ * before any commit (UIL-098: the Plan places, it never creates), so "nothing written" reads as none here.
+ */
 async function drakeCopies() {
   return (
     await db.query<{
@@ -152,7 +161,7 @@ async function drakeCopies() {
       line_slot_id: string | null;
     }>(
       `select id, role, binder_id, binder_half, color_band, line_slot_id from copy
-         where catalog_card_id = 'emberdrake' order by created_at`,
+         where catalog_card_id = 'emberdrake' and role <> 'haul' order by created_at`,
     )
   ).rows;
 }
@@ -200,13 +209,11 @@ describe("UIL-070 part 1 · joining an EXISTING line's open slot from the Haul P
 
   it("routes a synced, unplaced copy into the slot the same way (update_copy, not insert_copy)", async () => {
     await seedOpenLine();
-    await db.query(
-      `insert into copy (id, owner_id, catalog_card_id, role) values ($1, $2, 'emberdrake', 'bulk')`,
-      [PENDING_DRAKE, OWNER],
-    );
+    // A second copy in the haul, not the default one: the write must patch THE copy the row names.
+    await seedHaulRows(db, [haulRow(PENDING_DRAKE, "emberdrake")]);
     await commit(
       { ...BACK_RED, lineJoin: { mode: "existing", lineId: LINE, slotId: SLOT_NEXT } },
-      { ...DRAFT, existingCopyId: PENDING_DRAKE },
+      haulRow(PENDING_DRAKE, "emberdrake"),
     );
     const copies = await drakeCopies();
     expect(copies).toHaveLength(1); // routed, not duplicated (UIL-003)
@@ -313,7 +320,7 @@ describe("UIL-084 · one line per species per band per BINDER, from the Haul Pla
     });
     // The copy is in Binder 2's back half, pointing at a slot of the line it just started.
     const drakes = await drakeCopies();
-    const placed = drakes[drakes.length - 1];
+    const placed = drakes.find((d) => d.id === DRAFT.id)!;
     expect(placed).toMatchObject({
       role: "shelved",
       binder_id: GEN2,
@@ -346,20 +353,23 @@ describe("UIL-084 · one line per species per band per BINDER, from the Haul Pla
  * "drop the binder from the in-pass key" survived every other test in the suite.
  */
 describe("UIL-084 · two cards, one payload, two binders — the in-pass key is per binder too", () => {
+  /** Two Emberdrakes in her haul — DRAFT and a second one. */
+  const TWO_DRAKES: DraftItem[] = [
+    DRAFT,
+    haulRow("d0000000-0000-4000-8000-0000000000d2", "emberdrake"),
+  ];
+
   it("gives each binder its own new line instead of folding the second card into the first's line", async () => {
-    const pc = await planContext();
-    const cards: DraftItem[] = [
-      { id: "d-drake-1", tcgdexId: "emberdrake", variant: "normal" },
-      { id: "d-drake-2", tcgdexId: "emberdrake", variant: "normal" },
-    ];
+    await seedHaulRows(db, [TWO_DRAKES[1]]); // [0] is DRAFT, seeded in beforeEach
+    const cards = TWO_DRAKES;
+    const pc = await planContext(cards.map((c) => c.id));
     const { planned } = planFromDraft(pc, cards);
     const built = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
       draft: cards,
       // Each copy is sent to a DIFFERENT binder's back half, each starting a line there.
       overrides: {
-        "d-drake-1": { ...BACK_RED, lineJoin: { mode: "new" } },
-        "d-drake-2": { ...BACK_RED, binderId: GEN2, lineJoin: { mode: "new" } },
+        [cards[0].id]: { ...BACK_RED, lineJoin: { mode: "new" } },
+        [cards[1].id]: { ...BACK_RED, binderId: GEN2, lineJoin: { mode: "new" } },
       },
     });
 
@@ -387,18 +397,14 @@ describe("UIL-084 · two cards, one payload, two binders — the in-pass key is 
     // This used to refuse the second ask. She asked twice for a new line in one binder; with the rule gone
     // each ask is honoured, and the in-pass mirror still keeps them as two distinct lines rather than
     // folding the second card into the first's.
-    const pc = await planContext();
-    const cards: DraftItem[] = [
-      { id: "d-drake-1", tcgdexId: "emberdrake", variant: "normal" },
-      { id: "d-drake-2", tcgdexId: "emberdrake", variant: "normal" },
-    ];
+    const cards = TWO_DRAKES;
+    const pc = await planContext(cards.map((c) => c.id));
     const { planned } = planFromDraft(pc, cards);
     const { payload } = buildHaulCommitPayload(pc, planned, {
-      source: "bulk-bin",
       draft: cards,
       overrides: {
-        "d-drake-1": { ...BACK_RED, lineJoin: { mode: "new" } },
-        "d-drake-2": { ...BACK_RED, lineJoin: { mode: "new" } },
+        [cards[0].id]: { ...BACK_RED, lineJoin: { mode: "new" } },
+        [cards[1].id]: { ...BACK_RED, lineJoin: { mode: "new" } },
       },
     });
     expect(payload.ops.filter((o) => o.op === "insert_line")).toHaveLength(2);

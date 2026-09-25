@@ -9,7 +9,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pgcrypto } from "@electric-sql/pglite/contrib/pgcrypto";
-import type { CatalogCard } from "@/lib/engine";
+import type { CatalogCard, Variant } from "@/lib/engine";
+import type { DraftItem } from "@/lib/plan/context";
 import type { WritePayload } from "@/lib/repo";
 
 export const OWNER = "00000000-0000-0000-0000-000000000001";
@@ -155,6 +156,70 @@ export async function seedBinders(
       b.type,
     ]);
   }
+}
+
+/** The raw Dex string a seeded copy of each variant carries — display only, as sync stores it. */
+const DEX_RAW: Record<string, string> = { normal: "Normal", holo: "Holo", reverse: "Reverse Holo" };
+
+/**
+ * Copies her Dex import created, waiting in her haul — the only thing the Haul Plan places (UIL-098 part
+ * 2). Seeded the way sync leaves them: `role = 'haul'`, no placement, and in a presence group per
+ * (printing, raw variant), so a test's copy looks like a real import's rather than a hand-made twin.
+ * Superuser. Two entries of one printing share one group, as two copies of one Dex row do.
+ */
+export async function seedHaulCopies(
+  db: PGlite,
+  copies: { id: string; catalogCardId: string; variant?: string; dexVariantRaw?: string }[],
+): Promise<void> {
+  for (const c of copies) {
+    const raw = c.dexVariantRaw ?? DEX_RAW[c.variant ?? "normal"] ?? "Normal";
+    const group = await db.query<{ id: string }>(
+      `insert into presence_group (owner_id, catalog_card_id, dex_variant_raw, desired_count)
+         values ($1, $2, $3, 1)
+       on conflict (owner_id, catalog_card_id, dex_variant_raw)
+         do update set desired_count = presence_group.desired_count + 1
+       returning id`,
+      [OWNER, c.catalogCardId, raw],
+    );
+    await db.query(
+      `insert into copy (id, owner_id, catalog_card_id, variant, dex_variant_raw, presence_group_id, role)
+         values ($1, $2, $3, $4, $5, $6, 'haul')`,
+      [c.id, OWNER, c.catalogCardId, c.variant ?? "normal", raw, group.rows[0].id],
+    );
+  }
+}
+
+/**
+ * A Haul Plan draft row for a copy waiting in her haul. The draft id IS the copy id, exactly as the screen
+ * builds it from the queue (`loadPendingPlacementDraft`), because the Plan only ever places copies her
+ * import made (UIL-098 part 2). Seed the copy with `seedHaulRows`.
+ */
+export function haulRow(id: string, tcgdexId: string, variant: Variant = "normal"): DraftItem {
+  return { id, tcgdexId, variant, existingCopyId: id };
+}
+
+/**
+ * Seed the haul copies a draft routes, plus a stub catalog row for any printing the test has not seeded
+ * itself — only where none exists, so a test's own full row always wins (and a namespaced `ja:` id the
+ * test seeded with its locale is never re-inserted without one, which its check constraint refuses).
+ * Superuser.
+ */
+export async function seedHaulRows(db: PGlite, rows: DraftItem[]): Promise<void> {
+  for (const id of new Set(rows.map((r) => r.tcgdexId))) {
+    await db.query(
+      `insert into catalog_card (tcgdex_id, name)
+         select $1, $1 where not exists (select 1 from catalog_card where tcgdex_id = $1)`,
+      [id],
+    );
+  }
+  await seedHaulCopies(
+    db,
+    rows.map((r) => ({
+      id: r.existingCopyId ?? r.id,
+      catalogCardId: r.tcgdexId,
+      variant: r.variant,
+    })),
+  );
 }
 
 /** Insert collection rows owned by OWNER (superuser), optionally pre-seeded with targets + binders. */

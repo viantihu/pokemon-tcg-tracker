@@ -21,7 +21,16 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import { clearCatalogCache, commitCardPlacement, type DraftItem } from "@/lib/plan";
 import type { MoveDestination } from "@/lib/line/types";
-import { OWNER, asOwner, asSuperuser, count, freshRpcDb, seedBinders } from "../support/pglite-rpc";
+import {
+  OWNER,
+  asOwner,
+  asSuperuser,
+  count,
+  freshRpcDb,
+  haulRow,
+  seedBinders,
+  seedHaulRows,
+} from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
 const KB1 = "b0000000-0000-0000-0000-0000000000d1";
@@ -33,7 +42,8 @@ const OWNED_S1 = "c0000000-0000-0000-0000-0000000000d2";
 
 const ROOT_DEX = 9481;
 const S1_DEX = 9482;
-const DRAFT: DraftItem = { id: "d-cruel", tcgdexId: "toedscruel", variant: "normal" };
+/** The Toedscruel she is holding: a second copy her import made, waiting in her haul (UIL-098). */
+const DRAFT: DraftItem = haulRow("d0000000-0000-4000-8000-0000000000d9", "toedscruel");
 
 let db: PGlite;
 beforeEach(async () => {
@@ -50,6 +60,7 @@ beforeEach(async () => {
       [id, name, [dex], stage, from],
     );
   }
+  await seedHaulRows(db, [DRAFT]);
   // Her state: an Orange line whose every stage is already filled, so a second copy of a lined stage
   // has no slot to join.
   await db.query(
@@ -101,21 +112,20 @@ describe("UIL-084 · a refused manual placement writes nothing at all", () => {
       lineJoin: { mode: "existing", lineId: LINE, slotId: SLOT_S1 },
     };
     await asOwner(db);
-    await expect(
-      commitCardPlacement(pgliteClient(db), { source: "bulk-bin", card: DRAFT, override }),
-    ).rejects.toThrow(/already been filled/);
+    await expect(commitCardPlacement(pgliteClient(db), { card: DRAFT, override })).rejects.toThrow(
+      /already been filled/,
+    );
     await asSuperuser(db);
 
-    // Byte-for-byte the state we started from: no new copy for the card she is holding, no second
-    // line, no slot re-pointed, and no audit row or haul opened by the attempt.
+    // Byte-for-byte the state we started from: the card she is holding still unplaced in her haul, no
+    // second line, no slot re-pointed, and no audit row or haul opened by the attempt.
     expect(await state()).toEqual(before);
   });
 
-  it("the card she is holding has no copy row at all — 'it never landed' is literally true", async () => {
+  it("the card she is holding is still in her haul, placed nowhere — 'it never landed' is literally true", async () => {
     await asOwner(db);
     await expect(
       commitCardPlacement(pgliteClient(db), {
-        source: "bulk-bin",
         card: DRAFT,
         override: {
           kind: "shelf",
@@ -128,23 +138,26 @@ describe("UIL-084 · a refused manual placement writes nothing at all", () => {
     ).rejects.toThrow(/already been filled/);
     await asSuperuser(db);
 
-    // One Toedscruel: the copy that was already filling the line's Stage1 slot. Not hers-in-hand.
-    const cruel = await db.query<{ id: string }>(
-      `select id from copy where catalog_card_id = 'toedscruel'`,
+    // Two Toedscruels, as before the attempt: the copy filling the line's Stage1 slot, and hers-in-hand
+    // still in the haul with no placement at all.
+    const cruel = await db.query<{ id: string; role: string; binder_id: string | null }>(
+      `select id, role, binder_id from copy where catalog_card_id = 'toedscruel' order by id`,
     );
-    expect(cruel.rows.map((r) => r.id)).toEqual([OWNED_S1]);
+    expect(cruel.rows).toEqual([
+      { id: OWNED_S1, role: "shelved", binder_id: KB1 },
+      { id: DRAFT.id, role: "haul", binder_id: null },
+    ]);
   });
 
   it("CONTROL — the same card and binder with a line choice the server accepts DOES land, so the refusal above is the rule and not a broken path", async () => {
     await asOwner(db);
     // The front half needs no line at all: the write path itself is healthy.
     const res = await commitCardPlacement(pgliteClient(db), {
-      source: "bulk-bin",
       card: DRAFT,
       override: { kind: "shelf", binderId: KB1, half: "front", band: "orange" },
     });
     await asSuperuser(db);
-    expect(res.counts.copies).toBe(1);
+    expect(res.counts.routed).toBe(1);
     const cruel = await db.query<{ binder_half: string; line_slot_id: string | null }>(
       `select binder_half, line_slot_id from copy
          where catalog_card_id = 'toedscruel' and id <> $1`,
