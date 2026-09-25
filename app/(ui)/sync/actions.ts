@@ -42,6 +42,7 @@ import {
 import type { AppliedSnapshot } from "@/lib/sync";
 import { errorMessage } from "@/lib/errors";
 import { undoableSnapshot } from "@/lib/sync/apply-guard";
+import { loadCountCheck } from "@/lib/sync/count-check-load";
 import { lookupCatalog } from "../plan/actions";
 import type { LookupCard } from "../plan/plan-types";
 import type {
@@ -228,11 +229,14 @@ function toAliasViews(
  */
 export async function loadSyncState(): Promise<SyncState> {
   const { db } = await getOwnerContext();
-  const [entries, snapshots, aliases, typeRows] = await Promise.all([
+  const [entries, snapshots, aliases, typeRows, countCheck] = await Promise.all([
     unresolvedEntryRepo.list(db),
     lastSyncSnapshotRepo.list(db),
     setAliasRepo.list(db),
     typeColorMapRepo.list(db),
+    // UIL-100: does the collection add up to the Dex file? Re-read after every import, match, retry and
+    // undo, because the screen refreshes this whole state after each of them — so it is never stale.
+    loadCountCheck(db),
   ]);
 
   const waiting = entries.filter((e) => e.status === "WAITING").map(toEntryView);
@@ -256,6 +260,7 @@ export async function loadSyncState(): Promise<SyncState> {
     },
     aliases: toAliasViews(aliases, entries),
     cardTypes: [...new Set(typeRows.map((t) => t.card_type))].sort(),
+    countCheck,
   };
 }
 

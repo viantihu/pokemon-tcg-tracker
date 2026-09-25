@@ -64,6 +64,17 @@ export interface EntryPatch {
  * One typed write. Every variant maps 1:1 to a branch of `apply_write_ops`'s `case` — there is no
  * dynamic SQL. Inserts carry an explicit `id` (client-generated) so later ops can reference it.
  */
+/** One (card, Dex variant) key, as the count check names it. */
+export interface PresenceKeyRef {
+  catalog_card_id: string;
+  dex_variant_raw: string;
+}
+
+/** One row of the Dex record (UIL-100): Dex's raw quantity for a key, before removals. */
+export interface DexRecordRow extends PresenceKeyRef {
+  quantity: number;
+}
+
 export type WriteOp =
   | { op: "insert_haul"; id: string; source: string; notes: string | null }
   | {
@@ -259,6 +270,25 @@ export type WriteOp =
    * that set's WAITING entries (lib/sync/alias.ts) so the two land in one transaction.
    */
   | { op: "delete_set_alias"; locale: string; dex_code: string }
+  /**
+   * UIL-100 (migration 0022): what the Dex file said, kept so every sync write can be checked against it.
+   * A full import REPLACES the record (raw Dex quantities, before removals) and its file-level header;
+   * a Retry promotion or a manual match ADDS the row it resolves; Undo of the first recorded import CLEARS
+   * it. `assert_presence_counts` is the check itself — emitted LAST by every sync writer, it rolls the
+   * whole transaction back unless each key holds max(0, dex − removed) copies. No header yet: it passes.
+   */
+  | {
+      op: "replace_dex_record";
+      rows: DexRecordRow[];
+      file_total: number;
+      row_count: number;
+      imported_at?: string;
+    }
+  | { op: "clear_dex_record" }
+  | { op: "add_dex_presence"; catalog_card_id: string; dex_variant_raw: string; quantity: number }
+  /** Take `by` off a removal memory, deleting it at zero (0022). A key with no memory is a no-op. */
+  | { op: "shrink_removed_presence"; catalog_card_id: string; dex_variant_raw: string; by: number }
+  | { op: "assert_presence_counts"; keys?: PresenceKeyRef[]; all?: boolean }
   /**
    * A user-created STAND-IN catalog card (0015, UIL-060 Half 1): a row of her own for a card TCGdex
    * lacks, in the `user:` id namespace with `source = 'user'`. Emitted FIRST by lib/sync/exec.ts

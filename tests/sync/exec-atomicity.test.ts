@@ -474,7 +474,7 @@ describe("sync builders emit the correct ordered op set (fake DbClient)", () => 
     expect(res.removedCopies).toBe(1);
   });
 
-  it("manualMatch (UNKNOWN_SET): emits alias + group + N copies + resolve, in that order", async () => {
+  it("manualMatch (UNKNOWN_SET): emits alias + group + N copies + resolve + Dex record + check, in that order", async () => {
     const { db: fake, captured } = fakeClient({
       unresolved_entry: [
         {
@@ -501,9 +501,21 @@ describe("sync builders emit the correct ordered op set (fake DbClient)", () => 
     });
     expect(ops[1]).toMatchObject({ op: "insert_presence_group", catalog_card_id: "cardM" });
     expect(ops.filter((o) => o.op === "insert_copy")).toHaveLength(3);
-    const last = ops[ops.length - 1];
-    expect(last).toMatchObject({ op: "update_unresolved_entry", id: "entry-1" });
-    expect((last.patch as { status: string }).status).toBe("RESOLVED");
+    const resolve = ops[ops.length - 3];
+    expect(resolve).toMatchObject({ op: "update_unresolved_entry", id: "entry-1" });
+    expect((resolve.patch as { status: string }).status).toBe("RESOLVED");
+    // UIL-100: the matched Dex row joins the record with the quantity just inserted, and the count check on
+    // this one card runs LAST, so a match that would double-count is refused inside the same transaction.
+    expect(ops[ops.length - 2]).toEqual({
+      op: "add_dex_presence",
+      catalog_card_id: "cardM",
+      dex_variant_raw: "",
+      quantity: 3,
+    });
+    expect(ops[ops.length - 1]).toEqual({
+      op: "assert_presence_counts",
+      keys: [{ catalog_card_id: "cardM", dex_variant_raw: "" }],
+    });
     expect(resync_group_ids).toHaveLength(1);
     expect(res.created).toBe(3);
     expect(res.learnedAlias).toEqual({ locale: "en", dexCode: "xy7", tcgdexSetId: "setM" });

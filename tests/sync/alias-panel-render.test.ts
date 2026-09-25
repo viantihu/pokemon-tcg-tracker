@@ -12,6 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { SyncScreen } from "@/app/(ui)/sync/SyncScreen";
 import type { QueueEntryView, SyncState } from "@/app/(ui)/sync/sync-types";
+import { emptyCountCheck } from "@/lib/sync/count-check";
 
 function entry(over: Partial<QueueEntryView>): QueueEntryView {
   return {
@@ -39,6 +40,7 @@ function state(over: Partial<SyncState>): SyncState {
   return {
     waiting: { unknownSet: [], unknownCard: [] },
     cardTypes: [],
+    countCheck: emptyCountCheck(),
     dismissed: [],
     counts: { waiting: 0, dismissed: 0 },
     undo: { available: false, createdAt: null, summary: null },

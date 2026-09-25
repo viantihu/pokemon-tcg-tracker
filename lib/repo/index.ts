@@ -27,4 +27,11 @@ export { binderBlockRepo } from "./binder-block";
 export { haulRepo } from "./haul";
 export { placementDecisionRepo } from "./placement-decision";
 export { colorBandRepo, typeColorMapRepo } from "./config";
-export { presenceGroupRepo, unresolvedEntryRepo, lastSyncSnapshotRepo, setAliasRepo } from "./sync";
+export {
+  presenceGroupRepo,
+  unresolvedEntryRepo,
+  lastSyncSnapshotRepo,
+  setAliasRepo,
+  dexPresenceRepo,
+  dexImportRepo,
+} from "./sync";

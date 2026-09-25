@@ -93,3 +93,24 @@ export const setAliasRepo = {
     return data;
   },
 };
+
+/**
+ * What her last Dex import said she owns (UIL-100, migration 0022), per (card, Dex variant), BEFORE
+ * removals. Written only through `apply_write_ops` (replace / add / clear), so it moves in the same
+ * transaction as the copies it describes. Paged: a big collection can pass PostgREST's 1000-row cap.
+ */
+export const dexPresenceRepo = {
+  ...createRepo("dex_presence"),
+};
+
+/** Her last Dex import, file level (UIL-100): one row per owner, or none before her first import. */
+export const dexImportRepo = {
+  ...createRepo("dex_import", "owner_id"),
+
+  /** The header, or null when no import has been recorded since 0022. */
+  async get(db: DbClient): Promise<Row<"dex_import"> | null> {
+    const { data, error } = await db.from("dex_import").select("*").maybeSingle();
+    if (error) throw error;
+    return data ?? null;
+  },
+};
