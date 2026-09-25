@@ -184,31 +184,34 @@ to the `main` rail to get past it; find out what is in Production first.
 
 ## A7. First sign-in
 
-- [ ] **Magic Link template, Site URL and allow-list on the Production project** (UIL-097). The
-      two projects, by name, so they are never confused: **Testing = `cpmwdcmokbgcpmkvbtsw`**
-      (app `https://pokemon-tcg-tracker-git-develop-viantihus-projects.vercel.app`), **Production
-      = `bqqerxpdxywnpvndhxbs`** (app `https://pokemon-tcg-tracker-sooty.vercel.app`). Testing got
-      this change first (2026-09-23). In the Supabase dashboard for **Production
-      (`bqqerxpdxywnpvndhxbs`)**: Authentication → Emails → Templates → Magic Link
-      must contain the same HTML as `supabase/templates/magic_link.html` (a `token_hash` link
-      plus the `{{ .Token }}` code, not `{{ .ConfirmationURL }}`); Authentication → URL
-      Configuration: Site URL = `https://pokemon-tcg-tracker-sooty.vercel.app` (no trailing
-      slash, or the custom domain if one is added first) and
-      `https://pokemon-tcg-tracker-sooty.vercel.app/auth/callback` in Redirect URLs. This
-      cannot be scripted: the deploy PAT gets 401 from the Management API. It also needs custom SMTP first (item
-      below): the built-in sender locks template edits. Whatever sign-in path ships, the
-      Redirect URLs must include its landing route (`/auth/callback`, and `/auth/confirm` if
-      the implicit-flow fix is what shipped). Without the `token_hash` template or that fix,
-      the default PKCE link only works in the browser that requested it, which is how Testing
-      locked her out on the iPad.
+- [ ] **Sign-in links on the Production project** (UIL-097). The two projects, by name, so they
+      are never confused: **Testing = `cpmwdcmokbgcpmkvbtsw`** (app
+      `https://pokemon-tcg-tracker-git-develop-viantihus-projects.vercel.app`), **Production =
+      `bqqerxpdxywnpvndhxbs`** (app `https://pokemon-tcg-tracker-sooty.vercel.app`). None of this
+      can be scripted (the deploy PAT gets 401 from the Management API); all of it is the Supabase
+      dashboard for **Production (`bqqerxpdxywnpvndhxbs`)**, done BEFORE her first sign-in (A7):
+  - [ ] Authentication → URL Configuration → **Site URL** =
+        `https://pokemon-tcg-tracker-sooty.vercel.app` (no trailing slash; the custom domain instead
+        if one is added first).
+  - [ ] Authentication → URL Configuration → **Redirect URLs** includes
+        `https://pokemon-tcg-tracker-sooty.vercel.app/**`. That covers both landing routes:
+        `/auth/confirm`, where the any-browser link lands (#333), and `/auth/callback`, where the
+        `token_hash` link lands. Missing, Supabase silently sends the link to the Site URL instead;
+        `/login` still finishes it, but only if the Site URL above is right.
+  - [ ] **Which link she gets.** With the default template, the link works in any browser through
+        `/auth/confirm` (#333's implicit flow), and needs no custom SMTP. Once custom SMTP exists
+        (item below), prefer the `token_hash` template for Production: Authentication → Emails →
+        Templates → Magic Link = the HTML in `supabase/templates/magic_link.html`. That link is
+        verified on the server and puts no session tokens in any URL (the Tech Lead's #333 security
+        review), and `/auth/confirm` stays as the fallback.
       Repo side, for whoever edits it: `supabase/templates/magic_link.html` is loaded by
-      `supabase db push` itself (via `supabase/config.toml`), so moving or renaming it breaks
-      the Production migration, not just the email. CI's migration-order job checks it.
+      `supabase db push` itself (via `supabase/config.toml`), so moving or renaming it breaks the
+      Production migration, not just the email. CI's migration-order job checks it.
 - [ ] **Custom SMTP configured on Production — REQUIRED before cutover** (UIL-097). The built-in
       sender allows 2 emails per hour and locks template edits, so Production's `token_hash`
       template cannot be set without it (Karvi hit the lock on Testing on 2026-09-23). Configure
       it under Authentication → Emails → SMTP Settings, then raise the send limit under
-      Authentication → Rate Limits. Do this BEFORE the template item above, which depends on it.
+      Authentication → Rate Limits. The `token_hash` template in the item above depends on it.
 - [ ] Karvi signs into Production once via magic link. This creates her `auth.users`
       row, which is the uuid the promotion remaps `owner_id` onto. Without it the
       script refuses to start (it must resolve exactly one owner).
