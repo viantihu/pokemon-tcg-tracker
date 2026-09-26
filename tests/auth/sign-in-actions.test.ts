@@ -67,7 +67,8 @@ const after = vi.fn((fn: () => unknown) => {
 vi.mock("next/server", () => ({ after: (fn: () => unknown) => after(fn) }));
 const flush = () => Promise.all(scheduled.splice(0));
 
-import { RATE_LIMITED, signIn } from "@/app/login/actions";
+import { signIn } from "@/app/login/actions";
+import { RATE_LIMITED } from "@/app/login/messages";
 import { completeSignIn } from "@/app/auth/confirm/actions";
 
 const form = (email: string) => {
