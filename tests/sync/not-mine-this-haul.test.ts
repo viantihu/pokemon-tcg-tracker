@@ -144,6 +144,19 @@ describe("UIL-111 · a full import ends the haul", () => {
     expect(RETURNING_NOTE).toMatch(/fix it in Dex, or press Not mine again/);
   });
 
+  it("the apply itself records a reviewed import, never the fast path (QA's follow-up on #372)", async () => {
+    // The preview gating (above) keeps the screen from auto-applying; this pins the apply's own verdict,
+    // which rides in its result and in the Undo snapshot, and which nothing else would catch if it drifted.
+    await importFile(CHARMANDER);
+    await notMine("sv03-026");
+    const run = await runSyncPipeline(client(), bytes(CHARMANDER));
+    expect((await executeApply(client(), run.bundle, OWNER)).fastPath).toBe(false);
+
+    // Control: an import that only adds a card she never cleared is still the fast path.
+    const adds = await runSyncPipeline(client(), bytes(CHARMANDER, CHARMELEON));
+    expect((await executeApply(client(), adds.bundle, OWNER)).fastPath).toBe(true);
+  });
+
   it("an import with nothing coming back is not gated by this", async () => {
     await importFile(CHARMANDER);
     const { preview } = await runSyncPipeline(client(), bytes(CHARMANDER, CHARMELEON));

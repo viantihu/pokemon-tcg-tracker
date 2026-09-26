@@ -318,7 +318,7 @@ export function AnswerPanel({
               {f.lineId ? (
                 <>
                   {" "}
-                  <span className="tag">LINE · M7</span>
+                  <span className="tag">LINE</span>
                 </>
               ) : null}
             </span>
