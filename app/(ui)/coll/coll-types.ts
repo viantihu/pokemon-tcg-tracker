@@ -17,7 +17,10 @@ export interface CollectionCardView {
   setCardCountOfficial: number | null;
   bandKey: string;
   imageUrl: string | null;
+  /** On the list AND a shelved copy in one of the collection's binders: the ONE "in the collection" test (UIL-113). */
   owned: boolean;
+  /** She holds a copy of this card anywhere, in any role. False with `owned` false: on the list, not hers. */
+  held: boolean;
   /** True when this needed card already sits on the wishlist (a finite gap she is chasing). */
   wished: boolean;
   /**

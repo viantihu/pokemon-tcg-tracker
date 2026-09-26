@@ -26,6 +26,43 @@ export interface FiniteProgress {
   needed: number;
 }
 
+/**
+ * What a collection's list holds (UIL-113), by the ONE predicate both modes use: a card is IN the collection
+ * when it is on the list AND a shelved copy of it sits in one of the collection's binders (`owned`). A finite
+ * collection shows that as "owned / total"; an open one shows it as "in the binder". The rest of the list
+ * splits by whether she holds the card anywhere at all (`held`): a card she has in a haul or another binder is
+ * hers but not shelved here yet; a card she holds nowhere is on the list and not in her collection, which is
+ * what a Testing wipe leaves behind (it deletes copies and keeps lists).
+ */
+export interface CollectionTally {
+  inBinder: number;
+  notShelvedHere: number;
+  notInCollection: number;
+  total: number;
+}
+
+export function collectionTally(
+  cards: readonly { owned: boolean; held: boolean }[],
+): CollectionTally {
+  let inBinder = 0;
+  let notShelvedHere = 0;
+  let notInCollection = 0;
+  for (const c of cards) {
+    if (c.owned) inBinder++;
+    else if (c.held) notShelvedHere++;
+    else notInCollection++;
+  }
+  return { inBinder, notShelvedHere, notInCollection, total: cards.length };
+}
+
+/** An open collection's count, in her words: what is in it first, then what is only on its list. */
+export function openCollectionSummary(t: CollectionTally): string {
+  const parts = [`${t.inBinder} in the binder`];
+  if (t.notShelvedHere > 0) parts.push(`${t.notShelvedHere} not shelved here yet`);
+  if (t.notInCollection > 0) parts.push(`${t.notInCollection} not in your collection`);
+  return parts.join(" · ");
+}
+
 /** owned / total and the wishlist gap for a finite collection. */
 export function finiteProgress(total: number, owned: number): FiniteProgress {
   const clampedOwned = Math.max(0, Math.min(owned, total));

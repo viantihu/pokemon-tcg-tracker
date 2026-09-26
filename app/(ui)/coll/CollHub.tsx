@@ -19,7 +19,9 @@ import {
   buildWishlistCopyText,
   buildWishlistCsv,
   encodeDexCsvUtf16le,
+  collectionTally,
   finiteProgress,
+  openCollectionSummary,
   type WishlistBinderGroup,
 } from "@/lib/surfaces";
 import { BandChip } from "../_components/BandChip";
@@ -582,6 +584,8 @@ export function CollectionCard(props: {
   } = props;
   const fin = c.mode === "finite";
   const prog = finiteProgress(c.totalCount, c.ownedCount);
+  // The same tally `loadCollHub` counts `ownedCount` with: one predicate for both modes (UIL-113).
+  const tally = collectionTally(c.cards);
   return (
     <div className={"collcard panel" + (collapsed ? " folded" : "")}>
       <div className="collhead">
@@ -609,7 +613,9 @@ export function CollectionCard(props: {
           <div className="collmeta u">
             {c.binderNames.join(" · ") || "No binder yet"} ·{" "}
             {fin ? "Finite set list" : "Open running count"} ·{" "}
-            {fin ? `${prog.owned} / ${prog.total} owned · ${prog.pct}%` : `${c.totalCount} logged`}
+            {fin
+              ? `${prog.owned} / ${prog.total} owned · ${prog.pct}%`
+              : openCollectionSummary(tally)}
           </div>
         </div>
         <div className="collactions">
@@ -709,8 +715,9 @@ export function CollectionCard(props: {
       ) : (
         <>
           <div className="infbox">
-            <div className="infnum">{c.totalCount}</div>
-            <div className="inflab u">Cards and counting</div>
+            {/* What is IN it, by the same test finite mode uses (UIL-113), not every card on its list. */}
+            <div className="infnum">{tally.inBinder}</div>
+            <div className="inflab u">In the binder</div>
             <button className="logbtn u" onClick={() => onLog(c)} disabled={busy}>
               ＋ Add a card
             </button>
@@ -719,7 +726,7 @@ export function CollectionCard(props: {
           {c.cards.length > 0 && (
             <div className="cgrid">
               {c.cards.map((k) => (
-                <div key={k.tcgdexId} className="ccard">
+                <div key={k.tcgdexId} className={"ccard" + (k.owned ? "" : " need")}>
                   <CardFace
                     name={k.name}
                     tcgdexId={k.tcgdexId}
@@ -737,10 +744,33 @@ export function CollectionCard(props: {
                       {formatCollectorNumber(k.localId, k.setCardCountOfficial)}
                     </div>
                   ) : null}
-                  <span className="cpill have u">In collection</span>
-                  <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
-                  {/* UIL-112: an open collection shows her copies too, so it offers the same one "Not mine". */}
-                  <NotMineButton card={k} busy={busy} onRemoveCopy={onRemoveCopy} />
+                  {k.owned ? (
+                    <>
+                      <span className="cpill have u">In collection</span>
+                      <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
+                      {/* UIL-112: an open collection shows her copies too, so it offers the same one "Not mine". */}
+                      <NotMineButton card={k} busy={busy} onRemoveCopy={onRemoveCopy} />
+                    </>
+                  ) : k.held ? (
+                    <>
+                      <span className="cpill wish u">Not shelved here yet</span>
+                      <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
+                    </>
+                  ) : (
+                    // On the list, but she holds no copy anywhere (what a Testing wipe leaves, UIL-113).
+                    <>
+                      <span className="cpill gone u">Not in your collection</span>
+                      <button
+                        type="button"
+                        className="wbtn u"
+                        style={{ background: "var(--panel)" }}
+                        disabled={busy}
+                        onClick={() => onRemove(c, k)}
+                      >
+                        Remove from collection
+                      </button>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
