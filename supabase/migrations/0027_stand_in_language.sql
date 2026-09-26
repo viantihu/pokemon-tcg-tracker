@@ -26,7 +26,7 @@
 --      stand-in with no recorded language is nobody's twin, so it is outside the index.
 --
 -- The language list is lib/catalog/locale.ts `TCGDEX_LANGUAGES`, verbatim;
--- tests/catalog/stand-in-language-migration.test.ts pins that the two agree.
+-- tests/catalog/stand-in-language.test.ts pins that the two agree.
 --
 -- BEFORE-READ (Testing, the Senior BA's): every existing `source = 'user'` id must already match (4) and
 -- every existing stand-in's locale must be 'en', or the constraints below fail the deploy.
