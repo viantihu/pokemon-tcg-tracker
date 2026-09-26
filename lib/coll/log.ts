@@ -19,11 +19,8 @@
  *     import's reconcile cannot see it and creates a SECOND one when Dex lists the card — two records for
  *     one physical card, the duplicate UIL-089 had to learn to merge.
  *
- *     The wishlist row is the shape the Collections "Wishlist" button already writes
- *     (`wishlistCollectionCard`): no line slot, the collection's binder as `held_for_binder_id`, and
- *     `will_live_in_specialty`. A collection want is exactly what `wishlist_item.line_slot_id` was left
- *     nullable for, so no new table. It is what every "wishlisted?" reader already recognises — the hub's
- *     `wished` and Lookup's WISHLISTED fact both match an open row on `chosen_catalog_card_id`.
+ *     The wishlist row is `collectionWishOp` (./wish.ts), the one shape the search grid's bulk add writes
+ *     too (UIL-101).
  *
  * `role = 'block'` is excluded from "owned", and is the ONLY exclusion: it marks a slot no card can ever
  * fill, not a physical card she holds (system-design §4). It was not always the only one — the filter used
@@ -54,8 +51,8 @@ import {
   type DbClient,
   type Row,
   type WriteOp,
-  wishlistItemRepo,
 } from "@/lib/repo";
+import { collectionWishOp, openWishedCardIds } from "./wish";
 
 export type ExistingCollectionCopy =
   { kind: "here"; copy: Row<"copy"> } | { kind: "elsewhere"; copy: Row<"copy"> } | { kind: "none" };
@@ -163,28 +160,11 @@ export async function applyCollectionLog(
     // Already shelved in this collection's binder: a repeat that unions the tag and writes nothing else.
     copyId = existing.copy.id;
   } else {
-    // Owned nowhere: a WISH, never inventory (UIL-098 — see the header). The row the Collections "Wishlist"
-    // button already writes, so both ways of wanting a collection card are one shape.
+    // Owned nowhere: a WISH, never inventory (UIL-098 — see the header), in the one shape (./wish.ts).
     const card = await catalogCardRepo.getByPk(db, tcgdexId);
     if (!card) return { ok: false, error: "That card is not in the catalog." };
-    // Idempotent: a card she is already chasing is not wished for twice. Read-then-write, not server-side —
-    // the one open-row uniqueness the schema enforces (0021) is per line SLOT, and a collection want has none.
-    // A race between two adds of the same card could leave two wish rows for it; both read as one "wished",
-    // so the cost of that race is a duplicate row, never a wrong answer.
-    const open = await wishlistItemRepo.listOpen(db);
-    if (!open.some((w) => w.chosen_catalog_card_id === tcgdexId)) {
-      ops.push({
-        op: "insert_wishlist",
-        line_slot_id: null,
-        required_dex_id: card.dex_id?.[0] ?? null,
-        required_type: card.types?.[0] ?? null,
-        required_stage: card.stage,
-        chosen_catalog_card_id: tcgdexId,
-        alternate_catalog_card_ids: [],
-        held_for_binder_id: binderId,
-        will_live_in_specialty: true,
-      });
-    }
+    // Idempotent: a card she is already chasing is not wished for twice (read-then-write; see ./wish.ts).
+    if (!(await openWishedCardIds(db)).has(tcgdexId)) ops.push(collectionWishOp(card, binderId));
   }
 
   // The chase-list join, the same op every other "into a collection" path emits (UIL-022/UIL-033):

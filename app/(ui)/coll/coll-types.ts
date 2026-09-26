@@ -3,7 +3,7 @@
  * serializable data only, imported by both the server actions and the client screen.
  */
 
-import type { RebindRemedy } from "@/lib/coll";
+import type { BulkAddCounts, RebindRemedy } from "@/lib/coll";
 import type { MoveOptions } from "@/lib/line/types";
 import type { CollectionMode, WishlistBinderGroup, WishlistEntry } from "@/lib/surfaces";
 
@@ -140,6 +140,7 @@ export interface SetOption {
 
 /**
  * Bulk-add outcome. `added` may be fewer than requested — an id already on the target list is
- * skipped rather than erroring, so re-submitting a partially-successful selection is harmless.
+ * skipped rather than erroring, so re-submitting a partially-successful selection is harmless. The
+ * other counts say where each picked card went (UIL-101): see `BulkAddCounts`.
  */
-export type BulkAddResult = { ok: true; added: number } | { ok: false; error: string };
+export type BulkAddResult = ({ ok: true } & BulkAddCounts) | { ok: false; error: string };

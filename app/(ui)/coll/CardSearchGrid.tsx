@@ -24,7 +24,8 @@ import {
   listSetOptions,
   resolveSpeciesToDexId,
 } from "./actions";
-import type { BrowseCard, BrowseFilters, SetOption } from "./coll-types";
+import type { BrowseCard, BrowseFilters, BulkAddResult, SetOption } from "./coll-types";
+import { LOST, reach } from "../_components/reach";
 
 type OwnedFilter = "any" | "owned" | "unowned";
 
@@ -37,6 +38,29 @@ const OWNED_LABEL: Record<OwnedFilter, string> = {
 /** Why the species filter is off. `resolveSpeciesToDexId` throws for a server failure too, so it names no cause. */
 export const speciesLookupFailed = (name: string) =>
   `Could not look up "${name}", so no species filter is applied. Reload the page to try again.`;
+
+/**
+ * What a bulk add did, in her words (UIL-101): how many joined the list, and of the cards she picked, how
+ * many went on her wishlist and how many she already owns. Parts that are zero are left out.
+ */
+export function bulkAddSummary(
+  r: { added: number; wishlisted: number; alreadyWished: number; owned: number },
+  collectionName: string,
+): string {
+  const plural = (n: number) => (n === 1 ? "" : "s");
+  const head = `Added ${r.added} card${plural(r.added)} to ${collectionName}.`;
+  const parts: string[] = [];
+  if (r.wishlisted > 0) parts.push(`${r.wishlisted} went on your wishlist`);
+  if (r.alreadyWished > 0) {
+    parts.push(
+      `${r.alreadyWished} ${r.alreadyWished === 1 ? "was" : "were"} already on your wishlist`,
+    );
+  }
+  if (r.owned > 0) parts.push(`${r.owned} you already own`);
+  if (parts.length === 0) return head;
+  const picked = r.wishlisted + r.alreadyWished + r.owned;
+  return `${head} Of the ${picked} you picked, ${parts.join(", ")}.`;
+}
 
 export function CardSearchGrid({ collectionId }: { collectionId: string }) {
   const router = useRouter();
@@ -64,7 +88,7 @@ export function CardSearchGrid({ collectionId }: { collectionId: string }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
-  const [addedCount, setAddedCount] = useState<number | null>(null);
+  const [added, setAdded] = useState<Extract<BulkAddResult, { ok: true }> | null>(null);
 
   const requestToken = useRef(0);
 
@@ -162,15 +186,14 @@ export function CardSearchGrid({ collectionId }: { collectionId: string }) {
     setAdding(true);
     setAddError(null);
     try {
-      const res = await bulkAddTargets(collectionId, [...selected]);
+      // Through `reach` (UIL-106): a call that never answers ends in words, and her selection is kept.
+      const res = await reach(() => bulkAddTargets(collectionId, [...selected]), LOST.action);
       if (!res.ok) {
         setAddError(res.error);
         return;
       }
-      setAddedCount(res.added);
+      setAdded(res);
       setSelected(new Set());
-    } catch (e) {
-      setAddError(e instanceof Error ? e.message : "Could not add these cards.");
     } finally {
       setAdding(false);
     }
@@ -286,12 +309,10 @@ export function CardSearchGrid({ collectionId }: { collectionId: string }) {
           <b>{addError}</b>
         </div>
       )}
-      {addedCount != null && (
+      {added && (
         <div className="alertbar ok" role="status">
           <span>✓</span>
-          <b>
-            Added {addedCount} card{addedCount === 1 ? "" : "s"} to {collectionName}.
-          </b>
+          <b>{bulkAddSummary(added, collectionName)}</b>
         </div>
       )}
 

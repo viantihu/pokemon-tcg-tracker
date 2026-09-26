@@ -238,7 +238,9 @@ describe("applyBulkAddTargets", () => {
     const client = pgliteClient(db);
 
     const res = await applyBulkAddTargets(client, OWNER, COL, ["cardA", "cardB", "cardC"]);
-    expect(res).toEqual({ ok: true, added: 2 }); // cardA was already there
+    // cardA was already there, so two are new to the list. She owns none of the three, so all three are
+    // wished for, cardA too (UIL-101: every card she does not own; see tests/coll/bulk-add-wishlist.test.ts).
+    expect(res).toEqual({ ok: true, added: 2, wishlisted: 3, alreadyWished: 0, owned: 0 });
 
     await asSuperuser(db);
     const row = await collectionRepo.getByPk(pgliteClient(db), COL);

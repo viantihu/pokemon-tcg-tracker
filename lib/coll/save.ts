@@ -25,8 +25,17 @@
  * is loaded before the binder is resolved, and its current binder is the fallback, not null.
  */
 
-import { binderRepo, collectionRepo, type DbClient } from "@/lib/repo";
-import { collectionMode, type CollectionMode } from "@/lib/surfaces";
+import { errorMessage } from "@/lib/errors";
+import {
+  applyWriteOps,
+  binderRepo,
+  catalogCardRepo,
+  collectionRepo,
+  copyRepo,
+  type DbClient,
+  type WriteOp,
+} from "@/lib/repo";
+import type { CollectionMode } from "@/lib/surfaces";
 import {
   blockedBinderRebind,
   blockedBinderRebindMessage,
@@ -34,6 +43,7 @@ import {
   blockedTargetDropsMessage,
 } from "./remove";
 import { rebindRemedyFor, type RebindRemedy } from "./rebind";
+import { collectionWishOp, openWishedCardIds } from "./wish";
 
 export interface CollectionSaveInput {
   id?: string | null;
@@ -123,41 +133,107 @@ export async function applyCollectionSave(
   return { ok: true, id: created.id };
 }
 
+/** What a bulk add did, card by card, so the page can say where each one went (UIL-101). */
+export interface BulkAddCounts {
+  /** Newly on this collection's chase list (ones already listed are not counted again). */
+  added: number;
+  /** Of the cards she picked: not owned, and now on her wishlist. */
+  wishlisted: number;
+  /** Of the cards she picked: not owned, and already on her wishlist, so not wished for twice. */
+  alreadyWished: number;
+  /** Of the cards she picked: ones she already owns, which only join the chase list. */
+  owned: number;
+}
+
 /**
- * Bulk-add from the search grid (UIL-039) — one write for N cards, reusing `applyCollectionSave`
- * rather than a second target-list write path (the UIL-033 principle: one definition of what joining
- * a collection means). Name/mode/binder are re-sent unchanged, so `blockedBinderRebind` never fires
- * here; only ever-growing the target list means `blockedTargetDrops` never fires either — this path
- * cannot strand anything, by construction, not because a guard happens not to trigger today.
+ * Bulk-add from the search grid (UIL-039), with UIL-098 part 1's rule for a card she does not own (UIL-101).
  *
- * Already-listed ids are silently skipped rather than erroring, so re-submitting a selection that
- * partially landed (a flaky request, a double click) is harmless.
+ * Every picked card joins the collection's chase list. A card she owns does nothing else. A card she does NOT
+ * own also goes on her WISHLIST, in the same row shape a single add writes (`collectionWishOp`), unless it is
+ * already there. It never creates a copy: Dex is the only source of what she owns (UIL-098).
+ *
+ * ONE TRANSACTION. The wishes and the chase-list join are a single `apply_write_ops` call, so either every
+ * card lands or none does. The join is `union_collection_targets`, the op every other "into a collection"
+ * path emits, unioned server-side and idempotent for ids already listed, so re-submitting a selection that
+ * partially landed (a flaky request, a double click) is harmless. This path only ever grows the list and
+ * never touches name, mode or binder, so it cannot strand a card (UIL-014, UIL-040) by construction.
+ *
+ * "Owned" is any copy that is not a binder block, the same question `findExistingCopy` asks (UIL-093): a
+ * card in her haul or the bulk box is hers.
  */
 export async function applyBulkAddTargets(
   db: DbClient,
-  ownerId: string,
+  // Kept for the call signature; the RPC is SECURITY INVOKER and owner_id defaults to auth.uid().
+  _ownerId: string,
   collectionId: string,
   tcgdexIds: string[],
-): Promise<{ ok: true; added: number } | { ok: false; error: string }> {
+): Promise<({ ok: true } & BulkAddCounts) | { ok: false; error: string }> {
   const existing = await collectionRepo.getByPk(db, collectionId);
   if (!existing) return { ok: false, error: "That collection no longer exists." };
 
-  const current = new Set(existing.target_catalog_card_ids ?? []);
-  const merged = [...current, ...tcgdexIds.filter((id) => !current.has(id))];
-  const added = merged.length - current.size;
+  // A card picked twice is one card: one wish at most, counted once.
+  const ids = [...new Set(tcgdexIds)];
+  const listed = new Set(existing.target_catalog_card_ids ?? []);
+  const counts: BulkAddCounts = {
+    added: ids.filter((id) => !listed.has(id)).length,
+    wishlisted: 0,
+    alreadyWished: 0,
+    owned: 0,
+  };
+  if (ids.length === 0) return { ok: true, ...counts };
 
-  const res = await applyCollectionSave(
-    db,
-    ownerId,
-    {
-      id: collectionId,
-      name: existing.name,
-      mode: collectionMode(existing.mode),
-      binderId: existing.current_binder_ids?.[0] ?? "__new",
-      newBinderName: "",
-      targetTcgdexIds: merged,
-    },
-    { draft: true },
-  );
-  return res.ok ? { ok: true, added } : res;
+  const [owned, wished, cards] = await Promise.all([
+    copyRepo.ownedCatalogCardIdSet(db),
+    openWishedCardIds(db),
+    catalogCardRepo.listByIds(db, ids),
+  ]);
+  const byId = new Map(cards.map((c) => [c.tcgdex_id, c]));
+  const binderId = existing.current_binder_ids?.[0] ?? null;
+
+  const ops: WriteOp[] = [];
+  for (const id of ids) {
+    if (owned.has(id)) {
+      counts.owned += 1;
+      continue;
+    }
+    if (wished.has(id)) {
+      counts.alreadyWished += 1;
+      continue;
+    }
+    const card = byId.get(id);
+    // The grid only offers catalog cards, so this is a card that left the catalog mid-session. All or
+    // nothing: say so rather than listing it with no wish behind it.
+    if (!card)
+      return {
+        ok: false,
+        error: "One of those cards is no longer in the catalog. Reload the page.",
+      };
+    ops.push(collectionWishOp(card, binderId));
+    counts.wishlisted += 1;
+  }
+  ops.push({ op: "union_collection_targets", collection_id: collectionId, catalog_card_ids: ids });
+
+  try {
+    await applyWriteOps(db, { ops });
+  } catch (err) {
+    return { ok: false, error: `Could not add these cards: ${errorMessage(err)}` };
+  }
+
+  // `union_collection_targets` matches no row for a collection that vanished (or stopped being hers)
+  // between the read above and the write, and says nothing. Do not let that pass as success.
+  const after = await collectionRepo.getByPk(db, collectionId);
+  const nowListed = new Set(after?.target_catalog_card_ids ?? []);
+  if (!after || !ids.every((id) => nowListed.has(id))) {
+    return {
+      ok: false,
+      // A wish does not depend on the collection, so say what did land.
+      error:
+        counts.wishlisted > 0
+          ? "That collection changed under you, so those cards are on your wishlist but were not added " +
+            "to this list. Reload to see what changed."
+          : "That collection changed under you, so those cards were not added to this list. Reload to " +
+            "see what changed.",
+    };
+  }
+  return { ok: true, ...counts };
 }
