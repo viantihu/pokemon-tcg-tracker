@@ -9,12 +9,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAutosaveScheduler, flushBeforeNavigate } from "@/app/(ui)/coll/autosave";
 
+/** Let every queued microtask run (fake timers do not advance promise callbacks by themselves). */
+const settle = async () => {
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+};
+
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 beforeEach(() => {
@@ -57,8 +64,9 @@ describe("createAutosaveScheduler", () => {
     expect(save).toHaveBeenCalledTimes(1);
 
     first.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    // Drain microtasks rather than count them: the chain's depth is an implementation detail (UIL-106 added
+    // a catch to it). What this pins is the ORDER — B only ever starts after A resolves.
+    await settle();
     expect(order).toEqual(["start:A", "start:B"]);
   });
 
@@ -134,6 +142,117 @@ describe("flushBeforeNavigate", () => {
     const navigate = vi.fn();
 
     await flushBeforeNavigate(s, navigate);
+    expect(navigate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("UIL-106 · a save that cannot reach the server does not break the queue", () => {
+  it("one failure, then the next edit SAVES (it used to be skipped silently, forever)", async () => {
+    const saved: string[] = [];
+    let fail = true;
+    const save = vi.fn(async (v: string) => {
+      if (fail) {
+        fail = false;
+        throw new TypeError("Failed to fetch");
+      }
+      saved.push(v);
+    });
+    const onError = vi.fn();
+    const s = createAutosaveScheduler(save, 100, onError);
+
+    s.schedule("A");
+    await vi.advanceTimersByTimeAsync(100);
+    await settle();
+    expect(onError).toHaveBeenCalledTimes(1);
+
+    s.schedule("B");
+    await vi.advanceTimersByTimeAsync(100);
+    await settle();
+    expect(saved).toEqual(["B"]);
+  });
+
+  it("flush() never rejects: false after a failure, and it sends the kept value again", async () => {
+    const saved: string[] = [];
+    let fail = true;
+    const s = createAutosaveScheduler(async (v: string) => {
+      if (fail) {
+        fail = false;
+        throw new Error("network");
+      }
+      saved.push(v);
+    }, 10_000);
+
+    s.schedule("A");
+    await expect(s.flush()).resolves.toBe(false);
+    // Nothing new was typed: the flush re-sends A, which lands this time.
+    await expect(s.flush()).resolves.toBe(true);
+    expect(saved).toEqual(["A"]);
+    // And with nothing left to send, it stays true.
+    await expect(s.flush()).resolves.toBe(true);
+    expect(saved).toEqual(["A"]);
+  });
+
+  it("a newer edit replaces the kept value — whole-state saves, so the newer one carries it", async () => {
+    const saved: string[] = [];
+    let fail = true;
+    const s = createAutosaveScheduler(async (v: string) => {
+      if (fail) {
+        fail = false;
+        throw new Error("network");
+      }
+      saved.push(v);
+    }, 10_000);
+    s.schedule("A");
+    await s.flush();
+    s.schedule("B");
+    await expect(s.flush()).resolves.toBe(true);
+    expect(saved).toEqual(["B"]);
+  });
+
+  it("a newer edit made WHILE the failing save was in flight wins — the failed value never overwrites it", async () => {
+    const saved: string[] = [];
+    const a = deferred<void>();
+    const s = createAutosaveScheduler((v: string) => {
+      if (v === "A") return a.promise;
+      saved.push(v);
+      return Promise.resolve();
+    }, 10_000);
+    s.schedule("A");
+    const first = s.flush(); // A is in flight
+    s.schedule("B"); // she keeps typing
+    a.reject(new Error("network"));
+    await expect(first).resolves.toBe(false);
+    await expect(s.flush()).resolves.toBe(true);
+    // B carries everything A had; A must not come back and replace it.
+    expect(saved).toEqual(["B"]);
+  });
+
+  it("a save that throws synchronously recovers the same way", async () => {
+    let calls = 0;
+    const s = createAutosaveScheduler((v: string) => {
+      calls += 1;
+      if (calls === 1) throw new Error(`sync ${v}`);
+      return Promise.resolve();
+    }, 10_000);
+    s.schedule("A");
+    await expect(s.flush()).resolves.toBe(false);
+    await expect(s.flush()).resolves.toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it("flushBeforeNavigate leaves only when everything saved", async () => {
+    const navigate = vi.fn();
+    let fail = true;
+    const s = createAutosaveScheduler(async () => {
+      if (fail) {
+        fail = false;
+        throw new Error("network");
+      }
+    }, 10_000);
+    s.schedule("A");
+    await expect(flushBeforeNavigate(s, navigate)).resolves.toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+    await expect(flushBeforeNavigate(s, navigate)).resolves.toBe(true);
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 });
