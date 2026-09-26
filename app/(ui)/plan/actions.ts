@@ -24,6 +24,7 @@ import {
   planFromDraft,
   type BandMismatchChoice,
   type DraftItem,
+  type PendingPlacement,
   type PlanItem,
   type ProposedPull,
 } from "@/lib/plan";
@@ -95,15 +96,30 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
  */
 export async function loadPendingPlacementDraft(): Promise<DraftCard[]> {
   const { db } = await getOwnerContext();
-  const pending = await loadPendingPlacements(db);
-  return pending.map((p) => ({
+  return (await loadPendingPlacements(db)).map(toDraftCard);
+}
+
+/**
+ * Cards that became waiting while the Haul Plan was open (UIL-114): every pending copy the screen does not
+ * already hold. `knownCopyIds` is everything it holds, shelved or not, plus anything she took off the plan
+ * this sitting, so "Leave for later" is not undone by the next check. The screen asks on focus and every
+ * 30 s; a Realtime subscription could later ask the same question on a copy insert instead.
+ */
+export async function loadArrivals(knownCopyIds: string[]): Promise<DraftCard[]> {
+  const { db } = await getOwnerContext();
+  return (await loadPendingPlacements(db, { except: new Set(knownCopyIds) })).map(toDraftCard);
+}
+
+/** A pending copy as a draft row. Not exported: this file may export only async functions (E352). */
+function toDraftCard(p: PendingPlacement): DraftCard {
+  return {
     // The copy id doubles as the draft id: stable across reloads, and unique by construction.
     id: p.copyId,
     existingCopyId: p.copyId,
     dexVariantRaw: p.dexVariantRaw,
     card: toLookupCard(p.card),
     variant: p.variant,
-  }));
+  };
 }
 
 /**

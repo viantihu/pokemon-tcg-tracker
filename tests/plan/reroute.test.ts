@@ -66,6 +66,18 @@ describe("UIL-114 · merging a re-route", () => {
     expect(moved).toEqual([]);
   });
 
+  it("names a card the plan did not hold before as ADDED, not moved (an arrival, UIL-114 part C)", () => {
+    const next = routedPlan(draft("Kadabra", "Alakazam", "Machop"), undefined, (id) =>
+      id === "id-Machop" ? "KB-002 · Front · Orange" : "KB-001 · Front · Orange",
+    );
+    const { plan, moved, added } = mergeReroute(prev, next, new Set(["id-Abra"]));
+    expect(added).toEqual([
+      { incomingId: "id-Machop", name: "Machop", destination: "KB-002 · Front · Orange" },
+    ]);
+    expect(moved).toEqual([]);
+    expect(flattenPlan(plan).map((i) => i.name)).toContain("Machop");
+  });
+
   it("groups by the server's band order, falling back to the plan's own for one parked before UIL-114", () => {
     const old = { ...prev, orderedBandKeys: undefined };
     const next = { ...routedPlan(draft("Kadabra")), orderedBandKeys: undefined };

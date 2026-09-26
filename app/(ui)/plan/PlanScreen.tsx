@@ -43,12 +43,14 @@ import {
   shelveCardAction,
   getLineJoinOptions,
   getMoveOptions,
+  loadArrivals,
   loadPendingPlacementDraft,
   planStateStamp,
   refreshSpotlightAction,
   runHaulPlan,
 } from "./actions";
 import type { DraftCard, DraftPayloadItem, RunPlanResult } from "./plan-types";
+import { createArrivalWatch } from "./arrivals";
 import {
   createRerouteBatcher,
   dropFromPlan,
@@ -257,6 +259,12 @@ export function PlanScreen({
   const [updating, setUpdating] = useState(false);
   /** Waiting cards whose home the last re-route changed, named so none moves silently. */
   const [moved, setMoved] = useState<MovedCard[] | null>(null);
+  /**
+   * Cards that arrived while the page was open (UIL-114 part C), badged "New" until shelved, and named with
+   * their homes until she dismisses the note. Not parked: "New" means new while she was looking.
+   */
+  const [arrived, setArrived] = useState<Set<string>>(() => new Set());
+  const [joined, setJoined] = useState<MovedCard[] | null>(null);
   /**
    * The stamp the parked run is keyed to. Shelving a card changes the copy count, which is part of the
    * stamp by design (UIL-006), so without rolling it forward the resume cache would be thrown away on
@@ -496,6 +504,9 @@ export function PlanScreen({
       setConfirmedPulls({});
       setBandChoice({});
       setMoved(null);
+      // A fresh route is fresh work: nothing on it is "new" against anything.
+      setArrived(new Set());
+      setJoined(null);
     });
     return () => {
       live = false;
@@ -543,11 +554,11 @@ export function PlanScreen({
         .map((it) => it.incomingId)
         .filter((id) => !inDraft.has(id)),
     );
-    const { plan: next, moved: changed } = mergeReroute(
-      now.plan,
-      dropFromPlan(res, gone),
-      now.done,
-    );
+    const {
+      plan: next,
+      moved: changed,
+      added,
+    } = mergeReroute(now.plan, dropFromPlan(res, gone), now.done);
     const spotId = flattenPlan(now.plan)[now.cur]?.incomingId;
     const flat = flattenPlan(next);
     const at2 = spotId ? flat.findIndex((it) => it.incomingId === spotId) : -1;
@@ -559,6 +570,11 @@ export function PlanScreen({
     setBandChoice({});
     if (!isUnreached(stamp)) setLiveStamp(stamp);
     setMoved(changed.length > 0 ? changed : null);
+    // Arrivals (UIL-114 part C): badged, and named with where they go, so none joins silently.
+    if (added.length > 0) {
+      setArrived((prev) => new Set([...prev, ...added.map((a) => a.incomingId)]));
+      setJoined((prev) => [...(prev ?? []), ...added]);
+    }
   }
   const rerouteRef = useRef(reroute);
   useEffect(() => {
@@ -567,6 +583,48 @@ export function PlanScreen({
   // Made on first use, in an event handler, so no ref is read while rendering.
   const batcher = useRef<ReturnType<typeof createRerouteBatcher> | null>(null);
   useEffect(() => () => batcher.current?.cancel(), []);
+  function scheduleReroute() {
+    batcher.current ??= createRerouteBatcher(() => rerouteRef.current());
+    batcher.current.schedule();
+  }
+  /**
+   * Cards she took off the plan this sitting ("Leave for later", "Not mine"). A left card is still waiting
+   * on the server, so the arrivals check must be told about it or it would come straight back.
+   */
+  const takenOff = useRef<Set<string>>(new Set());
+
+  /**
+   * Look for cards that arrived while the page was open (UIL-114 part C): an import finished in another
+   * tab, or on her phone. AUTOMATIC, per the ruling: they join the draft and the next re-route places them,
+   * badged "New", and the spotlight stays on the card in her hand. A check that cannot reach the server
+   * says nothing; the next one tries again.
+   */
+  async function checkArrivals(): Promise<void> {
+    const at = latest.current;
+    // Cards in hand but no plan: the page is routing them (an arrival would miss the route in flight and
+    // be stranded), or a failed route is waiting on her "Try again". Routing only ever runs with no plan.
+    if (!at.plan && at.draft.length > 0) return;
+    const known = [...at.draft.map((d) => d.existingCopyId), ...takenOff.current];
+    const res = await reach(() => loadArrivals(known), LOST.read);
+    if (isUnreached(res)) return;
+    const now = latest.current;
+    const held = new Set([...now.draft.map((d) => d.existingCopyId), ...takenOff.current]);
+    const rows = res.filter((r) => !held.has(r.existingCopyId));
+    if (rows.length === 0) return;
+    setDraft((d) => [...d, ...rows]);
+    // Nothing was open: route them, as the page does when it opens with cards waiting.
+    if (!now.plan) setRunning(true);
+    else scheduleReroute();
+  }
+  const checkRef = useRef(checkArrivals);
+  useEffect(() => {
+    checkRef.current = checkArrivals;
+  });
+  useEffect(() => {
+    const watch = createArrivalWatch(() => checkRef.current());
+    watch.start();
+    return () => watch.stop();
+  }, []);
 
   /**
    * Take a card off the plan now, and re-route the rest shortly (batched: see ./reroute.ts). Used by
@@ -588,8 +646,8 @@ export function PlanScreen({
     setOverrides(omit);
     setConfirmedPulls(omit);
     setBandChoice(omit);
-    batcher.current ??= createRerouteBatcher(() => rerouteRef.current());
-    batcher.current.schedule();
+    takenOff.current.add(id);
+    scheduleReroute();
   }
 
   /** "Leave for later" (UIL-114): off this plan, still waiting in her haul, nothing deleted. */
@@ -720,6 +778,8 @@ export function PlanScreen({
     setMoveTarget(null);
     setPlanIsResumed(false);
     setLiveStamp(stateStamp);
+    // A new haul: anything left for later is back in the queue it is about to re-read.
+    takenOff.current = new Set();
     // The parked run is spent: it was committed, or she chose to start over.
     clearResume();
     // Re-read the queue: what we just placed is gone from it, and anything she pulled off the draft
@@ -924,6 +984,9 @@ export function PlanScreen({
           updating={updating}
           moved={moved}
           onDismissMoved={() => setMoved(null)}
+          arrived={arrived}
+          joined={joined}
+          onDismissJoined={() => setJoined(null)}
           overrides={overrides}
           overrideNames={overrideNames}
           onMove={openMove}
@@ -1145,6 +1208,11 @@ function PlanView(props: {
   /** Waiting cards whose home the last re-route changed. */
   moved: MovedCard[] | null;
   onDismissMoved: () => void;
+  /** Cards that arrived while the page was open (UIL-114 part C): badged "New" until shelved. */
+  arrived: Set<string>;
+  /** The arrivals the plan has placed, named with their homes until dismissed. */
+  joined: MovedCard[] | null;
+  onDismissJoined: () => void;
   overrides: Record<string, MoveDestination>;
   /** Name maps for override destination sentences (UIL-037); null until options load. */
   overrideNames: MoveNameLookups | null;
@@ -1180,6 +1248,9 @@ function PlanView(props: {
     updating,
     moved,
     onDismissMoved,
+    arrived,
+    joined,
+    onDismissJoined,
     overrides,
     overrideNames,
     onMove,
@@ -1360,6 +1431,24 @@ function PlanView(props: {
         </div>
       ) : null}
 
+      {joined && joined.length > 0 ? (
+        <div className="alertbar" role="status">
+          <span>+</span>
+          <b>
+            {joined.length} new card{joined.length === 1 ? "" : "s"} joined the plan:{" "}
+            {joined.map((m) => `${m.name} → ${m.destination}`).join(" · ")}
+          </b>
+          <button
+            type="button"
+            className="btn sm"
+            style={{ marginLeft: "auto" }}
+            onClick={onDismissJoined}
+          >
+            OK
+          </button>
+        </div>
+      ) : null}
+
       <div className="planwrap">
         <div className="worklist panel">
           {/* Per-band folding is the fine control; these are the bulk ones (UIL-018). At ten bands,
@@ -1419,6 +1508,7 @@ function PlanView(props: {
               shelving={shelving}
               overrides={overrides}
               overrideNames={overrideNames}
+              arrived={arrived}
               collapsedSubgroups={collapsedSubgroups}
               onToggleSubgroupCollapse={toggleSubgroupCollapse}
             />
@@ -1445,6 +1535,7 @@ function PlanView(props: {
               onSkip={() => setCur(Math.min(total - 1, cur + 1))}
               onNotMine={() => flatItems[cur] && onNotMine(flatItems[cur])}
               onLeaveForLater={() => flatItems[cur] && onLeaveForLater(flatItems[cur])}
+              isNew={flatItems[cur] ? arrived.has(flatItems[cur].incomingId) : false}
               override={flatItems[cur] ? overrides[flatItems[cur].incomingId] : undefined}
               overrideNames={overrideNames}
               blockNeeds={plan.blockNeeds}
@@ -1528,6 +1619,8 @@ export function BandSection(props: {
   overrides: Record<string, MoveDestination>;
   /** Name maps for the override destination text; null until options load (UIL-037). */
   overrideNames: MoveNameLookups | null;
+  /** Cards that arrived while the page was open (UIL-114 part C). Optional for the render tests. */
+  arrived?: Set<string>;
   /**
    * Sub-group keys currently folded away (UIL-075), each `${bandKey}:${kind}`. Same discipline as
    * UIL-018 one level up: a folded sub-group renders NOTHING below its header — rows absent from the
@@ -1551,6 +1644,7 @@ export function BandSection(props: {
     shelving,
     overrides,
     overrideNames,
+    arrived,
     collapsedSubgroups,
     onToggleSubgroupCollapse,
   } = props;
@@ -1629,6 +1723,7 @@ export function BandSection(props: {
                       busy={shelving === it.incomingId}
                       override={overrides[it.incomingId]}
                       overrideNames={overrideNames}
+                      isNew={arrived?.has(it.incomingId) ?? false}
                     />
                   ))}
             </div>
@@ -1652,8 +1747,20 @@ export function PlanRow(props: {
   override?: MoveDestination | undefined;
   /** Name maps for the override sentence; null until options load (UIL-037). */
   overrideNames?: MoveNameLookups | null;
+  /** Arrived while the page was open (UIL-114 part C). */
+  isNew?: boolean;
 }) {
-  const { item, current, done, onSelect, onShelve, busy = false, override, overrideNames } = props;
+  const {
+    item,
+    current,
+    done,
+    onSelect,
+    onShelve,
+    busy = false,
+    override,
+    overrideNames,
+    isNew = false,
+  } = props;
   // Show where she MOVED the card, not where the cascade proposed — same source as the spotlight, so
   // the two cannot disagree (UIL-037).
   const disp = displayFor(item, override ?? undefined, overrideNames ?? null);
@@ -1722,6 +1829,8 @@ export function PlanRow(props: {
             way: she needs to know which pocket to use BEFORE she presses Done. */}
         {override ? <span className="moved u">{done ? "Moved" : "Will move"}</span> : null}
         {item.needsDecision ? <span className="needs u">Decide</span> : null}
+        {/* Arrived while she had the page open (UIL-114 part C); gone once shelved, when it is no news. */}
+        {isNew && !done ? <span className="newcard u">New</span> : null}
       </div>
     </div>
   );
@@ -1741,6 +1850,8 @@ export function Spotlight(props: {
   /** UIL-114: "Not mine" and "Leave for later", once the haul has run. Absent: neither is offered. */
   onNotMine?: () => void;
   onLeaveForLater?: () => void;
+  /** Arrived while the page was open (UIL-114 part C). */
+  isNew?: boolean;
   override: MoveDestination | undefined;
   /** Name maps for the override sentence; null until options load (UIL-037). */
   overrideNames?: MoveNameLookups | null;
@@ -1774,6 +1885,7 @@ export function Spotlight(props: {
     onSkip,
     onNotMine,
     onLeaveForLater,
+    isNew = false,
     override,
     overrideNames,
     blockNeeds,
@@ -1826,7 +1938,14 @@ export function Spotlight(props: {
           )}
         />
         <div style={{ minWidth: 0 }}>
-          <div className="nm">{item.name}</div>
+          <div className="nm">
+            {item.name}
+            {isNew && !done ? (
+              <span className="newcard u" style={{ marginLeft: 8 }}>
+                New
+              </span>
+            ) : null}
+          </div>
           {formatCollectorNumber(item.localId, item.setCardCountOfficial) ? (
             <div style={{ marginTop: 6 }}>
               <span className="no">

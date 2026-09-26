@@ -10,13 +10,20 @@
  *   - loadPlanContext, cold (the catalog fetched) and warm (the catalog served from its 5-minute cache, which is
  *     what every re-route within a sitting hits);
  *   - planFromDraft, the cascade itself: pure, and the same work on the server as here;
- *   - groupPlan.
+ *   - groupPlan;
+ *   - the arrivals check the open page makes every 30 s, when nothing has arrived.
  * The database here is PGlite in-process, so the load figures are a floor: on Supabase each query also pays a
  * network round trip. The cascade figure is not affected by that.
  */
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { clearCatalogCache, groupPlan, loadPlanContext, planFromDraft } from "@/lib/plan";
+import {
+  clearCatalogCache,
+  groupPlan,
+  loadPendingPlacements,
+  loadPlanContext,
+  planFromDraft,
+} from "@/lib/plan";
 import { freshRpcDb, OWNER, asOwner, asSuperuser } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 
@@ -133,6 +140,11 @@ describe.skipIf(!process.env.PERF)("UIL-114 · runHaulPlan at her size", () => {
     const [{ items }, cascade] = await time(() => planFromDraft(pc, draft));
     const [, cascadeAgain] = await time(() => planFromDraft(pc, draft));
     const [, group] = await time(() => groupPlan(items, pc.orderedBandKeys));
+    // The 30 s arrivals check (UIL-114 part C) when nothing has arrived, which is almost every time.
+    const [none, arrivalsNone] = await time(() =>
+      loadPendingPlacements(client, { except: new Set(draft.map((d) => d.id)) }),
+    );
+    expect(none).toEqual([]);
 
     const catalog = (await db.query<{ n: number }>("select count(*)::int n from catalog_card"))
       .rows[0].n;
@@ -147,6 +159,7 @@ describe.skipIf(!process.env.PERF)("UIL-114 · runHaulPlan at her size", () => {
         planFromDraft: Math.round(cascade),
         planFromDraftAgain: Math.round(cascadeAgain),
         groupPlan: Math.round(group),
+        arrivalsCheckNothingNew: Math.round(arrivalsNone),
         reRouteWarm: Math.round(loadWarm + cascade + group),
       },
     });
