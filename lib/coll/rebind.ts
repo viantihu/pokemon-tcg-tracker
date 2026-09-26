@@ -50,7 +50,7 @@ import {
   type Row,
   type WriteOp,
 } from "@/lib/repo";
-import { placementForMove } from "@/lib/line/move";
+import { placementForMove, releaseSlotOps } from "@/lib/line/move";
 
 /* ------------------------------- pure planning ------------------------------ */
 
@@ -132,13 +132,9 @@ export function buildCollectionRebindOps(plan: CollectionRebindPlan): WriteOp[] 
     });
   }
   for (const copy of plan.copies) {
-    if (copy.reopenSlotId) {
-      ops.push({
-        op: "update_slot",
-        id: copy.reopenSlotId,
-        patch: { state: "placeholder", copy_id: null },
-      });
-    }
+    // The one release every path shares (lib/line/move.ts), so a vacated slot also drops the decision she resolved
+    // on it before (UIL-117 gap 1; it asked again everywhere but here).
+    ops.push(...releaseSlotOps(copy.reopenSlotId, null));
   }
   for (const copy of plan.copies) {
     if (copy.demoteLineId) {

@@ -45,6 +45,7 @@ import {
   collectionTargetJoinOp,
   describeMove,
   placementForMove,
+  releaseSlotOps,
   type MoveNameLookups,
 } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
@@ -119,13 +120,9 @@ export function buildCollectionRemovalOps(plan: CollectionRemovalPlan): WriteOp[
 
   // Moving a card OFF a line reopens the slot it filled (removal symmetry, sync-arch §1.6) …
   for (const copy of plan.copies) {
-    if (copy.reopenSlotId) {
-      ops.push({
-        op: "update_slot",
-        id: copy.reopenSlotId,
-        patch: { state: "placeholder", copy_id: null },
-      });
-    }
+    // The one release every path shares (lib/line/move.ts), so a vacated slot also drops the decision she resolved
+    // on it before (UIL-117 gap 1; it asked again everywhere but here).
+    ops.push(...releaseSlotOps(copy.reopenSlotId, null));
   }
   // … and a line that was complete is no longer complete.
   for (const copy of plan.copies) {
@@ -240,6 +237,13 @@ export async function applyCollectionRemoval(
   const binderIds = col.current_binder_ids ?? [];
   const rejection = rejectSelfDestination(req.destination, col.id, binderIds);
   if (rejection) throw new Error(rejection);
+  // UIL-117 gap 3: this path moves every copy here and writes no line ops, so a back-half destination would shelve
+  // the card on no line. The screen greys the back half out; a stale or bypassing caller is refused here.
+  if (req.destination.kind === "shelf" && req.destination.half === "back") {
+    throw new Error(
+      "A back half needs a line. Move this card from the Lines page, where you can pick a line or start one.",
+    );
+  }
 
   const copyRows = (await copyRepo.listByCatalogCard(db, req.tcgdexId)).filter(
     (c) => c.role === "shelved" && c.binder_id !== null && binderIds.includes(c.binder_id),

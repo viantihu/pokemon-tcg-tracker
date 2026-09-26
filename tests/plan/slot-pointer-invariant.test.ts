@@ -460,3 +460,145 @@ describe("UIL-063 · an unresolvable slot fails the commit instead of half-writi
     );
   });
 });
+
+/* ------------------------------ UIL-117 PR 1, gaps 4 and 5 ------------------------------ */
+
+/** A 2-stage line in B1: stage 0 filled by COPY (Charmander), stage 1 in `stage1State`, optionally held. */
+async function seedTwoStageLine(stage1: { state: "placeholder" | "filled"; copyId?: string }) {
+  await db.query(
+    `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id) values ($1,$2,4,'red',$3)`,
+    [LINE, OWNER, B1],
+  );
+  await db.query(
+    `insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band, acquired_at)
+     values ($1,$2,$3,'normal','shelved',$4,'back','red', now())`,
+    [COPY, OWNER, CHARMANDER_SV03_026.tcgdexId, B1],
+  );
+  await db.query(
+    `insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+     values ($1,$2,$3,0,'Basic','filled',$4)`,
+    [SLOT0, OWNER, LINE, COPY],
+  );
+  await db.query(`update copy set line_slot_id = $1 where id = $2`, [SLOT0, COPY]);
+  if (stage1.copyId) {
+    await db.query(
+      `insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band, acquired_at)
+       values ($1,$2,$3,'normal','shelved',$4,'back','red', now())`,
+      [stage1.copyId, OWNER, CHARMELEON_SV03_027.tcgdexId, B1],
+    );
+  }
+  await db.query(
+    `insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id, target_catalog_card_id)
+     values ($1,$2,$3,1,'Stage1',$4,$5,$6)`,
+    [SLOT1, OWNER, LINE, stage1.state, stage1.copyId ?? null, CHARMELEON_SV03_027.tcgdexId],
+  );
+  if (stage1.copyId) {
+    await db.query(`update copy set line_slot_id = $1 where id = $2`, [SLOT1, stage1.copyId]);
+  }
+  const slots = (
+    await db.query<Row<"line_slot">>(
+      `select * from line_slot where line_id = $1 order by stage_index`,
+      [LINE],
+    )
+  ).rows;
+  return slots;
+}
+
+describe("UIL-117 gap 4 · the Haul Plan completes a line when it fills the last open slot", () => {
+  /**
+   * The Move path (`buildExistingLineJoinOps`) marks a line `complete` when the slot it fills was the last open
+   * one. The Haul Plan's own fill (the cascade's FILL) filled the slot and left the line `open`, so a line she
+   * finished from a haul never read as complete.
+   */
+  it("fills Charmeleon into the last open stage, and the line reads complete", async () => {
+    const slots = await seedTwoStageLine({ state: "placeholder" });
+    const incoming = haulRow(INCOMING_COPY, CHARMELEON_SV03_027.tcgdexId);
+    await seedHaulRows(db, [incoming]);
+    const copies = (
+      await db.query<Row<"copy">>(`select * from copy where id <> $1`, [INCOMING_COPY])
+    ).rows;
+    const pc = ctxFor(copies, slots);
+    const { planned } = planFromDraft(pc, [incoming]);
+    expect(planned[0].result.filledExistingSlot).toBeTruthy();
+    const built = buildHaulCommitPayload(pc, planned, { draft: [incoming] });
+
+    await asOwner(db);
+    await applyOps(db, built.payload);
+    await asSuperuser(db);
+    const line = await db.query<{ status: string }>(
+      `select status from evolution_line where id = $1`,
+      [LINE],
+    );
+    expect(line.rows[0].status).toBe("complete");
+  });
+});
+
+describe("UIL-117 gap 5 · a new line that lands on an existing one never strands the card or fills the wrong stage", () => {
+  /**
+   * When the cascade plans a NEW line and the commit finds the same line already in the binder, it fills that line
+   * instead of starting a duplicate. With no open slot for the card's own stage it did nothing at all: the card was
+   * shelved into the back half on no line (what the Lines page lists as STRANDED). Now it fails loudly, like the
+   * existing-slot fill does in the same disagreement, and writes nothing.
+   */
+  it("refuses, writing nothing, when the line already holds this card's stage", async () => {
+    const slots = await seedTwoStageLine({
+      state: "filled",
+      copyId: "c0000000-0000-0000-0000-00000000aa02",
+    });
+    const incoming = haulRow(INCOMING_COPY, CHARMELEON_SV03_027.tcgdexId);
+    await seedHaulRows(db, [incoming]);
+    const copies = (
+      await db.query<Row<"copy">>(`select * from copy where id <> $1`, [INCOMING_COPY])
+    ).rows;
+    const pc = ctxFor(copies, slots);
+    const { planned } = planFromDraft(pc, [incoming]);
+    // The disagreement: the cascade planned a NEW line (stage 1) for a line the commit finds already holding it.
+    planned[0].result = {
+      ...planned[0].result,
+      target: { kind: "back-half-line", binderId: B1, band: "red", lineId: "new", stageIndex: 1 },
+      filledExistingSlot: null,
+      newLine: { rootDexId: 4, colorBand: "red", binderId: B1, status: "open", slots: [] },
+    } as never;
+    expect(() => buildHaulCommitPayload(pc, planned, { draft: [incoming] })).toThrow(
+      /already holds this card's stage/,
+    );
+  });
+});
+
+describe("UIL-117 gap 6 · a line started with a declined pull is not stored complete", () => {
+  /**
+   * The cascade plans a new line with every owned chain member pulled in, and so plans it `complete`. A pull she
+   * does not tick is not written (UIL-061): its stage stays a placeholder. The line's status was still written
+   * from the plan, so it could read `complete` with a stage waiting for a card. Found by Dev 2.
+   */
+  it("Charmeleon starts the line, she keeps her Charmander where it is, and the line reads open", async () => {
+    await db.query(
+      `insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band, acquired_at)
+       values ($1,$2,$3,'normal','shelved',$4,'front','red', now())`,
+      [COPY, OWNER, CHARMANDER_SV03_026.tcgdexId, B1],
+    );
+    const incoming = haulRow(INCOMING_COPY, CHARMELEON_SV03_027.tcgdexId);
+    await seedHaulRows(db, [incoming]);
+    const copies = (
+      await db.query<Row<"copy">>(`select * from copy where id <> $1`, [INCOMING_COPY])
+    ).rows;
+    const pc = ctxFor(copies, []);
+    const { planned } = planFromDraft(pc, [incoming]);
+    const newLine = planned[0].result.newLine;
+    expect(newLine?.status).toBe("complete"); // the engine planned the pull
+    expect(newLine?.slots.some((s) => s.copyId === COPY)).toBe(true);
+
+    // She does not tick the pull.
+    const built = buildHaulCommitPayload(pc, planned, { draft: [incoming] });
+    await asOwner(db);
+    await applyOps(db, built.payload);
+    await asSuperuser(db);
+    const lines = await db.query<{ status: string }>(`select status from evolution_line`);
+    expect(lines.rows).toEqual([{ status: "open" }]);
+    const front = await db.query<{ binder_half: string }>(
+      `select binder_half from copy where id = $1`,
+      [COPY],
+    );
+    expect(front.rows[0].binder_half).toBe("front"); // and her Charmander did not move
+  });
+});

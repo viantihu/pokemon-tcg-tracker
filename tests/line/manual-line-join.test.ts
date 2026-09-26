@@ -810,3 +810,101 @@ describe("applyMove REFUSES a back-half shelf with no lineJoin, server-side", ()
     expect(await copyRow(CARD)).toMatchObject({ binder_half: "front", line_slot_id: null });
   });
 });
+
+/* ============ UIL-117 gap 2: joining an existing line is checked against THAT line ============ */
+
+describe("UIL-117 gap 2 · applyMove refuses a join the line itself does not match", () => {
+  /**
+   * The join re-read the slot (exists, belongs to the line, not filled) and nothing else. The destination binder
+   * and band came from the browser, and the card was never compared with the slot, so a stale sheet, a line with
+   * no binder (the panel falls back to the first general binder), or any caller that skips the panel could shelve
+   * a card into another binder's line, another band, another stage or another language. Each is now refused
+   * before anything is written.
+   */
+  async function seedJoinable(): Promise<void> {
+    await seedCard({
+      id: "emberling",
+      name: "Emberling",
+      dexId: EMBERLING_DEX,
+      stage: "Basic",
+      evolveFrom: null,
+    });
+    await seedCard({
+      id: "emberdrake",
+      name: "Emberdrake",
+      dexId: EMBERDRAKE_DEX,
+      stage: "Stage1",
+      evolveFrom: "Emberling",
+    });
+    await seedShelvedFront(OTHER, "emberling");
+    await seedShelvedFront(CARD, "emberdrake");
+    await db.exec(`
+      insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+        values ('${LINE}', '${OWNER}', ${EMBERLING_DEX}, 'red', '${GEN}', 'back', 'open');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+        values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OTHER}');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, target_catalog_card_id)
+        values ('${SLOT_NEXT}', '${OWNER}', '${LINE}', 1, 'Stage1', 'placeholder', 'emberdrake');
+      update copy set line_slot_id = '${SLOT_ROOT}', binder_half = 'back' where id = '${OTHER}';
+    `);
+  }
+  const join = (over: { binderId?: string; band?: string } = {}) => ({
+    kind: "shelf" as const,
+    binderId: over.binderId ?? GEN,
+    half: "back" as const,
+    band: over.band ?? "red",
+    lineJoin: { mode: "existing" as const, lineId: LINE, slotId: SLOT_NEXT },
+  });
+  async function untouched() {
+    await asSuperuser(db);
+    const slot = (
+      await q<{ state: string }>(`select state from line_slot where id = '${SLOT_NEXT}'`)
+    )[0];
+    expect(slot.state).toBe("placeholder");
+  }
+
+  it("a destination in ANOTHER binder than the line's", async () => {
+    await seedJoinable();
+    await asOwner(db);
+    await expect(
+      applyMove(pgliteClient(db), { copyId: CARD, destination: join({ binderId: GEN2 }) }, names),
+    ).rejects.toThrow(/line is in another binder/);
+    await untouched();
+  });
+
+  it("a destination in another colour band than the line's", async () => {
+    await seedJoinable();
+    await asOwner(db);
+    await expect(
+      applyMove(pgliteClient(db), { copyId: CARD, destination: join({ band: "orange" }) }, names),
+    ).rejects.toThrow(/line is in another colour band/);
+    await untouched();
+  });
+
+  it("a card that is not that slot's stage (a second Emberling into the Emberdrake slot)", async () => {
+    await seedJoinable();
+    const SECOND = "c0000000-0000-0000-0000-0000000000e3";
+    await seedShelvedFront(SECOND, "emberling");
+    await asOwner(db);
+    await expect(
+      applyMove(pgliteClient(db), { copyId: SECOND, destination: join() }, names),
+    ).rejects.toThrow(/slot is for a different card/);
+    await untouched();
+  });
+
+  it("a card in another language than the line's (UIL-090)", async () => {
+    await seedJoinable();
+    const JA = "c0000000-0000-0000-0000-0000000000e4";
+    await db.query(
+      `insert into catalog_card (tcgdex_id, name, dex_id, types, stage, evolve_from, card_class, locale)
+         values ('ja:emberdrake', 'Emberdrake', $1, '{Fire}', 'Stage1', 'Emberling', 'standard', 'ja')`,
+      [[EMBERDRAKE_DEX]],
+    );
+    await seedShelvedFront(JA, "ja:emberdrake");
+    await asOwner(db);
+    await expect(
+      applyMove(pgliteClient(db), { copyId: JA, destination: join() }, names),
+    ).rejects.toThrow(/line is in another language/);
+    await untouched();
+  });
+});

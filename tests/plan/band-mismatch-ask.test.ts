@@ -229,14 +229,13 @@ describe('UIL-069 · picking "join the line"', () => {
       await db.query<{ state: string }>(`select state from line_slot where id = '${SLOT_STAGE1}'`)
     ).rows[0];
     expect(slot.state).toBe("filled");
-    // NOT asserting "complete" here: `writeCard`'s `filledExistingSlot` branch (lib/plan/commit.ts)
-    // never transitions line status at all — only `lib/line/move.ts`'s manual join path does. That is
-    // a real, pre-existing gap independent of UIL-069 (it would affect any auto-cascade slot fill,
-    // mismatched or not) and out of scope here; flagged separately rather than fixed in this PR.
+    // The last open slot filled, so the line completes (UIL-117 gap 4). This used to pin "open": the Haul
+    // Plan's slot fill never transitioned the line, the gap this comment flagged; it now shares the Move path's
+    // builder.
     const line = (
       await db.query<{ status: string }>(`select status from evolution_line where id = '${LINE}'`)
     ).rows[0];
-    expect(line.status).toBe("open");
+    expect(line.status).toBe("complete");
 
     const decision = await decisionRow();
     expect(decision?.resolved_by).toBe("user"); // her call, not "auto" — she was explicitly asked

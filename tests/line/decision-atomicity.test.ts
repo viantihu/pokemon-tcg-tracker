@@ -194,6 +194,8 @@ describe("UIL-095 · the real path is one transaction", () => {
       "update_slot",
       "upsert_wishlist_for_slot",
       "insert_decision",
+      // 0028 (UIL-117 PR 1): applyWriteOps appends the slot check last to every write touching a slot.
+      "assert_line_slots",
     ]);
   });
 });

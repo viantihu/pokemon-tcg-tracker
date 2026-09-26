@@ -297,6 +297,14 @@ export type WriteOp =
    */
   | { op: "assert_file_total" }
   /**
+   * UIL-087's slot invariant at the database (0028): every named slot, every slot a named copy points at or is
+   * named by, and every `filled` slot with no copy must hold together (a filled slot names exactly one shelved
+   * copy that points back, in the line's binder, back half; an unfilled slot has no copy pointing at it), and a
+   * named or checked slot's line reads `complete` only when every one of its slots is filled.
+   * `applyWriteOps` appends it last to every payload that touches a copy or a slot — callers never emit it.
+   */
+  | { op: "assert_line_slots"; slot_ids: string[]; copy_ids: string[]; line_ids: string[] }
+  /**
    * A user-created STAND-IN catalog card (0015, UIL-060 Half 1): a row of her own for a card TCGdex
    * lacks, in the `user:` id namespace with `source = 'user'`. Emitted FIRST by lib/sync/exec.ts
    * `manualMatchStandIn`, in the same transaction as the match that points at it, so a stand-in never
@@ -323,12 +331,67 @@ export interface WritePayload {
 }
 
 /**
+ * The slots and copies a write set touches, for the slot check (0028, UIL-117 PR 1). A copy counts if any op
+ * creates, patches or deletes it, or names it as a slot's card; a slot counts if any op creates or patches it, or a
+ * copy is pointed at it. Deliberately wide: a copy that moves binder can break its slot's rule without naming the
+ * slot, so every touched copy's slot is checked, not only the slots the writer thought about.
+ */
+export function touchedLineState(ops: readonly WriteOp[]): {
+  slotIds: string[];
+  copyIds: string[];
+  lineIds: string[];
+} {
+  const slots = new Set<string>();
+  const copies = new Set<string>();
+  const lines = new Set<string>();
+  for (const o of ops) {
+    switch (o.op) {
+      case "insert_copy":
+        copies.add(o.id);
+        if (o.line_slot_id) slots.add(o.line_slot_id);
+        break;
+      case "update_copy":
+        copies.add(o.id);
+        if (o.patch.line_slot_id) slots.add(o.patch.line_slot_id);
+        break;
+      case "delete_copy":
+        copies.add(o.id);
+        break;
+      case "insert_slot":
+        slots.add(o.id);
+        if (o.copy_id) copies.add(o.copy_id);
+        break;
+      case "update_slot":
+        slots.add(o.id);
+        if (o.patch.copy_id) copies.add(o.patch.copy_id);
+        break;
+      case "insert_line":
+      case "update_line":
+        lines.add(o.id);
+        break;
+    }
+  }
+  return { slotIds: [...slots], copyIds: [...copies], lineIds: [...lines] };
+}
+
+/** The write set with the slot check appended LAST when it touches a copy or a slot (and not already present). */
+export function withLineSlotCheck(ops: readonly WriteOp[]): WriteOp[] {
+  if (ops.some((o) => o.op === "assert_line_slots")) return [...ops];
+  const { slotIds, copyIds, lineIds } = touchedLineState(ops);
+  if (slotIds.length === 0 && copyIds.length === 0 && lineIds.length === 0) return [...ops];
+  return [
+    ...ops,
+    { op: "assert_line_slots", slot_ids: slotIds, copy_ids: copyIds, line_ids: lineIds },
+  ];
+}
+
+/**
  * Apply a write set atomically via the `apply_write_ops` RPC. Throws on any DB error — the whole set
  * has already rolled back server-side, so the caller never has to compensate.
  */
 export async function applyWriteOps(db: DbClient, payload: WritePayload): Promise<void> {
   const body = {
-    ops: payload.ops,
+    ops: withLineSlotCheck(payload.ops),
     resync_group_ids: payload.resyncGroupIds ?? [],
   };
   const { error } = await db.rpc("apply_write_ops", { payload: body as unknown as Json });
