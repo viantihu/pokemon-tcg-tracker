@@ -430,6 +430,11 @@ count that matters is the one the app sees:
 
 - **Testing goes back to being throwaway**, but not immediately. Keep it untouched
   until B6 is confirmed, then treat it as disposable.
+- **Labelled Testing baselines are never dropped, including after promotion** (Karvi's standing rule,
+  2026-09-26). Every future Testing refresh restores the NEWEST labelled baseline (the Database
+  Engineer's `backup_<date>_<time>z` schemas, e.g. `backup_20260926_2232z`), so a refresh returns her
+  to a known state rather than an empty one. "Disposable" above means Testing's live tables, never those
+  schemas; any cleanup after B6 leaves every labelled `backup_*` schema in place.
 - **`reset-testing.yml` does not work today and must stay that way until B6.** It
   resets through `supabase link`, which needs the Management API the account lost
   access to (UIL-024), so it fails before it can destroy anything. That failure is
