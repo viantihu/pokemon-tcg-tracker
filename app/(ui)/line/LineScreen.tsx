@@ -31,7 +31,15 @@ import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { bandMeta } from "../_components/plan-meta";
 import { fmtPrice } from "../_components/decision-format";
-import { loadLine, moveCardAction, removeSlotCopyAction, resolveDecisionAction } from "./actions";
+import {
+  checkLineDeletionAction,
+  deleteLineAction,
+  loadLine,
+  moveCardAction,
+  removeSlotCopyAction,
+  resolveDecisionAction,
+} from "./actions";
+import { DeleteLineButton } from "./DeleteLineButton";
 import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
 import { lineModelAction } from "../_components/line-popup-actions";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
@@ -280,6 +288,21 @@ export function LineScreen() {
     }
   }
 
+  /** UIL-118: the line goes, with its empty slots and the wishes it was waiting on; the next line shows. */
+  async function onDeleteLine(lineId: string, label: string) {
+    setBusy(true);
+    setError(null);
+    const res = await reach(() => deleteLineAction(lineId, view), LOST.action);
+    setBusy(false);
+    if (res.ok) {
+      setData(res.data);
+      setCurId(null);
+      flashToast(`Deleted · the ${label}`);
+    } else {
+      setError(res.error);
+    }
+  }
+
   async function onMoveConfirm(dest: MoveDestination, lineChoice?: LineChoice) {
     if (!move) return;
     setBusy(true);
@@ -406,8 +429,20 @@ export function LineScreen() {
             {curLine.counts.placeholder}◇ {curLine.counts.block}✕
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span className={`status ${curLine.status}`}>{STATUS_GLYPH[curLine.status]}</span>
+          {/* UIL-118. Keyed by line, so switching lines never carries a half-armed confirm across. */}
+          <DeleteLineButton
+            key={curLine.lineId}
+            speciesLabel={curLine.speciesLabel}
+            heldCards={curLine.slots.filter((s) => s.copyId).length}
+            check={async () => {
+              const res = await reach(() => checkLineDeletionAction(curLine.lineId), LOST.read);
+              return "unreached" in res ? { ok: false, error: res.error } : res;
+            }}
+            onDelete={() => onDeleteLine(curLine.lineId, curLine.speciesLabel)}
+            busy={busy}
+          />
         </div>
       </div>
 

@@ -785,6 +785,18 @@ nav.menu .tab .n {
   align-items: stretch;
   margin-bottom: 12px;
 }
+/* "Delete line" in the line header (UIL-118): the button, and what it says before the second tap. */
+.dlrow {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.dlwhy {
+  font-size: 11px;
+  color: var(--ink-2);
+  max-width: 44ch;
+}
 .linetabs {
   display: flex;
   flex-wrap: wrap;

@@ -197,6 +197,11 @@ export type WriteOp =
    * transaction as the placement rewrite, which 0006/0007 could not express.
    */
   | { op: "update_line"; id: string; patch: LinePatch }
+  /**
+   * Delete a line that holds no card, with its slots and their wishes (0029, UIL-118). The RPC refuses it whole
+   * while a slot is filled, a copy points at a slot, or a binder block sits on the line.
+   */
+  | { op: "delete_line"; line_id: string }
   | { op: "update_unresolved_entry"; id: string; patch: EntryPatch }
   /**
    * Union catalog ids into `collection.target_catalog_card_ids` (0007). The union happens SERVER-SIDE
@@ -368,6 +373,11 @@ export function touchedLineState(ops: readonly WriteOp[]): {
       case "insert_line":
       case "update_line":
         lines.add(o.id);
+        break;
+      // Named so the slot check runs after a delete too. A deleted line drops out of the check's joins, so naming
+      // it is harmless; what the check then proves is that the write left no half-written slot anywhere.
+      case "delete_line":
+        lines.add(o.line_id);
         break;
     }
   }

@@ -22,6 +22,7 @@ import {
 } from "@/lib/line";
 import { getOwnerContext } from "@/lib/plan/session";
 import { applyCopyRemoval } from "@/lib/copy";
+import { checkLineDeletion, deleteLine, type LineDeletionCheck } from "@/lib/line/delete";
 import { errorMessage } from "@/lib/errors";
 import type { LineChoice } from "@/lib/line/popup";
 
@@ -77,6 +78,38 @@ export async function removeSlotCopyAction(
   try {
     const { db } = await getOwnerContext();
     const res = await applyCopyRemoval(db, copyId);
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, data: await loadLineScreen(db, { view }) };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * What deleting a line would remove, or why it cannot go yet (UIL-118), from fresh state, for the confirm she
+ * reads before the second tap. Reads only.
+ */
+export async function checkLineDeletionAction(lineId: string): Promise<LineDeletionCheck> {
+  try {
+    const { db } = await getOwnerContext();
+    return await checkLineDeletion(db, lineId);
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * Delete a line that holds no card (UIL-118): its empty slots, the wishes it was waiting on, and the line, in one
+ * write, then fresh data in the view she is looking at. Refused, with nothing written, while it holds a card or a
+ * block.
+ */
+export async function deleteLineAction(
+  lineId: string,
+  view: LineViewMode = "color",
+): Promise<DecisionActionResult> {
+  try {
+    const { db } = await getOwnerContext();
+    const res = await deleteLine(db, lineId);
     if (!res.ok) return { ok: false, error: res.error };
     return { ok: true, data: await loadLineScreen(db, { view }) };
   } catch (err) {
