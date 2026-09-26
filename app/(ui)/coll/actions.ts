@@ -38,6 +38,7 @@ import {
 import { buildMoveOptions, type MoveDestination, type MoveNameLookups } from "@/lib/line";
 import {
   collectionMode,
+  collectionTally,
   groupWishlist,
   type WishlistCard,
   type WishlistEntry,
@@ -80,18 +81,32 @@ function toWishlistCard(row: Row<"catalog_card">): WishlistCard {
 /** Load everything the hub renders: collections (with derived ownership) + the grouped wishlist. */
 export async function loadCollHub(): Promise<CollHubData> {
   const { db } = await getOwnerContext();
-  const [collections, binders, cards, shelved, openWishlist, slots, lines, bands, typeMapRows] =
-    await Promise.all([
-      collectionRepo.list(db),
-      binderRepo.list(db),
-      catalogCardRepo.listAll(db),
-      copyRepo.listShelved(db),
-      wishlistItemRepo.listOpen(db),
-      lineSlotRepo.listAll(db),
-      evolutionLineRepo.listAll(db),
-      colorBandRepo.listOrdered(db),
-      typeColorMapRepo.list(db),
-    ]);
+  const [
+    collections,
+    binders,
+    cards,
+    allCopies,
+    heldCatalogIds,
+    openWishlist,
+    slots,
+    lines,
+    bands,
+    typeMapRows,
+  ] = await Promise.all([
+    collectionRepo.list(db),
+    binderRepo.list(db),
+    catalogCardRepo.listAll(db),
+    // Every copy (paginated, checked complete): the shelved ones decide what is IN a collection (UIL-113).
+    copyRepo.list(db),
+    // Whether a card on a list is hers at all: the app's one "owned" predicate (every role but `block`, #319),
+    // shared with Browse and "Add a card", so this screen cannot disagree with itself.
+    copyRepo.ownedCatalogCardIdSet(db),
+    wishlistItemRepo.listOpen(db),
+    lineSlotRepo.listAll(db),
+    evolutionLineRepo.listAll(db),
+    colorBandRepo.listOrdered(db),
+    typeColorMapRepo.list(db),
+  ]);
 
   const cardById = new Map(cards.map((c) => [c.tcgdex_id, c]));
   const binderNameById = new Map(binders.map((b) => [b.id, b.name]));
@@ -105,6 +120,7 @@ export async function loadCollHub(): Promise<CollHubData> {
   // What she owns, per binder (a target card is "owned" if a shelved copy of it sits in a binder
   // the collection lives in). Keeps the copy ids, not just the catalog id: removing a card from a
   // collection re-homes those physical copies, so the view has to know they exist (UIL-014).
+  const shelved = allCopies.filter((c) => c.role === "shelved");
   const ownedByBinder = new Map<string, Map<string, string[]>>();
   for (const c of shelved) {
     if (!c.binder_id) continue;
@@ -143,10 +159,13 @@ export async function loadCollHub(): Promise<CollHubData> {
           bandKey: bandKeyForCard(r),
           imageUrl: r.image_url,
           owned: copyIds.length > 0,
+          held: heldCatalogIds.has(r.tcgdex_id),
           wished: wishedCatalogIds.has(r.tcgdex_id),
           copyIds,
         };
       });
+    // One tally, one predicate, for both modes: finite reads `inBinder` as "owned", open as "in the binder".
+    const tally = collectionTally(cardsView);
     return {
       id: col.id,
       name: col.name,
@@ -154,8 +173,8 @@ export async function loadCollHub(): Promise<CollHubData> {
       binderIds: col.current_binder_ids ?? [],
       binderNames: (col.current_binder_ids ?? []).map((bid) => binderNameById.get(bid) ?? bid),
       cards: cardsView,
-      ownedCount: cardsView.filter((c) => c.owned).length,
-      totalCount: cardsView.length,
+      ownedCount: tally.inBinder,
+      totalCount: tally.total,
       // A draft the autosave path (UIL-038) created but she hasn't finished naming/homing yet.
       incomplete: col.name.trim().length === 0 || (col.current_binder_ids ?? []).length === 0,
     };

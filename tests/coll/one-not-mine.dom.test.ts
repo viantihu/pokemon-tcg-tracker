@@ -24,6 +24,7 @@ const card = (n: number, copyIds: string[]): CollectionCardView => ({
   bandKey: "red",
   imageUrl: null,
   owned: copyIds.length > 0,
+  held: copyIds.length > 0,
   wished: false,
   copyIds,
 });

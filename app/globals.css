@@ -2103,6 +2103,11 @@ nav.menu .tab .n {
 .cpill.wish {
   background: var(--note);
 }
+/* On a collection's list, but she holds no copy of it anywhere (UIL-113). */
+.cpill.gone {
+  background: var(--panel);
+  border-style: dashed;
+}
 .wbtn {
   font: inherit;
   font-size: 9px;

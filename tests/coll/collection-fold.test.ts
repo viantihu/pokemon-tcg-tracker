@@ -28,6 +28,7 @@ function card(n: number, owned: boolean): CollectionCardView {
     bandKey: "red",
     imageUrl: `https://assets.tcgdex.net/en/sv/sv03/${n}`,
     owned,
+    held: owned,
     wished: false,
     copyIds: owned ? [`copy-${n}`] : [],
   };
@@ -155,8 +156,9 @@ describe("UIL-034 · open collections fold the same way", () => {
     const c = openCollection(4);
     expect(cardCount(render(c, false))).toBe(4);
     expect(cardCount(render(c, true))).toBe(0);
-    expect(render(c, false)).toContain("4 logged");
-    expect(render(c, true)).toContain("4 logged");
+    // UIL-113 (the Senior BA's ruling): an open collection counts what is IN it, not every list entry.
+    expect(render(c, false)).toContain("4 in the binder");
+    expect(render(c, true)).toContain("4 in the binder");
   });
 });
 

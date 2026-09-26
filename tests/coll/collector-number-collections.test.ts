@@ -24,6 +24,7 @@ function view(over: Partial<CollectionCardView>): CollectionCardView {
     bandKey: "red",
     imageUrl: null,
     owned: true,
+    held: true,
     wished: false,
     copyIds: ["copy-1"],
     ...over,
