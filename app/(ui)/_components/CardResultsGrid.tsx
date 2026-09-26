@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from "react";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { cardTag, stripLocaleNamespace } from "@/lib/catalog/locale";
 import { CardFace } from "./CardFace";
+import { isUnreached, LOST, reach } from "./reach";
 import type { LookupCard } from "../plan/plan-types";
 
 /**
@@ -72,17 +73,17 @@ export function CardResultsGrid<T extends GridCard = LookupCard>({
         }
         if (token === latest.current) setLoading(true);
         try {
-          const found = await search(q);
-          if (token === latest.current) {
-            setResults(found);
-            setFailed(null);
+          // Through `reach` (UIL-109): a failed search says so in the shared words, not the raw error text.
+          const found = await reach(() => search(q), LOST.load);
+          if (token !== latest.current) return;
+          if (isUnreached(found)) {
+            // Keep the last good results on screen rather than blanking them — a transient failure
+            // mid-typing should not also erase what she could already see.
+            setFailed(found.error);
+            return;
           }
-        } catch (err) {
-          // Keep the last good results on screen rather than blanking them — a transient failure
-          // mid-typing should not also erase what she could already see.
-          if (token === latest.current) {
-            setFailed(err instanceof Error ? err.message : "Could not search the catalog.");
-          }
+          setResults(found);
+          setFailed(null);
         } finally {
           if (token === latest.current) setLoading(false);
         }

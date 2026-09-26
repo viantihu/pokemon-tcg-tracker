@@ -28,6 +28,7 @@ import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
 import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { bandMeta } from "../_components/plan-meta";
+import { isUnreached, LOST, reach } from "../_components/reach";
 import type { LookupCard } from "../plan/plan-types";
 import {
   commitFrontAction,
@@ -95,19 +96,20 @@ export function BackfillScreen() {
 
   useEffect(() => {
     let live = true;
-    loadContext()
-      .then((c) => {
-        if (!live) return;
-        setCtx(c);
-        const first = c.binders[0];
-        if (first) {
-          setBinderId(first.id);
-          setMode(first.type === "specialty" ? "specialty" : "front");
-        }
-      })
-      .catch(
-        (e) => live && setCtxError(e instanceof Error ? e.message : "Could not load binders."),
-      );
+    // Through `reach` (UIL-109): a failed load says so in the shared words, never the raw error text.
+    void reach(() => loadContext(), LOST.load).then((c) => {
+      if (!live) return;
+      if (isUnreached(c)) {
+        setCtxError(c.error);
+        return;
+      }
+      setCtx(c);
+      const first = c.binders[0];
+      if (first) {
+        setBinderId(first.id);
+        setMode(first.type === "specialty" ? "specialty" : "front");
+      }
+    });
     return () => {
       live = false;
     };
@@ -291,20 +293,23 @@ function FrontHalfPanel({
     setSaving(true);
     onResult(null);
     try {
-      const res = await commitFrontAction({
-        binderId,
-        half: "front",
-        cards: rows.map((r) => ({
-          tcgdexId: r.card.tcgdexId,
-          dexVariantRaw: r.card.dexVariantRaw,
-        })),
-      });
+      // The commit returns `{ ok }` for its own failures, so a throw is a call that never arrived (UIL-109).
+      const res = await reach(
+        () =>
+          commitFrontAction({
+            binderId,
+            half: "front",
+            cards: rows.map((r) => ({
+              tcgdexId: r.card.tcgdexId,
+              dexVariantRaw: r.card.dexVariantRaw,
+            })),
+          }),
+        LOST.action,
+      );
       if (res.ok) {
         onResult({ kind: "ok", text: `Saved ${res.counts.placed} card(s) to the front half.` });
         setRows([]);
       } else onResult({ kind: "err", text: res.error });
-    } catch (e) {
-      onResult({ kind: "err", text: e instanceof Error ? e.message : "Save failed." });
     } finally {
       setSaving(false);
     }
@@ -407,7 +412,12 @@ function BackHalfPanel({
     setResolving(true);
     onResult(null);
     try {
-      const r = await resolveLine(card.tcgdexId, bandKey);
+      // A read that throws for a server failure too, so its words name no single cause (UIL-109).
+      const r = await reach(() => resolveLine(card.tcgdexId, bandKey), LOST.load);
+      if (isUnreached(r)) {
+        onResult({ kind: "err", text: r.error });
+        return;
+      }
       if (!r) {
         onResult({ kind: "err", text: "Could not find that species' evolution line." });
         return;
@@ -423,8 +433,6 @@ function BackHalfPanel({
           return e;
         }),
       );
-    } catch (e) {
-      onResult({ kind: "err", text: e instanceof Error ? e.message : "Resolve failed." });
     } finally {
       setResolving(false);
     }
@@ -494,14 +502,19 @@ function BackHalfPanel({
           pocketCount: e.pocketCount,
         };
       });
-      const res = await commitLineAction({
-        binderId,
-        bandKey: resolved.bandKey,
-        rootDexId: resolved.rootDexId,
-        requiredType: resolved.requiredType,
-        terminated,
-        stages,
-      });
+      // The commit returns `{ ok }` for its own failures, so a throw is a call that never arrived (UIL-109).
+      const res = await reach(
+        () =>
+          commitLineAction({
+            binderId,
+            bandKey: resolved.bandKey,
+            rootDexId: resolved.rootDexId,
+            requiredType: resolved.requiredType,
+            terminated,
+            stages,
+          }),
+        LOST.action,
+      );
       if (res.ok) {
         onResult({
           kind: "ok",
@@ -509,8 +522,6 @@ function BackHalfPanel({
         });
         reset();
       } else onResult({ kind: "err", text: res.error });
-    } catch (e) {
-      onResult({ kind: "err", text: e instanceof Error ? e.message : "Save failed." });
     } finally {
       setSaving(false);
     }
@@ -847,14 +858,19 @@ function SpecialtyPanel({
     setSaving(true);
     onResult(null);
     try {
-      const res = await commitSpecialtyAction({
-        binderId,
-        cards: rows.map((r) => ({
-          tcgdexId: r.card.tcgdexId,
-          dexVariantRaw: r.card.dexVariantRaw,
-          collectionIds: r.collectionIds,
-        })),
-      });
+      // The commit returns `{ ok }` for its own failures, so a throw is a call that never arrived (UIL-109).
+      const res = await reach(
+        () =>
+          commitSpecialtyAction({
+            binderId,
+            cards: rows.map((r) => ({
+              tcgdexId: r.card.tcgdexId,
+              dexVariantRaw: r.card.dexVariantRaw,
+              collectionIds: r.collectionIds,
+            })),
+          }),
+        LOST.action,
+      );
       if (res.ok) {
         onResult({
           kind: "ok",
@@ -862,8 +878,6 @@ function SpecialtyPanel({
         });
         setRows([]);
       } else onResult({ kind: "err", text: res.error });
-    } catch (e) {
-      onResult({ kind: "err", text: e instanceof Error ? e.message : "Save failed." });
     } finally {
       setSaving(false);
     }

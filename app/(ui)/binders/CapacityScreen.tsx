@@ -16,6 +16,7 @@
 
 import { useEffect, useState } from "react";
 import { CardFace } from "../_components/CardFace";
+import { isUnreached, LOST, reach } from "../_components/reach";
 import { loadBinderCards, loadCapacity } from "./actions";
 import type { BinderCardTile, CapacityData, CapacitySection } from "./binders-types";
 
@@ -63,11 +64,10 @@ export function CapacityScreen() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    loadCapacity()
-      .then(setData)
-      .catch((e) =>
-        setError(e instanceof Error ? e.message : "Could not load capacity. Is the DB reachable?"),
-      );
+    // Through `reach` (UIL-109): a failed load says so in the shared words, never the raw error text.
+    void reach(() => loadCapacity(), LOST.load).then((d) =>
+      isUnreached(d) ? setError(d.error) : setData(d),
+    );
   }, []);
 
   function toggle(binderId: string) {
@@ -218,12 +218,11 @@ function BinderCardGrid({ binderId }: { binderId: string }) {
 
   useEffect(() => {
     let alive = true;
-    loadBinderCards(binderId).then(
-      (rows) => alive && setCards(rows),
-      (e) =>
-        alive &&
-        setGridError(e instanceof Error ? e.message : "Could not load this binder's cards."),
-    );
+    void reach(() => loadBinderCards(binderId), LOST.load).then((rows) => {
+      if (!alive) return;
+      if (isUnreached(rows)) setGridError(rows.error);
+      else setCards(rows);
+    });
     return () => {
       alive = false;
     };

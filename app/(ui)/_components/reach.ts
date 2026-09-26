@@ -33,7 +33,19 @@ export const LOST = {
   action: `${PREFIX} Reload the page to see whether that went through.`,
   /** A read: nothing was changed; a reload shows the latest. */
   read: `${PREFIX} Reload the page to see the latest.`,
+  /**
+   * A read whose action ALSO throws when the server itself fails (it returns data, not `{ ok }`), so a throw
+   * is not only a call that never arrived. It names all three causes, which is true of every throw (UIL-109).
+   */
+  load:
+    "The app was updated while this page was open, the connection dropped, or the server could not " +
+    "answer. Reload the page to try again.",
 } as const;
+
+/** True when `reach`'s call threw — for a read that returns data rather than `{ ok }`. */
+export function isUnreached(value: unknown): value is Unreached {
+  return typeof value === "object" && value !== null && "unreached" in value;
+}
 
 export async function reach<T>(call: () => Promise<T>, lost: string): Promise<T | Unreached> {
   try {
