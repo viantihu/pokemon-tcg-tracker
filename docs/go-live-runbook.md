@@ -380,9 +380,14 @@ Not enforced by the script, checked by hand before the dry run:
       The stand-ins are `catalog_card` rows with `source = user` (5 on 2026-09-26, referenced by her
       copies, presence groups, Dex presence and manual matches). The promotion reads only the live
       tables, never a `backup_*` schema, so the snapshot's `catalog_card_standins` copy does not
-      reach Production. A start-over deletes both. If one happened after the last baseline, the
-      Database Engineer runs `refresh-to-baseline.sh` first, which restores them together. After a
-      plain refresh-to-baseline they are already back.
+      reach Production. A start-over deletes both.
+      - **If they are missing** (a start-over happened), the Database Engineer runs
+        `refresh-to-baseline.sh` first, which restores them together. It brings back the **last
+        baseline**, not what she had just before the start-over: work done after that baseline was
+        lost with the start-over.
+      - **If they are there, do nothing.** `refresh-to-baseline.sh` always wipes the live card
+        tables before restoring, so running it would replace anything newer than the last baseline
+        (binders completed since) with the baseline.
 
 ## B4. Connection strings
 
@@ -448,7 +453,7 @@ count that matters is the one the app sees:
   `backup_*` schema whose `snapshot_meta.label` is non-null. An unlabelled `backup_*` schema is a working
   snapshot, and only those may be cleaned up (the Database Engineer's lane). Each snapshot also holds
   `catalog_card_standins`, her `source = user` catalog rows, because her copies reference them. That is a
-  copy inside the backup schema; the mirror and `catalog_card` are untouched. The schemas are out-of-band
+  copy inside the backup schema. Snapshotting never writes `catalog_card`; a restore writes back only her `source = user` rows, never a mirror row. The schemas are out-of-band
   (not migrations), so `db push` never sees them.
 - **`reset-testing.yml` does not work today and must stay that way until B6.** It
   resets through `supabase link`, which needs the Management API the account lost
