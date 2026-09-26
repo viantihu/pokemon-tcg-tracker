@@ -29,6 +29,23 @@ import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { MoveOverlay } from "../_components/MoveOverlay";
 import type { LookupCard } from "../plan/plan-types";
 import { createAutosaveScheduler, flushBeforeNavigate } from "./autosave";
+
+/**
+ * What she reads when a save cannot reach the server at all (UIL-106) — the same family as the Sync page's
+ * (#349). A thrown save may or may not have landed, so none of these says "nothing was saved".
+ */
+export const COLL_LOST = {
+  autosave:
+    "The app was updated while this page was open, or the connection dropped, so your last change may " +
+    "not have been saved. It will be sent again with your next change; if this keeps happening, reload " +
+    "the page.",
+  close:
+    "The app was updated while this page was open, or the connection dropped, so your last change may " +
+    "not have been saved. Press Close again to close without it, or reload the page.",
+  change:
+    "The app was updated while this page was open, or the connection dropped. Reload the page to see " +
+    "whether that change went through.",
+} as const;
 import {
   deleteCollection,
   loadCollHub,
@@ -995,11 +1012,24 @@ export function CollectionEditor(props: {
    * serialized (see `./autosave`) — passive edits (name, mode, target adds) flow through it and never
    * block typing on a round trip.
    */
+  /** Close was pressed once over an unsaved edit and told so; a second press closes anyway (UIL-106). */
+  const [closeOverUnsaved, setCloseOverUnsaved] = useState(false);
   const [autosave] = useState(() =>
-    createAutosaveScheduler<EditorState>(async (s) => {
-      const res = await saveCollection(inputFrom(s), { draft: true });
-      if (!res.ok) setInlineError(res.error); // rare here — these fields carry no stranding guard
-    }, 600),
+    createAutosaveScheduler<EditorState>(
+      async (s) => {
+        const res = await saveCollection(inputFrom(s), { draft: true });
+        if (!res.ok)
+          setInlineError(res.error); // rare here — these fields carry no stranding guard
+        // A save that lands clears the "may not have been saved" it would otherwise leave standing.
+        else {
+          setInlineError((e) => (e === COLL_LOST.autosave || e === COLL_LOST.close ? null : e));
+          setCloseOverUnsaved(false);
+        }
+      },
+      600,
+      // UIL-106: a THROWN save no longer breaks the queue; it is kept, and she is told.
+      () => setInlineError(COLL_LOST.autosave),
+    ),
   );
 
   /** Passive: update the UI immediately, autosave in the background. Safe for any field a fresh
@@ -1018,7 +1048,14 @@ export function CollectionEditor(props: {
    */
   async function immediateChange(next: EditorState) {
     await autosave.flush(); // keep this in order behind anything already mid-save
-    const res = await saveCollection(inputFrom(next), { draft: true });
+    let res: Awaited<ReturnType<typeof saveCollection>>;
+    try {
+      res = await saveCollection(inputFrom(next), { draft: true });
+    } catch {
+      // UIL-106: the call never reached the server, or never answered. The UI was not changed.
+      setInlineError(COLL_LOST.change);
+      return;
+    }
     if (res.ok) {
       setInlineError(null);
       setRemedy(null);
@@ -1062,14 +1099,21 @@ export function CollectionEditor(props: {
 
   const requestClose = useCallback(async () => {
     if (rebinding) return; // UIL-040 step 2: a move-and-rebind is in flight; its outcome lands here
-    await autosave.flush();
+    const saved = await autosave.flush();
+    // UIL-106: never stranded, never silent. The first press over an unsaved edit says so and stays open;
+    // the second closes anyway.
+    if (!saved && !closeOverUnsaved) {
+      setCloseOverUnsaved(true);
+      setInlineError(COLL_LOST.close);
+      return;
+    }
     const empty =
       state.isNewDraft &&
       state.name.trim().length === 0 &&
       state.targets.length === 0 &&
       state.binderId === initialBinderId;
     onClose(empty);
-  }, [autosave, state, initialBinderId, onClose, rebinding]);
+  }, [autosave, state, initialBinderId, onClose, rebinding, closeOverUnsaved]);
 
   /**
    * UIL-038 follow-up (QA on #155): a plain `<Link>` here navigated straight through any pending
@@ -1080,7 +1124,11 @@ export function CollectionEditor(props: {
    */
   async function goSearchAndAdd() {
     setSearchNavigating(true);
-    await flushBeforeNavigate(autosave, () => router.push(`/coll/search?collectionId=${state.id}`));
+    const saved = await flushBeforeNavigate(autosave, () =>
+      router.push(`/coll/search?collectionId=${state.id}`),
+    );
+    // UIL-106: it stays here rather than reopening the editor from server state without her edit.
+    if (!saved) setSearchNavigating(false);
   }
 
   // Escape is the only keyboard way out of a modal; it routes through the same close path.
@@ -1331,7 +1379,8 @@ export function CollectionEditor(props: {
                 style={{ marginLeft: "auto" }}
                 disabled={!valid || busy}
                 onClick={async () => {
-                  await autosave.flush();
+                  // UIL-106: not confirmed over an edit that may not have been saved; pressing again retries.
+                  if (!(await autosave.flush())) return;
                   onSubmit();
                 }}
               >
