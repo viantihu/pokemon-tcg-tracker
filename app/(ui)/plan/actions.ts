@@ -188,6 +188,8 @@ export async function shelveCardAction(input: {
   confirmedPulls?: string[];
   /** Her resolution of a colour mismatch, when the spotlight showed one (UIL-069). Absent ⇒ unresolved. */
   bandChoice?: "line" | "own-color" | null;
+  /** The collection she picked for a specialty card whose binder holds collections (UIL-053). */
+  collectionChoice?: string | null;
 }): Promise<
   | { ok: true; counts: CommitCounts; stamp: string }
   /**
@@ -211,6 +213,7 @@ export async function shelveCardAction(input: {
       expectedDigest: input.expectedDigest ?? null,
       confirmedPulls: input.confirmedPulls ?? [],
       bandChoice: input.bandChoice ?? null,
+      collectionChoice: input.collectionChoice ?? null,
     });
     const stamp = await loadPlanFingerprint(db, input.pendingCopyIds ?? []);
     return { ok: true, counts: res.counts, stamp };

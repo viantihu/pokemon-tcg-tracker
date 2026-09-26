@@ -49,6 +49,11 @@ export interface PlanItem {
   needsDecision: boolean;
   /** UIL-030: a bulk-bound duplicate the engine offers as a repurposed binder block (an open need exists). */
   offerBlockRepurpose?: boolean;
+  /**
+   * UIL-053: a specialty card whose binder holds collections; she picks which one it joins before Done.
+   * Absent on a plan parked before UIL-053; the server asks for the pick either way.
+   */
+  collectionPick?: { binderId: string; collections: { id: string; name: string }[] } | null;
 }
 
 /** A planned card paired with its full cascade result — the commit input (not sent to the client). */

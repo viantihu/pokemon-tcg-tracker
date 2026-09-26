@@ -78,10 +78,15 @@ export function describeReason(
       const belongs = name ? `Belongs to your "${name}" collection` : "Belongs to a collection";
       return `${belongs} — collection cards go to the specialty binder ahead of a line placement.`;
     }
-    case "card-class":
-      return incoming.card.rarity
-        ? `Specialty card (${incoming.card.rarity}) — goes to the specialty binder.`
-        : "Specialty card — goes to the specialty binder.";
+    case "card-class": {
+      const kind = incoming.card.rarity
+        ? `Specialty card (${incoming.card.rarity})`
+        : "Specialty card";
+      // UIL-053: she picks the collection, so the reason says so rather than implying it is settled.
+      return result.collectionPick
+        ? `${kind} — goes to the specialty binder. Pick which of its collections it belongs to.`
+        : `${kind} — goes to the specialty binder.`;
+    }
     case "duplicate":
       return result.swap
         ? `Holo duplicate of a card already on the shelf — the holo takes its place${
@@ -138,5 +143,6 @@ export function toPlanItem(
     reason: describeReason(incoming, result, l),
     needsDecision: resultNeedsDecision(result),
     offerBlockRepurpose: result.offerBlockRepurpose === true,
+    collectionPick: result.collectionPick ?? null,
   };
 }
