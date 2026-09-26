@@ -113,6 +113,19 @@ function planRowDomId(incomingId: string): string {
   return `plan-row-${incomingId}`;
 }
 
+/**
+ * The collection a specialty card will join (UIL-053): her pick while it is still one of its binder's
+ * collections, else the binder's ONLY collection (the Senior BA's ruling: pre-selected only when there is
+ * exactly one), else none, and she picks before Done. Null for any card that joins no collection.
+ */
+export function pickedCollection(item: PlanItem, chosen: Record<string, string>): string | null {
+  const pick = item.collectionPick;
+  if (!pick) return null;
+  const c = chosen[item.incomingId];
+  if (c && pick.collections.some((x) => x.id === c)) return c;
+  return pick.collections.length === 1 ? pick.collections[0].id : null;
+}
+
 export function subgroupKey(bandKey: string, kind: "basic" | "nonbasic"): string {
   return `${bandKey}:${kind}`;
 }
@@ -322,6 +335,11 @@ export function PlanScreen({
    * choice with no override to prove it happened.
    */
   const [bandChoice, setBandChoice] = useState<Record<string, "line" | "own-color">>({});
+  /**
+   * Her collection for a specialty card whose binder holds collections (UIL-053), by draft id. Starts
+   * empty: no collection is a default, except a binder's only one (`pickedCollection`).
+   */
+  const [collectionChoice, setCollectionChoice] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   /**
    * Cards she typed by hand on a build before UIL-098 part 2, found in her parked sitting. They cannot be
@@ -521,6 +539,7 @@ export function PlanScreen({
       setCollapsedSubgroups(new Set());
       setConfirmedPulls({});
       setBandChoice({});
+      setCollectionChoice({});
       setMoved(null);
       // A fresh route is fresh work: nothing on it is "new" against anything.
       setArrived(new Set());
@@ -672,6 +691,7 @@ export function PlanScreen({
     setOverrides(omit);
     setConfirmedPulls(omit);
     setBandChoice(omit);
+    setCollectionChoice(omit);
     takenOff.current.add(id);
     scheduleReroute();
   }
@@ -723,6 +743,13 @@ export function PlanScreen({
             // Only her pick FOR THIS CARD's current derivation, same rule as confirmedPulls (UIL-069).
             bandChoice:
               fresh?.id === item.incomingId ? (bandChoice[item.incomingId] ?? null) : null,
+            // Her collection for a specialty card (UIL-053). An override names its own destination.
+            collectionChoice: overrides[item.incomingId]
+              ? null
+              : pickedCollection(
+                  (fresh?.id === item.incomingId && fresh.item) || item,
+                  collectionChoice,
+                ),
           }),
         LOST.action,
       );
@@ -801,6 +828,7 @@ export function PlanScreen({
     setOverrides({});
     setConfirmedPulls({});
     setBandChoice({});
+    setCollectionChoice({});
     setMoveTarget(null);
     setPlanIsResumed(false);
     setLiveStamp(stateStamp);
@@ -1052,6 +1080,10 @@ export function PlanScreen({
           onTogglePull={onTogglePull}
           bandChoice={bandChoice}
           onPickBandChoice={onPickBandChoice}
+          collectionChoice={collectionChoice}
+          onPickCollection={(draftId, collectionId) =>
+            setCollectionChoice((prev) => ({ ...prev, [draftId]: collectionId }))
+          }
           advance={advance}
           onReset={resetAll}
           onNotMine={notMine}
@@ -1274,6 +1306,9 @@ function PlanView(props: {
   /** Her colour-mismatch pick, by draft id (UIL-069). */
   bandChoice: Record<string, "line" | "own-color">;
   onPickBandChoice: (draftId: string, choice: "line" | "own-color") => void;
+  /** Her collection for a specialty card whose binder holds collections, by draft id (UIL-053). */
+  collectionChoice: Record<string, string>;
+  onPickCollection: (draftId: string, collectionId: string) => void;
   advance: () => void;
   onReset: () => void;
   /** "Not mine" from the spotlight (UIL-114): deletes the copy, then the plan re-routes around it. */
@@ -1322,6 +1357,8 @@ function PlanView(props: {
     onTogglePull,
     bandChoice,
     onPickBandChoice,
+    collectionChoice,
+    onPickCollection,
     advance,
     onReset,
     onNotMine,
@@ -1597,11 +1634,18 @@ function PlanView(props: {
               flatIndex={flatIndex}
               done={done}
               onSelect={setCur}
-              onShelve={shelveCard}
+              // UIL-053: a card that joins a collection is shelved from the spotlight, where she can see
+              // which collection; its row box brings it there instead of shelving it unseen.
+              onShelve={(it) =>
+                it.collectionPick && !overrides[it.incomingId]
+                  ? setCur(flatIndex.get(it.incomingId) ?? cur)
+                  : void shelveCard(it)
+              }
               shelving={shelving}
               overrides={overrides}
               overrideNames={overrideNames}
               arrived={arrived}
+              collectionChoice={collectionChoice}
               collapsedSubgroups={collapsedSubgroups}
               onToggleSubgroupCollapse={toggleSubgroupCollapse}
             />
@@ -1661,6 +1705,11 @@ function PlanView(props: {
                 const id = flatItems[cur]?.incomingId;
                 if (id) onPickBandChoice(id, choice);
               }}
+              collectionChoice={collectionChoice}
+              onPickCollection={(collectionId) => {
+                const id = flatItems[cur]?.incomingId;
+                if (id) onPickCollection(id, collectionId);
+              }}
               refreshing={
                 !!flatItems[cur] &&
                 doneCount > 0 &&
@@ -1714,6 +1763,8 @@ export function BandSection(props: {
   overrideNames: MoveNameLookups | null;
   /** Cards that arrived while the page was open (UIL-114 part C). Optional for the render tests. */
   arrived?: Set<string>;
+  /** Her collection picks (UIL-053), so a row can say it still needs one. Optional for the render tests. */
+  collectionChoice?: Record<string, string>;
   /**
    * Sub-group keys currently folded away (UIL-075), each `${bandKey}:${kind}`. Same discipline as
    * UIL-018 one level up: a folded sub-group renders NOTHING below its header — rows absent from the
@@ -1738,6 +1789,7 @@ export function BandSection(props: {
     overrides,
     overrideNames,
     arrived,
+    collectionChoice,
     collapsedSubgroups,
     onToggleSubgroupCollapse,
   } = props;
@@ -1817,6 +1869,11 @@ export function BandSection(props: {
                       override={overrides[it.incomingId]}
                       overrideNames={overrideNames}
                       isNew={arrived?.has(it.incomingId) ?? false}
+                      needsCollection={
+                        !!it.collectionPick &&
+                        !overrides[it.incomingId] &&
+                        !pickedCollection(it, collectionChoice ?? {})
+                      }
                     />
                   ))}
             </div>
@@ -1842,6 +1899,8 @@ export function PlanRow(props: {
   overrideNames?: MoveNameLookups | null;
   /** Arrived while the page was open (UIL-114 part C). */
   isNew?: boolean;
+  /** A specialty card that still needs her pick of collection (UIL-053). */
+  needsCollection?: boolean;
 }) {
   const {
     item,
@@ -1853,6 +1912,7 @@ export function PlanRow(props: {
     override,
     overrideNames,
     isNew = false,
+    needsCollection = false,
   } = props;
   // Show where she MOVED the card, not where the cascade proposed — same source as the spotlight, so
   // the two cannot disagree (UIL-037).
@@ -1923,6 +1983,7 @@ export function PlanRow(props: {
             way: she needs to know which pocket to use BEFORE she presses Done. */}
         {override ? <span className="moved u">{done ? "Moved" : "Will move"}</span> : null}
         {item.needsDecision ? <span className="needs u">Decide</span> : null}
+        {needsCollection && !done ? <span className="needs u">Pick collection</span> : null}
         {/* Arrived while she had the page open (UIL-114 part C); gone once shelved, when it is no news. */}
         {isNew && !done ? <span className="newcard u">New</span> : null}
       </div>
@@ -1969,6 +2030,9 @@ export function Spotlight(props: {
   /** Her pick, if any. Neither is a default — `null` means genuinely unresolved, not "line". */
   bandChoice?: "line" | "own-color" | null;
   onPickBandChoice?: (choice: "line" | "own-color") => void;
+  /** Her collection picks, by draft id (UIL-053); read for this card through `pickedCollection`. */
+  collectionChoice?: Record<string, string>;
+  onPickCollection?: (collectionId: string) => void;
 }) {
   const {
     item: forecast,
@@ -1992,6 +2056,8 @@ export function Spotlight(props: {
     bandMismatch,
     bandChoice,
     onPickBandChoice,
+    collectionChoice = {},
+    onPickCollection,
   } = props;
   if (!forecast) return <p style={{ fontSize: 11, color: "var(--ink-2)" }}>No cards to handle.</p>;
   /**
@@ -2008,6 +2074,14 @@ export function Spotlight(props: {
    * default her ruling rejects.
    */
   const pendingBandChoice = !!bandMismatch && !override && bandChoice == null;
+  /**
+   * A specialty card bound for a binder that holds collections (UIL-053): it joins the one she picks, and
+   * Done waits for the pick, as the server does. Her override names its own destination instead.
+   */
+  const collectionPick = !override ? (item.collectionPick ?? null) : null;
+  const pickedId = collectionPick ? pickedCollection(item, collectionChoice) : null;
+  const pickedName = collectionPick?.collections.find((c) => c.id === pickedId)?.name ?? null;
+  const pendingCollection = !!collectionPick && !pickedId && !done;
   // Only worth telling her when the pocket actually moved; a reworded reason is not news.
   const movedFrom =
     freshItem && !override && freshItem.destination !== forecast.destination
@@ -2064,8 +2138,20 @@ export function Spotlight(props: {
       </div>
 
       <div className="doit">
-        <b>{pendingBandChoice ? "Colour mismatch — pick one below" : disp.big}</b>
-        <span className="sg u">{pendingBandChoice ? "" : disp.destination}</span>
+        <b>
+          {pendingBandChoice
+            ? "Colour mismatch — pick one below"
+            : pendingCollection
+              ? "Which collection? Pick one below"
+              : disp.big}
+        </b>
+        <span className="sg u">
+          {pendingBandChoice
+            ? ""
+            : pickedName
+              ? `${disp.destination} · ${pickedName}`
+              : disp.destination}
+        </span>
       </div>
 
       {/* UIL-069 — her ruling reverses UIL-065's "the line's band wins" default: neither option is
@@ -2113,6 +2199,31 @@ export function Spotlight(props: {
               </label>
             );
           })}
+        </div>
+      ) : null}
+
+      {/* UIL-053 — the binder holds collections, so the card joins one: her pick, with MovePanel's chips.
+          None is pre-selected unless the binder holds exactly one (the Senior BA's ruling). */}
+      {collectionPick && !done ? (
+        <div className="orow">
+          <div className="ol">WHICH COLLECTION?</div>
+          <span className="oskip">
+            This binder holds collections. The card goes on the list of the one you pick.
+          </span>
+          <div className="ochips" role="group" aria-label="Which collection this card belongs to">
+            {collectionPick.collections.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={"ochip" + (pickedId === c.id ? " on" : "")}
+                aria-pressed={pickedId === c.id}
+                onClick={() => onPickCollection?.(c.id)}
+                disabled={busy}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -2241,7 +2352,7 @@ export function Spotlight(props: {
           type="button"
           className="btn btn-primary go"
           onClick={onShelve}
-          disabled={done || busy || refreshing || pendingBandChoice}
+          disabled={done || busy || refreshing || pendingBandChoice || pendingCollection}
         >
           {done
             ? "Shelved ✓"
@@ -2251,7 +2362,9 @@ export function Spotlight(props: {
                 ? "Checking…"
                 : pendingBandChoice
                   ? "Pick one above"
-                  : "Done, next card"}
+                  : pendingCollection
+                    ? "Pick a collection above"
+                    : "Done, next card"}
         </button>
         <button type="button" className="btn" onClick={onBackCard}>
           ◀ Back

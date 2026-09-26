@@ -67,6 +67,16 @@ const REFUSE = {
 } as const;
 
 /**
+ * UIL-053: a specialty card bound for a binder that holds collections must name the one it joins, or it
+ * lands in the binder on no collection's list. Exported so the screen and the tests agree on the wording.
+ */
+export const COLLECTION_PICK = {
+  missing:
+    "This card goes in a binder that holds collections. Pick which collection it belongs to, then press Done again.",
+  notHere: "That collection is no longer in this card's binder. Pick again from the ones shown.",
+} as const;
+
+/**
  * The refusals for a row that is not a card waiting in her haul (UIL-098 part 2). Exported so the tests
  * and the screen agree on the wording.
  */
@@ -118,6 +128,11 @@ export interface CommitInput {
    * Absent/empty ⇒ identical to the pure cascade commit.
    */
   overrides?: Record<string, MoveDestination>;
+  /**
+   * The collection she picked for each specialty card whose binder holds collections (UIL-053), keyed by
+   * draft id. `commitCardPlacement` has already checked each is one of that binder's collections.
+   */
+  collectionChoices?: Record<string, string>;
 }
 
 export interface CommitCounts {
@@ -253,6 +268,12 @@ export async function commitCardPlacement(
      * this specific mismatch — is the one she actually looked at. Absent/null ⇒ unresolved.
      */
     bandChoice?: "line" | "own-color" | null;
+    /**
+     * The collection she picked for a specialty card whose binder holds collections (UIL-053). Required
+     * then, and only then; must be one of the binder's collections as they are NOW. Ignored for an
+     * override, which names its own destination.
+     */
+    collectionChoice?: string | null;
   },
 ): Promise<CommitResult> {
   // UIL-070 part 1: the refusal `applyMove` makes, made here too. The panel disables Confirm for an
@@ -311,6 +332,15 @@ export async function commitCardPlacement(
     );
   }
 
+  // UIL-053: in a binder that holds collections, the card joins the one she picked, never none.
+  const pick = planned[0]?.result.collectionPick;
+  if (pick && !input.override) {
+    if (!input.collectionChoice) throw new Error(COLLECTION_PICK.missing);
+    if (!pick.collections.some((c) => c.id === input.collectionChoice)) {
+      throw new Error(COLLECTION_PICK.notHere);
+    }
+  }
+
   // Compare BEFORE building the payload, so a conflict costs nothing and writes nothing.
   if (input.expectedDigest && !input.override && planned[0]) {
     const actual = placementDigest(planned[0].result);
@@ -326,6 +356,10 @@ export async function commitCardPlacement(
   const { payload, counts } = buildHaulCommitPayload(pc, withConsent, {
     draft,
     overrides: input.override ? { [input.card.id]: input.override } : undefined,
+    collectionChoices:
+      pick && !input.override && input.collectionChoice
+        ? { [input.card.id]: input.collectionChoice }
+        : undefined,
   });
   assertPlacementBandsConfigured(payload, pc);
   await applyWriteOps(db, payload);
@@ -437,17 +471,31 @@ export function buildHaulCommitPayload(
       continue;
     }
     const copyId = writeCard(ops, p, pc, slotsByLine, passLines, counts);
+    // UIL-053: the card goes on the list of the collection she picked, in the same transaction as its
+    // placement, so it is never in the binder and on no list.
+    const picked = p.result.collectionPick?.collections.find(
+      (c) => c.id === input.collectionChoices?.[p.incomingId],
+    );
+    if (picked) {
+      ops.push({
+        op: "union_collection_targets",
+        collection_id: picked.id,
+        catalog_card_ids: [p.tcgdexId],
+      });
+    }
     const reason = mismatch
       ? "Colour mismatch resolved at intake (her call, UIL-069): joined the existing line over " +
         "filing by its own colour."
-      : p.result.reason;
+      : picked
+        ? `Specialty card filed in the "${picked.name}" collection (her pick, UIL-053).`
+        : p.result.reason;
     ops.push({
       op: "insert_decision",
       haul_id: null,
       copy_id: copyId,
       decision: mismatch ? "colour-mismatch-join-line" : p.result.step,
       reason,
-      resolved_by: mismatch ? "user" : "auto",
+      resolved_by: mismatch || picked ? "user" : "auto",
     });
     counts.decisions += 1;
   }

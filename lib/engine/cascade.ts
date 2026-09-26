@@ -136,6 +136,12 @@ export interface CascadeResult {
    * rather than a display label on purpose — naming it is a display concern, not an engine one.
    */
   bandMismatch?: { ownColorTarget: PlacementTarget; lineRootDexId: number } | null;
+  /**
+   * UIL-053: a specialty-class card routed to a specialty binder that holds collections. A card in that
+   * binder belongs on one of their lists, so which one is HER call; this names the choices (none is picked
+   * here). Absent when the binder holds no collection, which keeps the plain card-class placement.
+   */
+  collectionPick?: { binderId: string; collections: { id: string; name: string }[] } | null;
   /** Owned copies to pull from front halves into a new line's slots. */
   pullActions?: PullAction[];
   /** Wishlist proposals for open placeholders / a stolen-line stage. */
@@ -384,11 +390,24 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
   // Now AFTER the duplicate check (UIL-049), so a duplicate specialty printing is bulked rather than
   // shelved a second time. Unchanged for every non-duplicate specialty card.
   if (incoming.card.cardClass === "specialty") {
+    const binderId = specialtyBinderId(ctx);
+    // UIL-053: landing in a binder that holds collections with `collectionId: null` put the card on NO
+    // collection's list, so no collection showed it. When the binder holds any, she picks which.
+    const hosted = binderId
+      ? ctx.collections.filter((c) => c.currentBinderIds.includes(binderId))
+      : [];
     return {
       ...head,
       step: "card-class",
-      reason: `cardClass = specialty (${incoming.card.rarity ?? "specialty"}); routes to the specialty binder.`,
-      target: { kind: "specialty", binderId: specialtyBinderId(ctx), collectionId: null },
+      reason:
+        hosted.length > 0
+          ? `cardClass = specialty (${incoming.card.rarity ?? "specialty"}); routes to the specialty binder, which holds collections, so which one it joins is her call.`
+          : `cardClass = specialty (${incoming.card.rarity ?? "specialty"}); routes to the specialty binder.`,
+      target: { kind: "specialty", binderId, collectionId: null },
+      collectionPick:
+        binderId && hosted.length > 0
+          ? { binderId, collections: hosted.map((c) => ({ id: c.id, name: c.name })) }
+          : null,
     };
   }
 
