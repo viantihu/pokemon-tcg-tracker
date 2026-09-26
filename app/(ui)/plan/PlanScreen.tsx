@@ -1295,24 +1295,18 @@ function PlanView(props: {
         <span className="hv">
           {doneCount} / {total}
         </span>
+        {/* Beside the count, since UIL-116 removed the bar it sat in. UIL-114 removes the screen it goes back to. */}
+        <button type="button" className="btn sm" style={{ marginLeft: "auto" }} onClick={onBack}>
+          ◀ Edit haul
+        </button>
         <span className="hk" style={{ flexBasis: "100%" }}>
           {destSummary}
         </span>
       </div>
 
-      <div className={"alertbar" + (plan.summary.decisions === 0 ? " ok" : "")}>
-        <span className={plan.summary.decisions ? "blink" : ""}>
-          {plan.summary.decisions ? "!" : "✓"}
-        </span>
-        <b>
-          {plan.summary.decisions
-            ? `${plan.summary.decisions} decision${plan.summary.decisions > 1 ? "s" : ""} flagged (resolve in Lines · M7)`
-            : "No decisions flagged · ready to commit"}
-        </b>
-        <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={onBack}>
-          ◀ Edit haul
-        </button>
-      </div>
+      {/* UIL-116: no decisions bar here. Karvi: "completely irrelevant to the user". A card that needs a
+          decision still says so on its own row ("Decide") and in the spotlight, and decisions are worked on
+          the Lines screen, whose own banner stays. */}
 
       <div className="planwrap">
         <div className="worklist panel">
@@ -1954,7 +1948,7 @@ export function Spotlight(props: {
         <div className="doit" style={{ background: "var(--note)" }}>
           <b style={{ fontSize: 13 }}>Needs a decision</b>
           <span style={{ fontSize: 11, color: "var(--ink-2)" }}>
-            Confirm-or-override lands in Lines (M7). The proposal is recorded when you shelve it.
+            Confirm or override it on the Lines screen. The proposal is recorded when you shelve it.
           </span>
         </div>
       ) : null}
