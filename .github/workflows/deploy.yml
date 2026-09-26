@@ -484,15 +484,28 @@ jobs:
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'production' || 'testing' }}
+    timeout-minutes: 25
+    # Read Vercel's deployment records for this commit; nothing here writes.
+    permissions:
+      contents: read
+      deployments: read
     steps:
-      # Both checks poll the deployed URL from OUTSIDE the app. They run after
-      # `migrate` (migrate-before-deploy) and after Vercel's Git integration has
-      # published the new build; the retries below absorb the gap until that
-      # deploy is actually serving. A red here means the deploy is NOT trusted,
-      # even though migrations already applied. APP_URL is env-scoped, so the
-      # correct base URL is used per environment (Testing for develop, Production
-      # for main). Context values go through `env:` rather than inline into the
-      # shell so nothing is interpolated into the script body.
+      # Every check polls the deployed URL from OUTSIDE the app. They run after
+      # `migrate` (migrate-before-deploy) and only once Vercel has reported THIS
+      # commit's build ready (the first step), so they test the new build, not the
+      # one before it. A red here means the deploy is NOT trusted, even though
+      # migrations already applied. APP_URL is env-scoped, so the correct base URL
+      # is used per environment (Testing for develop, Production for main).
+      # Context values go through `env:` rather than inline into the shell so
+      # nothing is interpolated into the script body.
+      - uses: actions/checkout@v7
+
+      - name: Wait until Vercel has published this commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: node scripts/wait-for-vercel-deploy.mjs
+
       - name: Health check (liveness + healthy payload)
         env:
           APP_URL: ${{ vars.APP_URL }}
@@ -538,3 +551,12 @@ jobs:
             exit 1
           fi
           echo "Read path OK."
+
+      # A page can render while none of its server actions load: from 2026-09-25 to
+      # 09-26 every action on every page failed (E352, UIL-107) and both checks above
+      # stayed green. This CALLS the sign-in action with an address that is not on
+      # the allow-list and expects its refusal: no email is sent, nothing is written.
+      - name: Action check (the sign-in action loads, runs, and refuses a stranger)
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: node scripts/deploy-smoke-sign-in.mjs
