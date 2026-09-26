@@ -33,15 +33,20 @@ describe("the action check finds the action in the page's own scripts", () => {
     expect(actionIdIn("no references here", "signIn")).toBeNull();
   });
 
-  it("collects chunks from script tags AND from escaped flight data, once each", () => {
+  it("collects chunks from script tags AND from escaped flight data, once each, on both path shapes", () => {
     const html =
       '<script src="/_next/static/chunks/aa11.js" async></script>' +
       '<script>self.__next_f.push([1,"2:I[123,[\\"static/chunks/bb22.js\\",\\"static/chunks/aa11.js\\"],\\"LoginForm\\"]"])</script>' +
-      '<link rel="preload" as="script" href="/_next/static/chunks/cc33.js?dpl=dpl_x"/>';
+      '<link rel="preload" as="script" href="/_next/static/chunks/cc33.js?dpl=dpl_x"/>' +
+      // Vercel's path (QA, against Testing): `next start` never serves this shape.
+      '<script src="/_next/static/immutable/chunks/dd44.js" async></script>' +
+      '<script>self.__next_f.push([1,"3:I[9,[\\"static/immutable/chunks/ee55.js\\"],\\"X\\"]"])</script>';
     expect(chunkPaths(html).sort()).toEqual([
       "/_next/static/chunks/aa11.js",
       "/_next/static/chunks/bb22.js",
       "/_next/static/chunks/cc33.js",
+      "/_next/static/immutable/chunks/dd44.js",
+      "/_next/static/immutable/chunks/ee55.js",
     ]);
   });
 });

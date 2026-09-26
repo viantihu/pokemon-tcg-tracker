@@ -20,10 +20,15 @@
 export const PROBE_EMAIL = "deploy-smoke@example.com";
 export const REFUSAL = "That email is not authorised for this binder.";
 
-/** Every client chunk a page names, in its script tags or in its flight data (where quotes are escaped). */
+/**
+ * Every client chunk a page names, in its script tags or in its flight data (where quotes are escaped). Vercel
+ * serves them under `static/immutable/chunks/`, `next start` under `static/chunks/`; both are read.
+ */
 export function chunkPaths(html) {
   const out = new Set();
-  for (const m of html.matchAll(/(?:\/_next\/)?static\/chunks\/[A-Za-z0-9._~/-]+?\.js/g)) {
+  for (const m of html.matchAll(
+    /(?:\/_next\/)?static\/(?:immutable\/)?chunks\/[A-Za-z0-9._~/-]+?\.js/g,
+  )) {
     out.add(`/_next/${m[0].replace(/^\/_next\//, "")}`);
   }
   return [...out];
