@@ -4,11 +4,11 @@
  * Testing had been redeployed a minute earlier, and a new deployment retires the old server-action ids, so the
  * open page's call THREW before reaching the server. The actions return their own failures as `{ ok: false }`, but
  * nothing on the Sync screen caught a throw, so the phase never reset. Driven through the REAL SyncScreen: a thrown
- * preview, a thrown apply (fast path and gated), a thrown Undo and a thrown refresh each end in a message that says what to
+ * preview, a thrown apply (fast path and gated), a thrown Undo, a thrown stand-in and a thrown refresh each end in a message that says what to
  * do, with the controls usable again.
  */
 import { createElement } from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -18,7 +18,7 @@ import {
   LOST_REFRESH,
   SyncScreen,
 } from "@/app/(ui)/sync/SyncScreen";
-import type { SyncState } from "@/app/(ui)/sync/sync-types";
+import type { QueueEntryView, SyncState } from "@/app/(ui)/sync/sync-types";
 import * as actions from "@/app/(ui)/sync/actions";
 import { emptyCountCheck } from "@/lib/sync/count-check";
 
@@ -50,6 +50,30 @@ const STATE: SyncState = {
   undo: { available: false, createdAt: null, summary: null },
   aliases: [],
   countCheck: emptyCountCheck(),
+};
+const ENTRY = {
+  id: "e1",
+  dexId: "xy7-99",
+  dexName: "Mystery Card",
+  dexSetName: "Ancient Origins",
+  dexSeries: "XY",
+  dexNumber: "99",
+  dexVariantRaw: "Normal",
+  quantity: 1,
+  locale: "en",
+  reason: "UNKNOWN_CARD",
+  status: "WAITING",
+  firstSeenSync: "2026-09-24T00:00:00Z",
+  lastRetrySync: null,
+  retryCount: 0,
+  manualMatchId: null,
+  aliasKey: "en:xy7",
+} as QueueEntryView;
+const WITH_ENTRY: SyncState = {
+  ...STATE,
+  waiting: { unknownSet: [], unknownCard: [ENTRY] },
+  cardTypes: ["Fire"],
+  counts: { waiting: 1, dismissed: 0 },
 };
 const WITH_UNDO: SyncState = {
   ...STATE,
@@ -172,6 +196,25 @@ describe("a server action that throws does not leave the Sync screen running for
     expect(screen.getByRole("button", { name: "Undo last sync" }).hasAttribute("disabled")).toBe(
       false,
     );
+  });
+
+  it("a thrown STAND-IN: the form says to reload and check, and its button can be pressed again", async () => {
+    m.loadSyncState.mockResolvedValue(WITH_ENTRY);
+    m.createStandInAndMatch.mockImplementationOnce(STALE);
+    const user = userEvent.setup();
+    render(createElement(SyncScreen, { initialState: WITH_ENTRY }));
+
+    await user.click(screen.getByRole("button", { name: "Match manually" }));
+    await user.click(screen.getByText(/Not in the catalog\? Create a stand-in/));
+    const form = within(document.querySelector("details.standin") as HTMLElement);
+    await user.click(form.getByRole("button", { name: "Trainer" }));
+    const submit = () =>
+      form.getByRole("button", { name: /Create the stand-in and match/ }) as HTMLButtonElement;
+    await user.click(submit());
+
+    expect(m.createStandInAndMatch).toHaveBeenCalledTimes(1);
+    expect(await form.findByText(LOST_ACTION)).toBeTruthy();
+    expect(submit().disabled).toBe(false);
   });
 
   it("a thrown REFRESH after an import that went through: no bar, and she is told to reload for the latest", async () => {
