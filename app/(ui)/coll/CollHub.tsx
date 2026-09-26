@@ -673,6 +673,7 @@ export function CollectionCard(props: {
               <div key={k.tcgdexId} className={"ccard" + (k.owned ? "" : " need")}>
                 <CardFace
                   name={k.name}
+                  tcgdexId={k.tcgdexId}
                   imageUrl={k.imageUrl}
                   size="m"
                   zoomable
@@ -730,6 +731,7 @@ export function CollectionCard(props: {
                 <div key={k.tcgdexId} className="ccard">
                   <CardFace
                     name={k.name}
+                    tcgdexId={k.tcgdexId}
                     imageUrl={k.imageUrl}
                     size="m"
                     zoomable
@@ -1481,6 +1483,7 @@ export function LogCardModal(props: {
               <span className="cet">
                 <CardFace
                   name={pick.name}
+                  tcgdexId={pick.tcgdexId}
                   imageUrl={pick.imageUrl}
                   size="s"
                   zoomable

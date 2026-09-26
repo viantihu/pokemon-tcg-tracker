@@ -13,6 +13,14 @@ import { useCallback, useRef, useState } from "react";
 import type { FlagFixRow, SyncOverrides, SyncPlanBundle, SyncPreview } from "@/lib/sync";
 import { forgottenDismissedLine } from "@/lib/sync/preview";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
+import {
+  isLanguage,
+  knownDexLocale,
+  languageName,
+  languageOfId,
+  TCGDEX_LANGUAGES,
+  type Language,
+} from "@/lib/catalog/locale";
 import { CardFace } from "../_components/CardFace";
 import { BandChip } from "../_components/BandChip";
 import { CardResultsGrid } from "../_components/CardResultsGrid";
@@ -430,7 +438,7 @@ export function FlagFixSection({ rows }: { rows: FlagFixRow[] }) {
           return (
             <div key={f.copyId} className="plate" style={{ padding: 10 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <CardFace name={f.name} imageUrl={f.imageUrl} size="s" />
+                <CardFace name={f.name} tcgdexId={f.catalogCardId} imageUrl={f.imageUrl} size="s" />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700 }}>
                     {f.name}
@@ -549,7 +557,12 @@ export function PreviewPanel({
               return (
                 <div key={r.copyId} className="plate" style={{ padding: 10 }}>
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <CardFace name={r.name} imageUrl={r.imageUrl} size="s" />
+                    <CardFace
+                      name={r.name}
+                      tcgdexId={r.catalogCardId}
+                      imageUrl={r.imageUrl}
+                      size="s"
+                    />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 700 }}>
                         {r.name}{" "}
@@ -606,7 +619,12 @@ export function PreviewPanel({
               return (
                 <div key={v.copyId} className="plate" style={{ padding: 10 }}>
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                    <CardFace name={v.name} imageUrl={v.imageUrl} size="s" />
+                    <CardFace
+                      name={v.name}
+                      tcgdexId={v.catalogCardId}
+                      imageUrl={v.imageUrl}
+                      size="s"
+                    />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 700 }}>
                         {v.name}{" "}
@@ -656,7 +674,7 @@ export function PreviewPanel({
                 key={`${a.catalogCardId} ${a.dexVariantRaw}`}
                 style={{ display: "flex", gap: 10, alignItems: "center" }}
               >
-                <CardFace name={a.name} imageUrl={a.imageUrl} size="s" />
+                <CardFace name={a.name} tcgdexId={a.catalogCardId} imageUrl={a.imageUrl} size="s" />
                 <span style={{ flex: 1 }}>
                   {a.name}{" "}
                   {formatCollectorNumber(a.localId, a.setCardCountOfficial) ? (
@@ -1058,6 +1076,9 @@ export function StandInForm({
   const [name, setName] = useState(entry.dexName || "");
   const [setLabel, setSetLabel] = useState(entry.dexSetName || "");
   const [localId, setLocalId] = useState(entry.dexNumber || "");
+  // UIL-108: pre-filled from the Dex row's Locale ("International" is English, "Japanese" is Japanese);
+  // anything Dex writes that we do not recognise pre-fills nothing, so she picks rather than we guess.
+  const [language, setLanguage] = useState<Language | "">(knownDexLocale(entry.locale) ?? "");
   const [kind, setKind] = useState<"pokemon" | "trainer" | "energy">("pokemon");
   const [type, setType] = useState<string>("");
   const [stage, setStage] = useState<(typeof STAGES)[number]>("Basic");
@@ -1066,10 +1087,15 @@ export function StandInForm({
   const [twin, setTwin] = useState<Extract<StandInOutcome, { twin: unknown }>["twin"] | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
 
-  const canSubmit = name.trim().length > 0 && (kind !== "pokemon" || type.length > 0) && !busy;
+  const twinLanguage = twin ? languageOfId(twin.tcgdexId) : null;
+  const canSubmit =
+    name.trim().length > 0 &&
+    isLanguage(language) &&
+    (kind !== "pokemon" || type.length > 0) &&
+    !busy;
 
   async function submit() {
-    if (!canSubmit) return;
+    if (!canSubmit || !isLanguage(language)) return;
     setBusy(true);
     setFailed(null);
     setTwin(null);
@@ -1078,6 +1104,7 @@ export function StandInForm({
       name: name.trim(),
       setName: setLabel.trim() || null,
       localId: localId.trim() || null,
+      language,
       kind:
         kind === "pokemon"
           ? { kind: "pokemon", type, stage, dexId: Number.isFinite(dex) && dex > 0 ? dex : null }
@@ -1123,6 +1150,22 @@ export function StandInForm({
             />
           </label>
         </div>
+        <label className="orow">
+          <div className="ol u">Language</div>
+          <select
+            className="field"
+            value={language}
+            onChange={(e) => setLanguage(isLanguage(e.target.value) ? e.target.value : "")}
+            aria-label="Language"
+          >
+            <option value="">Pick the language it is printed in…</option>
+            {TCGDEX_LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="orow">
           <div className="ol u">What kind of card</div>
           <div className="modetoggle" role="group" aria-label="Card kind">
@@ -1196,7 +1239,8 @@ export function StandInForm({
             <b>
               A stand-in for &quot;{twin.name}&quot;
               {twin.setName ? ` in ${twin.setName}` : ""}
-              {twin.localId ? ` · ${twin.localId}` : ""} already exists.
+              {twin.localId ? ` · ${twin.localId}` : ""}
+              {twinLanguage ? ` (${languageName(twinLanguage)})` : ""} already exists.
             </b>
             <button
               type="button"

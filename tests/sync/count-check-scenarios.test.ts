@@ -203,6 +203,7 @@ describe("UIL-100 · the other named cases", () => {
       setName: "Ancient Origins",
       setId: "xy7",
       localId: "91",
+      language: "en" as const,
       kind: { kind: "pokemon", type: "Fire", stage: "Basic", dexId: 7 },
     };
     const { standInId } = await manualMatchStandIn(client(), e.id, input);

@@ -56,6 +56,7 @@ const FOSSIL: StandInInput = {
   setName: "Obsidian Flames",
   setId: "sv03",
   localId: "999",
+  language: "en" as const,
   kind: { kind: "pokemon", type: "Fire", stage: "Basic", dexId: 4 },
 };
 

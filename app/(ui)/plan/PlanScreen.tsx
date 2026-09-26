@@ -29,7 +29,7 @@ import type { LineJoinOptions } from "@/lib/line/join-options";
 // Leaf import of the pure move module (its only dependency is ./types; the `WriteOp` it names is a
 // type-only import), so bringing `describeMove` into the browser bundle drags in no server code.
 import { describeMove, moveNameLookups, type MoveNameLookups } from "@/lib/line/move";
-import { localeTag, stripLocaleNamespace } from "@/lib/catalog/locale";
+import { cardTag, stripLocaleNamespace } from "@/lib/catalog/locale";
 import { BandChip } from "../_components/BandChip";
 import { CardFace } from "../_components/CardFace";
 import { cardCaption } from "../_components/CardLightbox";
@@ -956,6 +956,7 @@ function IntakePanel(props: {
             <div key={d.id} className="draftrow">
               <CardFace
                 name={d.card.name}
+                tcgdexId={d.card.tcgdexId}
                 imageUrl={d.card.imageUrl}
                 size="s"
                 zoomable
@@ -1042,6 +1043,7 @@ export function moveTargetFor(
   return {
     ...(item.offerBlockRepurpose && (blockNeeds ?? []).length > 0 ? { blockNeeds } : {}),
     copyId: item.incomingId,
+    tcgdexId: item.tcgdexId,
     name: item.name,
     localId: item.localId,
     setCardCountOfficial: item.setCardCountOfficial,
@@ -1641,6 +1643,7 @@ export function PlanRow(props: {
           than bumping the resume key and throwing away her check-off progress on deploy. */}
       <CardFace
         name={item.name}
+        tcgdexId={item.tcgdexId}
         imageUrl={item.imageUrl ?? null}
         size="s"
         zoomable
@@ -1760,6 +1763,7 @@ export function Spotlight(props: {
       <div className="hand">
         <CardFace
           name={item.name}
+          tcgdexId={item.tcgdexId}
           imageUrl={item.imageUrl ?? null}
           size="l"
           zoomable
@@ -1779,9 +1783,9 @@ export function Spotlight(props: {
           ) : null}
           <div className="sb u">
             {stripLocaleNamespace(item.setId)}
-            {localeTag(item.tcgdexId) ? (
+            {cardTag(item.tcgdexId) ? (
               <span className="cpill u" style={{ marginLeft: 6 }}>
-                {localeTag(item.tcgdexId)}
+                {cardTag(item.tcgdexId)}
               </span>
             ) : null}
             <br />

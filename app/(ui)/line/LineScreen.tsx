@@ -64,6 +64,7 @@ export function slotMoveTarget(line: LineView, slot: SlotView): MoveTargetCard |
     : undefined;
   return {
     copyId: slot.copyId,
+    tcgdexId: slot.card.tcgdexId,
     name: slot.card.name,
     localId: slot.card.localId,
     setCardCountOfficial: slot.card.setCardCountOfficial,
@@ -78,6 +79,7 @@ export function slotMoveTarget(line: LineView, slot: SlotView): MoveTargetCard |
 export function unlinedMoveTarget(card: UnlinedCard): MoveTargetCard {
   return {
     copyId: card.copyId,
+    tcgdexId: card.card.tcgdexId,
     name: card.card.name,
     localId: card.card.localId,
     setCardCountOfficial: card.card.setCardCountOfficial,
@@ -557,7 +559,12 @@ function UnlinedCardGrid({
     <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
       {cards.map((c) => (
         <div key={c.copyId} className="hand" style={{ minWidth: 160 }}>
-          <CardFace name={c.card.name} imageUrl={c.card.imageUrl} size="m" />
+          <CardFace
+            name={c.card.name}
+            tcgdexId={c.card.tcgdexId}
+            imageUrl={c.card.imageUrl}
+            size="m"
+          />
           <div style={{ minWidth: 0 }}>
             <div className="nm" style={{ fontSize: 13 }}>
               {c.card.name}
@@ -624,6 +631,7 @@ export function Slot({
           ) : (
             <CardFace
               name={slot.card?.name ?? slot.stage}
+              tcgdexId={slot.card?.tcgdexId}
               imageUrl={slot.card?.imageUrl ?? null}
               size="l"
             />

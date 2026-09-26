@@ -47,6 +47,7 @@ const EMPTY_VIEW: LookupView = { answer: null, copies: [], notFound: false, fail
 export function lookupMoveTarget(answer: LookupAnswer, copy: LookupMovableCopy): MoveTargetCard {
   return {
     copyId: copy.copyId,
+    tcgdexId: answer.card.tcgdexId,
     name: answer.card.name,
     localId: answer.card.localId,
     setCardCountOfficial: answer.card.setCardCountOfficial,
@@ -245,6 +246,7 @@ export function AnswerPanel({
       <div className="hand" style={{ padding: "12px 13px 0" }}>
         <CardFace
           name={answer.card.name}
+          tcgdexId={answer.card.tcgdexId}
           imageUrl={answer.card.imageUrl}
           size="m"
           zoomable

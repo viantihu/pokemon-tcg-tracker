@@ -96,6 +96,7 @@ describe("UIL-060 · the stand-in disclosure under the search", () => {
       name: "Mystery Fossil",
       setName: "Obsidian Flames",
       localId: "999",
+      language: "en", // pre-filled from the entry's Locale (UIL-108; tests/sync/stand-in-language.dom.test.ts)
       kind: { kind: "pokemon", type: "Fire", stage: "Stage1", dexId: 5 },
     });
     expect(JSON.stringify(onStandIn.mock.calls[0][0])).not.toContain("setId");

@@ -122,6 +122,7 @@ describe("UIL-099 E4 · a row matched to a stand-in stays on the stand-in once T
       setName: "Ancient Origins",
       setId: "xy7",
       localId: "99",
+      language: "en" as const,
       kind: { kind: "pokemon", type: "Fire", stage: "Basic" },
     });
 
@@ -153,6 +154,7 @@ describe("UIL-099 E4 · a row matched to a stand-in stays on the stand-in once T
       setName: "Future Set",
       setId: null,
       localId: "5",
+      language: "en" as const,
       kind: { kind: "pokemon", type: "Fire", stage: "Basic" },
     });
 

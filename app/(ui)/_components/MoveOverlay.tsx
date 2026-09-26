@@ -20,6 +20,8 @@ import { MovePanel } from "./MovePanel";
 
 export interface MoveTargetCard {
   copyId: string;
+  /** The card's stored id, so a stand-in's face can say its language (UIL-108). */
+  tcgdexId?: string;
   name: string;
   localId: string | null;
   /** Printed set total, for the full "099/182" form (UIL-077). Absent or null → the bare number. */
@@ -98,7 +100,12 @@ export function MoveOverlay({
         </div>
         <div className="body">
           <div className="hand" style={{ marginBottom: 16 }}>
-            <CardFace name={card.name} imageUrl={card.imageUrl} size="m" />
+            <CardFace
+              name={card.name}
+              tcgdexId={card.tcgdexId ?? null}
+              imageUrl={card.imageUrl}
+              size="m"
+            />
             <div style={{ minWidth: 0 }}>
               <div className="nm" style={{ fontSize: 15 }}>
                 {card.name}
