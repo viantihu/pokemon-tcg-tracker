@@ -8032,7 +8032,17 @@ the input feeding it is stale) and **UIL-099** (the same park/dedupe machinery, 
 
 - **Reported:** 2026-09-26, about 01:45Z (Karvi). In her words: "I've started the import job a while
   ago, but it is still running."
-- **Status:** Open, assigned to the Tech Lead (new). **Workaround: reload the page, then import again.**
+- **Status:** **Fixed** — PR [#349](https://github.com/viantihu/pokemon-tcg-tracker/pull/349) MERGED to `develop` 2026-09-26 (squash `798eba6`),
+  deployed green (Deploy run `36211079335`). Every Sync handler (import, apply, Undo, Retry, Dismiss,
+  Undismiss, Forget alias, manual match, Add it back, the stand-in form, refresh) now catches a thrown
+  action call and resets the page with a message that starts "The app was updated while this page was
+  open, or the connection dropped." The preview's message says "Nothing was saved"; the apply's says
+  "Reload the page to see whether your import was saved; importing again is safe", because a response can
+  drop after the atomic write commits (the Tech Lead's own copy correction). The fast-path apply now reads
+  "Saving your changes…". QA: 6 cases killed; the one accepted survivor (a thrown stand-in match) was
+  pinned by PR [#352](https://github.com/viantihu/pokemon-tcg-tracker/pull/352) (`5baf888`). Awaiting Karvi's confirmation. The same class on other
+  screens is UIL-106. **Was:** Open, assigned to the Tech Lead (new). Workaround: reload the page, then
+  import again.
 - **Priority:** High (Karvi's report; Senior BA agrees) — it blocked her import with no way forward
   shown.
 - **Area:** Sync
@@ -8090,7 +8100,10 @@ defects, which are about what gets written, not about the UI recovering when not
 ## UIL-106 — When a save or action call fails in transport (a page left open across a deploy, or a dropped connection), several screens either stick with controls disabled or silently drop her later edits, and none of them tells her to reload
 
 - **Reported:** 2026-09-26 (not from Karvi — found by the Tech Lead's audit for UIL-105)
-- **Status:** Open, assigned to Full Stack Dev - 2, in the Tech Lead's order: autosave first; then
+- **Status:** Open, assigned to Full Stack Dev - 2. **Part 1 (Collections autosave) DONE:** PR
+  [#351](https://github.com/viantihu/pokemon-tcg-tracker/pull/351) MERGED (`cfc351d`), deployed 2026-09-26 (Deploy run `36211839724`): a failed save shows a
+  message, is re-queued, and the next edit saves; Close and Esc never strand her over an unsaved edit (QA:
+  8 mutant groups killed). Remaining, in the Tech Lead's order: autosave first; then
   Lookup/Line/Plan/`RemoveCopyButton` on #349's shared `reach()` pattern once #349 merges; then
   Settings/rebind messages; then an app-level `error.tsx`.
 - **Priority:** High (Senior BA's read; Karvi to confirm) — silent loss of Collections edits.
