@@ -19,7 +19,8 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RemoveCopyButton } from "@/app/(ui)/_components/RemoveCopyButton";
-import type { DraftCard, LookupCard } from "@/app/(ui)/plan/plan-types";
+import type { DraftCard, DraftPayloadItem, LookupCard } from "@/app/(ui)/plan/plan-types";
+import { routedPlan } from "../support/plan-route";
 import { PlanScreen } from "@/app/(ui)/plan/PlanScreen";
 
 const removeCopyAction = vi.fn(async () => ({ ok: true as const, lookup: null }));
@@ -33,8 +34,11 @@ vi.mock("@/app/(ui)/plan/actions", () => ({
   loadPendingPlacementDraft: vi.fn(async () => []),
   lookupCatalog: vi.fn(async () => []),
   refreshSpotlightAction: vi.fn(async () => ({ ok: false, error: "not used" })),
-  runHaulPlan: vi.fn(async () => ({ ok: false, error: "not used" })),
+  // UIL-114: the page routes what is waiting as it opens.
+  runHaulPlan: (p: DraftPayloadItem[]) => runHaulPlan(p),
+  planStateStamp: vi.fn(async () => "stamp-routed"),
 }));
+const runHaulPlan = vi.fn(async (p: DraftPayloadItem[]) => routedPlan(p));
 
 afterEach(() => {
   cleanup();
@@ -121,29 +125,41 @@ const QUEUED: DraftCard = {
   dexVariantRaw: "Normal",
 };
 
-describe("UIL-089 · the Haul Plan queue row keeps its two removals apart", () => {
-  it('"Not mine" removes the COPY, and takes the row with it', async () => {
-    const user = userEvent.setup();
-    render(createElement(PlanScreen, { stateStamp: "s", initialPending: [QUEUED] }));
-    expect(await screen.findByText("Meditite")).toBeTruthy();
+/** A second card, so taking one off leaves a plan to look at rather than the empty state. */
+const MACHOP: DraftCard = {
+  id: "22222222-2222-4222-8222-222222222222",
+  existingCopyId: "22222222-2222-4222-8222-222222222222",
+  card: card("Machop"),
+  variant: "normal",
+  dexVariantRaw: "Normal",
+};
 
-    await user.click(screen.getByRole("button", { name: /Remove Meditite from your collection/i }));
+describe("UIL-089 / UIL-114 · the Haul Plan keeps its two removals apart, once the haul has run", () => {
+  // Since UIL-114 there is no first screen: the plan routes as the page opens, and both removals live in the
+  // spotlight on the card she is holding. Machop sorts first, so it is the one in hand.
+  it('"Not mine" removes the COPY, and takes the card off the plan', async () => {
+    const user = userEvent.setup();
+    render(createElement(PlanScreen, { stateStamp: "s", initialPending: [QUEUED, MACHOP] }));
+    await screen.findAllByText("Machop");
+
+    await user.click(screen.getByRole("button", { name: /Remove Machop from your collection/i }));
     await user.click(screen.getByRole("button", { name: /Yes, remove/i }));
 
-    await waitFor(() => expect(removeCopyAction).toHaveBeenCalledWith(QUEUED.existingCopyId));
-    // The copy it stood for is gone, so the row goes too — leaving it would offer her a card she does not
+    await waitFor(() => expect(removeCopyAction).toHaveBeenCalledWith(MACHOP.existingCopyId));
+    // The copy it stood for is gone, so the card goes too — leaving it would offer her a card she does not
     // have, and the next queue read would not return it anyway.
-    await waitFor(() => expect(screen.queryByText("Meditite")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Machop")).toBeNull());
+    expect(screen.getAllByText("Meditite").length).toBeGreaterThan(0);
   });
 
-  it("the ✕ takes the card off this SITTING and writes nothing — the card stays in the queue", async () => {
+  it('"Leave for later" takes the card off this PLAN and writes nothing — it stays waiting', async () => {
     // The confusable pair. If these two ever collapse into each other she loses cards she still owns.
     const user = userEvent.setup();
-    render(createElement(PlanScreen, { stateStamp: "s", initialPending: [QUEUED] }));
-    expect(await screen.findByText("Meditite")).toBeTruthy();
+    render(createElement(PlanScreen, { stateStamp: "s", initialPending: [QUEUED, MACHOP] }));
+    await screen.findAllByText("Machop");
 
-    await user.click(screen.getByRole("button", { name: /Take Meditite off this sitting/i }));
-    await waitFor(() => expect(screen.queryByText("Meditite")).toBeNull());
+    await user.click(screen.getByRole("button", { name: "Leave for later" }));
+    await waitFor(() => expect(screen.queryByText("Machop")).toBeNull());
     expect(removeCopyAction).not.toHaveBeenCalled(); // nothing was deleted
   });
 });

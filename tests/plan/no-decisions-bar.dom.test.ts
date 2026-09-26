@@ -5,12 +5,11 @@
  * The bar under the progress count read "N decisions flagged (resolve in Lines · M7)" (yellow) or "No
  * decisions flagged · ready to commit" (green), and it held the only "◀ Edit haul". What she acts on is not
  * lost: a card that needs a decision still says so on its own row and in the spotlight, and decisions are
- * worked on the Lines screen, whose banner stays. "◀ Edit haul" moves beside the count. Driven through the
+ * worked on the Lines screen, whose banner stays. "◀ Edit haul" went with the first screen (UIL-114). Driven through the
  * REAL screen, resumed from a parked sitting with one card that needs a decision.
  */
 import { createElement } from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanItem } from "@/lib/plan";
 import type { DraftCard, RunPlanResult } from "@/app/(ui)/plan/plan-types";
@@ -120,12 +119,9 @@ describe("UIL-116 · the Haul Plan has no decisions bar", () => {
     expect(document.body.textContent).not.toMatch(/\bM7\b/);
   });
 
-  it("◀ Edit haul is still there, beside the count, and still goes back to the haul", async () => {
-    const user = userEvent.setup();
+  it("has no ◀ Edit haul: UIL-114 removed the first screen it went back to", async () => {
     render(createElement(PlanScreen, { stateStamp: STAMP }));
-    const back = await screen.findByRole("button", { name: "◀ Edit haul" });
-    expect(back.closest(".haulbar")).not.toBeNull();
-    await user.click(back);
-    await waitFor(() => expect(screen.getByRole("button", { name: /Run the plan/ })).toBeTruthy());
+    await screen.findAllByText(/Toedscruel/);
+    expect(screen.queryByRole("button", { name: /Edit haul/ })).toBeNull();
   });
 });

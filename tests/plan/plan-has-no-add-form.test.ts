@@ -75,11 +75,13 @@ describe("UIL-098 part 2 · the Haul Plan places cards from the import, and adds
     expect(html).not.toContain("<select");
   });
 
-  it("offers no variant picker on a row: the variant is the one her Dex import says", () => {
+  it("offers no variant picker: the page routes the copy with the variant her Dex import says", () => {
     // A typed row used to carry a VariantSelector; a queued copy's variant is Dex-owned (and this card
-    // HAS a second variant, so a selector would have rendered if one were offered).
+    // HAS a second variant, so a selector would have rendered if one were offered). Since UIL-114 there is
+    // no first screen: the queued card goes straight to routing.
     const html = intake([QUEUED]);
-    expect(html).toContain("Waiting from sync · Normal");
+    expect(html).toContain("Routing 1 card…");
+    expect(html).not.toContain("<select");
     expect(html).not.toContain("Reverse");
   });
 

@@ -33,6 +33,7 @@ vi.mock("@/app/(ui)/plan/actions", () => ({
   lookupCatalog: vi.fn(async () => []),
   refreshSpotlightAction: vi.fn(async () => ({ ok: false, error: "not used" })),
   runHaulPlan: (...a: unknown[]) => runHaulPlan(...a),
+  planStateStamp: vi.fn(async () => "stamp-routed"),
 }));
 
 const LOST_CALL = () => new TypeError("Failed to fetch");
@@ -111,41 +112,41 @@ describe("UIL-106 · 'Not mine' that cannot reach the server", () => {
   it("says so, keeps the row, and Done still works afterwards", async () => {
     removeCopy.mockRejectedValue(LOST_CALL());
     const user = userEvent.setup();
+    // UIL-114: no first screen. The plan routes as the page opens, and "Not mine" is in the spotlight.
     render(createElement(PlanScreen, { stateStamp: "s", initialPending: [MEDITITE, MAKUHITA] }));
-    await screen.findByText("Meditite");
+    await screen.findAllByText("Meditite");
 
     await user.click(screen.getByRole("button", { name: /Remove Meditite from your collection/ }));
     await user.click(screen.getByRole("button", { name: /Yes, remove/ }));
 
     await waitFor(() => expect(alerts()).toContain(LOST.action));
-    // It may have gone through, so the row stays until a reload says otherwise; the button is not left armed.
-    expect(screen.getByText("Meditite")).toBeTruthy();
+    // It may have gone through, so the card stays until a reload says otherwise; the button is not left armed.
+    expect(screen.getAllByText("Meditite").length).toBeGreaterThan(0);
     expect(
       screen.getByRole("button", { name: /Remove Meditite from your collection/ }),
     ).toBeTruthy();
 
-    await user.click(screen.getByRole("button", { name: /Run the plan/ }));
-    await user.click(await screen.findByRole("button", { name: /Done, next card/ }));
+    await user.click(screen.getByRole("button", { name: /Done, next card/ }));
     // PRE-FIX: `shelving` was never cleared, so `shelveCard` returned before calling the server — silently.
     await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
   });
 });
 
-describe("UIL-106 (3) · 'Run the plan' that does not complete", () => {
-  it("says so without the raw error text, and Run can be pressed again", async () => {
-    runHaulPlan.mockRejectedValue(LOST_CALL());
+describe("UIL-106 (3) / UIL-114 · a route that does not complete", () => {
+  it("says so without the raw error text, and 'Try again' routes again", async () => {
+    // UIL-114: the route runs as the page opens, so its failure is shown on the page with a retry.
+    runHaulPlan.mockRejectedValueOnce(LOST_CALL());
     const user = userEvent.setup();
     render(createElement(PlanScreen, { stateStamp: "s", initialPending: [MEDITITE, MAKUHITA] }));
-    await screen.findByText("Meditite");
 
-    await user.click(screen.getByRole("button", { name: /Run the plan/ }));
-
-    // PRE-FIX: the raw "Failed to fetch". `runHaulPlan` throws for a server failure too, so it names no cause.
+    // `runHaulPlan` throws for a server failure too, so it names no cause.
     await waitFor(() => expect(alerts()).toContain(RUN_FAILED));
     expect(alerts()).not.toContain("Failed to fetch");
-    expect(
-      (screen.getByRole("button", { name: /Run the plan/ }) as HTMLButtonElement).disabled,
-    ).toBe(false);
+    expect(screen.getByText(/2 cards are waiting, but the plan could not be routed/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findAllByText("Meditite");
+    expect(runHaulPlan).toHaveBeenCalledTimes(2);
   });
 });
 

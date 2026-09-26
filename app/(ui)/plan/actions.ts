@@ -136,6 +136,7 @@ export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
       decisions: items.filter((it) => it.needsDecision).length,
       byAction,
     },
+    orderedBandKeys: pc.orderedBandKeys,
   };
 }
 

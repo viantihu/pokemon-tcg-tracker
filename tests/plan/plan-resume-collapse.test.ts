@@ -144,8 +144,8 @@ describe("UIL-018 × UIL-006 · folded bands in the resume payload", () => {
     const html = screen('{"v":2,"copies":[["shelved",null,null,"red",null,1]]}');
     expect(html).not.toContain("RESUMED");
     expect(html).not.toContain("Greencard");
-    // Back to the intake form.
-    expect(html).toContain("Your haul");
+    // Not her parked plan: with nothing still queued, the page says so (UIL-114: no first screen).
+    expect(html).toContain("Nothing is waiting to be placed.");
   });
 
   it("treats a plan parked before this feature as fully expanded", () => {
@@ -190,6 +190,6 @@ describe("UIL-075 × UIL-006 · folded sub-groups in the resume payload", () => 
     park({ ...base, collapsedSubgroups: ["red:nonbasic"] });
     const html = screen('{"v":2,"copies":[["shelved",null,null,"red",null,1]]}');
     expect(html).not.toContain("RESUMED");
-    expect(html).toContain("Your haul");
+    expect(html).toContain("Nothing is waiting to be placed.");
   });
 });
