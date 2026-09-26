@@ -515,23 +515,26 @@ describe("sync builders emit the correct ordered op set (fake DbClient)", () => 
     });
     expect(ops[1]).toMatchObject({ op: "insert_presence_group", catalog_card_id: "cardM" });
     expect(ops.filter((o) => o.op === "insert_copy")).toHaveLength(3);
-    const resolve = ops[ops.length - 4];
+    const resolve = ops[ops.length - 5];
     expect(resolve).toMatchObject({ op: "update_unresolved_entry", id: "entry-1" });
     expect((resolve.patch as { status: string }).status).toBe("RESOLVED");
     // UIL-100: the matched Dex row joins the record with the quantity just inserted, and the count check on
     // this one card runs LAST, so a match that would double-count is refused inside the same transaction.
-    expect(ops[ops.length - 3]).toEqual({
+    expect(ops[ops.length - 4]).toEqual({
       op: "add_dex_presence",
       catalog_card_id: "cardM",
       dex_variant_raw: "",
       quantity: 3,
     });
-    expect(ops[ops.length - 2]).toEqual({
+    expect(ops[ops.length - 3]).toEqual({
       op: "assert_presence_counts",
       keys: [{ catalog_card_id: "cardM", dex_variant_raw: "" }],
     });
-    // 0024: and the file total, LAST — the per-card check cannot see a row counted in the record twice.
-    expect(ops[ops.length - 1]).toEqual({ op: "assert_file_total" });
+    // 0024: and the file total — the per-card check cannot see a row counted in the record twice.
+    expect(ops[ops.length - 2]).toEqual({ op: "assert_file_total" });
+    // 0028 (UIL-117 PR 1): the slot check, appended LAST by applyWriteOps, names the three new copies.
+    expect(ops[ops.length - 1]).toMatchObject({ op: "assert_line_slots", slot_ids: [] });
+    expect((ops[ops.length - 1] as { copy_ids: string[] }).copy_ids).toHaveLength(3);
     expect(resync_group_ids).toHaveLength(1);
     expect(res.created).toBe(3);
     expect(res.learnedAlias).toEqual({ locale: "en", dexCode: "xy7", tcgdexSetId: "setM" });

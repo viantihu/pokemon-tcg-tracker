@@ -543,10 +543,7 @@ function writeCard(
           `that slot is not in the loaded line state. Re-run the plan so it reflects current lines.`,
       );
     }
-    slot.state = "filled";
-    slot.copy_id = copyId;
-    ops.push({ op: "update_slot", id: slot.id, patch: { state: "filled", copy_id: copyId } });
-    ops.push({ op: "update_copy", id: copyId, patch: { line_slot_id: slot.id } });
+    fillLineSlot(ops, lineId, slot, slots, copyId);
     return copyId;
   }
 
@@ -749,6 +746,25 @@ function emitIncomingCopy(
 }
 
 /** Create the proposed line + its slots + wishlist, or fill the incoming's slot if the line exists. */
+/**
+ * Fill one slot of a line she already has: both pointers (UIL-062), and the line `complete` when that was its last
+ * open slot (UIL-117 gap 4: the Move path did this and the Haul Plan did not). One shared builder with the Move
+ * path, so the two cannot drift again.
+ */
+function fillLineSlot(
+  ops: WriteOp[],
+  lineId: string,
+  slot: MutableSlot,
+  siblings: MutableSlot[],
+  copyId: string,
+): void {
+  const slotIsLastOpen = siblings.every((s) => s.id === slot.id || s.state === "filled");
+  slot.state = "filled";
+  slot.copy_id = copyId;
+  ops.push(...buildExistingLineJoinOps({ copyId, lineId, slotId: slot.id, slotIsLastOpen }).ops);
+  ops.push({ op: "update_copy", id: copyId, patch: { line_slot_id: slot.id } });
+}
+
 function writeNewLine(
   ops: WriteOp[],
   p: PlannedCard,
@@ -775,21 +791,39 @@ function writeNewLine(
   if (passLine || dbLine) {
     const lineId = passLine?.lineId ?? dbLine!;
     const slots = slotsByLine.get(lineId) ?? [];
-    // Prefer the incoming's own stage slot; otherwise the first still-open slot.
-    const byStage = slots.find((s) => s.stage_index === incomingStageIndex && s.state !== "filled");
-    const slot = byStage ?? slots.find((s) => s.state !== "filled");
-    if (slot) {
-      slot.state = "filled";
-      slot.copy_id = incomingCopyId;
-      ops.push({
-        op: "update_slot",
-        id: slot.id,
-        patch: { state: "filled", copy_id: incomingCopyId },
-      });
-      ops.push({ op: "update_copy", id: incomingCopyId, patch: { line_slot_id: slot.id } });
+    /**
+     * The incoming card's OWN stage, and only that (UIL-117 gap 5). This used to fall back to "the first still-open
+     * slot" of any stage, so a Basic could fill a Stage 2 slot; and with no open slot at all it wrote nothing,
+     * leaving the card shelved in the back half on no line. Either means the cascade and the loaded lines disagree,
+     * the same disagreement the existing-slot fill above fails loudly on, so this fails the same way: one
+     * transaction, zero rows written, and she re-runs the plan against current lines.
+     */
+    const slot = slots.find((s) => s.stage_index === incomingStageIndex && s.state !== "filled");
+    if (!slot) {
+      throw new Error(
+        "Cannot commit: the line this card would start is already in this binder and already holds this card's " +
+          "stage. Re-run the plan so it reflects current lines.",
+      );
     }
+    fillLineSlot(ops, lineId, slot, slots, incomingCopyId);
     return;
   }
+
+  /**
+   * Pulls she has agreed to. Empty means move nothing (UIL-061) — the cascade's proposal is a
+   * proposal, and every stage it wanted to fill from her collection stays a placeholder instead.
+   */
+  const confirmed = new Set(p.confirmedPulls ?? []);
+  // The cascade plans the line with every proposed pull in it, so it can plan it `complete`. A pull she did not
+  // tick leaves its stage a placeholder, so that line is `open` (UIL-117 gap 6, found by Dev 2).
+  const declinedAnyPull = plan.slots.some(
+    (s) =>
+      s.copyId !== null &&
+      s.copyId !== undefined &&
+      s.copyId !== p.incomingId &&
+      !confirmed.has(s.copyId),
+  );
+  const status = plan.status === "complete" && declinedAnyPull ? "open" : plan.status;
 
   const lineId = crypto.randomUUID();
   ops.push({
@@ -799,18 +833,12 @@ function writeNewLine(
     color_band: plan.colorBand,
     binder_id: plan.binderId,
     half: "back",
-    status: plan.status,
+    status,
   });
   counts.lines += 1;
 
   const slotIdByStage = new Map<number, string>();
   const mirror: MutableSlot[] = [];
-
-  /**
-   * Pulls she has agreed to. Empty means move nothing (UIL-061) — the cascade's proposal is a
-   * proposal, and every stage it wanted to fill from her collection stays a placeholder instead.
-   */
-  const confirmed = new Set(p.confirmedPulls ?? []);
 
   for (const slot of plan.slots) {
     const isIncoming = slot.copyId === p.incomingId;

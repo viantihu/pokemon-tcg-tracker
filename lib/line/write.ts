@@ -38,10 +38,12 @@ import {
   lineSlotRepo,
   typeColorMapRepo,
   type DbClient,
+  type Row,
   type SlotPatch,
   type WriteOp,
   binderBlockRepo,
 } from "@/lib/repo";
+import { localeOfId } from "@/lib/catalog/locale";
 import { resolveDecisionWrites } from "./decisions";
 import { buildScreenModel } from "./load";
 import {
@@ -72,6 +74,47 @@ export interface MoveResult {
  * `ownerId` is no longer a parameter: the RPC is SECURITY INVOKER, so `owner_id` defaults to
  * `auth.uid()` and RLS enforces it. It is never carried in a payload.
  */
+/**
+ * A join is checked against THE LINE, not only the slot (UIL-117 gap 2). The destination's binder and band come
+ * from the browser, and a stale sheet, a line with no binder (the panel then falls back to the first general
+ * binder) or any caller that skips the panel could send the wrong ones; the card itself was never compared with
+ * the slot. So: the line's own binder, back half and band, and a card of the slot's own species and language
+ * (the slot's target is in the line's language, UIL-090, so one comparison covers both). Nothing is written when
+ * any of these fails.
+ */
+async function assertJoinMatchesLine(
+  db: DbClient,
+  catalogCardId: string,
+  slot: Row<"line_slot">,
+  lineId: string,
+  dest: MoveDestination,
+): Promise<void> {
+  const line = await evolutionLineRepo.getByPk(db, lineId);
+  if (!line) throw new Error("That line no longer exists — reload the screen and pick again.");
+  if (dest.kind !== "shelf" || dest.half !== "back" || dest.binderId !== line.binder_id) {
+    throw new Error("That line is in another binder — reload the screen and pick the line again.");
+  }
+  if (dest.band !== line.color_band) {
+    throw new Error(
+      "That line is in another colour band — reload the screen and pick the line again.",
+    );
+  }
+  if (!slot.target_catalog_card_id) return;
+  if (localeOfId(catalogCardId) !== localeOfId(slot.target_catalog_card_id)) {
+    throw new Error(
+      "That line is in another language than this card — pick a line in its own language.",
+    );
+  }
+  const [card, target] = await Promise.all([
+    catalogCardRepo.getByPk(db, catalogCardId),
+    catalogCardRepo.getByPk(db, slot.target_catalog_card_id),
+  ]);
+  const sameSpecies = !!card && !!target && card.dex_id.some((d) => target.dex_id.includes(d));
+  if (!sameSpecies) {
+    throw new Error("That slot is for a different card — pick the slot for this card's own stage.");
+  }
+}
+
 export async function applyMove(
   db: DbClient,
   req: MoveRequest,
@@ -120,6 +163,7 @@ export async function applyMove(
       if (slot.state === "filled") {
         throw new Error("That slot has already been filled — reload the screen and pick again.");
       }
+      await assertJoinMatchesLine(db, copy.catalog_card_id, slot, join.lineId, req.destination);
       const siblings = await lineSlotRepo.listByLine(db, join.lineId);
       const slotIsLastOpen = siblings.every((s) => s.id === slot.id || s.state === "filled");
       const built = buildExistingLineJoinOps({
