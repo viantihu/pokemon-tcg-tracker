@@ -5,10 +5,11 @@
  * Collections). Her confirm there IS the move, sent with her choice; a sheet without the loader is unchanged.
  */
 import { createElement } from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MovePanel } from "@/app/(ui)/_components/MovePanel";
+import { MoveOverlay } from "@/app/(ui)/_components/MoveOverlay";
 import type { LinePopupModel, LineProposal } from "@/lib/line/popup";
 import type { LineJoinCandidate, MoveOptions } from "@/lib/line/types";
 
@@ -33,7 +34,7 @@ const CANDIDATE_HERE: LineJoinCandidate = {
   filledCount: 1,
   totalCount: 3,
 };
-const model = (mode: "start" | "add"): LinePopupModel => ({
+const model = (mode: "start" | "add", band = "red"): LinePopupModel => ({
   mode,
   copyId: "moving",
   card: {
@@ -50,8 +51,8 @@ const model = (mode: "start" | "add"): LinePopupModel => ({
     lineId: mode === "add" ? "L1" : null,
     binderId: "b1",
     binderName: "KB-001",
-    bandKey: "red",
-    bandDisplay: "Red",
+    bandKey: band,
+    bandDisplay: band === "red" ? "Red" : "Green",
     locale: "en",
     filledBefore: mode === "add" ? 1 : 0,
     filledAfter: mode === "add" ? 2 : 1,
@@ -65,7 +66,11 @@ afterEach(cleanup);
 
 function mount(over: Partial<Parameters<typeof MovePanel>[0]> = {}) {
   const onConfirm = vi.fn();
-  const lineModel = vi.fn(async (p: LineProposal) => model(p.kind === "add" ? "add" : "start"));
+  const lineModel = vi.fn(async (p: LineProposal) =>
+    p.kind === "start"
+      ? model("start", p.band)
+      : model("add", p.kind === "add" && p.slotId === "S2" ? "green" : "red"),
+  );
   const user = userEvent.setup();
   render(
     createElement(MovePanel, {
@@ -133,6 +138,70 @@ describe("UIL-117 · BACK HALF opens the line popup", () => {
       { kind: "shelf", binderId: "b1", half: "back", band: "red" },
       { mode: "start", binderId: "b1", band: "red", pulls: [] },
     );
+  });
+
+  it("the band is picked IN the popup: another band reloads it there, and her confirm moves it into that band", async () => {
+    const { lineModel, onConfirm, user } = mount();
+    await user.click(backHalf());
+    await screen.findByRole("dialog", { name: "Start a line" });
+    const group = screen.getByRole("group", { name: "Colour band" });
+    await user.click(within(group).getByRole("button", { name: /Green/ }));
+    expect(lineModel).toHaveBeenLastCalledWith({ kind: "start", binderId: "b1", band: "green" });
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("group", { name: "Colour band" }))
+          .getByRole("button", { name: /Green/ })
+          .getAttribute("aria-pressed"),
+      ).toBe("true"),
+    );
+    await user.click(screen.getByRole("button", { name: /Start line/ }));
+    expect(onConfirm).toHaveBeenCalledWith(
+      { kind: "shelf", binderId: "b1", half: "back", band: "green" },
+      { mode: "start", binderId: "b1", band: "green", pulls: [] },
+    );
+  });
+
+  it("a band where this card has an open slot in this binder reloads it as ADD to that line", async () => {
+    const GREEN_SLOT: LineJoinCandidate = { ...CANDIDATE_HERE, slotId: "S2", bandKey: "green" };
+    const { lineModel, user } = mount({ joinCandidates: [GREEN_SLOT] });
+    await user.click(backHalf());
+    await screen.findByRole("dialog", { name: "Start a line" });
+    await user.click(
+      within(screen.getByRole("group", { name: "Colour band" })).getByRole("button", {
+        name: /Green/,
+      }),
+    );
+    await screen.findByRole("dialog", { name: "Add to a line" });
+    expect(lineModel).toHaveBeenLastCalledWith({ kind: "add", lineId: "L1", slotId: "S2" });
+  });
+
+  it("Escape closes the popup, not the Move sheet behind it; a second Escape closes the sheet", async () => {
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(
+      createElement(MoveOverlay, {
+        card: {
+          copyId: "moving",
+          name: "Charmeleon",
+          localId: "027",
+          imageUrl: null,
+          bandKey: "red",
+          currentLabel: "KB-001 · Front · Red",
+          naturalBandKey: "red",
+        },
+        options: OPTIONS,
+        lineModel: vi.fn(async () => model("start")),
+        onConfirm: vi.fn(),
+        onClose,
+      }),
+    );
+    await user.click(backHalf());
+    await screen.findByRole("dialog", { name: "Start a line" });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Start a line" })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("Cancel closes the popup and nothing moves", async () => {

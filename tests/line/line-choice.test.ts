@@ -360,6 +360,8 @@ describe("the popup's model (loadLinePopupModel), built from fresh state", () =>
         locale: "en",
         joinSlotId: SLOT1,
         sameHere: true,
+        // Nothing held there yet, so the tile shows the line's top target (UX review of #385: lead with the image).
+        face: expect.objectContaining({ tcgdexId: "emberdrake", name: "Emberdrake" }),
       }),
     ]);
   });

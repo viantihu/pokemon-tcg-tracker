@@ -125,6 +125,19 @@ export async function loadLinePopupModel(
         ),
     )?.id ?? null;
 
+  /** An existing line's tile image: its most evolved card she holds there, else its top target. */
+  const faceOfLine = (lineId: string, bandKey: string): CardIdentity | null => {
+    const lineSlots = slotsByLine.get(lineId) ?? [];
+    for (const s of [...lineSlots].reverse()) {
+      const held = s.state === "filled" && s.copy_id ? cardOfCopy(s.copy_id) : null;
+      const cc = held ? catalogById.get(held) : undefined;
+      if (cc) return identity(cc, bandKey);
+    }
+    const top = lineSlots.at(-1)?.target_catalog_card_id;
+    const target = top ? catalogById.get(top) : undefined;
+    return target ? identity(target, bandKey) : null;
+  };
+
   let model: Omit<LinePopupModel, "existingLines">;
   let hereBinder: string | null;
   let hereBand: string;
@@ -256,6 +269,7 @@ export async function loadLinePopupModel(
       bandDisplay: bandDisplay.get(l.bandKey) ?? l.bandKey,
       joinSlotId: openSlotFor(l.lineId),
       sameHere: l.binderId === hereBinder && l.bandKey === hereBand && l.locale === cardLocale,
+      face: faceOfLine(l.lineId, l.bandKey),
     }));
   return { ...model, existingLines };
 }

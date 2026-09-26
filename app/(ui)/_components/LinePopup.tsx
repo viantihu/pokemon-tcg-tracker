@@ -10,8 +10,10 @@
  * owns the stepping ("Confirm & next") and the write; this component only reports her choice.
  */
 
+import { Fragment } from "react";
 import type { LineChoice, LinePopupProps, LinePopupStage } from "@/lib/line/popup";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
+import { BandChip } from "./BandChip";
 import { CardFace } from "./CardFace";
 
 const LANGUAGE: Record<string, { name: string; flag: string }> = {
@@ -19,6 +21,25 @@ const LANGUAGE: Record<string, { name: string; flag: string }> = {
   ja: { name: "Japanese", flag: "🇯🇵" },
 };
 const language = (l: string) => LANGUAGE[l] ?? { name: l, flag: "" };
+
+/** "KB-001 · Front · Red" with each part kept whole, so a narrow tag never breaks "· Red" off on its own. */
+function Segments({ label }: { label: string }) {
+  const parts = label.split(" · ");
+  return (
+    <>
+      {parts.map((p, i) => (
+        // The space before each "·" is the only place the tag may wrap.
+        <Fragment key={i}>
+          {i > 0 ? " " : null}
+          <span className="lp-seg">
+            {i > 0 ? "· " : ""}
+            {p}
+          </span>
+        </Fragment>
+      ))}
+    </>
+  );
+}
 
 export function LinePopup({
   model,
@@ -32,6 +53,8 @@ export function LinePopup({
   error = null,
   incomingLabel = "Moving in",
   onSwitch,
+  bands,
+  onBand,
 }: LinePopupProps) {
   const { line, card } = model;
   const foreign = model.mode === "add" && card.locale !== line.locale;
@@ -64,13 +87,38 @@ export function LinePopup({
       <div className="lp-cap">
         <span className="lp-t u">{title}</span>
         <span className="lp-n u">
-          {lineName} · {where} · {language(line.locale).flag} {language(line.locale).name}
+          {lineName} · {line.binderName} · Back · <BandChip bandKey={line.bandKey} />{" "}
+          {line.bandDisplay} · {language(line.locale).flag} {language(line.locale).name}
         </span>
         <button type="button" className="lp-x u" onClick={onCancel} disabled={busy}>
           Close
         </button>
       </div>
       <div className="lp-body">
+        {bands && onBand && bands.length > 1 && model.mode !== "replace" ? (
+          <>
+            <div className="lp-lbl u" style={{ marginTop: 0 }}>
+              Colour band
+            </div>
+            <div className="lp-bands" role="group" aria-label="Colour band">
+              {bands.map((b) => {
+                const on = b.key === line.bandKey;
+                return (
+                  <button
+                    type="button"
+                    key={b.key}
+                    className={"lp-band u" + (on ? " on" : "")}
+                    aria-pressed={on}
+                    disabled={busy}
+                    onClick={() => (on ? undefined : onBand(b.key))}
+                  >
+                    <BandChip bandKey={b.key} /> {b.display}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        ) : null}
         <div className="lp-strip">
           {model.stages.map((s, i) => (
             <Stage
@@ -89,6 +137,7 @@ export function LinePopup({
         <div className="lp-moves">
           <div className="lp-mrow">
             <span className="lp-verb u">Shelve</span>
+            <CardFace name={card.name} tcgdexId={card.tcgdexId} imageUrl={card.imageUrl} size="s" />
             <span>
               {card.name}{" "}
               <span className="lp-where">
@@ -103,6 +152,12 @@ export function LinePopup({
               pulls.includes(s.pull!.copyId) ? (
                 <div className="lp-mrow" key={s.pull!.copyId}>
                   <span className="lp-verb u">Take out</span>
+                  <CardFace
+                    name={s.card!.name}
+                    tcgdexId={s.card!.tcgdexId}
+                    imageUrl={s.card!.imageUrl}
+                    size="s"
+                  />
                   <span>
                     {s.card!.name}{" "}
                     <span className="lp-where">from {s.pull!.fromLabel} → into this line</span>
@@ -111,6 +166,12 @@ export function LinePopup({
               ) : (
                 <div className="lp-mrow lp-muted" key={s.pull!.copyId}>
                   <span className="lp-verb u">Stays put</span>
+                  <CardFace
+                    name={s.card!.name}
+                    tcgdexId={s.card!.tcgdexId}
+                    imageUrl={s.card!.imageUrl}
+                    size="s"
+                  />
                   <span>
                     {s.card!.name}{" "}
                     <span className="lp-where">
@@ -159,6 +220,14 @@ export function LinePopup({
             <div className="lp-minigrid">
               {model.existingLines.map((l) => (
                 <div className="lp-mini" key={l.lineId}>
+                  {l.face ? (
+                    <CardFace
+                      name={l.face.name}
+                      tcgdexId={l.face.tcgdexId}
+                      imageUrl={l.face.imageUrl}
+                      size="s"
+                    />
+                  ) : null}
                   <span className="u">
                     {l.binderName} · Back · {l.bandDisplay}
                     <br />
@@ -256,7 +325,7 @@ function Stage({
               : stage.stage}
         </div>
         {c ? (
-          <CardFace name={c.name} tcgdexId={c.tcgdexId} imageUrl={c.imageUrl} size="m" zoomable />
+          <CardFace name={c.name} tcgdexId={c.tcgdexId} imageUrl={c.imageUrl} size="l" zoomable />
         ) : (
           <div className="lp-empty" />
         )}
@@ -270,7 +339,9 @@ function Stage({
         {stage.state === "blocked" ? <span className="lp-src lp-want">Blocked</span> : null}
         {stage.state === "pullable" && stage.pull ? (
           <>
-            <span className="lp-src lp-binder">In {stage.pull.fromLabel}</span>
+            <span className="lp-src lp-binder">
+              In <Segments label={stage.pull.fromLabel} />
+            </span>
             <label className="lp-pull u">
               <input type="checkbox" checked={ticked} onChange={onTogglePull} disabled={busy} />{" "}
               Pull it into this line

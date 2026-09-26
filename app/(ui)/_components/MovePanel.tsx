@@ -31,7 +31,7 @@
  * predicate `applyMove` throws on — so the chip and the refusal cannot drift apart.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   BlockNeedCandidate,
   ExistingLineBlock,
@@ -211,6 +211,20 @@ export function MovePanel({
   const [linePopBusy, setLinePopBusy] = useState(false);
   const [linePopError, setLinePopError] = useState<string | null>(null);
 
+  // Escape closes the popup, not the whole sheet: her binder and band picks behind it stay (UX review of #385).
+  // Capture phase on window, so it runs before the sheet's own document listener and stops it there.
+  const popupOpen = linePop !== null;
+  useEffect(() => {
+    if (!popupOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setLinePop(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [popupOpen]);
+
   /** Open the popup on this binder and band: an open slot for this card here is added to, else a line is started. */
   async function openLinePopup(proposal?: LineProposal) {
     if (!lineModel) return;
@@ -233,6 +247,20 @@ export function MovePanel({
     } finally {
       setLinePopBusy(false);
     }
+  }
+
+  /** Her band pick in the popup: reload it for that band here (an open slot for this card there makes it an Add). */
+  function switchBand(bandKey: string) {
+    const lineBinder = linePop?.model.line.binderId ?? binderId;
+    const here = (joinCandidates ?? []).find(
+      (c) => c.binderId === lineBinder && c.bandKey === bandKey,
+    );
+    setBand(bandKey);
+    void openLinePopup(
+      here
+        ? { kind: "add", lineId: here.lineId, slotId: here.slotId }
+        : { kind: "start", binderId: lineBinder, band: bandKey },
+    );
   }
 
   function confirmLine(choice: LineChoice) {
@@ -606,7 +634,7 @@ export function MovePanel({
             ? "Start a new line anyway ▶"
             : confirmLabel}
         </button>
-        {linePopError ? (
+        {linePopError && !linePop ? (
           <div className="oskip" role="alert">
             {linePopError}
           </div>
@@ -621,7 +649,10 @@ export function MovePanel({
             onChange={(choice) => setLinePop({ ...linePop, choice })}
             onCancel={() => setLinePop(null)}
             onConfirm={confirmLine}
+            error={linePopError}
             onSwitch={(proposal) => void openLinePopup(proposal)}
+            bands={options.bands}
+            onBand={switchBand}
           />
         </div>
       ) : null}

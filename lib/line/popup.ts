@@ -90,6 +90,8 @@ export interface LinePopupExistingLine extends ExistingLineBlock {
   joinSlotId: string | null;
   /** Same binder, same band, same language as this card: the natural one to join. */
   sameHere: boolean;
+  /** The line's most evolved card she holds there (else its top target), so the tile leads with an image. */
+  face?: CardIdentity | null;
 }
 
 /** Everything the popup renders. Built server-side from fresh state (`loadLinePopupModel`), never trusted back. */
@@ -121,6 +123,12 @@ export interface LinePopupProps {
   incomingLabel?: string;
   /** "Add to that line" on an existing line: the screen reloads the model for that proposal. */
   onSwitch?(proposal: LineProposal): void;
+  /**
+   * The band row (the Move sheet): the bands she can pick, and the screen's handler, which reloads the model for
+   * that band (an open slot for this card there makes it an Add). Absent where the band is already decided.
+   */
+  bands?: readonly { key: string; display: string }[];
+  onBand?(band: string): void;
 }
 
 /* --------------------------------------- small shared rules --------------------------------------- */

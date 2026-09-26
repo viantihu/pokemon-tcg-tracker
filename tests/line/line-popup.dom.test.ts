@@ -5,7 +5,7 @@
  * already has are named before she starts another; a line in another language takes a second, explicit tick.
  */
 import { createElement, useState } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LinePopup } from "@/app/(ui)/_components/LinePopup";
@@ -59,6 +59,7 @@ const START: LinePopupModel = {
       bandDisplay: "Red",
       joinSlotId: "slot-ja-1",
       sameHere: false,
+      face: identity("ja:sv2a-005", "Charmeleon"),
     },
   ],
 };
@@ -121,7 +122,68 @@ describe("UIL-117 · the line popup", () => {
         .checked,
     ).toBe(false);
     expect(screen.getByText("Stays put")).toBeTruthy();
-    expect(screen.getByText(/In KB-001 · Front · Red/)).toBeTruthy();
+    const from = document.querySelector(".lp-src.lp-binder") as HTMLElement;
+    expect(from.textContent).toBe("In KB-001 · Front · Red");
+    // UX review of #385: each part stays whole, so a narrow tag never breaks "· Red" off on its own line.
+    expect([...from.querySelectorAll(".lp-seg")].map((e) => e.textContent)).toEqual([
+      "KB-001",
+      "· Front",
+      "· Red",
+    ]);
+  });
+
+  it("every 'What moves' row and every existing-line tile leads with the card's image (v3)", () => {
+    render(
+      createElement(Harness, {
+        model: START,
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+        onConfirm: vi.fn(),
+      }),
+    );
+    const rows = [...document.querySelectorAll(".lp-mrow")];
+    expect(rows).toHaveLength(2); // Shelve the Charmeleon, and her Charmander stays put
+    for (const row of rows) expect(row.querySelector(".face.s")).not.toBeNull();
+    expect(document.querySelector(".lp-mini .face.s")).not.toBeNull();
+    // The line's stages at the large size, the incoming one marked for its ring.
+    expect(document.querySelectorAll(".lp-strip .face.l")).toHaveLength(2);
+    expect(document.querySelector(".lp-slot.lp-in .face.l")).not.toBeNull();
+  });
+
+  it("the band row: her band is marked, another reloads the popup for that band", async () => {
+    const onBand = vi.fn();
+    const user = userEvent.setup();
+    render(
+      createElement(LinePopup, {
+        model: START,
+        value: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+        onChange: () => {},
+        onConfirm: () => {},
+        onCancel: () => {},
+        bands: [
+          { key: "red", display: "Red" },
+          { key: "green", display: "Green" },
+        ],
+        onBand,
+      }),
+    );
+    const group = screen.getByRole("group", { name: "Colour band" });
+    const red = within(group).getByRole("button", { name: /Red/ });
+    expect(red.getAttribute("aria-pressed")).toBe("true");
+    await user.click(red);
+    expect(onBand).not.toHaveBeenCalled();
+    await user.click(within(group).getByRole("button", { name: /Green/ }));
+    expect(onBand).toHaveBeenCalledWith("green");
+  });
+
+  it("no band row where the band is already decided (no handler)", () => {
+    render(
+      createElement(Harness, {
+        model: START,
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+        onConfirm: vi.fn(),
+      }),
+    );
+    expect(screen.queryByRole("group", { name: "Colour band" })).toBeNull();
   });
 
   it("ticking the pull moves it into the line, and confirming sends exactly what she ticked", async () => {
