@@ -221,6 +221,14 @@ nav.menu .tab .n {
   padding: 9px 13px;
   margin-bottom: 10px;
 }
+/* "Search haul" (UIL-115): under the haul bar, results as the app's card tiles (`.cgrid`). */
+.haulsearch {
+  padding: 9px 13px;
+  margin-bottom: 10px;
+}
+.ccard.done {
+  opacity: 0.75;
+}
 .haulbar .hk {
   font-size: 10px;
   color: var(--ink-2);
