@@ -33,6 +33,8 @@ import {
 } from "./actions";
 import type { LookupMovableCopy } from "./lookup-copies";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
+import { lineModelAction } from "../_components/line-popup-actions";
+import type { LineChoice } from "@/lib/line/popup";
 import { LOST, reach } from "../_components/reach";
 import { lookupViewFrom, type LookupView } from "./lookup-state";
 
@@ -127,12 +129,12 @@ export function LookupScreen() {
     flashToast(`Removed · ${answer.card.name}`);
   }
 
-  async function onMoveConfirm(dest: MoveDestination) {
+  async function onMoveConfirm(dest: MoveDestination, lineChoice?: LineChoice) {
     if (!moveTarget || !answer) return;
     setMoving(true);
     setMoveError(null);
     const res = await reach(
-      () => moveFromLookup(moveTarget.copyId, dest, answer.card.tcgdexId),
+      () => moveFromLookup(moveTarget.copyId, dest, answer.card.tcgdexId, lineChoice),
       LOST.action,
     );
     setMoving(false);
@@ -174,6 +176,15 @@ export function LookupScreen() {
         <MoveOverlay
           card={moveTarget}
           options={moveOptions}
+          // UIL-117: the back half opens the line popup here too (it used to be greyed: "Move it from the Lines page").
+          lineModel={async (proposal) => {
+            const res = await reach(
+              () => lineModelAction(moveTarget.copyId, proposal),
+              LOST.action,
+            );
+            if (!res.ok) throw new Error(res.error);
+            return res.model;
+          }}
           onConfirm={onMoveConfirm}
           onClose={() => setMoveTarget(null)}
         />

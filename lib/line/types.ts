@@ -283,6 +283,11 @@ export interface BlockNeedCandidate {
 export interface MoveRequest {
   copyId: string;
   destination: MoveDestination;
+  /**
+   * Her line popup choice for a back-half destination (UIL-117). When present it is the whole instruction for the
+   * line (start with ticked pulls, or join, with the language confirm); when absent a `lineJoin` is read as one.
+   */
+  lineChoice?: import("./popup").LineChoice;
 }
 
 /** Options the move panel offers — driven from the DB so a new binder/collection shows up at once. */

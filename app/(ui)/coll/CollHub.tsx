@@ -30,6 +30,8 @@ import { CardFace } from "../_components/CardFace";
 import { cardCaption } from "../_components/CardLightbox";
 import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { MoveOverlay } from "../_components/MoveOverlay";
+import { lineModelAction } from "../_components/line-popup-actions";
+import type { LineChoice } from "@/lib/line/popup";
 import type { LookupCard } from "../plan/plan-types";
 import { createAutosaveScheduler, flushBeforeNavigate } from "./autosave";
 import {
@@ -406,10 +408,28 @@ export function CollHub() {
             initial: { kind: "bulk" },
           }}
           options={data.moveOptions}
+          // UIL-117: into a back half through the line popup, for the ONE copy here (a line slot holds one card).
+          lineModel={
+            removeFor.card.copyIds.length === 1
+              ? async (proposal) => {
+                  const res = await reach(
+                    () => lineModelAction(removeFor.card.copyIds[0], proposal),
+                    LOST.action,
+                  );
+                  if (!res.ok) throw new Error(res.error);
+                  return res.model;
+                }
+              : undefined
+          }
           onClose={() => setRemoveFor(null)}
-          onConfirm={async (dest: MoveDestination) => {
+          onConfirm={async (dest: MoveDestination, lineChoice?: LineChoice) => {
             const ok = await run(() =>
-              removeCardFromCollection(removeFor.collection.id, removeFor.card.tcgdexId, dest),
+              removeCardFromCollection(
+                removeFor.collection.id,
+                removeFor.card.tcgdexId,
+                dest,
+                lineChoice,
+              ),
             );
             if (ok) setRemoveFor(null);
           }}

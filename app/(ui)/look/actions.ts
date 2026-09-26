@@ -18,6 +18,7 @@
 import { band } from "@/lib/engine";
 import { applyMove, loadMoveOptions, moveNameLookups } from "@/lib/line";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
+import type { LineChoice } from "@/lib/line/popup";
 import { getOwnerContext, loadPlanContext, type PlanContext } from "@/lib/plan";
 import { catalogCardRepo, wishlistItemRepo, type DbClient } from "@/lib/repo";
 import {
@@ -78,11 +79,13 @@ export async function moveFromLookup(
   copyId: string,
   destination: MoveDestination,
   tcgdexId: string,
+  /** Her line popup choice for a back-half move (UIL-117). */
+  lineChoice?: LineChoice,
 ): Promise<LookupMoveResult> {
   try {
     const { db } = await getOwnerContext();
     const options = await loadMoveOptions(db);
-    const res = await applyMove(db, { copyId, destination }, moveNameLookups(options));
+    const res = await applyMove(db, { copyId, destination, lineChoice }, moveNameLookups(options));
     const lookup = await assembleLookup(db, tcgdexId);
     return { ok: true, label: res.destinationLabel, lookup };
   } catch (err) {

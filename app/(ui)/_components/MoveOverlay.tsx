@@ -6,6 +6,7 @@
  * the card being moved and its current home, then the placement picker. Escape / backdrop closes.
  */
 
+import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
 import { useEffect } from "react";
 import type {
   BlockNeedCandidate,
@@ -48,6 +49,7 @@ export function MoveOverlay({
   card,
   options,
   allowLineJoin,
+  lineModel,
   onConfirm,
   onClose,
 }: {
@@ -61,7 +63,9 @@ export function MoveOverlay({
    * tests could not see. Passing the prop explicitly still overrides the default.
    */
   allowLineJoin?: boolean;
-  onConfirm: (dest: MoveDestination) => void;
+  /** UIL-117: the line popup's model loader; with it, BACK HALF opens the one line popup (see MovePanel). */
+  lineModel?: (proposal: LineProposal) => Promise<LinePopupModel>;
+  onConfirm: (dest: MoveDestination, lineChoice?: LineChoice) => void;
   onClose: () => void;
 }) {
   const lineJoinOn = allowLineJoin ?? Boolean(card.joinCandidates);
@@ -139,6 +143,7 @@ export function MoveOverlay({
             existingLines={card.existingLines}
             naturalBandKey={card.naturalBandKey}
             blockNeeds={card.blockNeeds}
+            lineModel={lineModel}
             onConfirm={onConfirm}
           />
           <div className="hint">Pick a new home. No rule applies here — it is your call.</div>

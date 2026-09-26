@@ -43,6 +43,13 @@ import type {
 import { defaultMoveHalf, isMoveDestinationComplete } from "@/lib/line/move";
 import type { Locale } from "@/lib/sync/types";
 import { bandMeta } from "./plan-meta";
+import {
+  defaultChoiceFor,
+  type LineChoice,
+  type LinePopupModel,
+  type LineProposal,
+} from "@/lib/line/popup";
+import { LinePopup } from "./LinePopup";
 
 const BULK = "__bulk__";
 
@@ -56,6 +63,7 @@ export function MovePanel({
   naturalBandKey,
   cardLocale,
   blockNeeds,
+  lineModel,
   onConfirm,
 }: {
   options: MoveOptions;
@@ -84,7 +92,13 @@ export function MovePanel({
    * sheet.
    */
   blockNeeds?: BlockNeedCandidate[];
-  onConfirm: (dest: MoveDestination) => void;
+  /**
+   * UIL-117: the line popup's model loader. When a screen passes it, picking BACK HALF opens the ONE line popup
+   * (mockup v3) instead of the inline line chips, and her confirm there is the move, sent with her `LineChoice`.
+   * Absent (the Haul Plan until UIL-117 PR 4), the inline picker below works as before.
+   */
+  lineModel?: (proposal: LineProposal) => Promise<LinePopupModel>;
+  onConfirm: (dest: MoveDestination, lineChoice?: LineChoice) => void;
 }) {
   const firstGeneral = options.binders.find((b) => b.type === "general");
   const [binderId, setBinderId] = useState<string>(() => {
@@ -174,19 +188,65 @@ export function MovePanel({
    * incomplete without a band, and it is not greyed). If UIL-056's invariant is ever relaxed in
    * lib/line/move.ts, this chip enables itself the same day — nothing here restates the rule.
    */
-  const backHalfNeedsLine = !isMoveDestinationComplete({
-    kind: "shelf",
-    binderId: "probe",
-    half: "back",
-    band: "probe",
-    ...(allowLineJoin ? { lineJoin } : {}),
-  });
+  const backHalfNeedsLine =
+    !lineModel &&
+    !isMoveDestinationComplete({
+      kind: "shelf",
+      binderId: "probe",
+      half: "back",
+      band: "probe",
+      ...(allowLineJoin ? { lineJoin } : {}),
+    });
   // Her words for the condition; the remedy names where the line picker is on THIS panel (the
   // section order flips when there is nothing to join — see the render below) or, where the panel has
   // no picker at all (plan spotlight, Collections), the screen that does.
   const backHalfReason = allowLineJoin
     ? `The back half holds lines. Pick a line ${hasCandidates ? "above" : "below"} to enable. Or choose the front half, a collection, or bulk.`
     : "The back half holds lines. Move it from the Lines page to pick one. Or choose the front half, a collection, or bulk.";
+
+  /** UIL-117: the line popup, open over the sheet while she chooses the line. */
+  const [linePop, setLinePop] = useState<{ model: LinePopupModel; choice: LineChoice } | null>(
+    null,
+  );
+  const [linePopBusy, setLinePopBusy] = useState(false);
+  const [linePopError, setLinePopError] = useState<string | null>(null);
+
+  /** Open the popup on this binder and band: an open slot for this card here is added to, else a line is started. */
+  async function openLinePopup(proposal?: LineProposal) {
+    if (!lineModel) return;
+    const bandKey = band ?? naturalBandKey ?? options.bands[0]?.key ?? "";
+    const here = (joinCandidates ?? []).find(
+      (c) => c.binderId === binderId && c.bandKey === bandKey,
+    );
+    const p: LineProposal =
+      proposal ??
+      (here
+        ? { kind: "add", lineId: here.lineId, slotId: here.slotId }
+        : { kind: "start", binderId, band: bandKey });
+    setLinePopBusy(true);
+    setLinePopError(null);
+    try {
+      const model = await lineModel(p);
+      setLinePop({ model, choice: defaultChoiceFor(p) });
+    } catch (e) {
+      setLinePopError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLinePopBusy(false);
+    }
+  }
+
+  function confirmLine(choice: LineChoice) {
+    if (!linePop) return;
+    const { line } = linePop.model;
+    const dest: MoveDestination = {
+      kind: "shelf",
+      binderId: choice.mode === "start" ? choice.binderId : (line.binderId ?? binderId),
+      half: "back",
+      band: choice.mode === "start" ? choice.band : line.bandKey,
+    };
+    setLinePop(null);
+    onConfirm(dest, choice);
+  }
 
   function summary(): string {
     if (blockNeed) {
@@ -322,6 +382,10 @@ export function MovePanel({
                     disabled={dead}
                     title={dead ? backHalfReason : undefined}
                     onClick={() => {
+                      if (h === "back" && lineModel) {
+                        void openLinePopup();
+                        return;
+                      }
                       setHalf(h);
                       setLineJoin(undefined);
                     }}
@@ -542,7 +606,25 @@ export function MovePanel({
             ? "Start a new line anyway ▶"
             : confirmLabel}
         </button>
+        {linePopError ? (
+          <div className="oskip" role="alert">
+            {linePopError}
+          </div>
+        ) : null}
       </div>
+      {linePop ? (
+        <div className="lp-overlay">
+          <LinePopup
+            model={linePop.model}
+            value={linePop.choice}
+            busy={linePopBusy}
+            onChange={(choice) => setLinePop({ ...linePop, choice })}
+            onCancel={() => setLinePop(null)}
+            onConfirm={confirmLine}
+            onSwitch={(proposal) => void openLinePopup(proposal)}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

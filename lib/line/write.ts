@@ -27,8 +27,8 @@
  * SERVER ONLY.
  */
 
-import { toCatalogCard } from "@/lib/plan/adapt";
-import type { IncomingCard, TypeColorMap, Variant } from "@/lib/engine";
+import { toCatalogCard, toOwnedCopy } from "@/lib/plan/adapt";
+import type { TypeColorMap, Variant } from "@/lib/engine";
 import {
   applyWriteOps,
   catalogCardRepo,
@@ -43,19 +43,18 @@ import {
   type WriteOp,
   binderBlockRepo,
 } from "@/lib/repo";
-import { localeOfId } from "@/lib/catalog/locale";
 import { resolveDecisionWrites } from "./decisions";
 import { buildScreenModel } from "./load";
 import {
-  buildExistingLineJoinOps,
   buildMoveOps,
-  buildNewLineJoinOps,
   describeMove,
   isMoveDestinationComplete,
   lineJoinOf,
   type MoveNameLookups,
 } from "./move";
-import type { DecisionChoiceId, MoveDestination, MoveRequest } from "./types";
+import type { DecisionChoiceId, LineJoinChoice, MoveDestination, MoveRequest } from "./types";
+import { buildLineChoiceOps, type LineWriteState } from "./line-choice";
+import type { LineChoice } from "./popup";
 
 export interface MoveResult {
   copyId: string;
@@ -75,17 +74,13 @@ export interface MoveResult {
  * `auth.uid()` and RLS enforces it. It is never carried in a payload.
  */
 /**
- * A join is checked against THE LINE, not only the slot (UIL-117 gap 2). The destination's binder and band come
- * from the browser, and a stale sheet, a line with no binder (the panel then falls back to the first general
- * binder) or any caller that skips the panel could send the wrong ones; the card itself was never compared with
- * the slot. So: the line's own binder, back half and band, and a card of the slot's own species and language
- * (the slot's target is in the line's language, UIL-090, so one comparison covers both). Nothing is written when
- * any of these fails.
+ * A join is checked against THE LINE (UIL-117 gap 2): the destination the browser sent must be the line's own binder,
+ * back half and band. A stale sheet, a line with no binder (the panel then fell back to the first general binder) or
+ * any caller that skips the panel is refused rather than silently corrected. The card-against-slot checks (species,
+ * and language with its second confirm) live in `buildLineChoiceOps`, the one line builder.
  */
 async function assertJoinMatchesLine(
   db: DbClient,
-  catalogCardId: string,
-  slot: Row<"line_slot">,
   lineId: string,
   dest: MoveDestination,
 ): Promise<void> {
@@ -99,20 +94,76 @@ async function assertJoinMatchesLine(
       "That line is in another colour band — reload the screen and pick the line again.",
     );
   }
-  if (!slot.target_catalog_card_id) return;
-  if (localeOfId(catalogCardId) !== localeOfId(slot.target_catalog_card_id)) {
-    throw new Error(
-      "That line is in another language than this card — pick a line in its own language.",
-    );
-  }
-  const [card, target] = await Promise.all([
-    catalogCardRepo.getByPk(db, catalogCardId),
-    catalogCardRepo.getByPk(db, slot.target_catalog_card_id),
+}
+
+/**
+ * The line ops for one copy moving into a back half (UIL-117), shared by every server path that can do it (a Move,
+ * a Collections removal). A join is checked against its line first; then the ONE line builder runs on fresh state.
+ *
+ * NO "a line already exists" refusal on START (UIL-096). Karvi overruled it: "Instead of blocking the creation of an
+ * evolution line, I want a warning that there is a line existing in my ENTIRE collection." The warning is the popup's,
+ * shown before she confirms; by the time a request reaches here she has chosen to start one anyway.
+ */
+export async function buildBackHalfLineOps(
+  db: DbClient,
+  copy: Row<"copy">,
+  destination: MoveDestination,
+  choice: LineChoice,
+): Promise<{ ops: WriteOp[]; slotId: string }> {
+  if (choice.mode === "join") await assertJoinMatchesLine(db, choice.lineId, destination);
+  const state = await loadLineWriteState(db, copy, choice);
+  const built = buildLineChoiceOps(state, copy.id, choice);
+  return { ops: built.ops, slotId: built.slotId };
+}
+
+/** The older `lineJoin` on a Move destination, read as the popup's choice (UIL-117): the same rules either way. */
+function lineChoiceFromJoin(join: LineJoinChoice | null, dest: MoveDestination): LineChoice | null {
+  if (!join || dest.kind !== "shelf") return null;
+  return join.mode === "existing"
+    ? { mode: "join", lineId: join.lineId, slotId: join.slotId }
+    : { mode: "start", binderId: dest.binderId, band: dest.band, pulls: [] };
+}
+
+/**
+ * Fresh state for `buildLineChoiceOps`: the copy's card, the catalog and type map for a new line's slots, her other
+ * copies as pull candidates, and every line and slot (for a joined line's language, and the slots pulls leave).
+ */
+async function loadLineWriteState(
+  db: DbClient,
+  copy: Row<"copy">,
+  choice: LineChoice,
+): Promise<LineWriteState> {
+  const [catalogRows, typeMapRows, copies, lines, slots] = await Promise.all([
+    catalogCardRepo.listAll(db),
+    typeColorMapRepo.list(db),
+    copyRepo.list(db),
+    evolutionLineRepo.list(db),
+    lineSlotRepo.list(db),
   ]);
-  const sameSpecies = !!card && !!target && card.dex_id.some((d) => target.dex_id.includes(d));
-  if (!sameSpecies) {
-    throw new Error("That slot is for a different card — pick the slot for this card's own stage.");
-  }
+  const catalog = catalogRows.map(toCatalogCard);
+  const catalogById = new Map(catalog.map((c) => [c.tcgdexId, c]));
+  const card = catalogById.get(copy.catalog_card_id);
+  if (!card) throw new Error("That card's catalog entry is missing — reload and try again.");
+  const typeColorMap: TypeColorMap = {};
+  for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
+  const slotsByLine = new Map<string, Row<"line_slot">[]>();
+  for (const sl of slots) slotsByLine.set(sl.line_id, [...(slotsByLine.get(sl.line_id) ?? []), sl]);
+  return {
+    copy,
+    incoming: { id: copy.id, card, variant: (copy.variant as Variant) ?? "normal" },
+    catalog,
+    typeColorMap,
+    owned:
+      choice.mode === "start"
+        ? copies
+            .filter((c) => c.id !== copy.id)
+            .map((c) => toOwnedCopy(c, catalogById))
+            .filter((o): o is NonNullable<typeof o> => o !== null)
+        : [],
+    copiesById: new Map(copies.map((c) => [c.id, c])),
+    lines: new Map(lines.map((l) => [l.id, l])),
+    slotsByLine,
+  };
 }
 
 export async function applyMove(
@@ -128,7 +179,10 @@ export async function applyMove(
   // from sending a back-half destination with no line and reproducing the exact strand this fix
   // exists to close. Re-checked here for the same reason a stale slot/line id is never trusted from
   // the browser: the ONE rule, enforced in the ONE place that can't be bypassed.
-  if (!isMoveDestinationComplete(req.destination)) {
+  // A popup choice (UIL-117) IS the line instruction for a back-half destination, in place of the older lineJoin.
+  const choiceCompletes =
+    !!req.lineChoice && req.destination.kind === "shelf" && req.destination.half === "back";
+  if (!choiceCompletes && !isMoveDestinationComplete(req.destination)) {
     throw new Error("That destination is incomplete — reload the screen and pick again.");
   }
 
@@ -149,72 +203,16 @@ export async function applyMove(
     }
   }
 
-  // Moving a card INTO the back half resolves a line target (UIL-056) — re-derived fresh here, same
-  // as reopenSlotId/demoteLineId above, never trusted from the client.
+  // Moving a card INTO the back half writes a line (UIL-056), through the ONE line builder (UIL-117): her popup
+  // choice when the screen sent one, else the older `lineJoin` read as the same choice. Every id is re-read fresh
+  // here and nothing about the line is trusted from the browser; the card lands in the LINE's binder and band.
   const join = lineJoinOf(req.destination);
   let lineJoinOps: WriteOp[] | undefined;
   let resolvedLineSlotId: string | null | undefined;
-  if (join && req.destination.kind === "shelf") {
-    if (join.mode === "existing") {
-      const slot = await lineSlotRepo.getByPk(db, join.slotId);
-      if (!slot || slot.line_id !== join.lineId) {
-        throw new Error("That line slot no longer exists — reload the screen and pick again.");
-      }
-      if (slot.state === "filled") {
-        throw new Error("That slot has already been filled — reload the screen and pick again.");
-      }
-      await assertJoinMatchesLine(db, copy.catalog_card_id, slot, join.lineId, req.destination);
-      const siblings = await lineSlotRepo.listByLine(db, join.lineId);
-      const slotIsLastOpen = siblings.every((s) => s.id === slot.id || s.state === "filled");
-      const built = buildExistingLineJoinOps({
-        copyId: req.copyId,
-        lineId: join.lineId,
-        slotId: slot.id,
-        slotIsLastOpen,
-      });
-      lineJoinOps = built.ops;
-      resolvedLineSlotId = built.slotId;
-    } else {
-      const card = await catalogCardRepo.getByPk(db, copy.catalog_card_id);
-      if (!card) throw new Error("That card's catalog entry is missing — reload and try again.");
-      const cc = toCatalogCard(card);
-      const [catalogRows, typeMapRows] = await Promise.all([
-        catalogCardRepo.listAll(db),
-        typeColorMapRepo.list(db),
-      ]);
-      const typeColorMap: TypeColorMap = {};
-      for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
-      const incoming: IncomingCard = {
-        id: req.copyId,
-        card: cc,
-        variant: (copy.variant as Variant) ?? "normal",
-      };
-      const built = buildNewLineJoinOps({
-        incoming,
-        catalog: catalogRows.map(toCatalogCard),
-        typeColorMap,
-        binderId: req.destination.binderId,
-        destinationBand: req.destination.band,
-      });
-      // Checked against the line's ACTUAL root (built.rootDexId) rather than the moved card's own
-      // dexId — those differ whenever the card is not itself the chain's root (e.g. starting a line
-      // from a Stage1 whose Basic exists in the catalog as a placeholder). Discarding `built.ops` on
-      // a throw is safe: they are pure data, no I/O has happened yet.
-      // Scoped to the DESTINATION BINDER (UIL-084): a line in another binder no longer owns this
-      // species-and-band, so she can start that binder's own line.
-      /**
-       * NO "a line already exists" refusal (UIL-096). This used to read every line for the species in the
-       * destination binder and band and throw `LINE_EXISTS_IN_BINDER` if one matched her card's locale.
-       * Karvi overruled the rule: "Instead of blocking the creation of an evolution line, I want a warning
-       * that there is a line existing in my ENTIRE collection." The warning is the Move panel's, shown
-       * before she confirms, from the join options that already list every line she has; by the time a
-       * request reaches here she has seen it and chosen to start a new line anyway, and that is hers to
-       * choose. A card must always be movable.
-       *
-       * Nothing downstream needed the uniqueness: `evolution_line` has no unique constraint (0002 declares
-       * only a plain `(root_dex_id, color_band)` index), and the cascade's own join picks deterministically
-       * among several same-species lines by oldest-first (`existingLineSlot`, pinned elsewhere).
-       */
+  if (req.destination.kind === "shelf" && req.destination.half === "back") {
+    const choice = req.lineChoice ?? lineChoiceFromJoin(join, req.destination);
+    if (choice) {
+      const built = await buildBackHalfLineOps(db, copy, req.destination, choice);
       lineJoinOps = built.ops;
       resolvedLineSlotId = built.slotId;
     }
