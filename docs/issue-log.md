@@ -8748,3 +8748,52 @@ No source investigation is owed at this stage; the design work itself is the nex
 **Cross-reference UIL-036** (the Haul Plan's line-join wiring this would rework) and **UIL-114** (the
 same screen's other pending restructuring, worth the UX session checking before mocking up a design that
 collides with it).
+
+## UIL-118 — There is no way to delete an evolution line, so a line she moved cards out of keeps its placeholder slots forever
+
+- **Reported:** 2026-09-26 (Karvi). In her words: "Before I asked the DE to take a snapshot, I need the
+  ability to delete lines. I accidentally added cards in the wrong place. I moved the cards, but the
+  lines still created placeholders. I want to get rid of them, and users should be able to as well."
+- **Status:** Open, assigned to Full Stack Dev - 2, plan first, coordinating with the Tech Lead's UIL-117
+  line work.
+- **Priority:** High (Senior BA's read; it blocks her next baseline snapshot, and she needs these lines
+  gone first; Karvi to confirm).
+- **Area:** Lines
+- **Env:** Testing, `develop` `676aaa7`
+
+**Confirmed: no delete or retire path exists anywhere for an evolution line.** Grepped `lib/line/*.ts`
+and every Lines-screen file for `delete`/`retire` against a line, and the migrations for a
+`delete_line`/`delete_evolution_line` op — none exist. There is no button, no server action, no
+`apply_write_ops` op that removes a line or its slots once created. Moving every card out of a line's
+slots empties them, but the line and its now-empty slot rows stay, exactly as she describes.
+
+**Three tables a delete has to account for, all confirmed to exist, all already `on delete set null`
+against `evolution_line`/`line_slot`:** `wishlist_item.line_slot_id`
+([`supabase/migrations/0021_wishlist_slot_ops.sql`](../supabase/migrations/0021_wishlist_slot_ops.sql), a
+wishlist row can be held for a specific slot), `placement_decision.line_id`
+([`0013_decision_persistence.sql:73`](../supabase/migrations/0013_decision_persistence.sql:73), pure
+traceability), and `line_slot.resolved_decision_kind` / `_choice` / `_collection_id`
+([`0013:68-70`](../supabase/migrations/0013_decision_persistence.sql:68), the resolved-answer markers
+UIL-078 added). Because all three are `on delete set null`, a plain `delete from line_slot` /
+`delete from evolution_line` would not be blocked by the database — but it would silently detach a
+wishlist hold and null out decision history's own line/slot pointers, which is a product question (does
+deleting a line also mean forgetting what was once decided about it, or should that history survive as
+orphaned-but-intact rows?), not just a schema mechanics one.
+
+**Confirmed: a delete also has to satisfy migration 0028's new invariant, landed this same week.**
+`assert_line_slots` ([`supabase/migrations/0028_assert_line_slots.sql`](../supabase/migrations/0028_assert_line_slots.sql))
+is appended by `applyWriteOps` to every payload touching a copy or a slot, and raises if a slot and its
+copy's back-pointer disagree, or if a slot reads `filled` with no copy. A delete-line op has to clear
+`copy.line_slot_id` for every copy the line's slots point at (if any remain — though her report implies
+they're already moved out) in the SAME transaction as removing the slots, or this new check refuses the
+write outright.
+
+**Suggested fix.** A single `delete_line` (or `retire_line`) `apply_write_ops` op: refuses if any slot is
+still `filled` (a card has to be moved out first, matching her own sequence — move, then delete), then
+removes the line's slot rows and the line row itself in one transaction, letting the three `on delete set
+null` foreign keys detach cleanly. Plan first, per the Senior BA, coordinating with whatever UIL-117's
+line-popup work (PR 2, in flight) already touches in this area so the two don't collide.
+
+**Cross-reference UIL-117** (the line-popup rework already restructuring how lines are created and
+moved into; this entry is the missing inverse operation) and **UIL-087** (the slot-fill invariant,
+now enforced database-side by migration 0028, which a delete path has to satisfy).
