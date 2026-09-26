@@ -1278,3 +1278,65 @@ jobs:
           });
           JS
           node uil113b.mjs
+
+      # UIL-117 PR 1 (migration 0028): the BEFORE read of UIL-087's slot invariant, which 0028 makes the database
+      # enforce on every write that touches a copy or a slot. An existing violation would make the next such write
+      # refuse, so each shape 0028 refuses is counted here. READ-ONLY, COUNTS ONLY: no id, no card, no name.
+      - name: "UIL-117 PR 1: slot invariant counts (0028 BEFORE read, counts only)"
+        if: always()
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          cat > uil117.mjs <<'JS'
+          import { createClient } from "@supabase/supabase-js";
+          const db = createClient(`https://${process.env.PROJECT_REF}.supabase.co`, process.env.SERVICE_KEY, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+          const all = async (table, cols) => {
+            const out = [];
+            for (let from = 0; ; from += 1000) {
+              const { data, error } = await db.from(table).select(cols).order("id").range(from, from + 999);
+              if (error) throw new Error(`${table}: ${error.message}`);
+              out.push(...data);
+              if (data.length < 1000) return out;
+            }
+          };
+          const [lines, slots, copies] = await Promise.all([
+            all("evolution_line", "id,binder_id"),
+            all("line_slot", "id,line_id,state,copy_id"),
+            all("copy", "id,role,binder_id,binder_half,line_slot_id"),
+          ]);
+          const lineById = new Map(lines.map((l) => [l.id, l]));
+          const copyById = new Map(copies.map((c) => [c.id, c]));
+          const pointers = new Map();
+          for (const c of copies) if (c.line_slot_id) pointers.set(c.line_slot_id, (pointers.get(c.line_slot_id) ?? 0) + 1);
+          const n = {
+            lines: lines.length, slots: slots.length, copies: copies.length,
+            filled_slots: 0, filled_with_no_copy: 0, filled_copy_gone: 0, filled_copy_not_shelved: 0,
+            filled_copy_does_not_point_back: 0, filled_copy_in_another_binder: 0, filled_copy_not_back_half: 0,
+            filled_more_than_one_pointer: 0, unfilled_slot_pointed_at: 0, copies_pointing_at_a_slot: [...pointers.values()].reduce((a, b) => a + b, 0),
+          };
+          for (const s of slots) {
+            const p = pointers.get(s.id) ?? 0;
+            if (s.state !== "filled") { if (p > 0) n.unfilled_slot_pointed_at++; continue; }
+            n.filled_slots++;
+            const c = s.copy_id ? copyById.get(s.copy_id) : null;
+            const l = lineById.get(s.line_id);
+            if (!s.copy_id) n.filled_with_no_copy++;
+            else if (!c) n.filled_copy_gone++;
+            else if (c.role !== "shelved") n.filled_copy_not_shelved++;
+            else if (c.line_slot_id !== s.id) n.filled_copy_does_not_point_back++;
+            else if ((c.binder_id ?? null) !== (l?.binder_id ?? null)) n.filled_copy_in_another_binder++;
+            else if (c.binder_half !== "back") n.filled_copy_not_back_half++;
+            else if (p !== 1) n.filled_more_than_one_pointer++;
+          }
+          const violations = n.filled_with_no_copy + n.filled_copy_gone + n.filled_copy_not_shelved + n.filled_copy_does_not_point_back +
+            n.filled_copy_in_another_binder + n.filled_copy_not_back_half + n.filled_more_than_one_pointer + n.unfilled_slot_pointed_at;
+          console.log(JSON.stringify(n));
+          console.log(violations === 0
+            ? "VERDICT: 0 violations. 0028 can apply: no existing slot would make a write refuse."
+            : `::error::VERDICT: ${violations} existing violation(s). Every write touching them will be refused after 0028; repair first.`);
+          JS
+          node uil117.mjs
