@@ -4340,7 +4340,21 @@ address post go-live. Flagged Low honestly, not "Low because busy."
 ## UIL-053 — A card can be shelved without appearing in the collection it should belong to
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open — **REPRODUCED by Karvi 2026-09-26, active again.** Her words: "I did experience this
+- **Status:** **Fixed** — PR [#384](https://github.com/viantihu/pokemon-tcg-tracker/pull/384) MERGED to `develop` 2026-09-26 (squash `471d926`), deployed
+  green with the action check (Deploy run `36279276324`); Full Stack Dev - 2; the Tech Lead's approval at
+  `641a3ea`; QA: Dev 2's 14-mutant sweep and the Tech Lead's 5 all killed. QA ran 10 of its own: 6 killed first time; the 2 it held for (the wrong collection joined, and her Move of such a card with no pick) were killed after the test-only commit `9723c73`; 1 survived and was accepted (the commit reads the forecast rather than the fresh derivation, and the server then refuses, writing nothing); 1 was equivalent (the client sending a pick with a Move, which the server ignores). A further override mutant was also equivalent, because an overridden card skips the join. **Cause (the Tech Lead's diagnosis, run `36276970692`):** the Haul Plan
+  cascade's card-class route sent a specialty-class card to the first specialty binder with no
+  collection, and the commit wrote no `union_collection_targets` on that path, so the card was shelved in a
+  binder that hosts collections while sitting on NO collection's list. Before the 2026-09-26 start-over
+  every such card was already on a list, so the collection-claim route caught it first, which is why the
+  2026-09-18 read found 27 of 27 correct. After the start-over emptied her open lists, 13 cards took the
+  card-class route, and she re-added 12 of them from Lookup (1 by a later Move). **Fix:** when the specialty
+  binder hosts any collection, the spotlight asks "Which collection?" (the Move sheet's chips; nothing is
+  pre-selected unless it hosts exactly one, the Senior BA's ruling), Done waits, and her pick goes on that
+  collection's list in the same write; the server refuses the shelf with no pick; a specialty binder with
+  no collections is unchanged; her Move of such a card still works with no pick (always movable). **Known
+  limit:** the card-class route still picks the FIRST specialty binder, which matters only if she adds a
+  second. Awaiting Karvi's confirmation. **Was:** Open — REPRODUCED by Karvi 2026-09-26, active again. Her words: "I did experience this
   issue. I was able to resolve it by adding the cards from the lookup screen so I was able to complete
   shelving properly." (She was shelving her specialty binder after the 20:29:55Z start-over; she worked
   around it herself, so the broken state is gone, but the placement history of those cards remains.)
