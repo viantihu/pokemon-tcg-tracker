@@ -434,7 +434,12 @@ count that matters is the one the app sees:
   2026-09-26). Every future Testing refresh restores the NEWEST labelled baseline (the Database
   Engineer's `backup_<date>_<time>z` schemas, e.g. `backup_20260926_2232z`), so a refresh returns her
   to a known state rather than an empty one. "Disposable" above means Testing's live tables, never those
-  schemas; any cleanup after B6 leaves every labelled `backup_*` schema in place.
+  schemas; any cleanup after B6 leaves every labelled `backup_*` schema in place. A baseline is a
+  `backup_*` schema whose `snapshot_meta.label` is non-null. An unlabelled `backup_*` schema is a working
+  snapshot, and only those may be cleaned up (the Database Engineer's lane). Each snapshot also holds
+  `catalog_card_standins`, her `source = user` catalog rows, because her copies reference them. That is a
+  copy inside the backup schema; the mirror and `catalog_card` are untouched. The schemas are out-of-band
+  (not migrations), so `db push` never sees them.
 - **`reset-testing.yml` does not work today and must stay that way until B6.** It
   resets through `supabase link`, which needs the Management API the account lost
   access to (UIL-024), so it fails before it can destroy anything. That failure is
