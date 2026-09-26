@@ -8298,3 +8298,43 @@ UIL-082/UIL-099 E4.
 **Cross-reference UIL-060** (the stand-in feature this extends), **UIL-047 C1/C2** and **migration 0016**
 (the existing but namespace-tied locale mechanism this can't simply reuse), **UIL-082** and **UIL-099
 E4** (the promotion-matching this is meant to fix downstream of).
+
+## UIL-110 — Embed an in-app feedback widget on both Testing and Production so real users can file bugs and feature requests once the app goes multi-user
+
+- **Reported:** 2026-09-26 (Karvi, relayed by the "Bugdrop integration for user feedback" session, its
+  owner). Backlog, not a UAT report.
+- **Status:** Open, backlog, blocked on Karvi's product choice, a new private feedback repo, and her
+  installing the GitHub App on it. Owner: "Bugdrop integration for user feedback".
+- **Priority:** Unrated — Karvi to set.
+- **Area:** Cutover / feedback
+- **Env:** n/a — pre-decision; nothing built yet.
+
+**Product choice, open for Karvi — the owning session is asking her directly, not decided here.**
+[`mean-weasel/bugdrop-board`](https://github.com/mean-weasel/bugdrop-board) is an upvote/roadmap board:
+confirmed via the GitHub API as a closed-beta investigation ("Investigation for an embeddable,
+self-hostable interactive feedback board"), no license set. Would need this app's own Cloudflare Worker
+plus D1, two secrets, and a per-user token route.
+[`bugdrophq/bugdrop`](https://github.com/bugdrophq/bugdrop) is a bug reporter: confirmed MIT-licensed,
+active, "In-app feedback → GitHub Issues. Screenshots, annotations, the works." One script tag, no user
+login of its own, covers both bugs and feature requests, and files directly to GitHub Issues.
+
+**Reports must not go to this repo, because it's public and a screenshot could expose a user's own
+collection data.** Needs a separate PRIVATE repo purpose-built for feedback intake, with Karvi installing
+whichever tool's GitHub App on that repo specifically, not this one.
+
+**Other scoping named at intake, all still open, none decided:**
+
+- Separate targets or labels for Testing and Production, configured per Vercel environment, so a report
+  names which deployment it came from.
+- Only useful once multi-user auth replaces the single allow-listed email this app authenticates today
+  (confirmed still the case: [`lib/auth/allowlist.ts`](../lib/auth/allowlist.ts) gates every sign-in) —
+  a feedback widget for one user is pointless.
+- Opens a second intake channel next to this issue log (GitHub Issues on the new private repo, separate
+  from `docs/issue-log.md`), so a routing rule from there into UIL triage is needed before it goes live.
+- No Content-Security-Policy exists in this app today — confirmed: `next.config.ts` sets no headers, and
+  no CSP appears anywhere else in the repo. If one is ever added, it will need the widget's script origin
+  allow-listed, or the widget breaks silently.
+
+**Tied to Production cutover, not to UAT — priority follows that timeline, not the bug queue.**
+
+**Cross-reference UIL-024** (Production readiness — this belongs in that same pre-cutover scope).
