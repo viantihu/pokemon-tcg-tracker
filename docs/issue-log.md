@@ -8518,3 +8518,165 @@ being asked to mean something narrower.
 match honour + "Add it back," the nearest existing override this could inform the design of), and
 **UIL-100** (the Count check that renders this memory and would need to reflect whatever the new scope
 is).
+
+## UIL-112 — Two "Not mine" buttons render on every owned card in a Finite collection
+
+- **Reported:** 2026-09-26 (Karvi). In her words: "in the collections screen, when I want to say a
+  card is not mine, there [are] two options for that." "This seems to only be happening to the Finite
+  collections."
+- **Status:** Open, assigned to Full Stack Dev - 2.
+- **Priority:** High (Karvi's report; it blocks her testing).
+- **Area:** Collections
+- **Env:** Testing, `develop` `e4025f5`
+
+**Confirmed, and it's exactly the suspect named at intake.** The Finite-set grid
+([`app/(ui)/coll/CollHub.tsx:687-688`](<../app/(ui)/coll/CollHub.tsx>:687)) renders
+`<NotMineButton card={k} busy={busy} onRemoveCopy={onRemoveCopy} />` twice in a row, identical props,
+for every owned card tile — a copy-paste duplication, not a conditional or a second code path.
+`NotMineButton` ([`:797-815`](<../app/(ui)/coll/CollHub.tsx>:797)) wraps the shared `RemoveCopyButton`
+with the "Not mine" label, so this doubles that button specifically, matching her report exactly. This
+block only renders inside the Finite-mode card grid — the Open-mode running-count view has no equivalent
+per-tile loop — which is why it's scoped to Finite collections only, also matching her report.
+
+**Suggested fix.** Delete one of the two duplicate lines.
+
+**Cross-reference:** none needed — a one-line duplication, not a design question.
+
+## UIL-113 — The Japanese collection shows 12 owned when she believes she shelved 10
+
+- **Reported:** 2026-09-26 (Karvi). In her words: "When adding cards to the Japanese collection, even
+  though I'm pretty sure I only shelved 10 cards, 12 are in the collection."
+- **Status:** Open, assigned to the Tech Lead — cause diagnosed, fix not yet built. Open-mode collections
+  count LIST entries as "logged," not owned copies; 2 of the 12 are leftover pre-wipe entries with no
+  copy behind them. The fix is the Tech Lead's: Open mode should count what she owns and mark the 2 stale
+  entries.
+- **Priority:** High.
+- **Area:** Collections
+- **Env:** Testing, `develop` `e4025f5`
+
+**Senior BA's read (run `36264921572`), reported, not independently checkable from this repo:**
+Japanese-printing copies break down as 8 `ja:` shelved, 1 `ja:` in the haul, and 3 Japanese stand-ins
+shelved — 11 shelved, 12 owned by that count.
+
+**Checked the specific hypothesis offered at intake against current source, and it did not hold as
+stated — flagged rather than repeated, and the flag was right.** The relay suggested the Collections
+view "may count every owned card on its list, including one still in the haul." `loadCollHub`
+([`app/(ui)/coll/actions.ts:81-113`](<../app/(ui)/coll/actions.ts>:81)) builds its ownership map from
+`copyRepo.listShelved(db)` only — a role-scoped query — and its own comment states the rule directly:
+"a target card is 'owned' if a SHELVED copy of it sits in a binder the collection lives in." A copy still
+in the haul is not counted by this path.
+
+**Diagnosed (Tech Lead, runs `36265297845` and `36265463408`): the Japanese collection is in OPEN mode,
+and Open mode's header counts something different from Finite mode's.** Confirmed directly:
+[`CollHub.tsx:612`](<../app/(ui)/coll/CollHub.tsx>:612) renders `${c.totalCount} logged` for Open mode,
+where `totalCount` ([`actions.ts:158`](<../app/(ui)/coll/actions.ts>:158)) is `cardsView.length` — the
+length of the collection's own target list, counted regardless of whether each target has a copy behind
+it. 10 of her 12 listed cards are genuinely shelved; the other 2 are leftover target entries from before
+the 2026-09-26 wipe whose backing copies no longer exist, still on the list, still counted by `totalCount`
+even though `owned` would read false for them.
+
+**Cross-reference UIL-098** (Japanese stand-ins and `ja:` namespacing) and **UIL-100** (the Dex-count
+mismatch class this resembles, though the actual mechanism here — Open mode's list-length count — is
+distinct from that class).
+
+## UIL-114 — The Haul Plan's pre-run screen should go away, "Not mine" belongs on the plan itself, and new imports should update the running screen live
+
+- **Reported:** 2026-09-26 (Karvi). In her words: "The first 'Haul plan' screen is pretty irrelevant. I
+  should be able to label 'Not mine' once the haul has actually ran. That said, the first screen is not
+  necessary. If new loads are made while a haul plan is running, that main screen should be updated with
+  new cards (this will lay the groundwork for future features I have in mind)."
+- **Status:** Open, assigned to Full Stack Dev - 2, plan first.
+- **Priority:** High.
+- **Area:** Haul Plan
+- **Env:** Testing, `develop` `e4025f5`
+
+**Confirmed which screen she means.** The Haul Plan's pre-run state
+([`app/(ui)/plan/PlanScreen.tsx`](<../app/(ui)/plan/PlanScreen.tsx>), the `draft.length === 0` /
+draft-listing view before "Run the plan" is pressed) is the worklist this entry calls "the first
+screen" — distinct from the post-run plan view where cascade routing, bands and "Done" live. UIL-098
+part 2 already removed that screen's own add-form, so today it's read-only: a list of what a Dex import
+parked, waiting for a run.
+
+**Three asks, one screen, one entry per her own rule:** (1) remove the pre-run screen as a distinct step
+— fold its content into the running plan view rather than showing it as a separate first stop; (2) "Not
+mine" moves to (or is newly added on) the running plan view, not the removed pre-run one; (3) a later Dex
+import, arriving while a plan is already running, should update the live worklist in place rather than
+requiring her to leave and re-run. She names (3) explicitly as groundwork for future features, not just
+this fix.
+
+**Suggested fix.** A plan first, not code — this reshapes the Haul Plan's own screen structure and needs
+scoping before implementation, per her own framing ("plan first").
+
+**Cross-reference UIL-089** (the removal mechanism "Not mine" would still use, wherever it moves to) and
+**UIL-115** (the search feature asked for on the same screen, likely the same PR).
+
+## UIL-115 — A "Search haul" feature for the Haul Plan, which loads hundreds of cards at a time
+
+- **Reported:** 2026-09-26 (Karvi). In her words: "I need a 'Search haul' feature in the haul plan. I'm
+  loading hundreds of cards at a time."
+- **Status:** Open, assigned to Full Stack Dev - 2, with UIL-114.
+- **Priority:** High.
+- **Area:** Haul Plan
+- **Env:** Testing, `develop` `e4025f5`
+
+**Confirmed: no search or filter exists anywhere in the Haul Plan today.** Grepped
+[`app/(ui)/plan/PlanScreen.tsx`](<../app/(ui)/plan/PlanScreen.tsx>) for any search/filter affordance over
+the worklist itself — none exists; the file's own comment (`:946-947`) says the empty state deliberately
+avoids "pointing at a search box that is not there," confirming its absence is already a known, named
+gap, not something removed by accident. At the scale she describes — hundreds of cards per haul — a flat
+list with no way to jump to a specific card is the concrete pain point.
+
+**Grouped with UIL-114, not decided here.** Both touch the same screen and the same PR is the likely
+shape, per the Senior BA — this entry records the search ask on its own so it isn't lost inside UIL-114's
+broader restructuring, but the two aren't required to ship separately.
+
+**Cross-reference UIL-114** (the same screen's broader restructuring this search feature would live
+inside).
+
+## UIL-116 — The yellow "Decisions" banner on the Haul Plan is irrelevant to her; the Lines screen's own banner stays
+
+- **Reported:** 2026-09-26 (Karvi). In her words: "The yellow 'Decisions' banner renders, but it is
+  completely irrelevant to the user." Karvi confirmed, once asked, that she means the **Haul Plan's**
+  bar — "N decisions flagged (resolve in Lines · M7)" — not the Lines screen's own banner, which she
+  wants kept: it's the only way into the decision cards.
+- **Status:** Open, assigned to Full Stack Dev - 2. Removing the Haul Plan bar in both states ("N
+  decisions flagged…" and "No decisions flagged · ready to commit") and rewording the "M7" milestone
+  text elsewhere it appears. The Lines screen's `alertbar` is untouched.
+- **Priority:** High.
+- **Area:** Haul Plan
+- **Env:** Testing, `develop` `e4025f5`
+
+**Corrected after Karvi's own answer — this was misidentified as the Lines screen at first pass, before
+asking her which banner she meant.** The actual bar is the Haul Plan's own `alertbar`
+([`app/(ui)/plan/PlanScreen.tsx:1302-1312`](<../app/(ui)/plan/PlanScreen.tsx>:1302)), sharing the same
+CSS class and `--note` yellow (`#fedf4f`, [`app/globals.css:20`](../app/globals.css:20)) as the Lines
+screen's, which is why the two were easy to conflate. Confirmed both states exist and both render the
+same class: `${plan.summary.decisions} decision(s) flagged (resolve in Lines · M7)` when nonzero,
+"No decisions flagged · ready to commit" when zero — the text names a milestone number ("M7") that means
+nothing to her and points at a screen (Lines) she isn't on. The Lines screen's own banner
+([`app/(ui)/line/LineScreen.tsx:337-348`](<../app/(ui)/line/LineScreen.tsx>:337), fed by `openDecisions`
+at [`:197-200`](<../app/(ui)/line/LineScreen.tsx>:197)) is a different render of the same CSS class and
+stays exactly as it is — it's the entry point to the decision cards Karvi confirmed she still needs.
+
+**Cross-reference UIL-078** (the decision-persistence mechanism the Lines banner's `resolved` state
+comes from, unaffected by this entry) and **UIL-114** (the same Haul Plan screen this bar's removal
+touches).
+
+## UIL-117 — Rework adding lines from the haul, UX-first: mockups before implementation
+
+- **Reported:** 2026-09-26 (Karvi). In her words: "I want to rework adding lines from the haul from a
+  UX perspective. This will be a larger lift that requires mock ups from the UX chat that I approve
+  before we implement. (this can be worked on in parallel to testing)."
+- **Status:** Open, owner "UX Dev" (mockups); nothing is implemented until Karvi approves.
+- **Priority:** Medium (Senior BA's read; parallel to testing, not blocking it).
+- **Area:** Haul Plan, Lines
+- **Env:** n/a — pre-mockup; nothing built yet.
+
+**Explicitly not a bug and not scoped here — her own words set the process.** Mockups first, her
+approval required before any implementation starts, and it runs alongside UAT rather than blocking it.
+No source investigation is owed at this stage; the design work itself is the next step, owned by the
+"UX Dev" session.
+
+**Cross-reference UIL-036** (the Haul Plan's line-join wiring this would rework) and **UIL-114** (the
+same screen's other pending restructuring, worth the UX session checking before mocking up a design that
+collides with it).
