@@ -8237,3 +8237,64 @@ rather than only `GET`ing the page, so this class of failure is caught before Te
 
 **Cross-reference UIL-105** (confirmed the same incident, not a separate cause) and **UIL-097** (PR
 #333, the change that introduced the export).
+
+## UIL-108 — The Sync page's stand-in form has no field for which language the physical card is in, so TCGdex can't be matched to the right printing later and there is no thumbnail to tell the two apart
+
+- **Reported:** 2026-09-26 (Karvi). In her words: "in the card creation spot, I want to add a field that
+  records which country/language the card is from. This will ensure that when TCGDex adds those cards to
+  their catalog that this app is matching to the correct one. And that the user knows that the manual
+  card they created is in a different language, since there is no thumbnail available for them to
+  quickly reference."
+- **Status:** Open, assigned to Full Stack Dev - 2, plan first (likely a migration).
+- **Priority:** High (Senior BA's read, per Karvi's "before I do anything else"; Karvi to confirm).
+- **Area:** Sync
+- **Env:** Testing, `develop` `44a265c`
+
+**"Card creation" is the Sync page's stand-in form (UIL-060 Half 1).** Migration 0015
+([`supabase/migrations/0015_stand_in_catalog_card.sql:37-39`](../supabase/migrations/0015_stand_in_catalog_card.sql:37))
+added `catalog_card.source` (`'tcgdex'` or `'user'`) with stand-in ids namespaced `user:<uuid>`, and
+[`manualMatchStandIn`](../lib/sync/exec.ts:1377) (`lib/sync/exec.ts:1377`, `insert_catalog_stand_in` at
+`:1406`) is the write path — a card she creates by hand when TCGdex doesn't have it yet, matched to the
+unresolved Dex row that prompted it.
+
+**Confirmed: stand-ins carry no usable language field today, and it's not simply missing — the existing
+`locale` column is structurally the wrong shape for what she's asking.** `catalog_card.locale` exists
+(migration 0016), but its own check constraint —
+[`(locale = 'en') = (tcgdex_id not like 'ja:%')`](../supabase/migrations/0016_catalog_locale.sql:38) —
+ties locale to the MIRROR NAMESPACE a row came from, not a free choice. The migration's own comment says
+so directly: "A `user:` stand-in (0015) is an 'en' row with no `ja:` prefix, so it passes untouched."
+Every stand-in is `locale = 'en'` by construction, regardless of what language the physical card actually
+is — there is no way today for a stand-in to record anything else. Compounding this: the app's own
+`Locale` type ([`lib/sync/types.ts:7`](../lib/sync/types.ts:7)) is `"en" | "ja"` only — narrower than
+"every language TCGdex publishes," which is what she's asking the form to offer. Reusing the existing
+column isn't enough; the type itself needs widening.
+
+**Her ruling, 2026-09-25: offer every language TCGdex publishes, pre-filled from the Dex row.** The form
+should default to the language named on the `unresolved_entry` row that prompted the stand-in — that
+column already exists ([`unresolved_entry.locale`](../supabase/migrations/0002_domain.sql:251), nullable
+text) — but let her change it, since the Dex row's own locale is only ever `en`/`ja` in this app's
+current model and TCGdex may name a language this app hasn't ingested at all. Shown wherever the
+stand-in appears afterward, since there's no thumbnail to tell a non-English printing apart at a glance.
+Used later when TCGdex adds the real card behind the stand-in, so the promotion (UIL-082, UIL-099 E4)
+matches the same-language printing rather than whichever one TCGdex happens to resolve first.
+
+**Testing facts, from the Senior BA's read (run `36253695667`, after her successful import at
+15:27:32Z) — reported, not independently checkable from this repo:** 5 stand-ins exist in the catalog
+(`source = 'user'`), none in use by any copy — they predate the 2026-09-26 wipe. 5 Dex rows sit WAITING.
+**Two consequences worth stating plainly for whoever builds this:** those 5 old stand-ins have no
+language recorded (by the constraint above, they couldn't), so they don't get a free backfill from
+existing data; and re-creating any of them once the new field ships risks a second, differently-shaped
+stand-in for the same card rather than updating the original — worth a dedupe check in the same PR, not
+a separate report.
+
+**Suggested fix.** A migration is the likely shape: either widen `catalog_card.locale`'s constraint and
+enum to decouple it from the id-namespace check for `user:` rows specifically, or add a separate
+free-text/enum language field scoped to stand-ins only, sized to TCGdex's actual published language list
+rather than this app's current two-value `Locale` type. Either way, the form field pre-fills from
+`unresolved_entry.locale` and stays editable, and the value needs to reach every place a stand-in
+renders (Sync, and wherever else UIL-060 and UIL-098 already surface one) plus the promotion match in
+UIL-082/UIL-099 E4.
+
+**Cross-reference UIL-060** (the stand-in feature this extends), **UIL-047 C1/C2** and **migration 0016**
+(the existing but namespace-tied locale mechanism this can't simply reuse), **UIL-082** and **UIL-099
+E4** (the promotion-matching this is meant to fix downstream of).
