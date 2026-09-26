@@ -374,6 +374,21 @@ columns" line names the tables it will copy, so read it against the schema on th
       rows behind (owner `00000000-0000-0000-0000-000000000001`), the script lists the
       candidates and requires `--source-owner=<uuid>`.
 
+Not enforced by the script, checked by hand before the dry run:
+
+- [ ] **Her collection AND her hand-added catalog stand-ins are in Testing's live `public` tables.**
+      The stand-ins are `catalog_card` rows with `source = user` (5 on 2026-09-26, referenced by her
+      copies, presence groups, Dex presence and manual matches). The promotion reads only the live
+      tables, never a `backup_*` schema, so the snapshot's `catalog_card_standins` copy does not
+      reach Production. A start-over deletes both.
+      - **If they are missing** (a start-over happened), the Database Engineer runs
+        `refresh-to-baseline.sh` first, which restores them together. It brings back the **last
+        baseline**, not what she had just before the start-over: work done after that baseline was
+        lost with the start-over.
+      - **If they are there, do nothing.** `refresh-to-baseline.sh` always wipes the live card
+        tables before restoring, so running it would replace anything newer than the last baseline
+        (binders completed since) with the baseline.
+
 ## B4. Connection strings
 
 The script takes both databases as Postgres URIs in `TESTING_DB_URL` and `PROD_DB_URL`.
@@ -434,7 +449,12 @@ count that matters is the one the app sees:
   2026-09-26). Every future Testing refresh restores the NEWEST labelled baseline (the Database
   Engineer's `backup_<date>_<time>z` schemas, e.g. `backup_20260926_2232z`), so a refresh returns her
   to a known state rather than an empty one. "Disposable" above means Testing's live tables, never those
-  schemas; any cleanup after B6 leaves every labelled `backup_*` schema in place.
+  schemas; any cleanup after B6 leaves every labelled `backup_*` schema in place. A baseline is a
+  `backup_*` schema whose `snapshot_meta.label` is non-null. An unlabelled `backup_*` schema is a working
+  snapshot, and only those may be cleaned up (the Database Engineer's lane). Each snapshot also holds
+  `catalog_card_standins`, her `source = user` catalog rows, because her copies reference them. That is a
+  copy inside the backup schema. Snapshotting never writes `catalog_card`; a restore writes back only her `source = user` rows, never a mirror row. The schemas are out-of-band
+  (not migrations), so `db push` never sees them.
 - **`reset-testing.yml` does not work today and must stay that way until B6.** It
   resets through `supabase link`, which needs the Management API the account lost
   access to (UIL-024), so it fails before it can destroy anything. That failure is
