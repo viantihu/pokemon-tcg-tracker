@@ -62,6 +62,7 @@ const STATE = {
       owned: true,
       imageUrl: null,
       bandKey: "red",
+      copyIds: ["copy-1"],
     },
   ],
 };

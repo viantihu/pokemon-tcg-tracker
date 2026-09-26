@@ -31,7 +31,7 @@ import { cardCaption } from "../_components/CardLightbox";
 import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { MoveOverlay } from "../_components/MoveOverlay";
 import { lineModelAction } from "../_components/line-popup-actions";
-import type { LineChoice } from "@/lib/line/popup";
+import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
 import type { LookupCard } from "../plan/plan-types";
 import { createAutosaveScheduler, flushBeforeNavigate } from "./autosave";
 import {
@@ -76,6 +76,20 @@ export const COLL_LOST = {
 type Tab = "coll" | "wish";
 
 /** A card held in the editor's working target list. */
+/**
+ * UIL-117: a move into a back half goes through the line popup, and a line slot holds ONE card, so the popup is
+ * offered only when exactly one copy of the card is shelved in the collection's binder (the server refuses the
+ * rest, lib/coll/remove.ts). A refusal becomes the message the Move sheet shows.
+ */
+function lineModelForOnly(copyIds: readonly string[]) {
+  if (copyIds.length !== 1) return undefined;
+  return async (proposal: LineProposal): Promise<LinePopupModel> => {
+    const res = await reach(() => lineModelAction(copyIds[0], proposal), LOST.action);
+    if (!res.ok) throw new Error(res.error);
+    return res.model;
+  };
+}
+
 interface DraftTarget {
   tcgdexId: string;
   name: string;
@@ -94,6 +108,8 @@ interface DraftTarget {
   /** For the inline Move sheet (UIL-043): the face and the band the sheet shows. */
   imageUrl: string | null;
   bandKey: string;
+  /** The copies shelved in the collection's binder (UIL-117: the line popup is offered for exactly one). */
+  copyIds: string[];
 }
 
 /** The card whose new home she is picking, with the collection it is leaving. */
@@ -236,6 +252,7 @@ export function CollHub() {
         owned: k.owned,
         imageUrl: k.imageUrl,
         bandKey: k.bandKey,
+        copyIds: k.copyIds,
       })),
     });
   }
@@ -353,8 +370,8 @@ export function CollHub() {
           onClose={(deleteIfEmpty) => closeEditor(editor.id, deleteIfEmpty)}
           onSubmit={submitEditor}
           moveOptions={data?.moveOptions ?? null}
-          onMoveOwned={(tcgdexId, dest) =>
-            run(() => removeCardFromCollection(editor.id, tcgdexId, dest))
+          onMoveOwned={(tcgdexId, dest, lineChoice) =>
+            run(() => removeCardFromCollection(editor.id, tcgdexId, dest, lineChoice))
           }
           onRebindMove={async (toBinderId) => {
             // Not through `run`: the refusal this remedies lives on the editor's own bar, so its
@@ -409,18 +426,7 @@ export function CollHub() {
           }}
           options={data.moveOptions}
           // UIL-117: into a back half through the line popup, for the ONE copy here (a line slot holds one card).
-          lineModel={
-            removeFor.card.copyIds.length === 1
-              ? async (proposal) => {
-                  const res = await reach(
-                    () => lineModelAction(removeFor.card.copyIds[0], proposal),
-                    LOST.action,
-                  );
-                  if (!res.ok) throw new Error(res.error);
-                  return res.model;
-                }
-              : undefined
-          }
+          lineModel={lineModelForOnly(removeFor.card.copyIds)}
           onClose={() => setRemoveFor(null)}
           onConfirm={async (dest: MoveDestination, lineChoice?: LineChoice) => {
             const ok = await run(() =>
@@ -1020,7 +1026,11 @@ export function CollectionEditor(props: {
    * resolves true when it landed, at which point the row leaves the list here too.
    */
   moveOptions: MoveOptions | null;
-  onMoveOwned: (tcgdexId: string, dest: MoveDestination) => Promise<boolean>;
+  onMoveOwned: (
+    tcgdexId: string,
+    dest: MoveDestination,
+    lineChoice?: LineChoice,
+  ) => Promise<boolean>;
   /**
    * UIL-040 step 2: the remedy to a refused binder rebind — move the collection's shelved copies into
    * the new binder and re-point the collection, as one transaction. Resolves with the server's own
@@ -1453,7 +1463,7 @@ export function CollectionEditor(props: {
       {moveFor && moveOptions && (
         <MoveOverlay
           card={{
-            copyId: "",
+            copyId: moveFor.copyIds[0] ?? "",
             name: moveFor.name,
             localId: moveFor.localId,
             setCardCountOfficial: moveFor.setCardCountOfficial,
@@ -1471,9 +1481,11 @@ export function CollectionEditor(props: {
             },
           }}
           options={moveOptions}
+          // UIL-117 (her answer 1: ONE popup, on EVERY screen): the back half opens the line popup here too.
+          lineModel={lineModelForOnly(moveFor.copyIds)}
           onClose={() => setMoveFor(null)}
-          onConfirm={async (dest: MoveDestination) => {
-            const ok = await onMoveOwned(moveFor.tcgdexId, dest);
+          onConfirm={async (dest: MoveDestination, lineChoice?: LineChoice) => {
+            const ok = await onMoveOwned(moveFor.tcgdexId, dest, lineChoice);
             if (ok) {
               setMoveFor(null);
               // The server subtracted the target as part of the move (lib/coll/remove.ts); mirror it.

@@ -144,6 +144,23 @@ describe("UIL-117 · Collections: Remove into a back half, through the line popu
     expect(removeCardFromCollection).toHaveBeenCalledWith("col-1", "sv03-charmander", DEST, CHOICE);
   });
 
+  it("the editor's Move, opened from the hub: the popup is for that copy, and her choice reaches the removal", async () => {
+    const user = userEvent.setup();
+    render(createElement(CollHub));
+    await screen.findByText("Starters");
+    await user.click(screen.getByRole("button", { name: "✎ Edit" }));
+    const row = within(document.querySelector(".celist") as HTMLElement)
+      .getByText("Charmander")
+      .closest(".cerow") as HTMLElement;
+    await user.click(row.querySelector("button.movebtn") as HTMLButtonElement);
+    await user.click(await screen.findByRole("button", { name: "BACK HALF" }));
+    await screen.findByText("Line loaded");
+    expect(lineModelAction).toHaveBeenCalledWith("copy-1", PROPOSAL);
+    await user.click(screen.getByRole("button", { name: "Start line" }));
+    await waitFor(() => expect(removeCardFromCollection).toHaveBeenCalledTimes(1));
+    expect(removeCardFromCollection).toHaveBeenCalledWith("col-1", "sv03-charmander", DEST, CHOICE);
+  });
+
   it("two copies here: no popup (a line holds one card)", async () => {
     await openRemoveFor("Squirtle");
     expect(screen.getByText("No line popup")).toBeTruthy();
