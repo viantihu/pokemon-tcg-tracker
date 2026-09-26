@@ -685,7 +685,6 @@ export function CollectionCard(props: {
                     <span className="cpill have u">Owned</span>
                     <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
                     <NotMineButton card={k} busy={busy} onRemoveCopy={onRemoveCopy} />
-                    <NotMineButton card={k} busy={busy} onRemoveCopy={onRemoveCopy} />
                   </>
                 ) : k.wished ? (
                   <span className="cpill wish u">On wishlist</span>
@@ -740,6 +739,8 @@ export function CollectionCard(props: {
                   ) : null}
                   <span className="cpill have u">In collection</span>
                   <RemoveCardButton card={k} busy={busy} onClick={() => onRemove(c, k)} />
+                  {/* UIL-112: an open collection shows her copies too, so it offers the same one "Not mine". */}
+                  <NotMineButton card={k} busy={busy} onRemoveCopy={onRemoveCopy} />
                 </div>
               ))}
             </div>
