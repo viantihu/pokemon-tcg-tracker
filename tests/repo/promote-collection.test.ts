@@ -294,6 +294,20 @@ describe("promote-collection: Testing -> Production", () => {
     expect(row).toEqual({ catalog_card_id: "sv03-027", dex_variant_raw: "Normal", count: 1 });
   });
 
+  it("carries the card each decision names (UIL-094), so Production's history is legible too", async () => {
+    await promoteCollection({ source, target, ownerEmail: PROD_EMAIL });
+    const row = await one<{ catalog_card_id: string; variant: string; dex_variant_raw: string }>(
+      target,
+      `select catalog_card_id, variant, dex_variant_raw from placement_decision where id = $1`,
+      [IDS.decision],
+    );
+    expect(row).toEqual({
+      catalog_card_id: "sv03-026",
+      variant: "reverse",
+      dex_variant_raw: "Reverse Holo",
+    });
+  });
+
   it("reconstructs the circular copy <-> line_slot reference", async () => {
     await promoteCollection({ source, target, ownerEmail: PROD_EMAIL });
 

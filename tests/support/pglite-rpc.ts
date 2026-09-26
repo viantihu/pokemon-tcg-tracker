@@ -49,11 +49,17 @@ function migrationSql(file: string): string {
   return readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
 }
 
-/** Fresh DB with `MIGRATIONS` applied, platform grants replicated. Ends as the bootstrap superuser. */
-export async function freshRpcDb(): Promise<PGlite> {
+/**
+ * Fresh DB with `MIGRATIONS` applied, platform grants replicated. Ends as the bootstrap superuser.
+ *
+ * `before` stops short of a version (e.g. "0025"), so a migration's BACKFILL can be tested against rows
+ * seeded under the schema it upgrades; finish with `applyMigration`. Absent, every migration is applied.
+ */
+export async function freshRpcDb(options: { before?: string } = {}): Promise<PGlite> {
   const db = new PGlite({ extensions: { pgcrypto } });
   await db.exec(SUPABASE_SHIMS);
   for (const f of MIGRATIONS) {
+    if (options.before && f.split("_")[0] >= options.before) break;
     await db.exec(migrationSql(f));
     await db.query(`insert into supabase_migrations.schema_migrations (version) values ($1)`, [
       f.split("_")[0],
@@ -97,6 +103,14 @@ const FIXTURE_AUTOGROUP = `
   create trigger test_fixture_autogroup before insert on copy
     for each row execute function test_fixture_autogroup();
 `;
+
+/** Apply one migration file by name, as `freshRpcDb` does (for a `before`-built database). */
+export async function applyMigration(db: PGlite, file: string): Promise<void> {
+  await db.exec(migrationSql(file));
+  await db.query(`insert into supabase_migrations.schema_migrations (version) values ($1)`, [
+    file.split("_")[0],
+  ]);
+}
 
 /** Switch the session to the authenticated owner (RLS on; auth.uid() = OWNER). */
 export async function asOwner(db: PGlite): Promise<void> {
