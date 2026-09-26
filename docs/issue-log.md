@@ -8027,3 +8027,62 @@ that isn't even wrong anymore.
 
 **Cross-reference UIL-100** (the Count check this corrupts — the mechanism the sum relies on is sound;
 the input feeding it is stale) and **UIL-099** (the same park/dedupe machinery, a different edge of it).
+
+## UIL-105 — The Sync page's import spins forever with no error when the call to the server fails (a page left open across a deploy, or a dropped connection), and nothing tells her to reload
+
+- **Reported:** 2026-09-26, about 01:45Z (Karvi). In her words: "I've started the import job a while
+  ago, but it is still running."
+- **Status:** Open, assigned to the Tech Lead (new). **Workaround: reload the page, then import again.**
+- **Priority:** High (Karvi's report; Senior BA agrees) — it blocked her import with no way forward
+  shown.
+- **Area:** Sync
+- **Env:** Testing, deployment `e210d63` (`develop` `b88b4f6` + one docs commit)
+
+**Confirmed: neither handler that starts a spinner has any way to stop it if the call itself throws.**
+`onFile` and `onApply` ([`app/(ui)/sync/SyncScreen.tsx:91-142`](<../app/(ui)/sync/SyncScreen.tsx>:91))
+each set a busy phase, `await` a server action, then branch on the *returned* `{ ok }` value to reset it
+— there is no `try`/`catch`/`finally` anywhere in either function. If the `await` itself rejects instead
+of resolving to a normal result, every statement after it — including the `setPhase("idle")` /
+`setPhase("preview")` that would end the spinner — never runs, and the screen is left showing "Reading
+your export and matching cards…" or "Saving your changes…" with nothing on screen to say anything went
+wrong.
+
+**Confirmed: this is reachable only by a transport-level failure, not an ordinary server error, because
+both actions already catch everything else.** `previewSync` and `applySync`
+([`app/(ui)/sync/actions.ts:62-74, 80-101`](<../app/(ui)/sync/actions.ts>:62)) wrap their entire body in
+`try`/`catch` and always resolve to `{ ok: false, error }` for any error raised inside them — a bad file,
+a database error, anything the server-side code itself can fail on. The only way `await previewSync(...)`
+or `await applySync(...)` can reject at the call site is a failure in dispatching the server action
+itself, before that try/catch ever runs.
+
+**Evidence ruling out a half-applied write, reported by the Database Engineer and Senior BA (DB-state
+claims, not independently checkable from this repo):** a read-only sample during the stuck window
+(01:49–01:52Z) found no app statement running, no open transaction, and no dead tuples — nothing was
+half-saved. A separate read (run `36209680075`) found every card and Dex table at 0. Together these say
+no write was ever attempted, consistent with the failure happening before the server action's own body
+ran at all.
+
+**Most likely trigger, per the Tech Lead: a stale server-action ID after a redeploy.** Testing redeployed
+(`e210d63`) at 01:26:02Z; Next.js generates a new server-action id per deployment, and Hobby has no
+deployment-skew protection to keep an already-open page's old action id valid against the new build. A
+page left open across that redeploy, or a plain dropped connection, would both explain a throw at the
+dispatch layer rather than inside either action's own try/catch. **Ruled out by the Tech Lead:** the 1 MB
+server-action body limit (a 750-row first-import bundle measured at 291 KB) and database slowness (the
+apply RPC measured at 158 ms locally).
+
+**Why she couldn't tell which stage it was stuck in.** A first import that only adds cards takes the
+fast path and auto-applies without ever setting `phase` to `"working"`
+([`SyncScreen.tsx:112-120`](<../app/(ui)/sync/SyncScreen.tsx>:112)), so the busy label
+([`:88-89`](<../app/(ui)/sync/SyncScreen.tsx>:88)) stays "Reading your export and matching cards…"
+straight through the auto-apply call — so a stall here could have been
+either `previewSync` or the fast-path `applySync` call, and the label gave no way to tell which.
+
+**Fix (Tech Lead, approved by the Senior BA).** Catch both handlers and show one message covering both
+triggers: "The app was updated while this page was open, or the connection dropped. Reload the page and
+import again. Nothing was saved." Split the busy label so the apply phase reads differently from the
+read phase, so a future stall at least narrows where it happened. Add a DOM test asserting both
+rejections recover to a visible error rather than an infinite spinner. A broader audit of other screens'
+handlers for the same missing-catch shape is being tracked separately, not folded into this entry.
+
+**Cross-reference:** none — first report of this failure shape; distinct from UIL-099/UIL-104's Sync
+defects, which are about what gets written, not about the UI recovering when nothing does.
