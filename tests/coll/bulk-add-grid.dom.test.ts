@@ -16,7 +16,9 @@ import type { BrowseCard } from "@/app/(ui)/coll/coll-types";
 import { LOST } from "@/app/(ui)/_components/reach";
 import { bulkAddSummary, CardSearchGrid } from "@/app/(ui)/coll/CardSearchGrid";
 
-vi.mock("next/navigation", () => ({
+// The real module, with only the router hooks stood in for: `reach` needs its `unstable_rethrow`.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 const bulkAddTargets = vi.fn();

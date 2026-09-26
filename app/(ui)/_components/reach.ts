@@ -9,7 +9,15 @@
  *
  * Say only what is TRUE for the call (#349's copy correction): a read writes nothing; a write is all-or-nothing on
  * the server, so a reload shows which way it went — which is why no message here says "nothing was saved".
+ *
+ * NOT EVERY THROW IS A FAILURE. An action that ends in `redirect()` (Sign out does) reaches the browser as a
+ * REJECTED promise carrying Next's redirect, for Next's own boundary to act on (next's server-action reducer:
+ * "the action promise will be rejected with a redirect"). Caught here, Sign out would stop navigating and
+ * say the connection dropped. `unstable_rethrow` hands every such Next signal back unchanged, and only a
+ * genuine failure becomes a message.
  */
+
+import { unstable_rethrow } from "next/navigation";
 
 /** What `reach` returns when the call threw. `ok: false` so an action's own failure path handles it too. */
 export interface Unreached {
@@ -30,7 +38,8 @@ export const LOST = {
 export async function reach<T>(call: () => Promise<T>, lost: string): Promise<T | Unreached> {
   try {
     return await call();
-  } catch {
+  } catch (err) {
+    unstable_rethrow(err);
     return { ok: false, error: lost, unreached: true };
   }
 }

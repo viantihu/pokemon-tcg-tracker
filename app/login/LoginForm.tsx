@@ -7,12 +7,24 @@
  */
 
 import { useActionState } from "react";
+import { reach } from "../(ui)/_components/reach";
 import { signIn, type SignInState } from "./actions";
+import { SIGN_IN_UNREACHED } from "./messages";
 
 const initialState: SignInState = { status: "idle" };
 
+/**
+ * `signIn` through `reach` (UIL-106): a call that cannot reach the server shows her a message on the form,
+ * where a refusal already shows, instead of the app's error page. The form data goes through untouched; nothing
+ * here reads or holds anything but the result.
+ */
+async function signInOrSay(prev: SignInState, formData: FormData): Promise<SignInState> {
+  const res = await reach(() => signIn(prev, formData), SIGN_IN_UNREACHED);
+  return "unreached" in res ? { status: "error", message: res.error } : res;
+}
+
 export function LoginForm() {
-  const [state, action, pending] = useActionState(signIn, initialState);
+  const [state, action, pending] = useActionState(signInOrSay, initialState);
 
   if (state.status === "sent") {
     return (
