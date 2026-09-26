@@ -8176,3 +8176,64 @@ whatever this pass didn't name specifically, not a substitute for fixing the nam
 
 **Cross-reference UIL-105** (the same missing-catch shape, first found on the Sync page; this entry is
 every other screen the same audit found it on).
+
+## UIL-107 — Every server action in the app failed from #333's deploy, because the sign-in actions file exported a string, which Next forbids in a "use server" file
+
+- **Reported:** 2026-09-26 (Karvi). Testing's `/login` showed "THIS PAGE STOPPED WORKING" (reference
+  `1242534235@E352`). In her words: "Before I refreshed the screen and cleared my cache (since I was
+  getting an 'app has updated' message when I tried loading the file and despite multiple tab refreshes
+  it wasn't working), I was getting a minified React error on the collections page and nothing was
+  loading."
+- **Status:** Open, P0, assigned to the Tech Lead (new); fix in PR #357, with QA. **All other merges
+  held until it is live and she confirms.**
+- **Priority:** High, P0 (Karvi: "the highest priority issue").
+- **Area:** App-wide (auth, all screens)
+- **Env:** Testing, `develop` `695b2ce`
+
+**Confirmed: `app/login/actions.ts` ("use server") exports a plain string constant alongside its two
+async actions — exactly what Next's Server Actions loader forbids.**
+[`app/login/actions.ts:31`](../app/login/actions.ts:31), `export const RATE_LIMITED = ...`, added by PR
+#333 (`3bc25ec`, deployed 2026-09-25 17:02Z, UIL-097's cross-browser magic-link fix). Next's own loader
+raises exactly this on it — confirmed directly in the installed package,
+`node_modules/next/dist/build/webpack/loaders/next-flight-loader/action-validate.js:18`: `A "use server"
+file can only export async functions, found ${typeof action}.` — matching Karvi's error reference
+(`E352`) precisely.
+
+**Confirmed: this reaches every page, not just `/login`, because the shared shell imports from the same
+file.** `SignOutButton` ([`app/(ui)/_components/SignOutButton.tsx:9`](<../app/(ui)/_components/SignOutButton.tsx>:9))
+imports `signOut` from `app/login/actions.ts`, and `SignOutButton` is mounted in
+[`app/(ui)/layout.tsx`](<../app/(ui)/layout.tsx>) — the layout every `(ui)` page renders inside. Next's
+action-entry-loader builds each page's action bundle by re-exporting every action reachable from that
+page; since every page's layout reaches `signOut`, every page's bundle reaches the same broken module,
+and the whole bundle — not just `signOut` — fails to load. This is why the Collections page (and every
+other screen) showed a minified React error with nothing loading, not only `/login`.
+
+**Proved directly by the Tech Lead on production builds, not just theorized:** on `695b2ce` all 9
+`(ui)` action modules return 500 with `E352` and no action body ever ran; on the fix (#357) all 10 return
+200.
+
+**Why every gate stayed green through this — a real, specific gap, not a missed check.** `vitest` imports
+a `"use server"` file as a plain module, with no Next build loader in the path, so the constraint is
+simply invisible to the test suite. `pnpm build` succeeds too — the check that failed is a webpack loader
+that only runs when Next actually resolves a page's action bundle, not a type or lint rule `build` itself
+enforces. `deploy.yml`'s smoke step only `GET`s `/login`, which renders the page fine; the failure only
+fires when an action is invoked, and nothing in CI ever invokes one.
+
+**No data was affected — every failure happened before any write.** The broken loader throws before any
+action body runs, so `signIn`/`signOut`/every other action's own logic never executed; this is a load-time
+failure, not a mid-write one.
+
+**Her UIL-105 hang on 2026-09-26 was this same cause, not a separate transport failure.** UIL-105's
+report (an import that stayed "running" with no error) is explained by the same E352 failure: the Sync
+page's own action bundle also reaches `app/login/actions.ts` through the shared layout, so the call never
+even reached the server to reject in the way UIL-105's write-up assumed — it failed at the loader before
+dispatch. Reclassify UIL-105's cause once #357 confirms this, rather than leaving both entries pointing at
+two separate causes for what may be one incident's two symptoms.
+
+**Fix.** PR #357 (Tech Lead): the constant moves to `app/login/messages.ts`, a plain module with no
+`"use server"` directive, plus a static guard test asserting every `"use server"` file exports only
+async functions. Follow-up, not folded into #357: a `deploy.yml` smoke step that `POST`s the login action
+rather than only `GET`ing the page, so this class of failure is caught before Testing sees it again.
+
+**Cross-reference UIL-105** (likely the same incident, pending #357's confirmation) and **UIL-097** (PR
+#333, the change that introduced the export).
