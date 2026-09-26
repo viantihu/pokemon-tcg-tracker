@@ -223,8 +223,10 @@ export type WriteOp =
   | { op: "delete_unresolved_entry"; id: string }
   | { op: "delete_snapshot"; id: string }
   /**
-   * Remember that she removed a Dex-backed copy (0020, UIL-089), so the next import does not hand the
-   * card back. Emitted in the SAME transaction as the `delete_copy` it describes.
+   * Remember that she removed a Dex-backed copy (0020, UIL-089), so the rest of this haul (a Retry, a manual
+   * match, the Count check) does not hand the card back; the next full import forgets it (UIL-111). Emitted
+   * in the SAME transaction as the `delete_copy` it describes, and by Undo to restore memories an import
+   * forgot.
    *
    * `delta` is added to the stored count SERVER-SIDE, computed from the column — never read-modify-written
    * here, or two removals of the same printing racing each other would lose one (0007's own lesson from
@@ -237,9 +239,8 @@ export type WriteOp =
       delta: number;
     }
   /**
-   * Forget that memory (0020, UIL-089), on the first import whose export no longer lists the key: Dex has
-   * stopped claiming the card, so the disagreement is over. A key that matches no row is a silent no-op,
-   * like `delete_copy`.
+   * Forget that memory (0020, UIL-089): every one of them, on the next FULL import, which ends the haul
+   * (UIL-111). A key that matches no row is a silent no-op, like `delete_copy`.
    */
   | { op: "forget_removed_presence"; catalog_card_id: string; dex_variant_raw: string }
   /**

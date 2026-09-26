@@ -200,45 +200,58 @@ export interface RemovedPresence {
 }
 
 /**
- * Subtract what she has REMOVED from what Dex says she owns (UIL-089).
+ * What she has REMOVED ("Not mine"), weighed against what Dex says she owns (UIL-089, reshaped by UIL-111).
  *
- * Presence is a count, so a copy she removed while Dex still lists the card reads as `desired 1 /
- * current 0` on the very next import and comes straight back. She traded it away; the app cannot keep
- * handing it to her. This is the one place that knows, which is the whole reason the memory is keyed
- * exactly like `presence_group`: the subtraction is `max(0, dex - removed)` and nothing has to agree with
- * anything else.
+ * "NOT MINE" IS FOR THIS HAUL ONLY (Karvi's ruling, UIL-111). It clears the card now, and the next FULL Dex
+ * import brings it back if Dex still lists it: Dex is the source of truth, so a Dex error is fixed in Dex,
+ * or she presses "Not mine" again. So:
+ *   - WITHIN the haul (`fullExport: false`: a Retry, a manual match, the Count check) a memory still counts,
+ *     `max(0, dex − removed)` per key, so the card she cleared is not handed straight back and nothing reads
+ *     it as missing;
+ *   - a FULL import (`fullExport: true`) ignores every memory, `desired` is exactly what Dex lists, and
+ *     `forget` is EVERY memory, deleted in the import's own transaction. The haul is over.
+ * `returning` is what that import hands back BECAUSE the memory no longer holds: per key Dex still lists,
+ * min(memory, max(0, dex − current)). It names those cards in the preview, and a non-empty list gates the
+ * import (the Senior BA's ruling), so a card she removed never reappears unannounced.
  *
  * Subtracting to zero DELETES the entry rather than storing a zero, because `diff` already reads an absent
  * key as zero and `toPresenceMap` drops zero counts — one representation of "none", not two.
  *
- * THE `forget` LIST IS GATED ON A FULL EXPORT, and that gate is load-bearing. A retry import reconciles
- * only against the handful of keys it just promoted (`lib/sync/pipeline.ts`), so its `desired` map is
- * almost entirely empty — treating "absent from desired" as "Dex stopped listing it" there would forget
- * every memory she has on the first retry. Only a full export is evidence of absence.
+ * THE FULL-EXPORT GATE IS LOAD-BEARING. A retry reconciles only against the handful of keys it just promoted
+ * (`lib/sync/pipeline.ts`), so its `desired` map is almost entirely empty: forgetting there would drop every
+ * memory she has on the first retry, and the haul is not over. Only a whole export ends it.
  */
 export function applyRemovedMemory(
   desired: PresenceMap,
   removed: readonly RemovedPresence[],
   fullExport: boolean,
-): { desired: PresenceMap; forget: RemovedPresence[] } {
+  /** Copies each key holds now, for `returning`. Only a full import needs it. */
+  current: PresenceMap = new Map(),
+): { desired: PresenceMap; forget: RemovedPresence[]; returning: RemovedPresence[] } {
   const out: PresenceMap = new Map(
     [...desired].map(([k, v]) => [k, { ...v }] as [string, PresenceCount]),
   );
-  const forget: RemovedPresence[] = [];
+
+  if (fullExport) {
+    // The haul is over (UIL-111): every memory goes, and what Dex lists stands as it is.
+    const returning: RemovedPresence[] = [];
+    for (const m of removed) {
+      const key = presenceKey(m.catalogCardId, m.dexVariantRaw);
+      const dex = out.get(key)?.count ?? 0;
+      const count = Math.min(m.count, Math.max(0, dex - (current.get(key)?.count ?? 0)));
+      if (count > 0) returning.push({ ...m, count });
+    }
+    return { desired: out, forget: [...removed], returning };
+  }
 
   for (const m of removed) {
     const key = presenceKey(m.catalogCardId, m.dexVariantRaw);
     const entry = out.get(key);
-    if (!entry) {
-      // Dex no longer lists this key at all. On a full export that means the disagreement is over and the
-      // memory would otherwise suppress a genuine future re-acquisition forever.
-      if (fullExport) forget.push(m);
-      continue;
-    }
+    if (!entry) continue;
     const left = entry.count - m.count;
     if (left > 0) entry.count = left;
     else out.delete(key);
   }
 
-  return { desired: out, forget };
+  return { desired: out, forget: [], returning: [] };
 }

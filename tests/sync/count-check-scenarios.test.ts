@@ -160,7 +160,8 @@ describe("UIL-100 · her real sequence: import → 4 hand matches → shelve →
 });
 
 describe("UIL-100 · the other named cases", () => {
-  it("remove a copy (UIL-089), then re-import: not re-created, and it still adds up", async () => {
+  // OVERRULED BY KARVI (UIL-111): "Not mine" is for this haul only, so the re-import brings the card back.
+  it("remove a copy (UIL-089), then re-import: it comes back (UIL-111), and it still adds up", async () => {
     await importFile([A, B]);
     const [charmander] = await sql<{ id: string }>(
       `select id from copy where catalog_card_id = 'sv03-026' limit 1`,
@@ -171,9 +172,9 @@ describe("UIL-100 · the other named cases", () => {
     expect(check).toMatchObject({ inCollection: 2, removed: 1, fileTotal: 3 });
 
     const again = await importFile([A, B]);
-    expect(again.plan.creates).toEqual([]);
+    expect(again.plan.creates.map((c) => c.catalogCardId)).toEqual(["sv03-026"]);
     check = await expectAddsUp();
-    expect(check).toMatchObject({ inCollection: 2, removed: 1 });
+    expect(check).toMatchObject({ inCollection: 3, removed: 0, fileTotal: 3 });
   });
 
   it("a rejected variant migration, then re-import: zero mismatches", async () => {

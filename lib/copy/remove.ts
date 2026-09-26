@@ -13,7 +13,11 @@
  * or none of them: the slot the copy filled is released, the line it completed is no longer complete, the
  * audit row exists, the copy is gone, and — when Dex would otherwise hand it back — the memory of the
  * removal exists. Any split leaves a state nobody designed: a filled slot pointing at nothing, or a copy
- * removed and re-created by the next import.
+ * removed and re-created by the very next Retry or match.
+ *
+ * THE MEMORY LASTS FOR THIS HAUL ONLY (UIL-111, Karvi's ruling). A Retry, a manual match and the Count check
+ * honour it; the next FULL Dex import forgets it and brings the card back if Dex still lists it. Dex is the
+ * source of truth: a Dex error is fixed in Dex, or she presses "Not mine" again. The confirm says so.
  *
  * WHAT IT DOES NOT DO, both on the Senior BA's ruling (2026-09-22):
  *   * It does not subtract the collection's chase tag. A chase tag is a WANT — she can chase a card she

@@ -155,11 +155,13 @@ describe("UIL-099 E2 · a manual match does not hand back a card she removed", (
     expect(await memory()).toBe(1);
   });
 
-  it("the next import agrees with the match: nothing parks, nothing is created, nothing retires", async () => {
+  // OVERRULED BY KARVI (UIL-111): "Not mine" is for this haul only. Within the haul the match holds the card
+  // back (above); the next full import ends the haul and brings it back, because Dex still lists it.
+  it("the next import ends the haul: the held-back card comes back, nothing parks, nothing retires", async () => {
     const id = await parked(1);
     await removed(1);
     await manualMatch(pgliteClient(db), id, CARD);
-    expect(await nextImport(1)).toEqual({ parks: 0, creates: [], retires: 0 });
+    expect(await nextImport(1)).toEqual({ parks: 0, creates: [CARD], retires: 0 });
   });
 
   it("a Dex row of 2 with 1 removed adds 1 and holds back 1", async () => {
@@ -168,7 +170,8 @@ describe("UIL-099 E2 · a manual match does not hand back a card she removed", (
     const res = await manualMatch(pgliteClient(db), id, CARD);
     expect(await copiesOf()).toBe(1);
     expect(res.withheld?.count).toBe(1);
-    expect(await nextImport(2)).toEqual({ parks: 0, creates: [], retires: 0 });
+    // The next import ends the haul (UIL-111): the one held back comes back.
+    expect(await nextImport(2)).toEqual({ parks: 0, creates: [CARD], retires: 0 });
   });
 
   it("with nothing removed it adds the row's quantity and holds nothing back", async () => {

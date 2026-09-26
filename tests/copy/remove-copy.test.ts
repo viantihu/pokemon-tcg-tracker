@@ -88,7 +88,10 @@ async function importOnce() {
 }
 
 describe("UIL-089 · a removed Dex copy stays removed", () => {
-  it("re-importing the SAME export does not hand the card back", async () => {
+  // OVERRULED BY KARVI (UIL-111): "Not mine" is for THIS HAUL ONLY. This case pinned UIL-089's persistent
+  // memory, the SAME export never handing the card back; it now pins the ruling, the next full import brings
+  // it back because Dex still lists it, forgets the memory, and names the card in a reviewed preview.
+  it("re-importing the SAME export hands the card back and forgets the memory: Not mine lasts for this haul", async () => {
     const client = pgliteClient(db);
     await importOnce();
     const created = await copies();
@@ -102,12 +105,17 @@ describe("UIL-089 · a removed Dex copy stays removed", () => {
       { catalog_card_id: CARD, dex_variant_raw: "Normal", count: 1 },
     ]);
 
-    // The export has not changed — Dex still says she owns one. PRE-FIX this created the copy again, which
-    // is the whole defect: the app handing back a card she has told it she does not have.
+    // The export has not changed — Dex still says she owns one, and a whole export ends the haul. A Dex error
+    // is fixed in Dex, or she presses Not mine again.
     const second = await runSyncPipeline(client, exportBytes());
-    expect(second.bundle.plan.creates).toHaveLength(0);
+    expect(second.bundle.plan.creates).toHaveLength(1);
+    expect(second.bundle.plan.returning).toEqual([
+      { catalogCardId: CARD, dexVariantRaw: "Normal", count: 1 },
+    ]);
+    expect(second.preview.kind).toBe("gated"); // she sees it before it comes back
     await executeApply(client, second.bundle, OWNER);
-    expect(await copies()).toHaveLength(0);
+    expect(await copies()).toHaveLength(1);
+    expect(await memory()).toEqual([]);
   });
 
   it("forgets the memory once Dex stops listing the card, so a real re-acquisition still lands", async () => {

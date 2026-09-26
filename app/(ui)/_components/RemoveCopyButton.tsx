@@ -21,6 +21,13 @@
 
 import { useState } from "react";
 
+/**
+ * "Not mine" is for this haul only (UIL-111, Karvi's ruling): said at the moment she decides, so the card
+ * coming back with her next import is never a surprise.
+ */
+export const NOT_MINE_LASTS_THIS_HAUL =
+  "If your Dex file still lists it, your next import brings it back.";
+
 export function RemoveCopyButton({
   onRemove,
   busy = false,
@@ -51,7 +58,9 @@ export function RemoveCopyButton({
   }
   return (
     <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-      <span style={{ color: "var(--ink-2)" }}>Remove {what}?</span>
+      <span style={{ color: "var(--ink-2)" }}>
+        Remove {what}? {NOT_MINE_LASTS_THIS_HAUL}
+      </span>
       <button
         type="button"
         className="btn sm btn-primary"

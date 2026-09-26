@@ -91,6 +91,27 @@ export function flagLabel(flag: string): string {
   }
 }
 
+/**
+ * A card this import hands BACK (UIL-111): she cleared it with "Not mine", Dex still lists it, and "Not mine"
+ * lasts only for the haul. Named so she sees it once, before it reappears.
+ */
+export interface ReturningRow {
+  catalogCardId: string;
+  name: string;
+  setName: string | null;
+  imageUrl: string | null;
+  localId: string | null;
+  setCardCountOfficial: number | null;
+  bandKey: string;
+  dexVariantRaw: string;
+  count: number;
+}
+
+/** What the preview says above the returning cards (the Senior BA's plan, UIL-111). */
+export const RETURNING_NOTE =
+  "You marked these Not mine, and your Dex file still lists them, so this import brings them back. If " +
+  "one is wrong, fix it in Dex, or press Not mine again after you apply.";
+
 export interface AdditionRow {
   catalogCardId: string;
   name: string;
@@ -119,6 +140,8 @@ export interface SyncPreview {
     variantChanges: number;
     /** Stored flags corrected (UIL-102). */
     flagFixes: number;
+    /** Cards coming back after a "Not mine" (UIL-111); also counted in `added`. */
+    returning: number;
     added: number;
     waiting: number;
     unchanged: number;
@@ -128,6 +151,7 @@ export interface SyncPreview {
     removals: RemovalRow[];
     variantChanges: VariantRow[];
     flagFixes: FlagFixRow[];
+    returning: ReturningRow[];
     additions: AdditionRow[];
     unresolved: { newParks: UnresolvedRowView[]; stillWaiting: number; forgottenDismissed: number };
     unchanged: number;
@@ -165,6 +189,11 @@ export function summaryLine(s: SyncPreview["summary"]): string {
     parts.push(`${s.flagFixes} variant flag${s.flagFixes === 1 ? "" : "s"} corrected`);
   }
   if (s.added > 0) parts.push(`${s.added} added`);
+  if (s.returning > 0) {
+    parts.push(
+      `${s.returning} card${s.returning === 1 ? "" : "s"} you marked Not mine come${s.returning === 1 ? "s" : ""} back`,
+    );
+  }
   if (s.waiting > 0) parts.push(`${s.waiting} waiting on catalog`);
   parts.push(`${s.unchanged} unchanged`);
   return parts.join(" · ");
@@ -244,6 +273,23 @@ export function buildPreview(plan: ReconcilePlan, enr: PreviewEnrichment): SyncP
     };
   });
 
+  const returning: ReturningRow[] = (plan.returning ?? [])
+    .map((r) => {
+      const m = meta(r.catalogCardId);
+      return {
+        catalogCardId: r.catalogCardId,
+        name: m.name,
+        setName: m.setName ?? null,
+        imageUrl: m.imageUrl,
+        localId: m.localId,
+        setCardCountOfficial: m.setCardCountOfficial,
+        bandKey: m.bandKey,
+        dexVariantRaw: r.dexVariantRaw,
+        count: r.count,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name) || a.dexVariantRaw.localeCompare(b.dexVariantRaw));
+
   // Additions are aggregated per (card, variant) so N new copies read as one "×N" row.
   const addMap = new Map<string, AdditionRow>();
   for (const c of plan.creates) {
@@ -283,6 +329,7 @@ export function buildPreview(plan: ReconcilePlan, enr: PreviewEnrichment): SyncP
     removed: plan.retires.length,
     variantChanges: plan.variantUpdates.length,
     flagFixes: flagFixes.length,
+    returning: returning.reduce((n, r) => n + r.count, 0),
     added: plan.creates.length,
     waiting: enr.stillWaiting,
     unchanged: enr.counts.unchanged,
@@ -310,6 +357,7 @@ export function buildPreview(plan: ReconcilePlan, enr: PreviewEnrichment): SyncP
       removals,
       variantChanges,
       flagFixes,
+      returning,
       additions,
       unresolved: {
         newParks,
