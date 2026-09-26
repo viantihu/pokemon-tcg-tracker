@@ -26,7 +26,6 @@ import type { LookupCard } from "../plan/plan-types";
 import {
   lookupAnswer,
   lookupMoveOptions,
-  mergeCopies,
   moveFromLookup,
   removeCopy,
   searchCatalog,
@@ -127,29 +126,6 @@ export function LookupScreen() {
     flashToast(`Removed · ${answer.card.name}`);
   }
 
-  /**
-   * Merge two records of one card (UIL-089): the copy she keeps adopts the Dex twin's identity.
-   *
-   * Offered only where it can be true — see `mergeableTwinOf`. The twin is the Dex-backed record, so the
-   * survivor is the one she has actually placed, which is also the one she would be annoyed to lose.
-   */
-  async function onMerge(survivor: LookupMovableCopy, twin: LookupMovableCopy) {
-    if (!answer) return;
-    setMoveError(null);
-    setMoving(true);
-    const res = await reach(
-      () => mergeCopies(survivor.copyId, twin.copyId, answer.card.tcgdexId),
-      LOST.action,
-    );
-    setMoving(false);
-    if (!res.ok) {
-      setMoveError(res.error);
-      return;
-    }
-    if (res.lookup) applyResult(res.lookup);
-    flashToast(`Merged · one ${answer.card.name}, one record`);
-  }
-
   async function onMoveConfirm(dest: MoveDestination) {
     if (!moveTarget || !answer) return;
     setMoving(true);
@@ -188,7 +164,6 @@ export function LookupScreen() {
           busy={moving}
           onMove={openMove}
           onRemove={onRemove}
-          onMerge={onMerge}
         />
       )}
 
@@ -252,14 +227,12 @@ export function AnswerPanel({
   busy,
   onMove,
   onRemove,
-  onMerge,
 }: {
   answer: LookupAnswer;
   copies: LookupMovableCopy[];
   busy: boolean;
   onMove: (copy: LookupMovableCopy) => void;
   onRemove: (copy: LookupMovableCopy) => void;
-  onMerge: (survivor: LookupMovableCopy, twin: LookupMovableCopy) => void;
 }) {
   const meta = bandMeta(answer.bandKey);
   return (
@@ -327,13 +300,7 @@ export function AnswerPanel({
       </div>
 
       {copies.length > 0 ? (
-        <CopyRows
-          copies={copies}
-          busy={busy}
-          onMove={onMove}
-          onRemove={onRemove}
-          onMerge={onMerge}
-        />
+        <CopyRows copies={copies} busy={busy} onMove={onMove} onRemove={onRemove} />
       ) : null}
 
       <div className="facts">
@@ -366,37 +333,16 @@ export function AnswerPanel({
  * its remedy: a binder block holds its pockets, and the place to free it is the line detail — a refusal
  * is only acceptable when the condition is stated and the way round it is on screen.
  */
-/**
- * The Dex twin this copy could be merged with, or null (UIL-089).
- *
- * Two records are one card only in the shape the incident actually produced: one copy she typed by hand
- * (in no presence group, so `dexTracked` is false) and one the import created. Offered on the HAND-TYPED
- * row, because that is the record she placed and the one she would be annoyed to lose, and the Dex-backed
- * twin is the identity being adopted. Two Dex-backed records mean Dex itself claims two cards, which is
- * not this screen's to overrule; two hand-typed ones have no identity to adopt. `applyCopyMerge` refuses
- * both from the server side too — this only decides whether to offer it.
- */
-export function mergeableTwinOf(
-  copy: LookupMovableCopy,
-  copies: readonly LookupMovableCopy[],
-): LookupMovableCopy | null {
-  if (copy.dexTracked || copy.role === "block") return null;
-  const twins = copies.filter((c) => c.copyId !== copy.copyId && c.dexTracked);
-  return twins.length === 1 ? twins[0] : null;
-}
-
 function CopyRows({
   copies,
   busy,
   onMove,
   onRemove,
-  onMerge,
 }: {
   copies: LookupMovableCopy[];
   busy: boolean;
   onMove: (copy: LookupMovableCopy) => void;
   onRemove: (copy: LookupMovableCopy) => void;
-  onMerge: (survivor: LookupMovableCopy, twin: LookupMovableCopy) => void;
 }) {
   return (
     <div className="facts" style={{ borderBottom: "3px solid var(--ink)" }}>
@@ -421,20 +367,6 @@ function CopyRows({
                 Move
               </button>
             ) : null}
-            {(() => {
-              const twin = mergeableTwinOf(c, copies);
-              return twin ? (
-                <button
-                  type="button"
-                  className="btn sm"
-                  disabled={busy}
-                  onClick={() => onMerge(c, twin)}
-                  title="One card, two records: keep this one and fold the imported record into it."
-                >
-                  Same card
-                </button>
-              ) : null;
-            })()}
             {/* A block is removable like anything else: a spacer she has thrown away is gone (UIL-089). */}
             <RemoveCopyButton onRemove={() => onRemove(c)} busy={busy} what="this copy" />
           </span>

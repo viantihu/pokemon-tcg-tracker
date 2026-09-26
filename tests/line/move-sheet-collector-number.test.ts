@@ -134,7 +134,6 @@ describe("UIL-077 · Lookup's Move sheet shows the full printed number", () => {
     copyId: "c3",
     role: "shelved" as const,
     currentLabel: "Binder 1 · Front · Red",
-    dexTracked: true,
   };
   it("099/182 when the total is known, 099 when it is not", () => {
     expect(numberOn(sheet(lookupMoveTarget(answer(182), copy)))).toBe("099/182");
