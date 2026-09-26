@@ -2898,7 +2898,7 @@ stale plan misleads her at the binder, which is exactly the moment a wrong answe
 ## UIL-033 — `logCardIntoCollection` is a fourth definition of "joining a collection," and it isn't atomic
 
 - **Reported:** 2026-09-14 (not from Karvi — found reviewing UIL-022's fix)
-- **Status:** **Fixed** — PR [#224](https://github.com/viantihu/pokemon-tcg-tracker/pull/224) MERGED to
+- **Status:** **Closed** — confirmed by Karvi, 2026-09-26: "I was able to shelve all cards in my specialty binder. … We can close any open issues related to adding to specialty binders or adding to collections." **Was:** **Fixed** — PR [#224](https://github.com/viantihu/pokemon-tcg-tracker/pull/224) MERGED to
   `develop` 2026-09-19 (squash `a910d83`), QA-gated on the merged tree (851 tests; two pre-fix-failing
   cases, "two cards logged at the same time both end up on the target list" and "copy, audit row and tag
   land together — or none of them do"; dropping the union op fails 3, tolerating a no-row match fails the
@@ -3351,7 +3351,7 @@ priority at all.
 ## UIL-039 — Card search for building a collection needs to be its own filterable, grid page with bulk add
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009)
-- **Status:** **Fixed** — PR [#155](https://github.com/viantihu/pokemon-tcg-tracker/pull/155) MERGED to
+- **Status:** **Closed** — confirmed by Karvi, 2026-09-26: "I was able to shelve all cards in my specialty binder. … We can close any open issues related to adding to specialty binders or adding to collections." **Was:** **Fixed** — PR [#155](https://github.com/viantihu/pokemon-tcg-tracker/pull/155) MERGED to
   `develop` 2026-09-16 (squash `83e1e44`), QA-gated on the merged tree, confirmed **deployed** to Testing
   (all four conditions green on that SHA). Card search for building a collection is now its own grid page
   at `/coll/search`, image-first per her standing visual-search principle, filterable by **illustrator**
@@ -3439,7 +3439,7 @@ inconvenient. Karvi's own priority read wasn't given for this one specifically; 
 ## UIL-040 — Rebinding a collection to a different specialty binder changes the record but silently orphans the cards already shelved in the old one
 
 - **Reported:** 2026-09-14 (surfaced while retesting UIL-009)
-- **Status:** **Fixed** — both steps deployed. **Step 2** (move the stranded copies so the rebind can
+- **Status:** **Closed** — confirmed by Karvi, 2026-09-26: "I was able to shelve all cards in my specialty binder. … We can close any open issues related to adding to specialty binders or adding to collections." She named UIL-040 among the issues to close. **Was:** **Fixed** — both steps deployed. **Step 2** (move the stranded copies so the rebind can
   succeed): PR [#289](https://github.com/viantihu/pokemon-tcg-tracker/pull/289) MERGED to `develop`
   2026-09-20 (squash `f94e2cc`), **migration `0017`** (0015's `apply_write_ops` verbatim plus one
   `set_collection_binders` branch, 16 lines; no DDL, no DML), QA-gated on the merged tree (1095 tests, build,
@@ -3642,7 +3642,7 @@ tables. No pending flag, no migration, zero behaviour change.
 
 - **Reported:** 2026-09-14 (not from Karvi — a follow-up suggestion from QA and the UX Dev, on
   UIL-014's shipped behaviour)
-- **Status:** **Fixed** — PR [#273](https://github.com/viantihu/pokemon-tcg-tracker/pull/273) MERGED to
+- **Status:** **Closed** — confirmed by Karvi, 2026-09-26: "I was able to shelve all cards in my specialty binder. … We can close any open issues related to adding to specialty binders or adding to collections." **Was:** **Fixed** — PR [#273](https://github.com/viantihu/pokemon-tcg-tracker/pull/273) MERGED to
   `develop` 2026-09-20 (squash `2850d20`), QA-gated on the merged tree (1011 tests, build; QA read the
   whole CollHub diff: 84 added / 11 removed lines ignoring whitespace, all of them this feature; the
   367-line stat is re-indentation), confirmed **deployed** to Testing (Deploy, migrate, smoke, acceptance
@@ -4159,7 +4159,7 @@ prevent. Same severity reasoning Karvi accepted for UIL-014/UIL-022.
 ## UIL-049 — A duplicate that is also a specialty card routes to the specialty binder instead of bulk
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** **Fixed** — PR [#164](https://github.com/viantihu/pokemon-tcg-tracker/pull/164) MERGED to
+- **Status:** **Closed** — confirmed by Karvi, 2026-09-26: "I was able to shelve all cards in my specialty binder. … We can close any open issues related to adding to specialty binders or adding to collections." **Was:** **Fixed** — PR [#164](https://github.com/viantihu/pokemon-tcg-tracker/pull/164) MERGED to
   `develop` 2026-09-18 (squash `b5d0690`), QA-gated on the merged tree, confirmed **deployed** to Testing
   (Deploy green on `04dea51`, which contains it). The cascade now checks **duplicate before card class**, so
   a second copy of the same specialty printing routes to bulk, exactly her rule; a specialty card that is
@@ -4340,7 +4340,12 @@ address post go-live. Flagged Low honestly, not "Low because busy."
 ## UIL-053 — A card can be shelved without appearing in the collection it should belong to
 
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
-- **Status:** Open — **on watch, by Karvi's ruling 2026-09-19: keep it open, do not close.** Not
+- **Status:** Open — **REPRODUCED by Karvi 2026-09-26, active again.** Her words: "I did experience this
+  issue. I was able to resolve it by adding the cards from the lookup screen so I was able to complete
+  shelving properly." (She was shelving her specialty binder after the 20:29:55Z start-over; she worked
+  around it herself, so the broken state is gone, but the placement history of those cards remains.)
+  Assigned to the Tech Lead to diagnose from that history. **Was:** on watch, by Karvi's ruling 2026-09-19:
+  keep it open, do not close. Not
   reproducible on current data: her example (Magneton, moved to the Saboteur collection, not shown there
   at the time) now shows correctly, and the Tech Lead's Testing read found every shelved copy in the
   specialty binder her collections list on exactly one collection's list (27 of 27; 0 on none, 0 on two).
@@ -7229,7 +7234,7 @@ and the second effect is irreversible in the current build.
 - **Reported:** 2026-09-23 (found by Full Stack Dev - 2 and QA reading the deployed tree for UIL-092; body
   by the Senior BA). A regression from UIL-088's PR
   [#305](https://github.com/viantihu/pokemon-tcg-tracker/pull/305).
-- **Status:** **Fixed** — PR [#309](https://github.com/viantihu/pokemon-tcg-tracker/pull/309) MERGED to
+- **Status:** **Closed** — confirmed by Karvi, 2026-09-26: "I was able to shelve all cards in my specialty binder. … We can close any open issues related to adding to specialty binders or adding to collections." **Was:** **Fixed** — PR [#309](https://github.com/viantihu/pokemon-tcg-tracker/pull/309) MERGED to
   `develop` 2026-09-23 (squash `cfc2594`), QA-gated on the merged tree (1203 tests, build, no migration;
   mutants: the owned set back to shelved-or-bulk fails 1, a block counted as owned fails 1, a haul copy
   described as the bulk box fails 1, the new PGlite `neq` shim meaning `eq` fails 4 including its contract
@@ -7843,7 +7848,7 @@ match's no-diff insert), the strongest candidate mechanism for a Dex-backed copy
 
 - **Reported:** 2026-09-23 (Karvi). In her words: "Collections bulk add should put every card I don't
   own on my wishlist but that can come later."
-- **Status:** **Fixed** — PR [#360](https://github.com/viantihu/pokemon-tcg-tracker/pull/360) MERGED to `develop` 2026-09-26 (squash `c621fc0`), deployed
+- **Status:** **Closed** — confirmed by Karvi, 2026-09-26: "I was able to shelve all cards in my specialty binder. … We can close any open issues related to adding to specialty binders or adding to collections." **Was:** **Fixed** — PR [#360](https://github.com/viantihu/pokemon-tcg-tracker/pull/360) MERGED to `develop` 2026-09-26 (squash `c621fc0`), deployed
   green (Deploy run `36254687819`); Full Stack Dev - 2; Karvi cleared Low items to start 2026-09-26. Bulk
   add on the Collections search grid now puts every card she does not own on her wishlist AND the chase
   list, in one `apply_write_ops` call, with no copy created; the result says how many went to her wishlist
@@ -8467,8 +8472,16 @@ included.
   remove cards from the haul for whatever reason." Asked to choose, she ruled "Remove for this haul
   only": "Not mine" clears the card from the current haul, and the next Dex import brings it back if Dex
   still lists it; a Dex error is fixed in Dex, or by pressing "Not mine" again.
-- **Status:** Open, assigned to Full Stack Dev - 2, plan first; the Tech Lead reviews (count-check and
-  removal territory).
+- **Status:** **Fixed** — PR [#372](https://github.com/viantihu/pokemon-tcg-tracker/pull/372) MERGED to `develop` 2026-09-26 (squash `d41c255`), deployed
+  green (Deploy run `36265580762`); Full Stack Dev - 2; the Tech Lead's approval (count-check part) at
+  `cf88045`; QA: 6 mutant groups killed. A full Dex import now ignores and forgets every "Not mine" memory,
+  so a card Dex still lists comes back; within the haul, Retry, a manual match and the Count check still
+  honour it. **Senior BA's rulings:** a returning card makes the import a reviewed one ("Coming back"
+  section, never the silent fast path; pinned by #375), and the shared confirm now says "If your Dex file
+  still lists it, your next import brings it back." Undo restores every memory the import forgot, which also
+  closes a pre-existing gap for keys Dex stopped listing. Four UIL-089 tests that pinned the old rule are
+  flipped and marked "OVERRULED BY KARVI (UIL-111)". Awaiting Karvi's confirmation. **Was:** Open, assigned
+  to Full Stack Dev - 2, plan first; the Tech Lead reviews (count-check and removal territory).
 - **Priority:** High (Senior BA's read; it reverses a data-model rule that every import applies; Karvi
   to confirm).
 - **Area:** Sync / Haul Plan
@@ -8524,7 +8537,11 @@ is).
 - **Reported:** 2026-09-26 (Karvi). In her words: "in the collections screen, when I want to say a
   card is not mine, there [are] two options for that." "This seems to only be happening to the Finite
   collections."
-- **Status:** Open, assigned to Full Stack Dev - 2.
+- **Status:** **Closed** — confirmed by Karvi, 2026-09-26: "I was able to shelve all cards in my specialty binder. … We can close any open issues related to adding to specialty binders or adding to collections." She named UIL-112 among the issues to close. **Fixed by** PR
+  [#373](https://github.com/viantihu/pokemon-tcg-tracker/pull/373) (squash `454eaef`), Full Stack Dev - 2: the finite-collection tile rendered its "Not mine"
+  button twice, a line duplicated in #311 (UIL-089, 2026-09-23) that the old test missed because it only
+  checked the words appeared; open-collection tiles had none, and now show exactly one (QA: 2 groups
+  killed). **Was:** Open, assigned to Full Stack Dev - 2.
 - **Priority:** High (Karvi's report; it blocks her testing).
 - **Area:** Collections
 - **Env:** Testing, `develop` `e4025f5`
@@ -8546,7 +8563,15 @@ per-tile loop — which is why it's scoped to Finite collections only, also matc
 
 - **Reported:** 2026-09-26 (Karvi). In her words: "When adding cards to the Japanese collection, even
   though I'm pretty sure I only shelved 10 cards, 12 are in the collection."
-- **Status:** Open, assigned to the Tech Lead — cause diagnosed, fix not yet built. Open-mode collections
+- **Status:** **Closed** — confirmed by Karvi 2026-09-26: "Japanese collection looks right", and by Karvi, 2026-09-26: "I was able to shelve all cards in my specialty binder. … We can close any open issues related to adding to specialty binders or adding to collections."
+  **Fixed by** PR [#376](https://github.com/viantihu/pokemon-tcg-tracker/pull/376) (squash `131a9c0`), the Tech Lead: one `collectionTally` predicate (on the
+  list AND a shelved copy in one of its binders, the same test finite mode uses); an open collection's
+  header counts what she owns ("10 in the binder · 2 not in your collection"), and marks the rest "not
+  shelved here yet" or "not in your collection", each with Remove. At the Senior BA's ruling, "held" uses
+  the app's one owned set (`ownedCatalogCardIdSet`), so a block-only card reads "not in your collection"
+  (QA: 3 groups killed). The 2 leftover entries were cleared when the 2026-09-26 20:29:55Z start-over
+  emptied her open lists at her request. **Was:** Open, assigned to the Tech Lead — cause diagnosed, fix not
+  yet built. Open-mode collections
   count LIST entries as "logged," not owned copies; 2 of the 12 are leftover pre-wipe entries with no
   copy behind them. The fix is the Tech Lead's: Open mode should count what she owns and mark the 2 stale
   entries.
@@ -8585,7 +8610,18 @@ distinct from that class).
   should be able to label 'Not mine' once the haul has actually ran. That said, the first screen is not
   necessary. If new loads are made while a haul plan is running, that main screen should be updated with
   new cards (this will lay the groundwork for future features I have in mind)."
-- **Status:** Open, assigned to Full Stack Dev - 2, plan first.
+- **Status:** **Fixed** — both parts deployed 2026-09-26, Full Stack Dev - 2. **Part 1:** PR [#377](https://github.com/viantihu/pokemon-tcg-tracker/pull/377)
+  (squash `e7f6579`): no first screen, and opening the Haul Plan routes the waiting cards itself (a parked
+  sitting whose stamp matches resumes with no re-run; about 2.4 s warm or 3.5 s cold at her size, shown as
+  "Routing N cards…"); "Not mine" and "Leave for later" sit on the spotlight (spotlight only, confirmed by
+  Karvi: "Spotlight only is fine"); presses are batched into one background re-route, and moved cards are
+  named (QA: 34 killed). **Part 2:** PR [#378](https://github.com/viantihu/pokemon-tcg-tracker/pull/378) (squash `0449bec`): cards that arrive while the plan
+  is open join it by themselves (a check on focus and every 30 s while visible; merged automatically;
+  badged "New"; the spotlight never changes card by itself), with a quiet "Can't check for new cards right
+  now" note after two failed checks (in #380). **Senior BA's rulings:** "Leave for later" is the name (the
+  existing "Skip ▶" keeps its own), with the hint "Takes it off this plan. It stays waiting in your haul;
+  nothing is deleted."; automatic merge; polling now, Realtime later through the same step. Awaiting
+  Karvi's confirmation. **Was:** Open, assigned to Full Stack Dev - 2, plan first.
 - **Priority:** High.
 - **Area:** Haul Plan
 - **Env:** Testing, `develop` `e4025f5`
@@ -8614,7 +8650,13 @@ scoping before implementation, per her own framing ("plan first").
 
 - **Reported:** 2026-09-26 (Karvi). In her words: "I need a 'Search haul' feature in the haul plan. I'm
   loading hundreds of cards at a time."
-- **Status:** Open, assigned to Full Stack Dev - 2, with UIL-114.
+- **Status:** **Fixed** — PR [#380](https://github.com/viantihu/pokemon-tcg-tracker/pull/380) MERGED to `develop` 2026-09-26 (squash `e14092c`), deployed
+  green (Deploy run `36270841292`); Full Stack Dev - 2; QA: 8 killed. An instant, client-side search over
+  the loaded plan: every word must match; collector numbers as "026", "26", "026/197" or "#026"; set, Dex
+  variant and "ja"; accents fold. Image-led tiles show each card's destination (her override if she moved
+  it) and include Done cards, marked. Picking a tile puts it in the spotlight and scrolls to its row; 60 at
+  a time with "Show more". Awaiting Karvi's confirmation. **Was:** Open, assigned to Full Stack Dev - 2, with
+  UIL-114.
 - **Priority:** High.
 - **Area:** Haul Plan
 - **Env:** Testing, `develop` `e4025f5`
@@ -8639,7 +8681,11 @@ inside).
   completely irrelevant to the user." Karvi confirmed, once asked, that she means the **Haul Plan's**
   bar — "N decisions flagged (resolve in Lines · M7)" — not the Lines screen's own banner, which she
   wants kept: it's the only way into the decision cards.
-- **Status:** Open, assigned to Full Stack Dev - 2. Removing the Haul Plan bar in both states ("N
+- **Status:** **Fixed** — PR [#375](https://github.com/viantihu/pokemon-tcg-tracker/pull/375) MERGED to `develop` 2026-09-26 (squash `1158a08`); Full Stack
+  Dev - 2. The Haul Plan bar is gone in both states. The build-milestone labels she could see are reworded
+  (the spotlight's "(M7)" note and Lookup's "LINE · M7" tag), and a source scan fails on any M1–M12 in
+  rendered code. QA: 3 groups killed. Awaiting Karvi's confirmation. **Was:** Open, assigned to Full Stack
+  Dev - 2. Removing the Haul Plan bar in both states ("N
   decisions flagged…" and "No decisions flagged · ready to commit") and rewording the "M7" milestone
   text elsewhere it appears. The Lines screen's `alertbar` is untouched.
 - **Priority:** High.
@@ -8667,7 +8713,29 @@ touches).
 - **Reported:** 2026-09-26 (Karvi). In her words: "I want to rework adding lines from the haul from a
   UX perspective. This will be a larger lift that requires mock ups from the UX chat that I approve
   before we implement. (this can be worked on in parallel to testing)."
-- **Status:** Open, owner "UX Dev" (mockups); nothing is implemented until Karvi approves.
+- **Status:** Open — **APPROVED by Karvi 2026-09-26 ("Approved!"); being built.** The approved mockup (v3)
+  is on `develop` as `docs/design/prototype-uil117-lines.html` (PR [#379](https://github.com/viantihu/pokemon-tcg-tracker/pull/379)). **Her three answers:**
+  (1) ANY card moving into a back half is assigned to a line or starts one, through ONE popup, on EVERY
+  screen (the Haul Plan, the Move sheet on Lines, Lookup and Collections, Backfill's back half, and a filled
+  slot's Replace), so on the Haul Plan every back-half card now waits for her OK; (2) Replace opens on "keep
+  the one that's there", and "The user must always authorize all moves"; (3) a card taken out of a line can
+  go anywhere she chooses, with the bulk box pre-selected as "Suggested". **Build plan (the Tech Lead's,
+  approved by the Senior BA):** five PRs behind one shared popup (`lib/line/popup.ts`, `LinePopup`,
+  `buildLineChoiceOps`); the cascade's results become proposals only, and the server refuses a back-half
+  placement without her explicit choice; Replace is one `apply_write_ops` call keeping UIL-087's two-sided
+  slot invariant. **Senior BA's rulings:** joining a line in another language is allowed after a second
+  confirm; Keep on a "could replace" card is a tap she makes; Backfill gains "join an existing line"; one
+  popup level only; the Haul Plan part ships as one PR in two commits. **PR 1 DONE:** PR
+  [#381](https://github.com/viantihu/pokemon-tcg-tracker/pull/381) (squash `7c2c2f4`, migration `0028`, Deploy run `36271883957`): `assert_line_slots` checks
+  every line write in the database (a filled slot has exactly one copy pointing back, shelved in the line's
+  binder, back half; a line reads complete only when every slot is filled). It also closes six gaps, each
+  pinned by a pre-fix-failing test: Collections remove and rebind released slots inline; a Move's join was
+  unchecked (it now refuses another binder, band, species or language); a Collections back-half move could
+  strand a card (refused until PR 2); a Plan fill never completed a line; a Plan new line onto an existing
+  one could fill any stage or strand silently; and a declined pull stored the line "complete". BEFORE (run
+  `36271170303`) and AFTER (run `36271985765`) show 0 violations and unchanged counts. PRs 2 and 3 (the
+  Tech Lead), then 4 and 5 (Full Stack Dev - 2) follow. **Was:** Open, owner "UX Dev" (mockups); nothing is
+  implemented until Karvi approves.
 - **Priority:** Medium (Senior BA's read; parallel to testing, not blocking it).
 - **Area:** Haul Plan, Lines
 - **Env:** n/a — pre-mockup; nothing built yet.
