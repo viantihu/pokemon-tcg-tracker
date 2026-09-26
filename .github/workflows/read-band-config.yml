@@ -1304,7 +1304,7 @@ jobs:
             }
           };
           const [lines, slots, copies] = await Promise.all([
-            all("evolution_line", "id,binder_id"),
+            all("evolution_line", "id,binder_id,status"),
             all("line_slot", "id,line_id,state,copy_id"),
             all("copy", "id,role,binder_id,binder_half,line_slot_id"),
           ]);
@@ -1316,7 +1316,7 @@ jobs:
             lines: lines.length, slots: slots.length, copies: copies.length,
             filled_slots: 0, filled_with_no_copy: 0, filled_copy_gone: 0, filled_copy_not_shelved: 0,
             filled_copy_does_not_point_back: 0, filled_copy_in_another_binder: 0, filled_copy_not_back_half: 0,
-            filled_more_than_one_pointer: 0, unfilled_slot_pointed_at: 0, copies_pointing_at_a_slot: [...pointers.values()].reduce((a, b) => a + b, 0),
+            filled_more_than_one_pointer: 0, unfilled_slot_pointed_at: 0, complete_line_with_unfilled_slot: 0, copies_pointing_at_a_slot: [...pointers.values()].reduce((a, b) => a + b, 0),
           };
           for (const s of slots) {
             const p = pointers.get(s.id) ?? 0;
@@ -1332,7 +1332,9 @@ jobs:
             else if (c.binder_half !== "back") n.filled_copy_not_back_half++;
             else if (p !== 1) n.filled_more_than_one_pointer++;
           }
-          const violations = n.filled_with_no_copy + n.filled_copy_gone + n.filled_copy_not_shelved + n.filled_copy_does_not_point_back +
+          const unfilledByLine = new Set(slots.filter((s) => s.state !== "filled").map((s) => s.line_id));
+          n.complete_line_with_unfilled_slot = lines.filter((l) => l.status === "complete" && unfilledByLine.has(l.id)).length;
+          const violations = n.complete_line_with_unfilled_slot + n.filled_with_no_copy + n.filled_copy_gone + n.filled_copy_not_shelved + n.filled_copy_does_not_point_back +
             n.filled_copy_in_another_binder + n.filled_copy_not_back_half + n.filled_more_than_one_pointer + n.unfilled_slot_pointed_at;
           console.log(JSON.stringify(n));
           console.log(violations === 0
