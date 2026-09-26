@@ -96,8 +96,7 @@ export function describeFormerPlacement(
  * NO COUNT CHECK HERE, deliberately (UIL-100). A removal takes one copy away AND records one removal
  * against the same key, so copies and max(0, dex − removed) fall together: it can never turn a card that
  * adds up into one that does not. Asserting would therefore only ever fire on a card that ALREADY
- * disagreed with Dex — and refuse the very removal that is her remedy for a double. A merge keeps the
- * count as well (one record out, the survivor in).
+ * disagreed with Dex — and refuse the very removal that is her remedy for a double.
  */
 export function buildRemoveCopyOps(plan: RemoveCopyPlan): WriteOp[] {
   const ops: WriteOp[] = [
@@ -185,100 +184,4 @@ export async function applyCopyRemoval(db: DbClient, copyId: string): Promise<Re
     return { ok: false, error: errorMessage(e) };
   }
   return { ok: true, removedCopyId: plan.copy.id, remembered: plan.rememberKey !== null };
-}
-
-/* --------------------------------- two records, one card --------------------------------- */
-
-/**
- * MERGE two records of the same physical card (UIL-089, the incident's shape).
- *
- * Today's duplicates are one card held twice: a copy she typed by hand and shelved, and the Dex twin the
- * import created, still waiting in the haul. Her model is that each card is a separate underlying object,
- * and these two records are ONE object — so the honest remedy is not "remove one", it is "these are the
- * same card".
- *
- * WHY THIS IS SMALLER THAN REMOVING THE TWIN, which is the surprising part. Remove-the-twin leaves the
- * surviving hand-typed copy in no `presence_group`, and `reconcile` builds `current` from groups — an
- * ungrouped copy is invisible to the diff. So Dex says 1, current says 0, forever, and only the
- * `removed_presence` memory stops every future import re-creating it: permanently load-bearing memory for
- * a card she still owns. Merging puts the survivor IN the group, so desired 1 / current 1 and the import
- * creates nothing. It needs NO memory row, because nothing was lost.
- *
- * The survivor keeps its own placement and adopts the twin's IDENTITY (group, Dex variant string, variant
- * flag). The twin then goes through the ordinary removal path — with `rememberKey` forced to null, which is
- * the whole difference between "this card is gone" and "this record was a duplicate".
- */
-export interface MergeCopiesPlan {
-  survivor: Row<"copy">;
-  twin: RemoveCopyPlan;
-}
-
-export function buildMergeCopiesOps(plan: MergeCopiesPlan): WriteOp[] {
-  return [
-    {
-      op: "update_copy",
-      id: plan.survivor.id,
-      patch: {
-        presence_group_id: plan.twin.copy.presence_group_id,
-        dex_variant_raw: plan.twin.copy.dex_variant_raw,
-        variant: plan.twin.copy.variant,
-      },
-    },
-    // No `rememberKey`: the Dex row is still hers and still accounted for, by the survivor.
-    ...buildRemoveCopyOps({ ...plan.twin, rememberKey: null }),
-  ];
-}
-
-export const MERGE_REFUSALS = {
-  missing: "One of those copies is no longer in your collection.",
-  same: "Those are the same record.",
-  differentCard:
-    "Those are two different printings, so they are two different cards. Remove one instead if you do not have it.",
-  bothTracked:
-    "Both of those came from your Dex export, so Dex says you own two. Fix the count in Dex, or remove one here.",
-  neitherTracked:
-    "Neither of those came from your Dex export, so there is no identity to merge. Remove one instead.",
-} as const;
-
-export type MergeCopiesOutcome =
-  { ok: true; survivorCopyId: string; removedCopyId: string } | { ok: false; error: string };
-
-/**
- * Merge the Dex-backed `twinId` into `survivorId`.
- *
- * Refuses rather than guesses in every ambiguous case, because a wrong merge silently destroys a copy she
- * owns: two different printings are two cards (a different art is its own card, system-design §2); two
- * Dex-backed records mean Dex itself claims two, which is a Dex problem and not this action's to overrule;
- * and two hand-typed records have no identity to adopt, so merging them would just be a removal wearing a
- * merge's name.
- */
-export async function applyCopyMerge(
-  db: DbClient,
-  survivorId: string,
-  twinId: string,
-): Promise<MergeCopiesOutcome> {
-  if (survivorId === twinId) return { ok: false, error: MERGE_REFUSALS.same };
-  const survivor = await copyRepo.getByPk(db, survivorId);
-  const twinPlan = await loadRemoveCopyPlan(db, twinId);
-  if (!survivor || !twinPlan) return { ok: false, error: MERGE_REFUSALS.missing };
-  if (survivor.catalog_card_id !== twinPlan.copy.catalog_card_id) {
-    return { ok: false, error: MERGE_REFUSALS.differentCard };
-  }
-  if (survivor.presence_group_id && twinPlan.copy.presence_group_id) {
-    return { ok: false, error: MERGE_REFUSALS.bothTracked };
-  }
-  if (!twinPlan.copy.presence_group_id) return { ok: false, error: MERGE_REFUSALS.neitherTracked };
-
-  const payload: WritePayload = {
-    ops: buildMergeCopiesOps({ survivor, twin: twinPlan }),
-    // The group's live count is unchanged in total — the survivor joins as the twin leaves — but it is
-    // resynced anyway, because the count is materialised and this transaction touches both of its members.
-    resyncGroupIds: [twinPlan.copy.presence_group_id],
-  };
-  try {
-    await applyWriteOps(db, payload);
-  } catch (e) {
-    return { ok: false, error: errorMessage(e) };
-  }
-  return { ok: true, survivorCopyId: survivor.id, removedCopyId: twinPlan.copy.id };
 }

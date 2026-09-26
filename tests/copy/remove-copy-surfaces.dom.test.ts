@@ -19,8 +19,6 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RemoveCopyButton } from "@/app/(ui)/_components/RemoveCopyButton";
-import { mergeableTwinOf } from "@/app/(ui)/look/LookupScreen";
-import type { LookupMovableCopy } from "@/app/(ui)/look/lookup-copies";
 import type { DraftCard, LookupCard } from "@/app/(ui)/plan/plan-types";
 import { PlanScreen } from "@/app/(ui)/plan/PlanScreen";
 
@@ -42,14 +40,6 @@ afterEach(() => {
   cleanup();
   removeCopyAction.mockClear();
   window.sessionStorage.clear();
-});
-
-const copy = (over: Partial<LookupMovableCopy>): LookupMovableCopy => ({
-  copyId: "c1",
-  role: "shelved",
-  currentLabel: "Binder 1 · Back · Red",
-  dexTracked: false,
-  ...over,
 });
 
 describe("UIL-089 · the Remove button asks once, then acts", () => {
@@ -101,37 +91,6 @@ describe("UIL-089 · the Remove button asks once, then acts", () => {
     expect(screen.getByRole("button", { name: /Removing…/i })).toBeTruthy();
     expect(screen.getByText(/Remove Meditite\?/)).toBeTruthy(); // her decision is still on screen
     expect(screen.getByRole("button", { name: /Removing…/i })).toHaveProperty("disabled", true);
-  });
-});
-
-describe("UIL-089 · when a merge is offered at all", () => {
-  const handTyped = copy({ copyId: "hand", dexTracked: false });
-  const dexTwin = copy({ copyId: "dex", dexTracked: true, role: "haul" });
-
-  it("offers it on the HAND-TYPED row when exactly one Dex twin sits beside it — her incident", () => {
-    // Her Meditite: one copy she typed and shelved, one the import created and left in the haul. The
-    // survivor is the one she placed; the twin carries the identity being adopted.
-    expect(mergeableTwinOf(handTyped, [handTyped, dexTwin])).toEqual(dexTwin);
-  });
-
-  it("does NOT offer it on the Dex row — that one is the identity, not the survivor", () => {
-    expect(mergeableTwinOf(dexTwin, [handTyped, dexTwin])).toBeNull();
-  });
-
-  it("does NOT offer it when both records are Dex's: Dex itself claims two cards", () => {
-    const other = copy({ copyId: "dex2", dexTracked: true });
-    expect(mergeableTwinOf(other, [dexTwin, other])).toBeNull();
-  });
-
-  it("does NOT offer it when there is no twin, or more than one to choose from", () => {
-    expect(mergeableTwinOf(handTyped, [handTyped])).toBeNull();
-    const twoTwins = [handTyped, dexTwin, copy({ copyId: "dex2", dexTracked: true })];
-    // Two candidates is a question this screen cannot answer for her, so it asks nothing.
-    expect(mergeableTwinOf(handTyped, twoTwins)).toBeNull();
-  });
-
-  it("never on a block — a block is not a record of a card she owns", () => {
-    expect(mergeableTwinOf(copy({ role: "block", dexTracked: false }), [dexTwin])).toBeNull();
   });
 });
 

@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import { executeApply } from "@/lib/sync";
 import { runSyncPipeline } from "@/lib/sync/pipeline";
-import { applyCopyMerge, applyCopyRemoval, buildRemoveCopyOps, MERGE_REFUSALS } from "@/lib/copy";
+import { applyCopyRemoval, buildRemoveCopyOps } from "@/lib/copy";
 import { asOwner, asSuperuser, freshRpcDb, OWNER, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
 import { readFileSync } from "node:fs";
@@ -264,54 +264,6 @@ describe("UIL-089 · what a removal releases", () => {
       "delete_copy",
       "remember_removed_presence",
     ]);
-  });
-});
-
-describe("UIL-089 · two records, one card — unreachable since 0023", () => {
-  /**
-   * Merge joined a copy she typed by hand (NO presence group) to its Dex twin, which adopted the twin's
-   * group. Since 0023 every copy has a group, so there is no untracked survivor left to adopt one: merge can
-   * only ever meet two tracked copies, and it refuses those (`bothTracked`) without writing. The survivor
-   * test below seeds her old incident's shape the only way it can now exist: both records tracked.
-   */
-  async function seedDuplicate(): Promise<{ survivor: string; twin: string }> {
-    await importOnce(); // the Dex twin, role 'haul', in a presence group
-    await asSuperuser(db);
-    const [twin] = (
-      await db.query<{ id: string; dex_variant_raw: string; presence_group_id: string }>(
-        `select id, dex_variant_raw, presence_group_id from copy where catalog_card_id = '${CARD}'`,
-      )
-    ).rows;
-    const survivor = "c0000000-0000-0000-0000-00000000bb01";
-    await db.query(
-      `insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band, dex_variant_raw,
-         presence_group_id)
-         values ($1, $2, $3, 'shelved', $4, 'front', 'red', $5, $6)`,
-      [survivor, OWNER, CARD, B1, twin.dex_variant_raw, twin.presence_group_id],
-    );
-    await asOwner(db);
-    return { survivor, twin: twin.id };
-  }
-
-  it("two tracked records of one card: merge refuses (bothTracked) and writes nothing", async () => {
-    const client = pgliteClient(db);
-    const { survivor, twin } = await seedDuplicate();
-    expect(await applyCopyMerge(client, survivor, twin)).toEqual({
-      ok: false,
-      error: MERGE_REFUSALS.bothTracked,
-    });
-    expect(await copies()).toHaveLength(2);
-    expect(await memory()).toHaveLength(0);
-  });
-
-  it("still refuses a copy merged with itself", async () => {
-    const client = pgliteClient(db);
-    const { twin } = await seedDuplicate();
-    expect(await applyCopyMerge(client, twin, twin)).toEqual({
-      ok: false,
-      error: MERGE_REFUSALS.same,
-    });
-    expect(await copies()).toHaveLength(2);
   });
 });
 

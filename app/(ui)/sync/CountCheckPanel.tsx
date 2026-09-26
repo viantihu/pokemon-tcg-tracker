@@ -88,9 +88,9 @@ export function CountCheckPanel({ check }: { check: CountCheckView }) {
       ) : null}
       <div style={{ color: "var(--ink-2)" }}>
         What to do: {missing.length > 0 || !check.fileAddsUp ? "import your Dex file again; " : ""}
-        {check.ungroupedCopies > 0
-          ? "for a card not linked to your import, use Merge on its card page; "
-          : ""}
+        {/* No remedy of its own for a card not linked to the import: since 0023 every copy carries its link,
+            so one can only be a fault, and Lookup's Merge that used to offer is gone (UIL-103). It falls
+            to "report it" below. */}
         {extra.length > 0
           ? "for an extra copy, import your Dex file again — the preview lists the extra copies and takes them out when you apply (do not remove one yourself: removing records it as traded away); "
           : ""}

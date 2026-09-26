@@ -2,8 +2,8 @@
 /**
  * UIL-106 (2, 3) — Lookup when an action cannot reach the server at all.
  *
- * A server action THROWS when the app was redeployed under an open page or the connection dropped. Remove,
- * "Same card" and Move set `moving` and awaited the action with nothing to catch a throw, so `moving` never
+ * A server action THROWS when the app was redeployed under an open page or the connection dropped. Remove
+ * and Move set `moving` and awaited the action with nothing to catch a throw, so `moving` never
  * cleared: every button on her copies stayed disabled and nothing said why. Opening Move threw out of the
  * click with no word at all. Driven through the REAL screen in a DOM, each action scripted to reject.
  *
@@ -41,13 +41,11 @@ vi.mock("@/app/(ui)/_components/MoveOverlay", async () => {
 
 const lookupAnswer = vi.fn();
 const lookupMoveOptions = vi.fn();
-const mergeCopies = vi.fn();
 const moveFromLookup = vi.fn();
 const removeCopy = vi.fn();
 vi.mock("@/app/(ui)/look/actions", () => ({
   lookupAnswer: (...a: unknown[]) => lookupAnswer(...a),
   lookupMoveOptions: (...a: unknown[]) => lookupMoveOptions(...a),
-  mergeCopies: (...a: unknown[]) => mergeCopies(...a),
   moveFromLookup: (...a: unknown[]) => moveFromLookup(...a),
   removeCopy: (...a: unknown[]) => removeCopy(...a),
   searchCatalog: vi.fn(async () => []),
@@ -76,16 +74,15 @@ const ANSWER: LookupAnswer = {
   location: { binderName: "Main", half: "BACK HALF", bandDisplay: "Red" },
   facts: [],
 };
-/** Her Meditite shape (UIL-089): a copy she placed by hand beside the import's twin, so "Same card" shows. */
+/** Two copies of the card: one shelved, one still in her haul. */
 const COPIES: LookupMovableCopy[] = [
   {
-    copyId: "c-hand",
+    copyId: "c-shelf",
     role: "shelved",
     currentLabel: "Main · Back · Red",
     initial: { kind: "shelf", binderId: "b1", half: "back", band: "red" },
-    dexTracked: false,
   },
-  { copyId: "c-dex", role: "haul", currentLabel: "In your haul", dexTracked: true },
+  { copyId: "c-haul", role: "haul", currentLabel: "In your haul" },
 ];
 
 async function mountWithAnswer() {
@@ -106,8 +103,7 @@ const alerts = () =>
 const copiesAnswer = () => moveButtons().every((b) => !b.disabled);
 
 beforeEach(() => {
-  for (const f of [lookupAnswer, lookupMoveOptions, mergeCopies, moveFromLookup, removeCopy])
-    f.mockReset();
+  for (const f of [lookupAnswer, lookupMoveOptions, moveFromLookup, removeCopy]) f.mockReset();
   lookupAnswer.mockResolvedValue({ ok: true, answer: ANSWER, copies: COPIES });
   lookupMoveOptions.mockResolvedValue({
     ok: true,
@@ -128,16 +124,6 @@ describe("UIL-106 · a Lookup action that cannot reach the server ends in a mess
     // PRE-FIX: `moving` stayed true, so every button on her copies stayed disabled, with no message.
     expect(copiesAnswer()).toBe(true);
     expect(screen.getAllByRole("button", { name: "Remove this copy" })).toHaveLength(2);
-  });
-
-  it("Same card: says so, and her copies answer again", async () => {
-    mergeCopies.mockRejectedValue(LOST_CALL());
-    const user = await mountWithAnswer();
-
-    await user.click(screen.getByRole("button", { name: "Same card" }));
-
-    await waitFor(() => expect(alerts()).toContain(LOST.action));
-    expect(copiesAnswer()).toBe(true);
   });
 
   it("Move, when the options cannot be read: says so, as a read, and opens no sheet", async () => {

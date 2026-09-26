@@ -82,7 +82,7 @@ describe("UIL-100 · the Count check panel", () => {
     expect(html).not.toMatch(/remove a duplicate/);
   });
 
-  it("names cards that are not linked to the import, with Merge as the remedy", () => {
+  it("names cards that are not linked to the import, and sends them to be reported, not to a Merge that is gone", () => {
     const html = render({
       ...emptyCountCheck(),
       status: "mismatch",
@@ -91,6 +91,8 @@ describe("UIL-100 · the Count check panel", () => {
       importedAt: "x",
     });
     expect(html).toContain("2 cards are in your collection without a link to your Dex import");
-    expect(html).toContain("use Merge on its card page");
+    // UIL-103 removed Lookup's Merge; since 0023 an unlinked card can only be a fault, so she reports it.
+    expect(html).not.toMatch(/Merge/);
+    expect(html).toContain("report it (UIL-100)");
   });
 });

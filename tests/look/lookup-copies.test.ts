@@ -79,8 +79,6 @@ describe("UIL-051 · a copy's present home, labelled and as a destination", () =
       role: "haul",
       currentLabel: "In haul (not placed yet)",
       initial: undefined,
-      // No presence group on this fixture, so it reads as hand-typed (UIL-089): nothing would re-create it.
-      dexTracked: false,
     });
   });
 
@@ -105,16 +103,6 @@ describe("UIL-051 · a copy's present home, labelled and as a destination", () =
       role: "shelved",
       currentLabel: "Main · Back · Red",
       initial: { kind: "shelf", binderId: "b1", half: "back", band: "red" },
-      dexTracked: false,
     });
-  });
-
-  it("dexTracked follows the presence group, which is what makes a record Dex's (UIL-089)", () => {
-    // It decides two things: whether a removal has to be REMEMBERED so the next import does not re-create
-    // the card, and which of two records of one card carries the identity in a merge. A hand-typed copy is
-    // in no group, so no import counts it and none will bring it back.
-    expect(toMovableCopy(home({ presenceGroupId: "pg-1" }), NAMES).dexTracked).toBe(true);
-    expect(toMovableCopy(home({ presenceGroupId: null }), NAMES).dexTracked).toBe(false);
-    expect(toMovableCopy(home({}), NAMES).dexTracked).toBe(false); // absent reads as hand-typed
   });
 });

@@ -26,7 +26,7 @@ import {
   type LookupCopy,
   type LookupLineRef,
 } from "@/lib/surfaces";
-import { applyCopyMerge, applyCopyRemoval } from "@/lib/copy";
+import { applyCopyRemoval } from "@/lib/copy";
 import { errorMessage } from "@/lib/errors";
 import { lookupCatalog } from "../plan/actions";
 import type { LookupCard } from "../plan/plan-types";
@@ -114,25 +114,6 @@ export async function removeCopy(copyId: string, tcgdexId?: string): Promise<Rem
   }
 }
 
-/**
- * Merge two records of one physical card (UIL-089): the survivor adopts the Dex twin's identity and the
- * twin is removed. Refuses rather than guesses whenever the two are not one card — see `applyCopyMerge`.
- */
-export async function mergeCopies(
-  survivorCopyId: string,
-  twinCopyId: string,
-  tcgdexId: string,
-): Promise<RemoveCopyResult> {
-  try {
-    const { db } = await getOwnerContext();
-    const res = await applyCopyMerge(db, survivorCopyId, twinCopyId);
-    if (!res.ok) return { ok: false, error: res.error };
-    return { ok: true, lookup: await assembleLookup(db, tcgdexId) };
-  } catch (err) {
-    return { ok: false, error: errorMessage(err) };
-  }
-}
-
 /** Name lookups for a copy's present home, resolved from the plan context (see lookup-copies.ts). */
 function homeNames(pc: PlanContext, tcgdexId: string): HomeNames {
   return {
@@ -183,15 +164,7 @@ async function assembleLookup(
     lineSlotId: o.lineSlotId,
   }));
   const names = homeNames(pc, tcgdexId);
-  // `presence_group_id` comes from the raw row, not the engine's `OwnedCopy` — the engine has no reason to
-  // know which records Dex tracks, and UIL-089 does: it decides whether a removal must be remembered, and
-  // which of two records of one card carries the identity in a merge.
-  const movable = ownedHere.map((o) =>
-    toMovableCopy(
-      { ...o, presenceGroupId: pc.copyRowById.get(o.id)?.presence_group_id ?? null },
-      names,
-    ),
-  );
+  const movable = ownedHere.map((o) => toMovableCopy(o, names));
 
   const toLineRef = (
     lineId: string,

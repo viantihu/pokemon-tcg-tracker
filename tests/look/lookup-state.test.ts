@@ -34,7 +34,6 @@ describe("UIL-035 · failure is not 'not found'", () => {
         copyId: "c1",
         role: "bulk" as const,
         currentLabel: "Bulk box (not shelved)",
-        dexTracked: true,
       },
     ];
     expect(lookupViewFrom({ ok: true, answer: ANSWER, copies })).toEqual({
