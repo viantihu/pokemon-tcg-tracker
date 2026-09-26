@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UIL-117 v2 — building lines inside the Haul Plan</title>
+<title>UIL-117 v3 — one line popup for every move into a back half</title>
 <style>
 /* Palette + primitives copied from docs/design/prototype.html / app/globals.css so this reads as the
    real app. Card art is a placeholder block here; the real screen shows TCGdex art in each face. */
@@ -144,21 +144,23 @@ section{margin-bottom:52px}
 </head>
 <body>
 
-<h1>UIL-117 v2 — building lines inside the Haul Plan
+<h1>UIL-117 v3 — one line popup for every move into a back half
   <small>Proposed direction · not implemented · for Karvi's review before any code · card art is a placeholder here, the real screen shows each card's TCGdex image</small>
 </h1>
 <ul class="changes">
-  <li>A <b>line popup opens over the Haul Plan</b> whenever a card would start, join or replace something in a line, so you see the whole line and the cards moving into it before anything is written.</li>
-  <li>New: <b>replacing a card</b> already in a line with a different copy (today the new one silently goes to the front half).</li>
-  <li>Kept from v1: image-first tiles, the English/Japanese flag on every line, and "start a new line" always available.</li>
+  <li><b>Your answer 1:</b> any card going into a back half must be put in a line or start one, through
+    this popup, from <b>every</b> screen. New section ② shows every way in.</li>
+  <li><b>Your answer 2:</b> a replace opens on "keep the one that's there." Nothing moves until you confirm.</li>
+  <li><b>Your answer 3:</b> a card taken out of a line defaults to the <b>bulk box</b>, and you confirm the move.</li>
 </ul>
 
 <div class="toc">
   <a href="#s1">① The Haul Plan, with line badges</a>
-  <a href="#s2">② Starting a line</a>
-  <a href="#s3">③ Adding to a line</a>
-  <a href="#s4">④ Replacing a card in a line</a>
-  <a href="#s5">⑤ Questions for you</a>
+  <a href="#s0">② One popup, every screen</a>
+  <a href="#s2">③ Starting a line</a>
+  <a href="#s3">④ Adding to a line</a>
+  <a href="#s4">⑤ Replacing a card in a line</a>
+  <a href="#s5">⑥ Ready to approve?</a>
 </div>
 
 <!-- =================================================================== 1 -->
@@ -166,10 +168,14 @@ section{margin-bottom:52px}
   <div class="stephead"><span class="stepnum">1</span><h2>THE HAUL PLAN, WITH LINE BADGES</h2></div>
   <p class="stepnote">
     The Haul Plan is the main screen (the intake screen and yellow Decisions banner are gone, and
-    "Search haul" is Dev 2's UIL-114 to 116). Any card that changes a line gets a coloured badge on its
-    row: <b>green</b> starts a line, <b>yellow</b> adds to one, <b>pink</b> would replace a card already in
-    one. Tapping the badge opens that line's popup. Cards that don't touch a line look exactly as they
-    do today.
+    "Search haul" is Dev 2's UIL-114 to 116). Every card headed for a back half gets a coloured badge on
+    its row: <b>green</b> starts a line, <b>yellow</b> adds to one, <b>pink</b> could replace a card already in
+    one. <b>You have to confirm each one.</b> Tapping the badge opens its popup, and reaching the card in
+    the checklist opens it too, so a back-half card can't be marked done without your OK. Inside the popup,
+    "Confirm &amp; next" takes you straight to the next line card, so a big haul is one pass, not a hunt.
+    Front-half, bulk and collection cards look exactly as they do today.<br><br>
+    <b>This changes a rule:</b> today the plan fills and starts lines on its own, and only flagged
+    decisions ask you. After this, every back-half card waits for you.
   </p>
   <div class="frame">
     <div class="panel haul">
@@ -213,9 +219,61 @@ section{margin-bottom:52px}
   </div>
 </section>
 
-<!-- =================================================================== 2 -->
+<!-- =================================================================== 2 (new in v3) -->
+<section id="s0">
+  <div class="stephead"><span class="stepnum">2</span><h2>ONE POPUP, EVERY SCREEN</h2></div>
+  <p class="stepnote">
+    Whichever screen you're on, the moment a card's destination is a back half, <b>this same popup
+    opens</b>: same layout, same "what moves" list, same confirm. Front halves, the bulk box and
+    collections have no lines, so moving a card there works the way it does today.<br><br>
+    <b>What changes on each screen:</b> the Move sheet already won't put a card in a back half without a
+    line, but today that choice is a row of text chips inside the sheet; picking "Back half" will open the
+    popup instead. Backfill's back half has its own separate line builder today; it switches to the popup
+    too, so there's one way to build a line, not two.
+  </p>
+  <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;max-width:980px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;flex:1 1 560px">
+      <div class="panel" style="padding:10px">
+        <div class="lbl u">Haul Plan</div>
+        <div style="font-size:11px">A card the plan sends to a back half. <b>Badge</b> or the checklist opens it.</div>
+        <div style="margin-top:8px"><span class="lbadge start u">＋ Starts Charizard line</span></div>
+      </div>
+      <div class="panel" style="padding:10px">
+        <div class="lbl u">Move sheet · Lines, Lookup, Collections</div>
+        <div style="font-size:11px">"↔ Move" on any card, then pick where it goes:</div>
+        <div class="ochips" style="margin-top:8px">
+          <span class="ochip">Front half</span><span class="ochip">Bulk box</span><span class="ochip">A collection</span><span class="ochip on">Back half ▶</span>
+        </div>
+      </div>
+      <div class="panel" style="padding:10px">
+        <div class="lbl u">Backfill · back half</div>
+        <div style="font-size:11px">Loading an existing binder. Each line you record goes through the popup instead of today's separate builder.</div>
+      </div>
+      <div class="panel" style="padding:10px">
+        <div class="lbl u">Lines page · a filled slot</div>
+        <div style="font-size:11px">Tap a card already in a line, then "Replace this card". Opens the replace view (section ⑤).</div>
+      </div>
+    </div>
+    <div style="font-size:26px;color:var(--panel);text-shadow:2px 2px 0 rgba(0,0,0,.25)">▶</div>
+    <div class="panel" style="padding:0;width:230px;flex:0 0 auto">
+      <div class="cap" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--ink);color:var(--panel);font-size:10px;letter-spacing:.12em">THE LINE POPUP</div>
+      <div style="padding:10px">
+        <div class="strip" style="padding:8px 4px">
+          <div class="face m"><div class="art red">CMD</div></div>
+          <div class="arrow" style="margin-top:22px">▶</div>
+          <div class="face m"><div class="art red">CML</div></div>
+          <div class="arrow" style="margin-top:22px">▶</div>
+          <div class="face m open"><div class="art">+</div></div>
+        </div>
+        <div style="font-size:9px;color:var(--ink-2);margin-top:8px" class="u">Same popup from every screen</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================================================================== 3 -->
 <section id="s2">
-  <div class="stephead"><span class="stepnum">2</span><h2>STARTING A LINE — SEE THE WHOLE LINE BEFORE IT EXISTS</h2></div>
+  <div class="stephead"><span class="stepnum">3</span><h2>STARTING A LINE — SEE THE WHOLE LINE BEFORE IT EXISTS</h2></div>
   <p class="stepnote">
     Tapping "Starts Charizard line" opens this over the plan. The line is laid out stage by stage,
     the same shape as the Lines screen, with <b>every card that would go into it</b>: the two from this
@@ -287,9 +345,9 @@ section{margin-bottom:52px}
         </div>
 
         <div class="foot">
-          <span class="sum u">2 cards go in · 1 waiting on you · nothing written until you confirm</span>
+          <span class="sum u">Line card 1 of 3 in this haul · 2 cards go in · nothing written until you confirm</span>
           <button class="btn">Cancel</button>
-          <button class="btn primary">Start this line ▶</button>
+          <button class="btn primary">Start line · next ▶</button>
         </div>
       </div>
     </div>
@@ -298,7 +356,7 @@ section{margin-bottom:52px}
 
 <!-- =================================================================== 3 -->
 <section id="s3">
-  <div class="stephead"><span class="stepnum">3</span><h2>ADDING TO A LINE — THE CARD LANDS IN ITS SLOT</h2></div>
+  <div class="stephead"><span class="stepnum">4</span><h2>ADDING TO A LINE — THE CARD LANDS IN ITS SLOT</h2></div>
   <p class="stepnote">
     Your Toedscruel example. The popup shows the existing line with the card you already own in
     it, and the new card <b>dropping into the open slot</b>, so you can see how the two look side by side
@@ -343,9 +401,9 @@ section{margin-bottom:52px}
           <div class="mrow"><span class="verb u">Shelve</span><span class="face s"><span class="art orange">TSC</span></span><span>Toedscruel <span class="where">→ KB-004 · Back · Orange, right after Toedscool</span></span></div>
         </div>
         <div class="foot">
-          <span class="sum u">1/2 → 2/2 · line complete</span>
+          <span class="sum u">Line card 2 of 3 · 1/2 → 2/2 · line complete</span>
           <button class="btn">Pick a different line</button>
-          <button class="btn primary">Add to this line ▶</button>
+          <button class="btn primary">Add to line · next ▶</button>
         </div>
       </div>
     </div>
@@ -354,7 +412,7 @@ section{margin-bottom:52px}
 
 <!-- =================================================================== 4 -->
 <section id="s4">
-  <div class="stephead"><span class="stepnum">4</span><h2>REPLACING A CARD IN A LINE</h2></div>
+  <div class="stephead"><span class="stepnum">5</span><h2>REPLACING A CARD IN A LINE</h2></div>
   <p class="stepnote">
     <b>What happens today:</b> if a new copy of a stage you already have arrives (say an alt-art
     Charmeleon for a line that already holds a Charmeleon), the app sends the new one to the front half
@@ -364,7 +422,8 @@ section{margin-bottom:52px}
     <b>Proposed:</b> that card gets the pink badge, and its popup shows the line with both cards
     for that slot side by side. You pick which one stays in the line. <b>The default is "keep the one
     that's there"</b>, so nothing changes unless you choose it. If you swap, you also pick where the card
-    coming out goes, and the whole swap is done in one step, so the line never shows a gap.
+    coming out goes (<b>the bulk box by default</b>), and the whole swap is done in one step, so the line
+    never shows a gap.
     The holo upgrade uses this same screen, pre-set to swap with the old copy going to bulk, which is
     today's rule for it.
   </p>
@@ -435,8 +494,8 @@ section{margin-bottom:52px}
 
         <div class="lbl u" style="margin-top:14px">Where does 027/197 go?</div>
         <div class="ochips">
-          <span class="ochip on"><span class="chip" style="background:var(--b-red);width:12px;height:12px;border-width:2px"></span> Front half · Red</span>
-          <span class="ochip">Bulk box</span>
+          <span class="ochip on">Bulk box</span>
+          <span class="ochip"><span class="chip" style="background:var(--b-red);width:12px;height:12px;border-width:2px"></span> Front half · Red</span>
           <span class="ochip">A collection…</span>
           <span class="ochip">Another binder…</span>
         </div>
@@ -445,7 +504,7 @@ section{margin-bottom:52px}
         <div class="moves">
           <div class="mrow"><span class="verb u" style="color:#9e3217">Take out</span><span class="face s leaving"><span class="art red">CML</span></span><span>Charmeleon 027/197 <span class="where">from KB-003 · Back · Red</span></span></div>
           <div class="mrow"><span class="verb u">Shelve</span><span class="face s"><span class="art redH">CML</span></span><span>Charmeleon 169/165 <span class="where">→ into its spot, between Charmander and Charizard</span></span></div>
-          <div class="mrow"><span class="verb u">Shelve</span><span class="face s"><span class="art red">CML</span></span><span>Charmeleon 027/197 <span class="where">→ KB-003 · Front · Red</span></span></div>
+          <div class="mrow"><span class="verb u">To bulk</span><span class="face s"><span class="art red">CML</span></span><span>Charmeleon 027/197 <span class="where">→ the bulk box</span></span></div>
         </div>
 
         <div class="foot">
@@ -467,19 +526,20 @@ section{margin-bottom:52px}
 
 <!-- =================================================================== 5 -->
 <section id="s5">
-  <div class="stephead"><span class="stepnum">5</span><h2>THREE QUESTIONS FOR YOU</h2></div>
+  <div class="stephead"><span class="stepnum">6</span><h2>READY TO APPROVE?</h2></div>
   <div class="panel questions">
+    <b class="u" style="font-size:11px;letter-spacing:.08em">Your answers, and where they are in this mockup</b>
     <ol>
-      <li><b>When should the popup open?</b> Proposed: when you tap a card's line badge, <b>and</b>
-        automatically when you reach that card in the checklist ("Done, next card"). The auto-open could
-        feel like a lot on a big haul with many line cards. Want both, or badge-only?</li>
-      <li><b>Replace default.</b> Proposed: "keep the one that's there," so a new copy never bumps
-        a card out of a line unless you say so. Or would you rather it default to the newer card when
-        it's a nicer printing (holo, alt art, full art)?</li>
-      <li><b>Where a card that comes out of a line goes by default.</b> Proposed: the front half, same
-        colour, which is what happens to an extra copy today. Bulk is one tap away. Would you rather the
-        default be bulk?</li>
+      <li><b>Every move into a back half goes through this popup, on every screen.</b> <i>Sections ①
+        and ②. Each back-half card needs your OK; none is placed on its own.</i></li>
+      <li><b>Replace opens on "keep the one that's there."</b> <i>Section ⑤. You authorize every move.</i></li>
+      <li><b>A card coming out of a line goes to the bulk box by default</b>, and you confirm it.
+        <i>Section ⑤.</i></li>
     </ol>
+    <p style="font-size:11px;margin-top:12px">
+      If this matches what you want, say <b>approved</b> and the Senior BA assigns the build. Otherwise,
+      tell me what to change.
+    </p>
   </div>
 </section>
 
