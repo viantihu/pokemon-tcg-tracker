@@ -637,7 +637,9 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
     const e = await unresolvedEntryRepo.getByPk(db, id);
     if (!e || e.status !== "RESOLVED" || !e.manual_match_id) continue;
     const prior = priorById.get(id);
-    if (prior && prior.status === "RESOLVED") continue; // already matched before this sync
+    // Unreachable today (updatedPrior is built from WAITING + DISMISSED rows only), kept for a future caller:
+    // a row already RESOLVED before this sync is in the restored record, so re-adding it would count it twice.
+    if (prior && prior.status === "RESOLVED") continue;
     keptMatches.push({ entry: e, predates: prior !== undefined });
   }
   const keptMatchIds = new Set(keptMatches.map((k) => k.entry.id));
