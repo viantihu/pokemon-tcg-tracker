@@ -54,9 +54,17 @@ export interface PendingPlacement {
  * been placed, which is exactly what happened when 702 rows were cleared by hand on Testing
  * (2026-09-14). There is deliberately no separate "pending" flag to keep in step with this: the row is
  * the flag. Never clear that table; never archive it out of the live database.
+ *
+ * `except` (UIL-114): copies the caller already holds, left out BEFORE the catalog is read. The Haul Plan
+ * asks this every 30 s for cards that arrived while it was open, and almost always the answer is none, so
+ * then the check reads her unplaced copies and nothing else: no decision lookup, no catalog join.
  */
-export async function loadPendingPlacements(db: DbClient): Promise<PendingPlacement[]> {
-  const unplaced = await copyRepo.listUnplaced(db);
+export async function loadPendingPlacements(
+  db: DbClient,
+  opts: { except?: ReadonlySet<string> } = {},
+): Promise<PendingPlacement[]> {
+  const except = opts.except;
+  const unplaced = (await copyRepo.listUnplaced(db)).filter((c) => !except?.has(c.id));
   if (unplaced.length === 0) return [];
 
   const decided = await placementDecisionRepo.listDecidedCopyIds(

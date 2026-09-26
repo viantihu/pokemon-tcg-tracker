@@ -59,7 +59,7 @@ export function dropFromPlan(plan: RunPlanResult, ids: ReadonlySet<string>): Run
   );
 }
 
-/** A waiting card whose home a re-route changed, named so it never moves silently. */
+/** A waiting card whose home a re-route changed, or a card it placed for the first time; named either way. */
 export interface MovedCard {
   incomingId: string;
   name: string;
@@ -68,27 +68,29 @@ export interface MovedCard {
 
 /**
  * The plan after a re-route: every card she has SHELVED kept exactly as it was (it is written; the server
- * routed only the waiting ones), every waiting card as the server now routes it, and the waiting cards whose
- * home changed.
+ * routed only the waiting ones), every waiting card as the server now routes it, the waiting cards whose
+ * home changed (`moved`), and the cards the plan did not hold before (`added`: arrivals, UIL-114 part C).
  */
 export function mergeReroute(
   prev: RunPlanResult,
   next: RunPlanResult,
   done: ReadonlySet<string>,
-): { plan: RunPlanResult; moved: MovedCard[] } {
+): { plan: RunPlanResult; moved: MovedCard[]; added: MovedCard[] } {
   const before = new Map(flattenPlan(prev).map((it) => [it.incomingId, it]));
   const kept = flattenPlan(prev).filter((it) => done.has(it.incomingId));
   const routed = flattenPlan(next).filter((it) => !done.has(it.incomingId));
   const moved: MovedCard[] = [];
+  const added: MovedCard[] = [];
   for (const it of routed) {
     const was = before.get(it.incomingId);
-    if (was && (was.destination !== it.destination || was.action !== it.action)) {
-      moved.push({ incomingId: it.incomingId, name: it.name, destination: it.destination });
-    }
+    const named = { incomingId: it.incomingId, name: it.name, destination: it.destination };
+    if (!was) added.push(named);
+    else if (was.destination !== it.destination || was.action !== it.action) moved.push(named);
   }
   return {
     plan: planOf([...kept, ...routed], bandOrder(next, prev), next.blockNeeds),
     moved,
+    added,
   };
 }
 
