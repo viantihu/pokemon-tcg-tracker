@@ -29,7 +29,7 @@ and the irreversible ones (A5, B5) wait for Karvi's explicit go on the day.
 | A6 | Deploy on `main` green: `migrate` applied 0003 onward, `smoke` sees `/login` 200 | Tech Lead verifies | read-only |
 | A7 | Karvi signs into Production once (creates the owner row) | Karvi | yes |
 | A8 | Backups / PITR confirmed **on** for the Production project | Karvi (dashboard) | yes |
-| A9 | Only if the repo goes private: GitHub Pro on **before** the flip, then protection re-checked | Karvi (billing), Tech Lead verifies | yes |
+| A9 | At go-live the repo goes private: GitHub Pro and a spending limit **before** the flip, then protection re-checked | Karvi (billing), Tech Lead verifies | yes |
 | A10 | In-app feedback widget (UIL-110), when she chooses to add it | Karvi (GitHub App, Vercel), feedback session builds | yes |
 | B3 | Preconditions the script enforces | script | read-only |
 | B5 | `promote-collection.mjs --dry-run`, then the real run | Karvi runs, Tech Lead reviews the dry-run output | dry run: yes. Real run: one transaction, but not idempotent |
@@ -53,9 +53,9 @@ are answered. The fourth gates only a change of the repository's visibility (A9)
       it merges, so it is opened and merged on the day, not parked.
 - [ ] **UAT closed.** Every open issue-log entry she wants fixed before real use is
       Fixed and deployed to Testing. Anything left open ships to Production as-is.
-- [ ] **Repository visibility.** Whether this repository stays public or goes private at
-      go-live, and if private, which of A9's options pays for CI. Not needed for A5; needed
-      before anyone flips the setting.
+- [x] **Repository visibility. DECIDED 2026-09-26: private at go-live, on GitHub Pro, as-is**
+      (A9's Option 2: no minute cuts). The repository stays public until then. Not needed
+      for A5; A9's steps are needed before anyone flips the setting.
 
 ## A2. Measure the gap (read-only, repeatable)
 
@@ -228,7 +228,7 @@ to the `main` rail to get past it; find out what is in Production first.
       project. Do this before B5, not after; the promotion is a one-shot write of
       everything she owns.
 
-## A9. If the repository goes private: CI minutes and branch protection
+## A9. The repository goes private at go-live: CI minutes and branch protection
 
 The repository went public on 2026-09-17 because a private repo's free Actions minutes ran
 out and CI stopped. Going private brings that limit back, and one more.
@@ -243,19 +243,37 @@ Measured 2026-09-19 → 09-26, at UAT pace: **3,596 billable minutes in 7 days**
 minutes. Pro includes 3,000 minutes a month; beyond that, Linux minutes cost $0.006 each
 (the January 2026 rate). Self-hosted runner minutes carry no GitHub charge.
 
-| Option | Cost at UAT pace / quiet pace | What she gives up |
-|---|---|---|
-| 1. Stay public; only the feedback repos (A10) are private | $0 / $0 | Nothing new: code and Actions logs stay public, as today |
-| 2. Private + Pro + a spending cap | about $79 / $4 a month | When the cap is hit, CI stops until the month resets (the 2026-09-17 stall) |
-| 3. Option 2 plus docs-only changes skip the test run and Deploy's database steps | about $40 / $4 a month | Nothing visible; about half a day of CI work, including an always-green check so docs PRs are not blocked by the required checks |
-| 4. Private + Pro + a self-hosted runner | about $9 / $9 a month (Pro plus a small always-on server) | Reliability: CI stops whenever that machine is down. Setup and upkeep, and one more machine holding the deploy secrets |
+**Karvi's ruling (2026-09-26): Option 2, "Private, Pro plan, as-is".** The other three
+were considered and declined; they stay here so the choice can be revisited with its numbers.
 
-If she chooses to go private:
+| Option | Cost at UAT pace / quiet pace | What she gives up | Status |
+|---|---|---|---|
+| 1. Stay public; only the feedback repos (A10) are private | $0 / $0 | Nothing new: code and Actions logs stay public, as today | Declined |
+| 2. Private + Pro + a spending limit | about $79 / $4 a month | When the limit is hit, CI stops until the month resets (the 2026-09-17 stall) | **Chosen** |
+| 3. Option 2 plus docs-only changes skip the test run and Deploy's database steps | about $40 / $4 a month | Nothing visible; about half a day of CI work, including an always-green check so docs PRs are not blocked by the required checks | Declined |
+| 4. Private + Pro + a self-hosted runner | about $9 / $9 a month (Pro plus a small always-on server) | Reliability: CI stops whenever that machine is down. Setup and upkeep, and one more machine holding the deploy secrets | Declined |
 
-- [ ] GitHub Pro is active on the owning account, and a spending cap is set, **before** the
-      visibility changes.
-- [ ] After the flip, the branch protection rules on `develop` and `main` still list verify,
-      migration-order and Vercel as required, and a test PR shows them as required.
+**The spending limit.** GitHub bills an account's Actions minutes beyond Pro's 3,000 against
+a budget, and blocks further runs once that budget is spent. That block is what stopped CI on
+2026-09-17.
+
+- **Amount: $80 a month, recommended, pending Karvi's confirmation.** That covers the measured
+  UAT pace (about $75 over Pro's minutes), so CI does not stop mid-month while fixes are
+  still landing. Lower it once a quiet month's usage is measured.
+- **Alerts** at 75% and 90% of the limit go to the account owner's email.
+- **Who raises it: Karvi.** Only the account owner can change billing (GitHub → Settings →
+  Billing and licensing → Budgets and alerts). When CI stops on the limit, the Tech Lead
+  tells her the month's usage and what raising it would cost. No one else changes it.
+
+At go-live, in this order:
+
+- [ ] **(1) GitHub Pro** is active on the owning account (`viantihu`), **before** the
+      visibility changes. Without it, the flip removes branch protection.
+- [ ] **(2) The spending limit** is set on Actions at the confirmed amount, with the alerts
+      above, and set to stop usage at the limit.
+- [ ] The visibility is changed to private (Karvi, repository Settings → General).
+- [ ] **(3) After the flip**, the branch protection rules on `develop` and `main` still list
+      verify, migration-order and Vercel as required, and a test PR shows them as required.
 - [ ] One push to `develop` runs Deploy green end-to-end (the minutes are now metered).
 - [ ] The `ops/read-band-config` diagnostic still dispatches. Its logs stop being
       world-readable; the counts-only rule stays unless she rules otherwise.
