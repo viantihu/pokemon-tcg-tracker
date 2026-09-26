@@ -1342,3 +1342,61 @@ jobs:
             : `::error::VERDICT: ${violations} existing violation(s). Every write touching them will be refused after 0028; repair first.`);
           JS
           node uil117.mjs
+
+      # UIL-053 (reproduced 2026-09-26): cards shelved into the specialty binder that did not show in any collection.
+      # Hypothesis: the cascade's CARD CLASS step routes a specialty-class card to the specialty binder with
+      # collectionId null and no list join; before the 20:29:55Z start-over emptied the open lists, those cards were
+      # claimed by a list first (COLLECTION CLAIM). READ-ONLY, COUNTS ONLY: decisions by route since the start-over,
+      # and, for the card-class ones, whether a later move (her Lookup fix) put them on a list.
+      - name: "UIL-053: specialty-binder shelves by route since the start-over (counts only)"
+        if: always()
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          cat > uil053.mjs <<'JS'
+          import { createClient } from "@supabase/supabase-js";
+          const db = createClient(`https://${process.env.PROJECT_REF}.supabase.co`, process.env.SERVICE_KEY, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+          const all = async (table, cols, filter = (q) => q) => {
+            const out = [];
+            for (let from = 0; ; from += 1000) {
+              const { data, error } = await filter(db.from(table).select(cols)).order("id").range(from, from + 999);
+              if (error) throw new Error(`${table}: ${error.message}`);
+              out.push(...data);
+              if (data.length < 1000) return out;
+            }
+          };
+          const SINCE = "2026-09-26T20:29:55Z";
+          const [binders, collections, copies, decisions] = await Promise.all([
+            all("binder", "id,type"),
+            all("collection", "id,mode,target_catalog_card_ids,current_binder_ids"),
+            all("copy", "id,catalog_card_id,role,binder_id"),
+            all("placement_decision", "id,copy_id,decision,created_at", (q) => q.gte("created_at", SINCE)),
+          ]);
+          const specialty = new Set(binders.filter((b) => b.type === "specialty").map((b) => b.id));
+          const copyById = new Map(copies.map((c) => [c.id, c]));
+          const onAList = (c) => collections.some((col) => (col.current_binder_ids ?? []).includes(c.binder_id) && (col.target_catalog_card_ids ?? []).includes(c.catalog_card_id));
+          const byDecision = {};
+          for (const d of decisions) byDecision[d.decision] = (byDecision[d.decision] ?? 0) + 1;
+          const decsByCopy = new Map();
+          for (const d of decisions) if (d.copy_id) decsByCopy.set(d.copy_id, [...(decsByCopy.get(d.copy_id) ?? []), d]);
+          const firstIs = (list, kind) => [...list].sort((a, b) => a.created_at.localeCompare(b.created_at))[0]?.decision === kind;
+          const cardClassCopies = [...decsByCopy].filter(([, list]) => firstIs(list, "card-class")).map(([id, list]) => ({ c: copyById.get(id), list }));
+          const out = {
+            decisions_since_start_over: decisions.length,
+            by_route: byDecision,
+            card_class_first: cardClassCopies.length,
+            card_class_now_in_specialty_binder: cardClassCopies.filter((x) => x.c && specialty.has(x.c.binder_id)).length,
+            card_class_now_on_a_list: cardClassCopies.filter((x) => x.c && onAList(x.c)).length,
+            card_class_with_a_later_move: cardClassCopies.filter((x) => x.list.some((d) => d.decision === "placement-move")).length,
+            claim_first: [...decsByCopy].filter(([, list]) => firstIs(list, "collection-claim")).length,
+            specialty_binder_shelved_on_no_list_now: copies.filter((c) => c.role === "shelved" && specialty.has(c.binder_id) && !onAList(c)).length,
+            open_collections: collections.filter((c) => c.mode !== "finite").length,
+            open_collections_with_empty_list: collections.filter((c) => c.mode !== "finite" && (c.target_catalog_card_ids ?? []).length === 0).length,
+          };
+          console.log(JSON.stringify(out));
+          JS
+          node uil053.mjs
