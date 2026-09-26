@@ -26,7 +26,17 @@ import {
 } from "@/lib/repo";
 import { releaseSlotOps } from "@/lib/line/move";
 import { parseDexId, resolveDexId } from "./resolve";
-import { localeOfId, normalizeLocale } from "@/lib/catalog/locale";
+import {
+  isLanguage,
+  isStandInId,
+  languageName,
+  languageOfId,
+  localeOfId,
+  normalizeLocale,
+  STAND_IN_ID_PREFIX,
+  standInIdFor,
+  type Language,
+} from "@/lib/catalog/locale";
 import { entryAsDexRow, loadAliasMap } from "./pipeline";
 import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
@@ -998,6 +1008,11 @@ export interface StandInInput {
   /** The TCGdex set id when the entry's set is known (UNKNOWN_CARD); null for UNKNOWN_SET. */
   setId: string | null;
   localId: string | null;
+  /**
+   * The language the card is printed in (UIL-108), one of TCGdex's. It goes INTO the id
+   * (`user:<language>:<uuid>`), and 0027 derives `catalog_card.locale` from the id, so the two agree.
+   */
+  language: Language;
   kind:
     | { kind: "pokemon"; type: string; stage: "Basic" | "Stage1" | "Stage2"; dexId?: number | null }
     | { kind: "trainer" }
@@ -1005,14 +1020,9 @@ export interface StandInInput {
   cardClass?: "standard" | "specialty";
 }
 
-/** The id namespace a stand-in lives in; the schema check in 0015 ties it to `source = 'user'`. */
-export const STAND_IN_ID_PREFIX = "user:";
-export function newStandInId(): string {
-  return `${STAND_IN_ID_PREFIX}${crypto.randomUUID()}`;
-}
-export function isStandInId(tcgdexId: string): boolean {
-  return tcgdexId.startsWith(STAND_IN_ID_PREFIX);
-}
+// The stand-in id helpers live with the other id namespaces (lib/catalog/locale.ts); re-exported for callers.
+export { isStandInId, STAND_IN_ID_PREFIX };
+export const newStandInId = standInIdFor;
 
 /**
  * Thrown instead of creating a second stand-in for the same card (Karvi's refusal rule: name the
@@ -1020,10 +1030,11 @@ export function isStandInId(tcgdexId: string): boolean {
  */
 export class StandInTwinError extends Error {
   constructor(public readonly twin: Row<"catalog_card">) {
+    const language = languageOfId(twin.tcgdex_id);
     super(
       `A stand-in for "${twin.name}"${twin.set_name ? ` in ${twin.set_name}` : ""}` +
-        `${twin.local_id ? ` · ${twin.local_id}` : ""} already exists. Match this entry to it instead ` +
-        `of creating a twin.`,
+        `${twin.local_id ? ` · ${twin.local_id}` : ""}${language ? ` (${languageName(language)})` : ""} ` +
+        `already exists. Match this entry to it instead of creating a twin.`,
     );
     this.name = "StandInTwinError";
   }
@@ -1364,8 +1375,27 @@ export async function knownSetIdForEntry(
 }
 
 export interface StandInMatchResult extends ManualMatchResult {
-  /** The id the stand-in was created under (`user:<uuid>`). */
+  /** The id the stand-in was created under (`user:<language>:<uuid>`). */
   standInId: string;
+}
+
+/**
+ * The stand-in she already made for this card, if any: same name, set name and number, in the SAME
+ * language (UIL-108). An English and a Japanese stand-in of one card are two cards, as their printings
+ * are (UIL-090). A stand-in made before UIL-108 recorded no language, so it is nobody's twin. 0027's unique
+ * index enforces the same key in the database, for two entries racing each other.
+ */
+async function findStandInTwin(
+  db: DbClient,
+  input: Pick<StandInInput, "name" | "setName" | "localId" | "language">,
+): Promise<Row<"catalog_card"> | undefined> {
+  return (await catalogCardRepo.listStandIns(db)).find(
+    (c) =>
+      languageOfId(c.tcgdex_id) === input.language &&
+      norm(c.name) === norm(input.name) &&
+      norm(c.set_name) === norm(input.setName) &&
+      norm(c.local_id) === norm(input.localId),
+  );
 }
 
 /**
@@ -1382,13 +1412,9 @@ export async function manualMatchStandIn(
   const entry = await unresolvedEntryRepo.getByPk(db, entryId);
   if (!entry) throw new Error("Unresolved entry not found.");
   if (!input.name.trim()) throw new Error("A stand-in needs a name.");
+  if (!isLanguage(input.language)) throw new Error("Pick the language the card is printed in.");
 
-  const twin = (await catalogCardRepo.listStandIns(db)).find(
-    (c) =>
-      norm(c.name) === norm(input.name) &&
-      norm(c.set_name) === norm(input.setName) &&
-      norm(c.local_id) === norm(input.localId),
-  );
+  const twin = await findStandInTwin(db, input);
   // Applied once, like `manualMatch` (UIL-099): a second press on a row already matched to THIS stand-in is
   // that match landing, not a twin; any other resolution is refused before a second stand-in is made.
   if (entry.status === "RESOLVED") {
@@ -1399,7 +1425,7 @@ export async function manualMatchStandIn(
   }
   if (twin) throw new StandInTwinError(twin);
 
-  const standInId = newStandInId();
+  const standInId = standInIdFor(input.language);
   const k = input.kind;
   const ops: WriteOp[] = [
     {
@@ -1426,6 +1452,10 @@ export async function manualMatchStandIn(
     if (now?.status === "RESOLVED" && now.manual_match_id && isStandInId(now.manual_match_id)) {
       return { ...alreadyMatchedResult(), standInId: now.manual_match_id };
     }
+    // Another entry made this same stand-in between the twin check above and this write: 0027's unique
+    // index refused the second one. That is a twin, so say it as one, with the stand-in to match instead.
+    const raced = await findStandInTwin(db, input);
+    if (raced) throw new StandInTwinError(raced);
     throw (await asCountRefusal(db, err, NEXT_STEP.match)) ?? err;
   }
   return { ...match.result, standInId };

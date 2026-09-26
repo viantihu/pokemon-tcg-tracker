@@ -40,6 +40,7 @@ describe("UIL-060 · createStandInAndMatch", () => {
       name: "Mystery Fossil",
       setName: "Obsidian Flames",
       localId: "999",
+      language: "en" as const,
       kind: { kind: "pokemon", type: "Fire", stage: "Basic", dexId: 4 },
     });
     expect(r.ok).toBe(true);
@@ -64,6 +65,7 @@ describe("UIL-060 · createStandInAndMatch", () => {
       name: "Ghost Card",
       setName: "A Set Nobody Has",
       localId: "1",
+      language: "en" as const,
       kind: { kind: "trainer" },
     });
     expect(r.ok).toBe(true);
@@ -81,6 +83,7 @@ describe("UIL-060 · createStandInAndMatch", () => {
       name: "Mystery Fossil",
       setName: "Obsidian Flames",
       localId: "999",
+      language: "en" as const,
       kind: { kind: "trainer" as const },
     };
     const first = await createStandInAndMatch(KNOWN, input);

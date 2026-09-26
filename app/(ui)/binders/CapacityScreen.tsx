@@ -263,7 +263,7 @@ function BinderCardGrid({ binderId }: { binderId: string }) {
           <div className="cgrid" style={{ marginTop: showHeaders ? 6 : 0 }}>
             {grp.cards.map((c) => (
               <div key={c.copyId} className="ccard">
-                <CardFace name={c.name} imageUrl={c.imageUrl} size="m" />
+                <CardFace name={c.name} tcgdexId={c.tcgdexId} imageUrl={c.imageUrl} size="m" />
                 <div className="cn u">{c.name}</div>
                 {c.localId ? <div className="cno">{c.localId}</div> : null}
               </div>

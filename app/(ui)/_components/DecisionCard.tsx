@@ -82,7 +82,12 @@ export function DecisionCard({
 
         {d.card ? (
           <div className="hand" style={{ marginBottom: 18 }}>
-            <CardFace name={d.card.name} imageUrl={d.card.imageUrl} size="m" />
+            <CardFace
+              name={d.card.name}
+              tcgdexId={d.card.tcgdexId}
+              imageUrl={d.card.imageUrl}
+              size="m"
+            />
             <div style={{ minWidth: 0 }}>
               <div className="nm" style={{ fontSize: 15 }}>
                 {d.card.name}
@@ -269,7 +274,12 @@ export function DecisionCard({
                         style={resolvedLabel ? undefined : { cursor: "pointer" }}
                       >
                         <div className="top">
-                          <CardFace name={w.name} imageUrl={w.imageUrl} size="m" />
+                          <CardFace
+                            name={w.name}
+                            tcgdexId={w.tcgdexId}
+                            imageUrl={w.imageUrl}
+                            size="m"
+                          />
                           {w.badge ? <span className="badge">{w.badge}</span> : null}
                         </div>
                         <div className="wn">{w.name}</div>

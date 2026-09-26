@@ -382,7 +382,7 @@ export function BrowseCardTile({
       onClick={onToggle}
       aria-pressed={picked}
     >
-      <CardFace name={card.name} imageUrl={card.imageUrl} size="m" />
+      <CardFace name={card.name} tcgdexId={card.tcgdexId} imageUrl={card.imageUrl} size="m" />
       <div className="cn u">{card.name}</div>
       {number ? <div className="cno">{number}</div> : null}
       {card.owned && <span className="cpill have u">Owned</span>}

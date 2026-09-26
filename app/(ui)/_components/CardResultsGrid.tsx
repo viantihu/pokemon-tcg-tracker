@@ -21,7 +21,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
-import { localeTag, stripLocaleNamespace } from "@/lib/catalog/locale";
+import { cardTag, stripLocaleNamespace } from "@/lib/catalog/locale";
 import { CardFace } from "./CardFace";
 import type { LookupCard } from "../plan/plan-types";
 
@@ -174,11 +174,11 @@ export function CardResultTiles<T extends GridCard = LookupCard>({
                 aria-selected={false}
                 onClick={() => onPick(c)}
               >
-                <CardFace name={c.name} imageUrl={c.imageUrl} size="m" />
+                <CardFace name={c.name} tcgdexId={c.tcgdexId} imageUrl={c.imageUrl} size="m" />
                 <div className="cn u">{c.name}</div>
                 <div className="cno">
                   {c.setName ?? stripLocaleNamespace(c.setId)}
-                  {localeTag(c.tcgdexId) ? ` · ${localeTag(c.tcgdexId)}` : ""}
+                  {cardTag(c.tcgdexId) ? ` · ${cardTag(c.tcgdexId)}` : ""}
                 </div>
                 {number ? <div className="cno">{number}</div> : null}
                 {c.badge ? <div className="cno">{c.badge}</div> : null}

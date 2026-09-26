@@ -3272,3 +3272,21 @@ button.subhead.folded:hover {
   letter-spacing: 0.08em;
   color: var(--ink-2);
 }
+
+/* UIL-108: a stand-in's language, badged on its sigil (the one face every screen shows for it). Top-left,
+   ink on cream inverted, sized to fit the smallest face (34px) with the longest code ("ZH-TW"). */
+.face .fallback .lang {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 1px 2px;
+  background: var(--ink);
+  color: var(--hi);
+  font-size: 7px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+.face.l .fallback .lang {
+  font-size: 10px;
+  padding: 2px 3px;
+}

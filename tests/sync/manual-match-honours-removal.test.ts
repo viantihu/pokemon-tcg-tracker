@@ -493,6 +493,7 @@ describe("UIL-099 · a manual match is applied once", () => {
       setName: "Ancient Origins",
       setId: "xy7",
       localId: "99",
+      language: "en" as const,
       kind: { kind: "pokemon" as const, type: "Fire", stage: "Basic" as const },
     };
     const first = await manualMatchStandIn(pgliteClient(db), id, input);

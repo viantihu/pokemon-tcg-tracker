@@ -25,6 +25,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { CardLightbox } from "./CardLightbox";
 import { SIGIL_DARK, SIGIL_SIZE, sigilCells, sigilColor } from "@/lib/catalog/sigil";
+import { languageName, languageOfId, isStandInId } from "@/lib/catalog/locale";
 
 export type FaceSize = "s" | "m" | "l";
 
@@ -39,12 +40,19 @@ function initials(name: string): string {
 export function CardFace({
   name,
   imageUrl,
+  tcgdexId = null,
   size = "s",
   zoomable = false,
   caption = null,
 }: {
   name: string;
   imageUrl: string | null;
+  /**
+   * The card's stored id. A STAND-IN has no artwork, so its face is always the sigil, and the sigil is the
+   * one place every screen shows it: the id's language is badged there (UIL-108), so a French stand-in
+   * and an English one never look alike.
+   */
+  tcgdexId?: string | null;
   size?: FaceSize;
   /** Open the lightbox on click (UIL-036). Ignored when there is no art to enlarge. */
   zoomable?: boolean;
@@ -55,6 +63,11 @@ export function CardFace({
   const [open, setOpen] = useState(false);
   const src = imageUrl ? `${imageUrl}/low.webp` : null;
   const canZoom = zoomable && imageUrl !== null && !errored;
+  const standIn = tcgdexId !== null && isStandInId(tcgdexId);
+  const language = standIn ? languageOfId(tcgdexId) : null;
+  const faceLabel = standIn
+    ? `${name}, your stand-in${language ? `, ${languageName(language)}` : ", language not recorded"}`
+    : name;
 
   function openZoom(e: { preventDefault: () => void; stopPropagation: () => void }) {
     e.preventDefault();
@@ -91,7 +104,7 @@ export function CardFace({
             onError={() => setErrored(true)}
           />
         ) : (
-          <span className="fallback" title={name} aria-label={name} role="img">
+          <span className="fallback" title={faceLabel} aria-label={faceLabel} role="img">
             <svg
               className="sigil"
               viewBox={`0 0 ${SIGIL_SIZE} ${SIGIL_SIZE}`}
@@ -111,6 +124,11 @@ export function CardFace({
               ))}
             </svg>
             <span className="init u">{initials(name)}</span>
+            {language ? (
+              <span className="lang u" aria-hidden="true">
+                {language.toUpperCase()}
+              </span>
+            ) : null}
           </span>
         )}
       </span>

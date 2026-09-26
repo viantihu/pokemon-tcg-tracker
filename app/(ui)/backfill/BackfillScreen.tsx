@@ -239,7 +239,12 @@ export function FrontRowItem({
     <span className="c" style={{ flexDirection: "column", gap: 6 }}>
       <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
         <BandChip bandKey={key} />
-        <CardFace name={row.card.name} imageUrl={row.card.imageUrl} size="s" />
+        <CardFace
+          name={row.card.name}
+          tcgdexId={row.card.tcgdexId}
+          imageUrl={row.card.imageUrl}
+          size="s"
+        />
         <span className="tx">
           <span className="nm">{row.card.name}</span>
           {formatCollectorNumber(row.card.localId, row.card.setCardCountOfficial) ? (
@@ -675,6 +680,7 @@ function StageRow({
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <CardFace
                   name={entry.filledCard.name}
+                  tcgdexId={entry.filledCard.tcgdexId}
                   imageUrl={entry.filledCard.imageUrl}
                   size="s"
                 />
@@ -882,7 +888,12 @@ function SpecialtyPanel({
         <div className="draftlist" style={{ maxHeight: "none" }}>
           {rows.map((r) => (
             <div key={r.id} className="draftrow" style={{ alignItems: "flex-start" }}>
-              <CardFace name={r.card.name} imageUrl={r.card.imageUrl} size="s" />
+              <CardFace
+                name={r.card.name}
+                tcgdexId={r.card.tcgdexId}
+                imageUrl={r.card.imageUrl}
+                size="s"
+              />
               <div className="di">
                 <div className="nm">
                   {r.card.name}
