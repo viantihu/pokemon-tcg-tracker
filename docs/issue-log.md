@@ -7732,7 +7732,18 @@ legitimately do, creating too many), **UIL-089** (the removed-presence memory E2
   Dex file again to refresh the record", the same words the panel shows at rest. It also carries the
   Senior BA's ruling (i) for Undo: a hand-matched card from a row that was already in the earlier import
   survives the Undo, which also fixes a false "doesn't add up" warning. BEFORE (run `36167924379`, taken by
-  the returning Senior BA (New)) and AFTER (run `36206748621`) match; QA: 10 mutant groups killed.
+  the returning Senior BA (New)) and AFTER (run `36206748621`) match; QA: 10 mutant groups killed. **Post-fix defect, found 2026-09-26 and FIXED:** the first import to reach the record after 0022 was
+refused by Supabase with "DELETE requires a WHERE clause [code: 21000]": pg_safeupdate, loaded for the API
+roles, rejects the three whole-record deletes in `replace_dex_record` and `clear_dex_record` (written
+unscoped in 0022, carried into 0024). PGlite does not load safeupdate, and UIL-107's outage had kept every
+import from reaching it. PR [#359](https://github.com/viantihu/pokemon-tcg-tracker/pull/359) (squash `49dbd1e`, migration `0026`, Deploy run `36250918391`)
+scopes them to `owner_id = auth.uid()` next to the existing role guard, and adds a static guard over every
+function body; the Database Engineer proved it on Testing's real Postgres (a libpg_query safeupdate check,
+3 refused → 0, and an always-raising behaviour run of first import, second import and undo). BEFORE run
+`36250270874`, AFTER run `36251005323`. **First real use:** her import at 2026-09-26 15:27:32Z wrote the
+record (read run `36253695667`: `dex_import` 1 row, `dex_presence` 686 = `presence_group` 686), and the
+Count check read as adding up; her later import at 18:03:29Z did the same (`dex_presence` 693, Σ 719 = the
+file's 719 owned cards, checked against the file itself).
 - **Priority:** High (Senior BA's read; Karvi to confirm) — a silent wrong count on import is exactly the
   defect class UIL-098 and UIL-099 exist to close.
 - **Area:** Sync
@@ -7832,7 +7843,13 @@ match's no-diff insert), the strongest candidate mechanism for a Dex-backed copy
 
 - **Reported:** 2026-09-23 (Karvi). In her words: "Collections bulk add should put every card I don't
   own on my wishlist but that can come later."
-- **Status:** Open, unassigned.
+- **Status:** **Fixed** — PR [#360](https://github.com/viantihu/pokemon-tcg-tracker/pull/360) MERGED to `develop` 2026-09-26 (squash `c621fc0`), deployed
+  green (Deploy run `36254687819`); Full Stack Dev - 2; Karvi cleared Low items to start 2026-09-26. Bulk
+  add on the Collections search grid now puts every card she does not own on her wishlist AND the chase
+  list, in one `apply_write_ops` call, with no copy created; the result says how many went to her wishlist
+  and how many she already owns. It reuses #319's wishlist row shape. QA: 8 mutant groups killed. Known and
+  accepted: the read-then-write wishlist dedup #319 accepted still applies across two simultaneous adds.
+  Awaiting Karvi's confirmation. **Was:** Open, unassigned.
 - **Priority:** Low (Karvi: "can come later").
 - **Area:** Collections
 - **Env:** Testing, `develop` `3bac29c`
@@ -7929,7 +7946,13 @@ wrong) and **UIL-099** (the same `matchOps` function E1/E2/#330 are already fixi
 ## UIL-103 — The "merge two records" action (UIL-089) can no longer be reached once migration 0023 lands, because it needs a copy outside any Dex group and 0023 makes that impossible
 
 - **Reported:** 2026-09-25 (not from Karvi — found reviewing the Tech Lead's 0023 work)
-- **Status:** Open, unassigned, decision pending.
+- **Status:** **Fixed** — **Karvi's ruling 2026-09-26: "Remove it"** (chosen over repurposing it as
+  "these two are the same card"; re-importing is the repair path for a double). PR [#362](https://github.com/viantihu/pokemon-tcg-tracker/pull/362) MERGED to
+  `develop` 2026-09-26 (squash `3a5fb9b`), deployed green (Deploy run `36255074763`); Full Stack Dev - 2.
+  Lookup's "Same card" merge action, `applyCopyMerge` and its op are removed, along with the Sync Count
+  check's "use Merge" line, which would otherwise have pointed at a button that no longer exists; a static
+  pin fails if any piece returns (QA: 3 killed). Awaiting Karvi's confirmation. **Was:** Open, unassigned,
+  decision pending.
 - **Priority:** Low (Senior BA's read).
 - **Area:** Lookup (not Collections — the action lives entirely in `app/(ui)/look/`, confirmed below).
 - **Env:** `develop` `c02a4a7` plus PR #334 (migration 0023, open).
@@ -8041,7 +8064,12 @@ the input feeding it is stale) and **UIL-099** (the same park/dedupe machinery, 
   drop after the atomic write commits (the Tech Lead's own copy correction). The fast-path apply now reads
   "Saving your changes…". QA: 6 cases killed; the one accepted survivor (a thrown stand-in match) was
   pinned by PR [#352](https://github.com/viantihu/pokemon-tcg-tracker/pull/352) (`5baf888`). Awaiting Karvi's confirmation. The same class on other
-  screens is UIL-106. **Was:** Open, assigned to the Tech Lead (new). Workaround: reload the page, then
+  screens is UIL-106. **CAUSE CORRECTED 2026-09-26:** her 01:45Z hang was NOT a tab left open across a deploy. It was
+UIL-107's outage: #333 had broken every server action app-wide with Next's E352, so the call never reached
+the database (the Database Engineer's read), and the page had no handler for a thrown call. The Tech Lead's
+production-build proof confirmed it (on the pre-fix build, all 9 screens' actions returned 500 and no action
+body ran). #349's fix is still correct: it is why she got a message rather than an endless bar, and why
+that message survived her reloads. **Was:** Open, assigned to the Tech Lead (new). Workaround: reload the page, then
   import again.
 - **Priority:** High (Karvi's report; Senior BA agrees) — it blocked her import with no way forward
   shown.
@@ -8116,7 +8144,10 @@ defects, which are about what gets written, not about the UI recovering when not
   the Senior BA's approval); Run and the species filter use cause-neutral words, since they also fail on a
   server error; Done keeps her override when the call never arrives (UIL-084). `app/error.tsx` and
   `app/(ui)/error.tsx` (the second keeps the nav) say "This page stopped working" with Reload / Try again
-  and a reference code, never the error's own text (QA: 12 killed). Awaiting Karvi's confirmation.
+  and a reference code, never the error's own text (QA: 12 killed). **Also, 2026-09-26:** PR [#364](https://github.com/viantihu/pokemon-tcg-tracker/pull/364) (`a66cbc9`) puts Sign in and Sign out through `reach()`, and
+`reach()` now hands Next's redirect and not-found signals back through `unstable_rethrow`, because a server
+action's `redirect()` reaches the browser as a rejected promise and would otherwise read as "connection
+dropped" (Dev 2's finding; no live action was affected; QA: 4 killed, including rethrow-everything). Awaiting Karvi's confirmation.
   **Left as a Low follow-up (not stuck, not yet logged):** read-only loads that still show a raw error text.
   **Was:** Open, assigned to Full Stack Dev - 2, in the Tech Lead's order: autosave, then the shared
   `reach()` sites, then Settings/rebind messages, then an app-level `error.tsx`.
@@ -8184,8 +8215,16 @@ every other screen the same audit found it on).
   getting an 'app has updated' message when I tried loading the file and despite multiple tab refreshes
   it wasn't working), I was getting a minified React error on the collections page and nothing was
   loading."
-- **Status:** Open, P0, assigned to the Tech Lead (new); fix in PR #357, with QA. **All other merges
-  held until it is live and she confirms.**
+- **Status:** **Fixed** — PR [#357](https://github.com/viantihu/pokemon-tcg-tracker/pull/357) MERGED to `develop` 2026-09-26 (squash `fccd3aa`), Deploy run
+  `36249069001`: `RATE_LIMITED` moved to `app/login/messages.ts`, plus a static guard (every export of a
+  "use server" file under `app/` and `lib/` must be an async function; QA: 6 mutants killed). QA verified
+  on Testing itself (the deployed sign-in action returned its own refusal, with no E352), and Karvi
+  confirmed sign-in and Collections work. The second defect this outage had hidden, the Dex record's
+  unscoped deletes, was fixed by PR [#359](https://github.com/viantihu/pokemon-tcg-tracker/pull/359) (`49dbd1e`, migration `0026`; recorded under UIL-100),
+  and her import then succeeded at 15:27:32Z; the merge hold was lifted. **So it cannot recur silently:**
+  PR [#368](https://github.com/viantihu/pokemon-tcg-tracker/pull/368) (`b68facc`) makes every deploy wait for Vercel to publish THAT commit and then call the
+  sign-in action, failing the deploy on a 500. Awaiting Karvi's confirmation. **Was:** Open, P0, assigned to
+  the Tech Lead (new); fix in PR #357, with QA. All other merges held until it was live and she confirmed.
 - **Priority:** High, P0 (Karvi: "the highest priority issue").
 - **Area:** App-wide (auth, all screens)
 - **Env:** Testing, `develop` `695b2ce`
@@ -8245,7 +8284,22 @@ rather than only `GET`ing the page, so this class of failure is caught before Te
   their catalog that this app is matching to the correct one. And that the user knows that the manual
   card they created is in a different language, since there is no thumbnail available for them to
   quickly reference."
-- **Status:** Open, assigned to Full Stack Dev - 2, plan first (likely a migration).
+- **Status:** **Fixed** — PR [#363](https://github.com/viantihu/pokemon-tcg-tracker/pull/363) MERGED to `develop` 2026-09-26 (squash `21e9c43`), migration
+  `0027` applied on Testing (Deploy run `36259523727`); Full Stack Dev - 2; the Tech Lead's approval at
+  `a996ff3`; QA: 7 mutant groups killed. **Karvi's rulings 2026-09-26:** offer EVERY language TCGdex
+  publishes (17), pre-filled from the Dex row (Dex writes "International" and "Japanese"); record and show
+  the language now, and build the switch to the real card later (UIL-060 Half 2), not in this item. **As
+  built:** a stand-in's id carries its language (`user:<lang>:<uuid>`) and 0027 makes the `locale` column
+  agree with it (widened for `source='user'` only; a trigger writes it from the id); its sigil shows the
+  language wherever it appears; the twin check and a partial unique index include the language; a
+  Japanese stand-in joins Japanese lines. **Known limitation:** stand-ins in languages other than English
+  and Japanese stay English-scoped for lines, since no catalog exists in those languages. BEFORE runs
+  `36259306091` / `36259346968` and AFTER run `36259735867` match. **The 5 legacy stand-ins** (no language)
+  were deleted at Karvi's go-ahead by the Database Engineer at 17:41:07Z, with their 4 chase-list entries;
+  the Senior BA's first "no references" read had missed `collection.target_catalog_card_ids`, and the
+  Database Engineer's schema-driven scan caught it. Her 18:03:29Z import made 5 language-tagged stand-ins.
+  Awaiting Karvi's confirmation. **Was:** Open, assigned to Full Stack Dev - 2, plan first (likely a
+  migration).
 - **Priority:** High (Senior BA's read, per Karvi's "before I do anything else"; Karvi to confirm).
 - **Area:** Sync
 - **Env:** Testing, `develop` `44a265c`
@@ -8303,7 +8357,14 @@ E4** (the promotion-matching this is meant to fix downstream of).
 
 - **Reported:** 2026-09-26 (not from Karvi — follow-up to UIL-106, filed by Full Stack Dev - 2 in #355's
   own "Left alone" list, from the Tech Lead's original audit)
-- **Status:** Open, assigned to Full Stack Dev - 2.
+- **Status:** **Fixed** — PR [#366](https://github.com/viantihu/pokemon-tcg-tracker/pull/366) MERGED to `develop` 2026-09-26 (squash `07197b6`), deployed
+  green with the new action check (Deploy run `36263479925`); Full Stack Dev - 2; QA: 9 killed. One fix in
+  the shared `CardResultsGrid` covers every search; Backfill's three save handlers get the write wording and
+  its species resolve, Binders, Collections and Settings loads get the read wording: "The app was updated
+  while this page was open, the connection dropped, or the server could not answer. Reload the page to try
+  again." (cause-neutral, because those calls also throw on a server error). Out of scope by the Senior
+  BA's call: `app/api/sync/route.ts:31`, since no page calls that route. Awaiting Karvi's confirmation.
+  **Was:** Open, assigned to Full Stack Dev - 2.
 - **Priority:** Low (Senior BA's read; Karvi has cleared Lows to start).
 - **Area:** all screens
 - **Env:** Testing, `develop` `a66cbc9`
@@ -8352,7 +8413,9 @@ app-wide audit this is the tail end of).
 - **Reported:** 2026-09-26 (Karvi, relayed by the "Bugdrop integration for user feedback" session, its
   owner). Backlog, not a UAT report.
 - **Status:** Open, backlog; product chosen; blocked on the feedback repos, the GitHub App install, and
-  multi-user auth. Owner: "Bugdrop integration for user feedback".
+  multi-user auth. Owner: "Bugdrop integration for user feedback". **Related go-live ruling, 2026-09-26:** Karvi decided THIS repository goes private at go-live, on
+GitHub Pro, as-is (the runbook's A1 and A9, PR [#369](https://github.com/viantihu/pokemon-tcg-tracker/pull/369)); the limit amount is hers to set then. A
+private feedback repository per environment is still recommended.
 - **Priority:** Unrated — Karvi to set.
 - **Area:** Cutover / feedback
 - **Env:** n/a — pre-decision; nothing built yet.
