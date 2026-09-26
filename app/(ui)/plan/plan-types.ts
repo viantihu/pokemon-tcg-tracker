@@ -58,6 +58,12 @@ export interface RunPlanResult {
   /** Per-band card counts, in rainbow order — drives the band headers (incl. empty bands). */
   bands: { key: string; count: number }[];
   summary: { total: number; decisions: number; byAction: Record<string, number> };
+  /**
+   * The full rainbow band order the plan was grouped by (UIL-114), so a re-route can regroup kept and newly
+   * routed cards the same way. Absent on a plan parked before UIL-114; `reroute.ts` then falls back to the
+   * order the plan shows.
+   */
+  orderedBandKeys?: string[];
 }
 
 /** One draft entry as it crosses the client → server boundary. */

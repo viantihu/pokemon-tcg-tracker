@@ -20,7 +20,13 @@ import { createElement } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanBandGroup } from "@/lib/plan";
-import type { DraftCard, LookupCard, RunPlanResult } from "@/app/(ui)/plan/plan-types";
+import type {
+  DraftCard,
+  DraftPayloadItem,
+  LookupCard,
+  RunPlanResult,
+} from "@/app/(ui)/plan/plan-types";
+import { routedPlan } from "../support/plan-route";
 import { PlanScreen, restoreDraft } from "@/app/(ui)/plan/PlanScreen";
 
 vi.mock("@/app/(ui)/plan/actions", () => ({
@@ -29,7 +35,9 @@ vi.mock("@/app/(ui)/plan/actions", () => ({
   getLineJoinOptions: vi.fn(async () => null),
   loadPendingPlacementDraft: vi.fn(async () => []),
   refreshSpotlightAction: vi.fn(async () => ({ ok: false, error: "not used" })),
-  runHaulPlan: vi.fn(async () => ({ ok: false, error: "not used" })),
+  // UIL-114: the page routes what is waiting as it opens, so the route comes back as a plan.
+  runHaulPlan: vi.fn(async (p: DraftPayloadItem[]) => routedPlan(p)),
+  planStateStamp: vi.fn(async () => "stamp-routed"),
 }));
 
 const RESUME_KEY = "binderops.plan.v1";
@@ -137,7 +145,7 @@ describe("UIL-092 · a parked draft outlives the plan", () => {
     render(createElement(PlanScreen, { stateStamp: MOVED_STAMP, initialPending: [TOEDSCOOL] }));
 
     // Pre-UIL-092 the whole blob went in the bin here, draft included.
-    expect(await screen.findByText("Toedscool")).toBeTruthy();
+    expect((await screen.findAllByText("Toedscool")).length).toBeGreaterThan(0);
     // The plan computed against the old state is correctly NOT restored.
     expect(screen.queryByText("RESUMED")).toBeNull();
   });
@@ -146,19 +154,19 @@ describe("UIL-092 · a parked draft outlives the plan", () => {
     park({ ...base, draft: [TOEDSCOOL, ROCKRUFF] });
     render(createElement(PlanScreen, { stateStamp: MOVED_STAMP, initialPending: [ROCKRUFF] }));
 
-    expect(await screen.findByText("Rockruff")).toBeTruthy();
+    expect((await screen.findAllByText("Rockruff")).length).toBeGreaterThan(0);
     expect(screen.queryByText("Toedscool")).toBeNull();
   });
 
-  it("survives a reload with no plan yet, because a bare draft is parked at all", async () => {
-    // The bug was the parking effect clearing the key whenever no plan existed.
+  it("a bare parked draft survives a reload, and is routed at once (UIL-114: no first screen)", async () => {
+    // The bug was the parking effect clearing the key whenever no plan existed (UIL-092). Since UIL-114
+    // a draft with no plan is routed as the page opens, and the routed plan is parked with it.
     park({ ...base, stamp: MOVED_STAMP, plan: null, draft: [TOEDSCOOL] });
     render(createElement(PlanScreen, { stateStamp: MOVED_STAMP, initialPending: [TOEDSCOOL] }));
 
-    expect(await screen.findByText("Toedscool")).toBeTruthy();
-    await waitFor(() => expect(parkedBlob()).not.toBeNull()); // pre-UIL-092: clearResume() removed it
+    expect((await screen.findAllByText("Toedscool")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(parkedBlob()?.plan).not.toBeNull()); // pre-UIL-092: clearResume() removed it
     expect(parkedBlob()!.draft.map((d) => d.id)).toEqual([TOEDSCOOL.id]);
-    expect(parkedBlob()!.plan).toBeNull();
   });
 });
 
@@ -172,7 +180,7 @@ describe("UIL-098 · a hand-typed row parked by an older build is dropped, and n
     expect(notice.textContent).toContain("Meditite, Machop");
     expect(notice.textContent).toContain("add them in Dex, then import on the Sync page");
     // The copy-backed row is still there to place.
-    expect(screen.getByText("Toedscool")).toBeTruthy();
+    expect(screen.getAllByText("Toedscool").length).toBeGreaterThan(0);
   });
 
   it("is dropped even when the stamp still holds — the server would refuse it either way", async () => {
@@ -190,7 +198,7 @@ describe("UIL-098 · a hand-typed row parked by an older build is dropped, and n
     park({ ...base, ...LEGACY_FIELDS, stamp: MOVED_STAMP, plan: null, draft: [TOEDSCOOL] });
     render(createElement(PlanScreen, { stateStamp: MOVED_STAMP, initialPending: [TOEDSCOOL] }));
 
-    await screen.findByText("Toedscool");
+    await screen.findAllByText("Toedscool");
     await waitFor(() => expect(parkedBlob()).not.toBeNull());
     expect(parkedBlob()).not.toHaveProperty("haulId");
     expect(parkedBlob()).not.toHaveProperty("source");
@@ -209,7 +217,7 @@ describe("UIL-098 · a hand-typed row parked by an older build is dropped, and n
     park({ ...base, draft: [TOEDSCOOL] });
     render(createElement(PlanScreen, { stateStamp: MOVED_STAMP, initialPending: [TOEDSCOOL] }));
 
-    await screen.findByText("Toedscool");
+    await screen.findAllByText("Toedscool");
     expect(screen.queryByText(/typed in by hand/)).toBeNull();
   });
 });

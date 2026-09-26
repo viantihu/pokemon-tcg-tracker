@@ -36,7 +36,7 @@ import { cardCaption } from "../_components/CardLightbox";
 import { ProgressBar } from "../_components/ProgressBar";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
-import { LOST, reach } from "../_components/reach";
+import { isUnreached, LOST, reach } from "../_components/reach";
 import { ACTION_META, bandMeta, moveMeta } from "../_components/plan-meta";
 import { removeCopy } from "../look/actions";
 import {
@@ -44,10 +44,18 @@ import {
   getLineJoinOptions,
   getMoveOptions,
   loadPendingPlacementDraft,
+  planStateStamp,
   refreshSpotlightAction,
   runHaulPlan,
 } from "./actions";
 import type { DraftCard, DraftPayloadItem, RunPlanResult } from "./plan-types";
+import {
+  createRerouteBatcher,
+  dropFromPlan,
+  flattenPlan,
+  mergeReroute,
+  type MovedCard,
+} from "./reroute";
 
 /* ------------------------- resuming a plan in progress (UIL-006) ------------------------- */
 
@@ -205,6 +213,15 @@ function toPayload(draft: DraftCard[]): DraftPayloadItem[] {
  */
 export const RUN_FAILED = "Could not run the plan. Reload the page and run it again.";
 
+/** Why a card taken off the plan did not re-route the others; the plan she has stays usable (UIL-114). */
+export const REROUTE_FAILED =
+  "The rest of the plan could not be updated. Its homes may be out of date; reload the page to route it again.";
+
+/** "Leave for later" (UIL-114; the Senior BA's wording): off this plan, still waiting, nothing deleted. */
+export const LEAVE_FOR_LATER = "Leave for later";
+export const LEAVE_FOR_LATER_HINT =
+  "Takes it off this plan. It stays waiting in your haul; nothing is deleted.";
+
 export function PlanScreen({
   initialPending = [],
   stateStamp = "",
@@ -229,7 +246,17 @@ export function PlanScreen({
   // Whether the plan CURRENTLY on screen is the restored one. `resumed` stays non-null for the life of
   // the component, so using it directly would keep claiming "resumed" after she re-runs.
   const [planIsResumed, setPlanIsResumed] = useState(resumed?.plan != null);
-  const [running, setRunning] = useState(false);
+  /**
+   * Routing the haul (UIL-114: there is no first screen, so the page routes what is waiting as soon as it
+   * opens). Starts TRUE when there is something to route and no sitting to resume, so the route below is
+   * kicked off by state rather than by a setState in an effect. A resumed sitting whose stamp matches never
+   * re-routes: its plan is still true, and routing her full haul costs seconds.
+   */
+  const [running, setRunning] = useState(() => !resumed?.plan && restored.draft.length > 0);
+  /** A background re-route after a card left the plan (UIL-114); the plan stays usable meanwhile. */
+  const [updating, setUpdating] = useState(false);
+  /** Waiting cards whose home the last re-route changed, named so none moves silently. */
+  const [moved, setMoved] = useState<MovedCard[] | null>(null);
   /**
    * The stamp the parked run is keyed to. Shelving a card changes the copy count, which is part of the
    * stamp by design (UIL-006), so without rolling it forward the resume cache would be thrown away on
@@ -300,7 +327,6 @@ export function PlanScreen({
   const [toast, setToast] = useState<string | null>(null);
   // Pending-placement queue (UIL-003). Seeded from the server render, then re-read after a commit.
   const [pendingState, setPendingState] = useState<"loading" | "ready">("ready");
-  const [seededCount, setSeededCount] = useState(initialPending.length);
 
   /**
    * Park the run whenever it changes. Writing to sessionStorage is exactly what an effect is for — syncing
@@ -352,27 +378,16 @@ export function PlanScreen({
     setPendingState("loading");
     loadPendingPlacementDraft()
       .then((rows) => {
-        setSeededCount(rows.length);
         // Only seed when nothing is in progress, so a re-read never discards the sitting she is working.
         setDraft((cur) => (cur.length === 0 ? rows : cur));
+        // And route it straight away: there is no first screen to press "Run the plan" on (UIL-114).
+        if (rows.length > 0) setRunning(true);
       })
       .catch(() => {
-        setSeededCount(0);
         setError("Could not load the cards waiting to be placed.");
       })
       .finally(() => setPendingState("ready"));
   }, []);
-
-  // Editing the draft invalidates a computed plan / prior commit (and its overrides).
-  function mutateDraft(next: DraftCard[]) {
-    setDraft(next);
-    setPlan(null);
-    setOverrides({});
-    // Consent was given against a plan that no longer exists (UIL-061).
-    setConfirmedPulls({});
-    // Any colour-mismatch pick was against a plan that no longer exists too (UIL-069).
-    setBandChoice({});
-  }
 
   function flashToast(msg: string) {
     setToast(msg);
@@ -426,17 +441,14 @@ export function PlanScreen({
     flashToast(`Placement override set · ${moveTarget.name}`);
     setMoveTarget(null);
   }
-  function removeCard(id: string) {
-    mutateDraft(draft.filter((d) => d.id !== id));
-  }
-
   /**
-   * "I do not have this card" — remove the COPY from the app, not just the row from this sitting (UIL-089).
-   *
-   * The ✕ beside it means something different and both are needed: ✕ takes a card off today's working list
-   * and leaves it in the queue for next time, this deletes the copy.
+   * "I do not have this card" — remove the COPY from the app (UIL-089), from the plan she is working
+   * (UIL-114: there is no first screen to do it from). "Leave for later" beside it means something different
+   * and both are needed: it takes the card off this plan and leaves it waiting; this deletes the copy.
    */
-  async function removeCopyFromApp(row: DraftCard) {
+  async function notMine(item: PlanItem) {
+    const row = draft.find((d) => d.id === item.incomingId);
+    if (!row) return;
     setError(null);
     setShelving(row.id);
     // Through `reach`: a call that never answers must still clear `shelving`, or `shelveCard` refuses every
@@ -447,19 +459,35 @@ export function PlanScreen({
       setError(res.error);
       return;
     }
-    // Drop the row too: the copy it stood for is gone, so leaving it would offer her a card she does not
-    // have, and the next `reloadPending` would not return it anyway.
-    mutateDraft(draft.filter((d) => d.id !== row.id));
+    // The copy it stood for is gone, so it leaves the plan, and the rest re-routes around it.
+    takeOffPlan(row.id);
+    flashToast(`Removed · ${item.name}`);
   }
 
-  async function onRun() {
-    setError(null);
-    setRunning(true);
-    try {
-      const result = await runHaulPlan(toPayload(draft));
+  /**
+   * Route the haul (UIL-114). Runs whenever `running` turns true: on opening the page with cards waiting and
+   * no sitting to resume, after "Start a new haul", and on "Try again". Every setState is in the reply, not
+   * in the effect body, so the effect cannot cascade a render. The draft is the one standing when routing
+   * starts; a later change to it is a re-route's business, not this one's.
+   */
+  useEffect(() => {
+    if (!running) return;
+    let live = true;
+    const toRoute = draft;
+    void Promise.all([
+      reach(() => runHaulPlan(toPayload(toRoute)), RUN_FAILED),
+      reach(() => planStateStamp(toRoute.map((d) => d.existingCopyId)), RUN_FAILED),
+    ]).then(([result, stamp]) => {
+      if (!live) return;
+      setRunning(false);
+      if (isUnreached(result)) {
+        setError(result.error);
+        return;
+      }
+      setError(null);
       setPlan(result);
       setPlanIsResumed(false);
-      setLiveStamp(stateStamp);
+      setLiveStamp(isUnreached(stamp) ? stateStamp : stamp);
       setCur(0);
       setDone(new Set());
       // A new run is new work: nothing is finished yet, so nothing should arrive folded.
@@ -467,11 +495,107 @@ export function PlanScreen({
       setCollapsedSubgroups(new Set());
       setConfirmedPulls({});
       setBandChoice({});
-    } catch {
-      setError(RUN_FAILED);
-    } finally {
-      setRunning(false);
+      setMoved(null);
+    });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- routes the draft standing when `running` turns on
+  }, [running]);
+
+  /**
+   * The latest screen state, for a re-route that finishes after she has moved on: it merges into what is on
+   * screen THEN, not what was on screen when it started. Written after every render, which is what an effect
+   * is for; nothing reads it during render.
+   */
+  const latest = useRef({ draft, done, plan, cur });
+  useEffect(() => {
+    latest.current = { draft, done, plan, cur };
+  });
+
+  /**
+   * Re-route the cards still waiting, after one left the plan (UIL-114). The server routes them again
+   * against everything she has shelved; `mergeReroute` keeps her shelved cards as they were, keeps the
+   * spotlight on the card it was on, and names any waiting card whose home changed. A failure leaves the
+   * plan she has, which is still usable, and says so.
+   */
+  async function reroute(): Promise<void> {
+    const at = latest.current;
+    if (!at.plan) return;
+    const waiting = at.draft.filter((d) => !at.done.has(d.id));
+    if (waiting.length === 0) return;
+    setUpdating(true);
+    const [res, stamp] = await Promise.all([
+      reach(() => runHaulPlan(toPayload(waiting)), REROUTE_FAILED),
+      reach(() => planStateStamp(waiting.map((d) => d.existingCopyId)), REROUTE_FAILED),
+    ]);
+    setUpdating(false);
+    if (isUnreached(res)) {
+      setError(REROUTE_FAILED);
+      return;
     }
+    const now = latest.current;
+    if (!now.plan) return;
+    // A card she took off while this ran stays off: route only what is still in the draft.
+    const inDraft = new Set(now.draft.map((d) => d.id));
+    const gone = new Set(
+      flattenPlan(res)
+        .map((it) => it.incomingId)
+        .filter((id) => !inDraft.has(id)),
+    );
+    const { plan: next, moved: changed } = mergeReroute(
+      now.plan,
+      dropFromPlan(res, gone),
+      now.done,
+    );
+    const spotId = flattenPlan(now.plan)[now.cur]?.incomingId;
+    const flat = flattenPlan(next);
+    const at2 = spotId ? flat.findIndex((it) => it.incomingId === spotId) : -1;
+    setPlan(next);
+    setCur(at2 >= 0 ? at2 : Math.min(now.cur, Math.max(flat.length - 1, 0)));
+    // Anything she ticked was against a derivation that no longer exists (UIL-061, UIL-069).
+    setFresh(null);
+    setConfirmedPulls({});
+    setBandChoice({});
+    if (!isUnreached(stamp)) setLiveStamp(stamp);
+    setMoved(changed.length > 0 ? changed : null);
+  }
+  const rerouteRef = useRef(reroute);
+  useEffect(() => {
+    rerouteRef.current = reroute;
+  });
+  // Made on first use, in an event handler, so no ref is read while rendering.
+  const batcher = useRef<ReturnType<typeof createRerouteBatcher> | null>(null);
+  useEffect(() => () => batcher.current?.cancel(), []);
+
+  /**
+   * Take a card off the plan now, and re-route the rest shortly (batched: see ./reroute.ts). Used by
+   * "Not mine" once its copy is gone, and by "Leave for later", which deletes nothing.
+   */
+  function takeOffPlan(id: string) {
+    if (!plan) return;
+    const next = dropFromPlan(plan, new Set([id]));
+    setDraft((d) => d.filter((x) => x.id !== id));
+    setPlan(next);
+    // The next card slides into the spotlight; the cursor stays put unless it ran off the end.
+    setCur((c) => Math.min(c, Math.max(flattenPlan(next).length - 1, 0)));
+    const omit = <T,>(m: Record<string, T>) => {
+      if (!(id in m)) return m;
+      const out = { ...m };
+      delete out[id];
+      return out;
+    };
+    setOverrides(omit);
+    setConfirmedPulls(omit);
+    setBandChoice(omit);
+    batcher.current ??= createRerouteBatcher(() => rerouteRef.current());
+    batcher.current.schedule();
+  }
+
+  /** "Leave for later" (UIL-114): off this plan, still waiting in her haul, nothing deleted. */
+  function leaveForLater(item: PlanItem) {
+    takeOffPlan(item.incomingId);
+    flashToast(`Left for later · ${item.name}`);
   }
 
   /**
@@ -766,16 +890,17 @@ export function PlanScreen({
         <DroppedTypedNotice rows={droppedTyped} onDismiss={() => setDroppedTyped([])} />
       ) : null}
 
-      {!plan ? (
-        <IntakePanel
-          draft={draft}
-          onRemove={removeCard}
-          onRemoveCopy={removeCopyFromApp}
-          onRun={onRun}
-          running={running}
-          pendingState={pendingState}
-          seededCount={seededCount}
-          onReloadPending={reloadPending}
+      {running ? (
+        // UIL-114: no first screen. The page routes what is waiting as it opens; routing her full haul takes
+        // a few seconds (UIL-008), so the bar says what is happening rather than showing an empty page.
+        <div className="entry panel">
+          <ProgressBar label={`Routing ${draft.length} card${draft.length === 1 ? "" : "s"}…`} />
+        </div>
+      ) : !plan ? (
+        <EmptyHaul
+          waiting={draft.length}
+          loading={pendingState === "loading"}
+          onRetry={() => setRunning(true)}
         />
       ) : (
         <PlanView
@@ -793,8 +918,12 @@ export function PlanScreen({
           bandChoice={bandChoice}
           onPickBandChoice={onPickBandChoice}
           advance={advance}
-          onBack={() => setPlan(null)}
           onReset={resetAll}
+          onNotMine={notMine}
+          onLeaveForLater={leaveForLater}
+          updating={updating}
+          moved={moved}
+          onDismissMoved={() => setMoved(null)}
           overrides={overrides}
           overrideNames={overrideNames}
           onMove={openMove}
@@ -831,51 +960,6 @@ export function PlanScreen({
 /* --------------------------------- intake --------------------------------- */
 
 /**
- * The pending-placement status line (UIL-003). It exists so arriving from Sync's "Place new cards"
- * never looks like an empty form with no explanation: it says how many copies are waiting, that they
- * are already counted in the collection, and that this pass gives them a home rather than re-adding
- * them. Silent only when the queue is genuinely empty and nothing was seeded.
- */
-function PendingBar({
-  state,
-  seededCount,
-  routedInDraft,
-  onReload,
-}: {
-  state: "loading" | "ready";
-  seededCount: number;
-  routedInDraft: number;
-  onReload: () => void;
-}) {
-  if (state === "loading") {
-    return (
-      <div className="alertbar" style={{ marginBottom: 12 }}>
-        <span>…</span>
-        <b>Checking for cards waiting to be placed…</b>
-      </div>
-    );
-  }
-  if (seededCount === 0) return null;
-  return (
-    <div className="alertbar" style={{ marginBottom: 12 }}>
-      <span>↯</span>
-      <b>
-        {routedInDraft > 0
-          ? `${routedInDraft} card${routedInDraft === 1 ? "" : "s"} from your Dex sync, waiting to be placed.`
-          : `${seededCount} card${seededCount === 1 ? "" : "s"} from your Dex sync are still waiting to be placed.`}
-      </b>
-      <span style={{ fontSize: 11, color: "var(--ink-2)", flexBasis: "100%" }}>
-        These are already in your collection — running the plan gives them a home, it does not add
-        them again.
-      </span>
-      <button type="button" className="btn" style={{ marginLeft: "auto" }} onClick={onReload}>
-        Refresh
-      </button>
-    </div>
-  );
-}
-
-/**
  * Cards she had typed by hand, parked from a build before UIL-098 part 2, that this screen can no longer
  * place. Named rather than dropped silently — a typed row existed nowhere else, so this is the last place
  * she can see what it was (UIL-092's rule). The remedy is the same one the server's refusal gives.
@@ -907,119 +991,52 @@ export function DroppedTypedNotice({
   );
 }
 
-function IntakePanel(props: {
-  draft: DraftCard[];
-  onRemove: (id: string) => void;
-  /** UIL-089: remove the COPY. Distinct from `onRemove`'s ✕, which only takes it off this sitting. */
-  onRemoveCopy: (row: DraftCard) => void;
-  onRun: () => void;
-  running: boolean;
-  pendingState: "loading" | "ready";
-  seededCount: number;
-  onReloadPending: () => void;
+/**
+ * The Haul Plan with nothing routed (UIL-114: there is no first screen). Either nothing is waiting, which
+ * says where cards come from, or the route failed, which offers to try again (the error above says why).
+ */
+function EmptyHaul({
+  waiting,
+  loading,
+  onRetry,
+}: {
+  waiting: number;
+  loading: boolean;
+  onRetry: () => void;
 }) {
-  const {
-    draft,
-    onRemove,
-    onRemoveCopy,
-    onRun,
-    running,
-    pendingState,
-    seededCount,
-    onReloadPending,
-  } = props;
-  return (
-    <div className="entry panel">
-      <PendingBar
-        state={pendingState}
-        seededCount={seededCount}
-        routedInDraft={draft.length}
-        onReload={onReloadPending}
-      />
-      <div className="entryhead">
-        <span className="hk u" style={{ fontSize: 11, letterSpacing: "0.14em" }}>
-          Your haul
-        </span>
-      </div>
-
-      {draft.length === 0 ? (
-        // UIL-098 part 2: there is no add form here any more, so the empty state says where cards come
-        // from instead of pointing at a search box that is not there.
-        <p style={{ marginTop: 14, fontSize: 11, color: "var(--ink-2)", lineHeight: 1.8 }}>
-          Nothing is waiting to be placed. Cards arrive here from your Dex import: add them in Dex,
-          then import on the Sync page. Then run the plan — the cascade routes the whole haul and
-          groups it to your physical sort.
+  if (loading) {
+    return (
+      <div className="entry panel">
+        <p style={{ fontSize: 11, color: "var(--ink-2)" }}>
+          Checking for cards waiting to be placed…
         </p>
-      ) : (
-        <div className="draftlist">
-          {draft.map((d) => (
-            <div key={d.id} className="draftrow">
-              <CardFace
-                name={d.card.name}
-                tcgdexId={d.card.tcgdexId}
-                imageUrl={d.card.imageUrl}
-                size="s"
-                zoomable
-                caption={cardCaption(
-                  d.card.setName ?? d.card.setId,
-                  formatCollectorNumber(d.card.localId, d.card.setCardCountOfficial),
-                )}
-              />
-              <div className="di">
-                <div className="nm">{d.card.name}</div>
-                <div style={{ fontSize: 10, color: "var(--ink-2)", marginTop: 3 }}>
-                  {(d.card.setName ?? d.card.setId ?? "").toString()}
-                  {formatCollectorNumber(d.card.localId, d.card.setCardCountOfficial)
-                    ? ` · ${formatCollectorNumber(d.card.localId, d.card.setCardCountOfficial)}`
-                    : ""}
-                </div>
-                <div style={{ marginTop: 6 }}>
-                  {/* Dex owns the variant of a synced copy (sync-architecture §1.1), so it is shown, not
-                      edited: a local change here would be silently reverted by the next import. */}
-                  <span className="tag u" title="Already in your collection from a Dex sync">
-                    Waiting from sync · {d.dexVariantRaw ?? d.variant}
-                  </span>
-                </div>
-              </div>
-              <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                {/* "I do not have this card" (UIL-089). */}
-                <RemoveCopyButton
-                  onRemove={() => onRemoveCopy(d)}
-                  label="Not mine"
-                  what={`${d.card.name} from your collection`}
-                />
-                <button
-                  type="button"
-                  className="iconbtn"
-                  onClick={() => onRemove(d.id)}
-                  aria-label={`Take ${d.card.name} off this sitting`}
-                  title="Take it off this sitting. The card stays in your collection."
-                >
-                  ✕
-                </button>
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center" }}>
-        <span className="hk">
-          {draft.length} card{draft.length === 1 ? "" : "s"} in the haul
-        </span>
+      </div>
+    );
+  }
+  if (waiting > 0) {
+    return (
+      <div className="entry panel">
+        <p style={{ fontSize: 12, lineHeight: 1.8 }}>
+          {waiting} card{waiting === 1 ? " is" : "s are"} waiting, but the plan could not be routed.
+        </p>
         <button
           type="button"
           className="btn btn-primary"
-          style={{ marginLeft: "auto" }}
-          disabled={draft.length === 0 || running}
-          onClick={onRun}
+          style={{ marginTop: 10 }}
+          onClick={onRetry}
         >
-          {running ? "Running…" : "Run the plan ▶"}
+          Try again
         </button>
       </div>
-      {/* UIL-008: the cascade over a synced stack takes long enough that a dead button reads as a
-          hang. Indeterminate by necessity — `runHaulPlan` is one server action that returns once. */}
-      {running ? <ProgressBar label={`Routing ${draft.length} cards…`} /> : null}
+    );
+  }
+  return (
+    <div className="entry panel">
+      {/* UIL-098 part 2: there is no add form, so the empty state says where cards come from. */}
+      <p style={{ fontSize: 11, color: "var(--ink-2)", lineHeight: 1.8 }}>
+        Nothing is waiting to be placed. Cards arrive here from your Dex import: add them in Dex,
+        then import on the Sync page, and they are routed here to your physical sort.
+      </p>
     </div>
   );
 }
@@ -1118,8 +1135,16 @@ function PlanView(props: {
   bandChoice: Record<string, "line" | "own-color">;
   onPickBandChoice: (draftId: string, choice: "line" | "own-color") => void;
   advance: () => void;
-  onBack: () => void;
   onReset: () => void;
+  /** "Not mine" from the spotlight (UIL-114): deletes the copy, then the plan re-routes around it. */
+  onNotMine: (item: PlanItem) => void;
+  /** "Leave for later" from the spotlight (UIL-114): off this plan, still waiting, nothing deleted. */
+  onLeaveForLater: (item: PlanItem) => void;
+  /** A background re-route is running; the plan stays usable meanwhile (UIL-114). */
+  updating: boolean;
+  /** Waiting cards whose home the last re-route changed. */
+  moved: MovedCard[] | null;
+  onDismissMoved: () => void;
   overrides: Record<string, MoveDestination>;
   /** Name maps for override destination sentences (UIL-037); null until options load. */
   overrideNames: MoveNameLookups | null;
@@ -1149,8 +1174,12 @@ function PlanView(props: {
     bandChoice,
     onPickBandChoice,
     advance,
-    onBack,
     onReset,
+    onNotMine,
+    onLeaveForLater,
+    updating,
+    moved,
+    onDismissMoved,
     overrides,
     overrideNames,
     onMove,
@@ -1282,6 +1311,15 @@ function PlanView(props: {
             RESUMED
           </span>
         ) : null}
+        {updating ? (
+          <span
+            className="tag"
+            role="status"
+            title="Re-routing the cards still waiting; keep going"
+          >
+            Updating…
+          </span>
+        ) : null}
         <span className="hv">
           {total} card{total === 1 ? "" : "s"}
         </span>
@@ -1295,10 +1333,6 @@ function PlanView(props: {
         <span className="hv">
           {doneCount} / {total}
         </span>
-        {/* Beside the count, since UIL-116 removed the bar it sat in. UIL-114 removes the screen it goes back to. */}
-        <button type="button" className="btn sm" style={{ marginLeft: "auto" }} onClick={onBack}>
-          ◀ Edit haul
-        </button>
         <span className="hk" style={{ flexBasis: "100%" }}>
           {destSummary}
         </span>
@@ -1307,6 +1341,24 @@ function PlanView(props: {
       {/* UIL-116: no decisions bar here. Karvi: "completely irrelevant to the user". A card that needs a
           decision still says so on its own row ("Decide") and in the spotlight, and decisions are worked on
           the Lines screen, whose own banner stays. */}
+
+      {moved && moved.length > 0 ? (
+        <div className="alertbar" role="status">
+          <span>↻</span>
+          <b>
+            {moved.length} card{moved.length === 1 ? "" : "s"} got a new home after that change:{" "}
+            {moved.map((m) => `${m.name} → ${m.destination}`).join(" · ")}
+          </b>
+          <button
+            type="button"
+            className="btn sm"
+            style={{ marginLeft: "auto" }}
+            onClick={onDismissMoved}
+          >
+            OK
+          </button>
+        </div>
+      ) : null}
 
       <div className="planwrap">
         <div className="worklist panel">
@@ -1391,6 +1443,8 @@ function PlanView(props: {
               }}
               onBackCard={() => setCur(Math.max(0, cur - 1))}
               onSkip={() => setCur(Math.min(total - 1, cur + 1))}
+              onNotMine={() => flatItems[cur] && onNotMine(flatItems[cur])}
+              onLeaveForLater={() => flatItems[cur] && onLeaveForLater(flatItems[cur])}
               override={flatItems[cur] ? overrides[flatItems[cur].incomingId] : undefined}
               overrideNames={overrideNames}
               blockNeeds={plan.blockNeeds}
@@ -1684,6 +1738,9 @@ export function Spotlight(props: {
   onShelve: () => void;
   onBackCard: () => void;
   onSkip: () => void;
+  /** UIL-114: "Not mine" and "Leave for later", once the haul has run. Absent: neither is offered. */
+  onNotMine?: () => void;
+  onLeaveForLater?: () => void;
   override: MoveDestination | undefined;
   /** Name maps for the override sentence; null until options load (UIL-037). */
   overrideNames?: MoveNameLookups | null;
@@ -1715,6 +1772,8 @@ export function Spotlight(props: {
     onShelve,
     onBackCard,
     onSkip,
+    onNotMine,
+    onLeaveForLater,
     override,
     overrideNames,
     blockNeeds,
@@ -1988,6 +2047,32 @@ export function Spotlight(props: {
           Skip ▶
         </button>
       </div>
+
+      {/* UIL-114: the two ways a card leaves the plan, now the haul has run. Different on purpose: "Not
+          mine" deletes the copy (UIL-089, for this haul only, UIL-111); "Leave for later" deletes nothing. */}
+      {!done && (onNotMine || onLeaveForLater) ? (
+        <div className="spotbtns" style={{ marginTop: 8 }}>
+          {onLeaveForLater ? (
+            <button
+              type="button"
+              className="btn sm"
+              onClick={onLeaveForLater}
+              disabled={busy}
+              title={LEAVE_FOR_LATER_HINT}
+            >
+              {LEAVE_FOR_LATER}
+            </button>
+          ) : null}
+          {onNotMine && forecast ? (
+            <RemoveCopyButton
+              onRemove={onNotMine}
+              busy={busy}
+              label="Not mine"
+              what={`${forecast.name} from your collection`}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       {/* "Commit the haul" lived here and is GONE, not relabelled (UIL-027, her ruling). It wrote the
           entire draft — decided or not — which is what treated unshelved cards as inventory. Each card
