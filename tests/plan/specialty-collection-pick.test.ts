@@ -134,14 +134,15 @@ describe("UIL-053 · a specialty binder with collections: she picks which one", 
         { id: FIRE, name: "Fire art", currentBinderIds: [SPEC] },
       ]),
     );
-    await commitCardPlacement(pgliteClient(db), { card: INCOMING, collectionChoice: CHARIZARDS });
+    // The SECOND collection, so joining "the first one" instead of hers would fail here.
+    await commitCardPlacement(pgliteClient(db), { card: INCOMING, collectionChoice: FIRE });
     expect(await copyRow()).toEqual({ role: "shelved", binder_id: SPEC });
-    expect(await listOf(CHARIZARDS)).toEqual([CHARIZARD_EX_SV035_006.tcgdexId]);
-    expect(await listOf(FIRE)).toEqual([]); // only the one she picked
+    expect(await listOf(FIRE)).toEqual([CHARIZARD_EX_SV035_006.tcgdexId]);
+    expect(await listOf(CHARIZARDS)).toEqual([]); // only the one she picked
     expect(await decisions()).toEqual([
       {
         decision: "card-class",
-        reason: 'Specialty card filed in the "Charizards" collection (her pick, UIL-053).',
+        reason: 'Specialty card filed in the "Fire art" collection (her pick, UIL-053).',
         resolved_by: "user",
       },
     ]);
@@ -160,6 +161,32 @@ describe("UIL-053 · a specialty binder with collections: she picks which one", 
     ).rejects.toThrow(COLLECTION_PICK.notHere);
     expect(await copyRow()).toEqual({ role: "haul", binder_id: null });
     expect(await listOf(ELSEWHERE)).toEqual([]);
+  });
+});
+
+describe("UIL-053 · her Move still goes anywhere (a card must always be movable)", () => {
+  const withCollection = () =>
+    seeded(() =>
+      seedCollections(db, [
+        { id: CHARIZARDS, name: "Charizards", currentBinderIds: [SPEC], mode: "open" },
+      ]),
+    );
+
+  it("a Move to a front half commits with no collection pick, and joins no list", async () => {
+    await withCollection();
+    await commitCardPlacement(pgliteClient(db), {
+      card: INCOMING,
+      override: { kind: "shelf", binderId: B1, half: "front", band: "red" },
+    });
+    expect(await copyRow()).toEqual({ role: "shelved", binder_id: B1 });
+    expect(await listOf(CHARIZARDS)).toEqual([]);
+  });
+
+  it("a Move to the bulk box commits with no collection pick, and joins no list", async () => {
+    await withCollection();
+    await commitCardPlacement(pgliteClient(db), { card: INCOMING, override: { kind: "bulk" } });
+    expect(await copyRow()).toEqual({ role: "bulk", binder_id: null });
+    expect(await listOf(CHARIZARDS)).toEqual([]);
   });
 });
 
