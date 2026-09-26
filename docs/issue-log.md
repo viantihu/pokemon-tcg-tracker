@@ -4342,8 +4342,7 @@ address post go-live. Flagged Low honestly, not "Low because busy."
 - **Reported:** 2026-09-14 (Karvi, UAT spreadsheet)
 - **Status:** **Fixed** — PR [#384](https://github.com/viantihu/pokemon-tcg-tracker/pull/384) MERGED to `develop` 2026-09-26 (squash `471d926`), deployed
   green with the action check (Deploy run `36279276324`); Full Stack Dev - 2; the Tech Lead's approval at
-  `641a3ea`; QA: 14 mutants plus the two it held for (the wrong collection, and her Move of such a card
-  with no pick), all killed. **Cause (the Tech Lead's diagnosis, run `36276970692`):** the Haul Plan
+  `641a3ea`; QA: Dev 2's 14-mutant sweep and the Tech Lead's 5 all killed. QA ran 10 of its own: 6 killed first time; the 2 it held for (the wrong collection joined, and her Move of such a card with no pick) were killed after the test-only commit `9723c73`; 1 survived and was accepted (the commit reads the forecast rather than the fresh derivation, and the server then refuses, writing nothing); 1 was equivalent (the client sending a pick with a Move, which the server ignores). A further override mutant was also equivalent, because an overridden card skips the join. **Cause (the Tech Lead's diagnosis, run `36276970692`):** the Haul Plan
   cascade's card-class route sent a specialty-class card to the first specialty binder with no
   collection, and the commit wrote no `union_collection_targets` on that path, so the card was shelved in a
   binder that hosts collections while sitting on NO collection's list. Before the 2026-09-26 start-over
