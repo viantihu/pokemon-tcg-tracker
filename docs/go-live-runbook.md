@@ -374,6 +374,16 @@ columns" line names the tables it will copy, so read it against the schema on th
       rows behind (owner `00000000-0000-0000-0000-000000000001`), the script lists the
       candidates and requires `--source-owner=<uuid>`.
 
+Not enforced by the script, checked by hand before the dry run:
+
+- [ ] **Her collection AND her hand-added catalog stand-ins are in Testing's live `public` tables.**
+      The stand-ins are `catalog_card` rows with `source = user` (5 on 2026-09-26, referenced by her
+      copies, presence groups, Dex presence and manual matches). The promotion reads only the live
+      tables, never a `backup_*` schema, so the snapshot's `catalog_card_standins` copy does not
+      reach Production. A start-over deletes both. If one happened after the last baseline, the
+      Database Engineer runs `refresh-to-baseline.sh` first, which restores them together. After a
+      plain refresh-to-baseline they are already back.
+
 ## B4. Connection strings
 
 The script takes both databases as Postgres URIs in `TESTING_DB_URL` and `PROD_DB_URL`.
