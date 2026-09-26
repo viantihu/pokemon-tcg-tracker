@@ -22,7 +22,9 @@ import type { QueueEntryView, SyncState } from "@/app/(ui)/sync/sync-types";
 import * as actions from "@/app/(ui)/sync/actions";
 import { emptyCountCheck } from "@/lib/sync/count-check";
 
-vi.mock("next/navigation", () => ({
+// The real module, with only the router hooks stood in for: `reach` needs its `unstable_rethrow`.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));

@@ -16,7 +16,9 @@ import type { CollHubData, RebindRemedy } from "@/app/(ui)/coll/coll-types";
 import { LOST } from "@/app/(ui)/_components/reach";
 import { CollHub, rebindButtonLabel } from "@/app/(ui)/coll/CollHub";
 
-vi.mock("next/navigation", () => ({
+// The real module, with only the router hooks stood in for: `reach` needs its `unstable_rethrow`.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));

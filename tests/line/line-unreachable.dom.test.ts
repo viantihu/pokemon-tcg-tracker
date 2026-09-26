@@ -28,7 +28,9 @@ import { LineScreen, LOAD_FAILED } from "@/app/(ui)/line/LineScreen";
 
 const DEST: MoveDestination = { kind: "shelf", binderId: "kb1", half: "back", band: "orange" };
 
-vi.mock("next/navigation", () => ({
+// The real module, with only the router hooks stood in for: `reach` needs its `unstable_rethrow`.
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/line",
   useSearchParams: () => new URLSearchParams(),
