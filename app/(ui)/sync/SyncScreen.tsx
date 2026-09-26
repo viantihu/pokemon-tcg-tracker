@@ -32,6 +32,7 @@ import {
   undoLastSync,
 } from "./actions";
 import type {
+  ActionError,
   ApplyOutcome,
   LearnedAliasView,
   QueueEntryView,
@@ -59,6 +60,30 @@ function localeLabel(locale: string): string {
 
 const aliasKeyOf = (a: LearnedAliasView) => `${a.locale}:${a.dexCode}`;
 
+/**
+ * A server action that THROWS never reached her data or never answered: the app was redeployed while the page
+ * was open (a new deployment retires the old action ids), or the connection dropped. The actions return their own
+ * failures as `{ ok: false }`, so a throw is only ever this. Before, nothing caught it and the progress bar ran
+ * forever. Each message says only what is true for that call: a preview writes nothing; a write is all-or-nothing,
+ * so a reload shows which.
+ */
+export const LOST_PREVIEW =
+  "The app was updated while this page was open, or the connection dropped. Reload the page and import again. Nothing was saved.";
+export const LOST_APPLY =
+  "The app was updated while this page was open, or the connection dropped. Reload the page to see whether your import was saved; importing again is safe.";
+export const LOST_ACTION =
+  "The app was updated while this page was open, or the connection dropped. Reload the page to see whether that went through.";
+export const LOST_REFRESH =
+  "The app was updated while this page was open, or the connection dropped. Reload the page to see the latest.";
+
+async function reach<T>(call: () => Promise<T>, lost: string): Promise<T | ActionError> {
+  try {
+    return await call();
+  } catch {
+    return { ok: false, error: lost };
+  }
+}
+
 export function SyncScreen({ initialState }: { initialState: SyncState }) {
   const [state, setState] = useState<SyncState>(initialState);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -76,7 +101,11 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
-    setState(await loadSyncState());
+    try {
+      setState(await loadSyncState());
+    } catch {
+      setError(LOST_REFRESH);
+    }
   }, []);
 
   const busy = phase === "parsing" || phase === "working";
@@ -97,7 +126,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
     setPhase("parsing");
     const fd = new FormData();
     fd.append("file", f);
-    const res = await previewSync(fd);
+    const res = await reach(() => previewSync(fd), LOST_PREVIEW);
     if (!res.ok) {
       setError(res.error);
       setPhase("idle");
@@ -110,8 +139,10 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
       return;
     }
     if (res.preview.kind === "fastpath") {
-      // Fast-path: additions only → auto-apply + notify, no gate (sync-ui-spec §B.1).
-      const applied = await applySync(res.bundle);
+      // Fast-path: additions only → auto-apply + notify, no gate (sync-ui-spec §B.1). The bar now says it is
+      // saving, so a stall can be told apart from a slow read.
+      setPhase("working");
+      const applied = await reach(() => applySync(res.bundle), LOST_APPLY);
       if (!applied.ok) setError(applied.error);
       else setToast(applied.notification);
       setPhase("idle");
@@ -128,7 +159,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
   async function onApply() {
     if (!bundle) return;
     setPhase("working");
-    const res = await applySync(bundle, overrides);
+    const res = await reach(() => applySync(bundle, overrides), LOST_APPLY);
     if (!res.ok) {
       setError(res.error);
       setPhase("preview");
@@ -151,7 +182,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
   async function run(label: string | null, fn: () => Promise<{ ok: boolean; error?: string }>) {
     setError(null);
     setPhase("working");
-    const res = await fn();
+    const res = await reach(fn, LOST_ACTION);
     if (!res.ok && res.error) setError(res.error);
     else if (label) setToast(label);
     setPhase("idle");
@@ -295,7 +326,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
           onStandIn={async (input) => {
             // UIL-060 Half 1: create the stand-in and match in one transaction. A twin comes back as a
             // refusal the overlay renders with "match to it instead"; only a success closes it.
-            const r = await createStandInAndMatch(matching.id, input);
+            const r = await reach(() => createStandInAndMatch(matching.id, input), LOST_ACTION);
             if (r.ok) {
               setMatching(null);
               setToast("Created a stand-in and matched — ready to place.");
