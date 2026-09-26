@@ -109,6 +109,18 @@ describe("UIL-117 PR 2 · Collections → a back half, through the line popup", 
     expect(await orphanedCopies(db)).toEqual([]);
   });
 
+  it("a choice for another colour band than the destination: refused, nothing written (QA on #385)", async () => {
+    await shelveInCollection(COPY);
+    await expect(remove({ ...START, band: "dark_blue" } as LineChoice)).rejects.toThrow(
+      /another colour band than the one this card is moving to/,
+    );
+    expect(await targets()).toEqual(["emberling"]);
+    expect(
+      await q(`select binder_id, binder_half, color_band from copy where id = $1`, [COPY]),
+    ).toEqual([{ binder_id: SPEC, binder_half: "front", color_band: "red" }]);
+    expect(await q(`select id from evolution_line`)).toEqual([]);
+  });
+
   it("with no choice: refused before any write, the card still on the list and where it was", async () => {
     await shelveInCollection(COPY);
     await expect(remove()).rejects.toThrow(/back half needs a line/);

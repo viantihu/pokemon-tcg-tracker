@@ -159,6 +159,40 @@ describe("START · only what she ticked moves, and the status is the slots'", ()
     ).toBe("open");
   });
 
+  it.each([
+    [
+      "colour band",
+      { mode: "start", binderId: GEN, band: "dark_blue", pulls: [] } as LineChoice,
+      /another colour band than the one this card is moving to/,
+    ],
+    [
+      "binder",
+      {
+        mode: "start",
+        binderId: "b0000000-0000-4000-8000-0000000117b2",
+        band: "red",
+        pulls: [],
+      } as LineChoice,
+      /another binder than the one this card is moving to/,
+    ],
+  ])(
+    "a start for another %s than the destination is refused, and nothing is written (QA on #385)",
+    async (_, choice, message) => {
+      await seedBinders(db, [
+        { id: "b0000000-0000-4000-8000-0000000117b2", type: "general", name: "KB-002" },
+      ]);
+      await asOwner(db);
+      // The destination is GEN · back · red; the choice names somewhere else.
+      await expect(move(choice)).rejects.toThrow(message);
+      expect(await q(`select id from evolution_line`)).toEqual([]);
+      expect(
+        await q(`select binder_id, binder_half, color_band, line_slot_id from copy where id = $1`, [
+          MOVING,
+        ]),
+      ).toEqual([{ binder_id: GEN, binder_half: "front", color_band: "red", line_slot_id: null }]);
+    },
+  );
+
   it("a tick for a card this line did not propose is refused, and nothing is written", async () => {
     await expect(move(start(["c0000000-0000-4000-8000-00000000dead"]))).rejects.toThrow(
       /no longer one this line can take/,

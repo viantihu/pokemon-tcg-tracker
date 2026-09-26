@@ -97,8 +97,31 @@ async function assertJoinMatchesLine(
 }
 
 /**
+ * A START is written where the card is going, or not at all (QA on #385): the line is built from the choice's binder
+ * and band while the copy is placed from the destination, and 0028 checks the binder but not the band, so a stale or
+ * bypassing caller could otherwise leave a copy shelved in one band inside a line in another. Refused rather than
+ * silently corrected, the same rule a join follows (`assertJoinMatchesLine`).
+ */
+function assertStartMatchesDestination(
+  choice: Extract<LineChoice, { mode: "start" }>,
+  dest: MoveDestination,
+): void {
+  if (dest.kind !== "shelf" || dest.half !== "back" || dest.binderId !== choice.binderId) {
+    throw new Error(
+      "That new line is for another binder than the one this card is moving to — reload the screen and start it again.",
+    );
+  }
+  if (dest.band !== choice.band) {
+    throw new Error(
+      "That new line is for another colour band than the one this card is moving to — reload the screen and start it again.",
+    );
+  }
+}
+
+/**
  * The line ops for one copy moving into a back half (UIL-117), shared by every server path that can do it (a Move,
- * a Collections removal). A join is checked against its line first; then the ONE line builder runs on fresh state.
+ * a Collections removal). A join is checked against its line, a start against the destination; then the ONE line
+ * builder runs on fresh state.
  *
  * NO "a line already exists" refusal on START (UIL-096). Karvi overruled it: "Instead of blocking the creation of an
  * evolution line, I want a warning that there is a line existing in my ENTIRE collection." The warning is the popup's,
@@ -111,6 +134,7 @@ export async function buildBackHalfLineOps(
   choice: LineChoice,
 ): Promise<{ ops: WriteOp[]; slotId: string }> {
   if (choice.mode === "join") await assertJoinMatchesLine(db, choice.lineId, destination);
+  if (choice.mode === "start") assertStartMatchesDestination(choice, destination);
   const state = await loadLineWriteState(db, copy, choice);
   const built = buildLineChoiceOps(state, copy.id, choice);
   return { ops: built.ops, slotId: built.slotId };
