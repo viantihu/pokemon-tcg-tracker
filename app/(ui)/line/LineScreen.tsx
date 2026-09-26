@@ -33,6 +33,7 @@ import { bandMeta } from "../_components/plan-meta";
 import { fmtPrice } from "../_components/decision-format";
 import { loadLine, moveCardAction, removeSlotCopyAction, resolveDecisionAction } from "./actions";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
+import { LOST, reach } from "../_components/reach";
 
 const SLOT_HEAD: Record<SlotView["state"], string> = {
   filled: "FILLED",
@@ -139,6 +140,9 @@ export function LineTabs({
   );
 }
 
+/** Why the screen is empty when its first read fails. True whatever the cause, so it names none. */
+export const LOAD_FAILED = "Could not load your lines. Reload the page to try again.";
+
 export function LineScreen() {
   const [data, setData] = useState<LineScreenData | null>(null);
   const [curId, setCurId] = useState<string | null>(null);
@@ -173,7 +177,9 @@ export function LineScreen() {
         setData(d);
         setCurId((cur) => cur ?? d.lines[0]?.lineId ?? null);
       })
-      .catch((e) => live && setError(e instanceof Error ? e.message : "Could not load lines."));
+      // `loadLine` throws for a server failure AND when the call never reaches the server, so this says
+      // neither — only what is true of both (UIL-106).
+      .catch(() => live && setError(LOAD_FAILED));
     return () => {
       live = false;
     };
@@ -209,13 +215,18 @@ export function LineScreen() {
     const label = decision?.choices.find((c) => c.id === choiceId)?.label ?? "Resolved";
     setBusy(true);
     setError(null);
-    const res = await resolveDecisionAction(decisionId, choiceId, pickedCatalogCardId, view);
+    const res = await reach(
+      () => resolveDecisionAction(decisionId, choiceId, pickedCatalogCardId, view),
+      LOST.action,
+    );
     setBusy(false);
     if (res.ok) {
       setData(res.data);
       setResolved((prev) => ({ ...prev, [decisionId]: label }));
       flashToast(`Decision recorded · ${label}`);
     } else {
+      // Close the sheet: a failure shown behind a veil is a failure she cannot read (as Lookup does).
+      setActiveDecisionId(null);
       setError(res.error);
     }
   }
@@ -246,7 +257,7 @@ export function LineScreen() {
   async function onRemoveSlotCopy(copyId: string) {
     setBusy(true);
     setError(null);
-    const res = await removeSlotCopyAction(copyId, view);
+    const res = await reach(() => removeSlotCopyAction(copyId, view), LOST.action);
     setBusy(false);
     if (res.ok) {
       setData(res.data);
@@ -260,18 +271,28 @@ export function LineScreen() {
     if (!move) return;
     setBusy(true);
     setError(null);
-    const res = await moveCardAction(move.copyId, dest, view);
+    const res = await reach(() => moveCardAction(move.copyId, dest, view), LOST.action);
     setBusy(false);
+    // Close the sheet either way: a failure shown behind a veil is a failure she cannot read.
+    setMove(null);
     if (res.ok) {
       setData(res.data);
-      setMove(null);
       flashToast(`Moved · ${move.name} → ${res.label}`);
     } else {
       setError(res.error);
     }
   }
 
+  const errorBar = error ? (
+    <div className="alertbar" role="alert" style={{ background: "#FFD9DF" }}>
+      <span>!</span>
+      <b>{error}</b>
+    </div>
+  ) : null;
+
   if (!data) {
+    // A load that failed says so, rather than "Loading lines…" for ever (UIL-106).
+    if (errorBar) return errorBar;
     return (
       <div className="stub panel">
         <h1 className="u">Loading lines…</h1>
@@ -283,6 +304,7 @@ export function LineScreen() {
   if (!curLine) {
     return (
       <>
+        {errorBar}
         <div className="stub panel">
           <h1 className="u">No lines yet</h1>
           <p>
@@ -308,12 +330,7 @@ export function LineScreen() {
 
   return (
     <>
-      {error && (
-        <div className="alertbar" role="alert" style={{ background: "#FFD9DF" }}>
-          <span>!</span>
-          <b>{error}</b>
-        </div>
-      )}
+      {errorBar}
 
       <div
         className={"alertbar" + (openDecisions.length === 0 ? " ok" : "")}

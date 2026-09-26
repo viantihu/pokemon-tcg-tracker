@@ -58,9 +58,16 @@ export function RemoveCopyButton({
         disabled={busy}
         onClick={async () => {
           // Stays armed while the write is in flight: the row usually disappears on success, and if it
-          // fails she is looking at the same decision she just made rather than a reset button.
-          await onRemove();
-          setArmed(false);
+          // fails she is looking at the same decision she just made rather than a reset button. Disarmed
+          // even if `onRemove` throws, so the row never sits armed for ever (UIL-106). Saying what went
+          // wrong is the caller's job, which is why every caller goes through `reach` and never throws.
+          try {
+            await onRemove();
+          } catch {
+            // Nothing to show here: this button has no message of its own.
+          } finally {
+            setArmed(false);
+          }
         }}
       >
         {busy ? "Removing…" : "Yes, remove"}

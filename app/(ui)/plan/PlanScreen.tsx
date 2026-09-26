@@ -36,6 +36,7 @@ import { cardCaption } from "../_components/CardLightbox";
 import { ProgressBar } from "../_components/ProgressBar";
 import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
+import { LOST, reach } from "../_components/reach";
 import { ACTION_META, bandMeta, moveMeta } from "../_components/plan-meta";
 import { removeCopy } from "../look/actions";
 import {
@@ -432,7 +433,9 @@ export function PlanScreen({
   async function removeCopyFromApp(row: DraftCard) {
     setError(null);
     setShelving(row.id);
-    const res = await removeCopy(row.existingCopyId);
+    // Through `reach`: a call that never answers must still clear `shelving`, or `shelveCard` refuses every
+    // Done after it with no word (UIL-106).
+    const res = await reach(() => removeCopy(row.existingCopyId), LOST.action);
     setShelving(null);
     if (!res.ok) {
       setError(res.error);

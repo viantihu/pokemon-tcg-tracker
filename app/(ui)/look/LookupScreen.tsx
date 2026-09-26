@@ -34,6 +34,7 @@ import {
 } from "./actions";
 import type { LookupMovableCopy } from "./lookup-copies";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
+import { LOST, reach } from "../_components/reach";
 import { lookupViewFrom, type LookupView } from "./lookup-state";
 
 const FACT_ICON: Record<string, string> = { y: "✓", n: "·", hot: "★" };
@@ -100,7 +101,7 @@ export function LookupScreen() {
     setMoveError(null);
     let opts = moveOptions;
     if (!opts) {
-      const r = await lookupMoveOptions();
+      const r = await reach(() => lookupMoveOptions(), LOST.read);
       if (!r.ok) {
         setMoveError(r.error);
         return;
@@ -119,7 +120,8 @@ export function LookupScreen() {
     if (!answer) return;
     setMoveError(null);
     setMoving(true);
-    const res = await removeCopy(copy.copyId, answer.card.tcgdexId);
+    // Through `reach`: a call that never answers must still clear `moving`, or every button stays disabled.
+    const res = await reach(() => removeCopy(copy.copyId, answer.card.tcgdexId), LOST.action);
     setMoving(false);
     if (!res.ok) {
       setMoveError(res.error);
@@ -139,7 +141,10 @@ export function LookupScreen() {
     if (!answer) return;
     setMoveError(null);
     setMoving(true);
-    const res = await mergeCopies(survivor.copyId, twin.copyId, answer.card.tcgdexId);
+    const res = await reach(
+      () => mergeCopies(survivor.copyId, twin.copyId, answer.card.tcgdexId),
+      LOST.action,
+    );
     setMoving(false);
     if (!res.ok) {
       setMoveError(res.error);
@@ -153,7 +158,10 @@ export function LookupScreen() {
     if (!moveTarget || !answer) return;
     setMoving(true);
     setMoveError(null);
-    const res = await moveFromLookup(moveTarget.copyId, dest, answer.card.tcgdexId);
+    const res = await reach(
+      () => moveFromLookup(moveTarget.copyId, dest, answer.card.tcgdexId),
+      LOST.action,
+    );
     setMoving(false);
     // Close the sheet either way: a failure shown behind a veil is a failure she cannot read.
     setMoveTarget(null);
