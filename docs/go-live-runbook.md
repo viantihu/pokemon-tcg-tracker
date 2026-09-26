@@ -257,9 +257,8 @@ were considered and declined; they stay here so the choice can be revisited with
 a budget, and blocks further runs once that budget is spent. That block is what stopped CI on
 2026-09-17.
 
-- **Amount: $80 a month, recommended, pending Karvi's confirmation.** That covers the measured
-  UAT pace (about $75 over Pro's minutes), so CI does not stop mid-month while fixes are
-  still landing. Lower it once a quiet month's usage is measured.
+- **Limit amount: set by Karvi at go-live; she expects testing volume to drop significantly
+  after launch.**
 - **Alerts** at 75% and 90% of the limit go to the account owner's email.
 - **Who raises it: Karvi.** Only the account owner can change billing (GitHub → Settings →
   Billing and licensing → Budgets and alerts). When CI stops on the limit, the Tech Lead
@@ -269,8 +268,8 @@ At go-live, in this order:
 
 - [ ] **(1) GitHub Pro** is active on the owning account (`viantihu`), **before** the
       visibility changes. Without it, the flip removes branch protection.
-- [ ] **(2) The spending limit** is set on Actions at the confirmed amount, with the alerts
-      above, and set to stop usage at the limit.
+- [ ] **(2) The spending limit** is set on Actions at the amount Karvi chooses, with the
+      alerts above, and set to stop usage at the limit.
 - [ ] The visibility is changed to private (Karvi, repository Settings → General).
 - [ ] **(3) After the flip**, the branch protection rules on `develop` and `main` still list
       verify, migration-order and Vercel as required, and a test PR shows them as required.
