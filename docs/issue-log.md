@@ -8223,17 +8223,17 @@ fires when an action is invoked, and nothing in CI ever invokes one.
 action body runs, so `signIn`/`signOut`/every other action's own logic never executed; this is a load-time
 failure, not a mid-write one.
 
-**Her UIL-105 hang on 2026-09-26 was this same cause, not a separate transport failure.** UIL-105's
-report (an import that stayed "running" with no error) is explained by the same E352 failure: the Sync
-page's own action bundle also reaches `app/login/actions.ts` through the shared layout, so the call never
-even reached the server to reject in the way UIL-105's write-up assumed — it failed at the loader before
-dispatch. Reclassify UIL-105's cause once #357 confirms this, rather than leaving both entries pointing at
-two separate causes for what may be one incident's two symptoms.
+**Confirmed, not just likely: her UIL-105 hang on 2026-09-26 was this same cause, not a separate
+transport failure.** The Tech Lead's widened proof on the unmodified build found all 9 `(ui)` action
+modules returning 500 with no action body ever running — the Sync page's own action bundle reaches
+`app/login/actions.ts` through the shared layout the same as every other page's, so UIL-105's call never
+reached the server to reject in the way that entry's write-up assumed; it failed at the loader before
+dispatch. UIL-105's own cause line is being corrected separately by the Senior BA.
 
 **Fix.** PR #357 (Tech Lead): the constant moves to `app/login/messages.ts`, a plain module with no
 `"use server"` directive, plus a static guard test asserting every `"use server"` file exports only
 async functions. Follow-up, not folded into #357: a `deploy.yml` smoke step that `POST`s the login action
 rather than only `GET`ing the page, so this class of failure is caught before Testing sees it again.
 
-**Cross-reference UIL-105** (likely the same incident, pending #357's confirmation) and **UIL-097** (PR
+**Cross-reference UIL-105** (confirmed the same incident, not a separate cause) and **UIL-097** (PR
 #333, the change that introduced the export).
