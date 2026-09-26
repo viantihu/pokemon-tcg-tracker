@@ -66,9 +66,11 @@ export async function freshRpcDb(options: { before?: string } = {}): Promise<PGl
     ]);
   }
   // Supabase grants base-table privileges to these roles as a platform default; RLS is the security
-  // boundary on top. Replicate it so `set role authenticated` can write through the RPC.
+  // boundary on top. Replicate it so `set role authenticated` can write through the RPC. The platform also
+  // grants usage on schema `auth`, which is what lets a function body call `auth.uid()` as the owner (0026).
   await db.exec(`
     grant usage on schema public to authenticated, service_role, anon;
+    grant usage on schema auth to authenticated, service_role, anon;
     grant all on all tables in schema public to authenticated, service_role;
   `);
   await db.exec(FIXTURE_AUTOGROUP);
