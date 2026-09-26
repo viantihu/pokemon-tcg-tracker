@@ -25,7 +25,7 @@ import {
   resolveSpeciesToDexId,
 } from "./actions";
 import type { BrowseCard, BrowseFilters, BulkAddResult, SetOption } from "./coll-types";
-import { LOST, reach } from "../_components/reach";
+import { isUnreached, LOST, reach } from "../_components/reach";
 
 type OwnedFilter = "any" | "owned" | "unowned";
 
@@ -114,15 +114,16 @@ export function CardSearchGrid({ collectionId }: { collectionId: string }) {
       setLoading(true);
       setLoadError(null);
       try {
-        const page = await browseCards(filters(), 0);
+        // Through `reach` (UIL-109): a failed search says so in the shared words.
+        const page = await reach(() => browseCards(filters(), 0), LOST.load);
         if (token !== requestToken.current) return;
+        if (isUnreached(page)) {
+          setLoadError(page.error);
+          return;
+        }
         setCards(page.cards);
         setNextOffset(page.nextOffset);
         setHasMore(page.hasMore);
-      } catch (e) {
-        if (token === requestToken.current) {
-          setLoadError(e instanceof Error ? e.message : "Could not search the catalog.");
-        }
       } finally {
         if (token === requestToken.current) setLoading(false);
       }
@@ -135,12 +136,14 @@ export function CardSearchGrid({ collectionId }: { collectionId: string }) {
     setLoading(true);
     setLoadError(null);
     try {
-      const page = await browseCards(filters(), nextOffset);
+      const page = await reach(() => browseCards(filters(), nextOffset), LOST.load);
+      if (isUnreached(page)) {
+        setLoadError(page.error);
+        return;
+      }
       setCards((prev) => [...prev, ...page.cards]);
       setNextOffset(page.nextOffset);
       setHasMore(page.hasMore);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Could not search the catalog.");
     } finally {
       setLoading(false);
     }

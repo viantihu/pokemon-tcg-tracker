@@ -99,6 +99,23 @@ describe("UIL-106 · a Settings change that cannot reach the server says so", ()
     await waitFor(() => expect(alerts()).toContain(LOST.action));
   });
 
+  it("UIL-109: a first load that fails says so in the shared words, not the raw error text", async () => {
+    loadSettings.mockReset();
+    loadSettings.mockRejectedValue(new Error("column binder.pages does not exist"));
+    render(createElement(SettingsScreen));
+    // PRE-FIX: the raw error text, which a server failure hands back redacted and a dropped call garbles.
+    await waitFor(() => expect(alerts()).toBe(`!${LOST.load}`));
+    expect(alerts()).not.toContain("column binder.pages");
+  });
+
+  it("UIL-109: a reload after a change that fails says so too", async () => {
+    deleteBinder.mockResolvedValue({ ok: true });
+    const user = await mount();
+    loadSettings.mockRejectedValue(LOST_CALL());
+    await user.click(screen.getByRole("button", { name: "✕" }));
+    await waitFor(() => expect(alerts()).toContain(LOST.load));
+  });
+
   it("an answer the server gives is still shown in its own words", async () => {
     deleteBinder.mockResolvedValue({ ok: false, error: "That binder still holds cards." });
     const user = await mount();

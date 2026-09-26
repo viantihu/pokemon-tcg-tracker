@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { binderSplit } from "@/lib/surfaces";
 import { BandChip } from "../_components/BandChip";
-import { LOST, reach } from "../_components/reach";
+import { isUnreached, LOST, reach } from "../_components/reach";
 import { deleteBinder, loadSettings, reorderBands, saveBinder, setTypeBand } from "./actions";
 import type { BandRow, BinderInput, SettingsData } from "./settings-types";
 
@@ -36,26 +36,19 @@ export function SettingsScreen() {
   // Reused by mutation handlers. setState lands only inside .then/.catch (never synchronously).
   const refresh = useCallback(
     () =>
-      loadSettings().then(
-        (d) => setData(d),
-        (e) =>
-          setError(
-            e instanceof Error ? e.message : "Could not load settings. Is the DB reachable?",
-          ),
+      // Through `reach` (UIL-109): a failed load says so in the shared words, never the raw error text.
+      reach(() => loadSettings(), LOST.load).then((d) =>
+        isUnreached(d) ? setError(d.error) : setData(d),
       ),
     [],
   );
   useEffect(() => {
     let alive = true;
-    loadSettings()
-      .then((d) => alive && setData(d))
-      .catch(
-        (e) =>
-          alive &&
-          setError(
-            e instanceof Error ? e.message : "Could not load settings. Is the DB reachable?",
-          ),
-      );
+    void reach(() => loadSettings(), LOST.load).then((d) => {
+      if (!alive) return;
+      if (isUnreached(d)) setError(d.error);
+      else setData(d);
+    });
     return () => {
       alive = false;
     };

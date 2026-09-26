@@ -25,6 +25,7 @@ vi.mock("next/navigation", async (importOriginal) => ({
 const loadCollHub = vi.fn();
 const saveCollection = vi.fn();
 const rebindCollectionWithMove = vi.fn();
+const setCollectionMode = vi.fn();
 vi.mock("@/app/(ui)/coll/actions", () => ({
   deleteCollection: vi.fn(),
   loadCollHub: (...a: unknown[]) => loadCollHub(...a),
@@ -34,7 +35,7 @@ vi.mock("@/app/(ui)/coll/actions", () => ({
   removeCopyFromApp: vi.fn(),
   saveCollection: (...a: unknown[]) => saveCollection(...a),
   searchCatalog: vi.fn(async () => []),
-  setCollectionMode: vi.fn(),
+  setCollectionMode: (...a: unknown[]) => setCollectionMode(...a),
   wishlistCollectionCard: vi.fn(),
 }));
 
@@ -87,7 +88,8 @@ async function mount() {
 }
 
 beforeEach(() => {
-  for (const f of [loadCollHub, saveCollection, rebindCollectionWithMove]) f.mockReset();
+  for (const f of [loadCollHub, saveCollection, rebindCollectionWithMove, setCollectionMode])
+    f.mockReset();
   loadCollHub.mockResolvedValue(DATA);
 });
 afterEach(cleanup);
@@ -102,6 +104,27 @@ describe("UIL-106 · the Collections hub when a call cannot reach the server", (
     // PRE-FIX: the throw escaped the click; nothing opened and nothing was said.
     await waitFor(() => expect(alerts()).toContain(LOST.action));
     expect(screen.queryByPlaceholderText("e.g. Matsuno illustrations")).toBeNull();
+  });
+
+  it("UIL-109: a first load that fails says so in the shared words, not the raw error text", async () => {
+    loadCollHub.mockReset();
+    loadCollHub.mockRejectedValue(new Error("relation collection does not exist"));
+    render(createElement(CollHub));
+    await waitFor(() => expect(alerts()).toContain(LOST.load));
+    expect(alerts()).not.toContain("relation collection");
+  });
+
+  it("UIL-109: a change through run() that cannot reach the server says so in the shared words", async () => {
+    // Its actions return `{ ok }` for their own failures, so a throw is a call that never arrived.
+    setCollectionMode.mockRejectedValue(LOST_CALL());
+    const user = await mount();
+    // The mode toggle's "Open" (switching a finite list to an open count), not the card grid's.
+    const toggle = screen
+      .getAllByRole("button", { name: "Open" })
+      .find((b) => b.className.includes("modebtn"))!;
+    await user.click(toggle);
+    await waitFor(() => expect(alerts()).toContain(LOST.action));
+    expect(alerts()).not.toContain("Failed to fetch");
   });
 
   it("the rebind remedy says so on the editor's bar, and its button goes", async () => {

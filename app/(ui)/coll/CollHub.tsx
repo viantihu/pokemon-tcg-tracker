@@ -23,7 +23,7 @@ import {
   type WishlistBinderGroup,
 } from "@/lib/surfaces";
 import { BandChip } from "../_components/BandChip";
-import { LOST, reach } from "../_components/reach";
+import { isUnreached, LOST, reach } from "../_components/reach";
 import { CardFace } from "../_components/CardFace";
 import { cardCaption } from "../_components/CardLightbox";
 import { CardResultsGrid } from "../_components/CardResultsGrid";
@@ -131,27 +131,20 @@ export function CollHub() {
   // Reused by mutation handlers. setState lands only inside .then/.catch (never synchronously).
   const refresh = useCallback(
     () =>
-      loadCollHub().then(
-        (d) => setData(d),
-        (e) =>
-          setError(
-            e instanceof Error ? e.message : "Could not load collections. Is the DB reachable?",
-          ),
+      // Through `reach` (UIL-109): a failed load says so in the shared words, never the raw error text.
+      reach(() => loadCollHub(), LOST.load).then((d) =>
+        isUnreached(d) ? setError(d.error) : setData(d),
       ),
     [],
   );
 
   useEffect(() => {
     let alive = true;
-    loadCollHub()
-      .then((d) => alive && setData(d))
-      .catch(
-        (e) =>
-          alive &&
-          setError(
-            e instanceof Error ? e.message : "Could not load collections. Is the DB reachable?",
-          ),
-      );
+    void reach(() => loadCollHub(), LOST.load).then((d) => {
+      if (!alive) return;
+      if (isUnreached(d)) setError(d.error);
+      else setData(d);
+    });
     return () => {
       alive = false;
     };
@@ -172,13 +165,12 @@ export function CollHub() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fn();
+      // Through `reach` (UIL-109): every action `run` takes returns `{ ok }` for its own failures, so a throw
+      // is a call that never arrived, said in the shared words rather than the raw error text.
+      const res = await reach(fn, LOST.action);
       if (!res.ok) setError(res.error ?? "Something went wrong.");
       else await refresh();
       return res.ok;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong.");
-      return false;
     } finally {
       setBusy(false);
     }
