@@ -8303,24 +8303,34 @@ E4** (the promotion-matching this is meant to fix downstream of).
 
 - **Reported:** 2026-09-26 (Karvi, relayed by the "Bugdrop integration for user feedback" session, its
   owner). Backlog, not a UAT report.
-- **Status:** Open, backlog, blocked on Karvi's product choice, a new private feedback repo, and her
-  installing the GitHub App on it. Owner: "Bugdrop integration for user feedback".
+- **Status:** Open, backlog; product chosen; blocked on the feedback repos, the GitHub App install, and
+  multi-user auth. Owner: "Bugdrop integration for user feedback".
 - **Priority:** Unrated — Karvi to set.
 - **Area:** Cutover / feedback
 - **Env:** n/a — pre-decision; nothing built yet.
 
-**Product choice, open for Karvi — the owning session is asking her directly, not decided here.**
-[`mean-weasel/bugdrop-board`](https://github.com/mean-weasel/bugdrop-board) is an upvote/roadmap board:
-confirmed via the GitHub API as a closed-beta investigation ("Investigation for an embeddable,
-self-hostable interactive feedback board"), no license set. Would need this app's own Cloudflare Worker
-plus D1, two secrets, and a per-user token route.
-[`bugdrophq/bugdrop`](https://github.com/bugdrophq/bugdrop) is a bug reporter: confirmed MIT-licensed,
-active, "In-app feedback → GitHub Issues. Screenshots, annotations, the works." One script tag, no user
-login of its own, covers both bugs and feature requests, and files directly to GitHub Issues.
+**Product chosen: [`bugdrophq/bugdrop`](https://github.com/bugdrophq/bugdrop), 2026-09-26 (Karvi) —
+she does not want another license.** Confirmed MIT-licensed, active, "In-app feedback → GitHub Issues.
+Screenshots, annotations, the works." One script tag, no user login of its own, covers both bugs and
+feature requests, and files directly to GitHub Issues.
+[`mean-weasel/bugdrop-board`](https://github.com/mean-weasel/bugdrop-board) (an upvote/roadmap board,
+confirmed unlicensed and a self-described closed-beta investigation, needing this app's own Cloudflare
+Worker plus D1) was the passed-over option.
 
-**Reports must not go to this repo, because it's public and a screenshot could expose a user's own
-collection data.** Needs a separate PRIVATE repo purpose-built for feedback intake, with Karvi installing
-whichever tool's GitHub App on that repo specifically, not this one.
+**Reports must not go to this repo, because it's public — and Karvi separately plans to make this repo
+private at go-live, which doesn't remove the need for a dedicated feedback repo.** A screenshot could
+expose a user's own collection data. Karvi will install BugDrop's GitHub App on a new, purpose-built
+private repo, not this one.
+
+**BugDrop's own recommendation, confirmed against its README, is TWO separate private feedback
+repos — one for Testing, one for Production — pending Karvi's decision, not yet decided here.** Three
+reasons, each confirmed directly rather than relayed: BugDrop needs `contents` write access on its
+target, because it commits screenshots to a dedicated `bugdrop-screenshots` branch it auto-creates on
+first use (its README states this explicitly); every submission is unauthenticated user-generated
+content by BugDrop's own design ("Treat feedback and screenshots as unauthenticated user-generated
+content"), so anything filed lands in that repo with no identity check; and a Testing report filed before
+this repo's own go-live flip to private would otherwise sit in a public repo permanently, screenshots
+included.
 
 **Other scoping named at intake, all still open, none decided:**
 
