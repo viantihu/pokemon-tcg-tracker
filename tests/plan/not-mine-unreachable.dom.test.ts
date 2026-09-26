@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
- * UIL-106 (2) — the Haul Plan's "Not mine", and the Remove button itself, when the call cannot reach the
- * server at all.
+ * UIL-106 (2, 3) — the Haul Plan's "Not mine" and "Run the plan", and the Remove button itself, when the
+ * call cannot reach the server at all.
  *
  * A server action THROWS when the app was redeployed under an open page or the connection dropped. "Not
  * mine" set `shelving` and awaited the removal with nothing to catch a throw, so `shelving` never cleared
@@ -17,7 +17,7 @@ import type { PlanItem } from "@/lib/plan";
 import type { DraftCard, LookupCard, RunPlanResult } from "@/app/(ui)/plan/plan-types";
 import { LOST } from "@/app/(ui)/_components/reach";
 import { RemoveCopyButton } from "@/app/(ui)/_components/RemoveCopyButton";
-import { PlanScreen } from "@/app/(ui)/plan/PlanScreen";
+import { PlanScreen, RUN_FAILED } from "@/app/(ui)/plan/PlanScreen";
 
 const removeCopy = vi.fn();
 vi.mock("@/app/(ui)/look/actions", () => ({
@@ -128,6 +128,24 @@ describe("UIL-106 · 'Not mine' that cannot reach the server", () => {
     await user.click(await screen.findByRole("button", { name: /Done, next card/ }));
     // PRE-FIX: `shelving` was never cleared, so `shelveCard` returned before calling the server — silently.
     await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("UIL-106 (3) · 'Run the plan' that does not complete", () => {
+  it("says so without the raw error text, and Run can be pressed again", async () => {
+    runHaulPlan.mockRejectedValue(LOST_CALL());
+    const user = userEvent.setup();
+    render(createElement(PlanScreen, { stateStamp: "s", initialPending: [MEDITITE, MAKUHITA] }));
+    await screen.findByText("Meditite");
+
+    await user.click(screen.getByRole("button", { name: /Run the plan/ }));
+
+    // PRE-FIX: the raw "Failed to fetch". `runHaulPlan` throws for a server failure too, so it names no cause.
+    await waitFor(() => expect(alerts()).toContain(RUN_FAILED));
+    expect(alerts()).not.toContain("Failed to fetch");
+    expect(
+      (screen.getByRole("button", { name: /Run the plan/ }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 });
 

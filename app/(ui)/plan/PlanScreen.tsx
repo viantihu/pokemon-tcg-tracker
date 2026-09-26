@@ -199,6 +199,12 @@ function toPayload(draft: DraftCard[]): DraftPayloadItem[] {
   }));
 }
 
+/**
+ * Why a run did not produce a plan. `runHaulPlan` throws for a server failure as well as for a call that never
+ * reached it, so this names no cause; a run writes nothing, so running it again is safe (UIL-106).
+ */
+export const RUN_FAILED = "Could not run the plan. Reload the page and run it again.";
+
 export function PlanScreen({
   initialPending = [],
   stateStamp = "",
@@ -461,8 +467,8 @@ export function PlanScreen({
       setCollapsedSubgroups(new Set());
       setConfirmedPulls({});
       setBandChoice({});
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not run the plan.");
+    } catch {
+      setError(RUN_FAILED);
     } finally {
       setRunning(false);
     }
@@ -485,29 +491,39 @@ export function PlanScreen({
     setError(null);
     setShelving(item.incomingId);
     try {
-      const res = await shelveCardAction({
-        card: {
-          id: entry.id,
-          tcgdexId: entry.card.tcgdexId,
-          variant: entry.variant,
-          existingCopyId: entry.existingCopyId,
-        },
-        override: overrides[item.incomingId] ?? null,
-        // Everything not yet shelved stays queued, so the returned stamp describes what we hold next.
-        pendingCopyIds: draft
-          .filter((d) => !done.has(d.id) && d.id !== item.incomingId)
-          .map((d) => d.existingCopyId),
-        // Only when we hold a fresh derivation FOR THIS CARD (UIL-045). Sending the stale forecast's
-        // digest would conflict on every interacting card; sending none keeps the old behaviour.
-        expectedDigest: fresh?.id === item.incomingId ? fresh.digest : null,
-        // Only what she ticked FOR THIS CARD, and only while the derivation it was ticked against is
-        // still the current one — consent is specific to a placement, not to a card (UIL-061).
-        confirmedPulls:
-          fresh?.id === item.incomingId ? (confirmedPulls[item.incomingId] ?? []) : [],
-        // Only her pick FOR THIS CARD's current derivation, same rule as confirmedPulls (UIL-069).
-        bandChoice: fresh?.id === item.incomingId ? (bandChoice[item.incomingId] ?? null) : null,
-      });
+      const res = await reach(
+        () =>
+          shelveCardAction({
+            card: {
+              id: entry.id,
+              tcgdexId: entry.card.tcgdexId,
+              variant: entry.variant,
+              existingCopyId: entry.existingCopyId,
+            },
+            override: overrides[item.incomingId] ?? null,
+            // Everything not yet shelved stays queued, so the returned stamp describes what we hold next.
+            pendingCopyIds: draft
+              .filter((d) => !done.has(d.id) && d.id !== item.incomingId)
+              .map((d) => d.existingCopyId),
+            // Only when we hold a fresh derivation FOR THIS CARD (UIL-045). Sending the stale forecast's
+            // digest would conflict on every interacting card; sending none keeps the old behaviour.
+            expectedDigest: fresh?.id === item.incomingId ? fresh.digest : null,
+            // Only what she ticked FOR THIS CARD, and only while the derivation it was ticked against is
+            // still the current one — consent is specific to a placement, not to a card (UIL-061).
+            confirmedPulls:
+              fresh?.id === item.incomingId ? (confirmedPulls[item.incomingId] ?? []) : [],
+            // Only her pick FOR THIS CARD's current derivation, same rule as confirmedPulls (UIL-069).
+            bandChoice:
+              fresh?.id === item.incomingId ? (bandChoice[item.incomingId] ?? null) : null,
+          }),
+        LOST.action,
+      );
       if (!res.ok) {
+        // Never reached the server (UIL-106): not a refusal, so her override is KEPT (UIL-084 below).
+        if ("unreached" in res) {
+          setError(res.error);
+          return false;
+        }
         // The placement moved under her. Nothing was written; show the new one and let her look
         // again rather than reporting a failure for something that is working correctly.
         if (res.changed) {
@@ -538,7 +554,7 @@ export function PlanScreen({
          * on the one path a refusal comes back, so the row falls back to the cascade's own destination
          * and she can pick again.
          *
-         * Only on a RETURNED refusal, never in the `catch` below: a transport failure is not the
+         * Only on a RETURNED refusal, never on the `unreached` branch above: a transport failure is not the
          * server rejecting her pick, and throwing her choice away for a dropped connection would be
          * its own small data loss.
          */
@@ -561,9 +577,6 @@ export function PlanScreen({
       setLiveStamp(res.stamp);
       setDone((prev) => new Set(prev).add(item.incomingId));
       return true;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not shelve that card.");
-      return false;
     } finally {
       setShelving(null);
     }
