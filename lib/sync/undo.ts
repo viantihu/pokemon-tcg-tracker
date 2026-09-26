@@ -121,6 +121,13 @@ export interface AppliedSnapshot {
    * when no record existed, so Undo leaves the record alone.
    */
   priorDexRecord?: PriorDexRecord | null;
+  /**
+   * The "Not mine" memories this import FORGOT (UIL-111: a full import ends the haul), with the counts they
+   * held when it applied. Undo puts them back, so undoing the import also undoes the end of the haul. Absent
+   * when the import forgot none, and on every snapshot written before UIL-111: Undo then leaves memories as
+   * it always did.
+   */
+  priorRemovedMemories?: { catalog_card_id: string; dex_variant_raw: string; count: number }[];
   /** Copies retired this sync — re-inserted verbatim on undo. */
   retiredCopies: SnapshotCopy[];
   /** Line slots freed by a retire — restored to their filled state on undo. */

@@ -10,7 +10,14 @@
 
 import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
-import type { FlagFixRow, SyncOverrides, SyncPlanBundle, SyncPreview } from "@/lib/sync";
+import type {
+  FlagFixRow,
+  ReturningRow,
+  SyncOverrides,
+  SyncPlanBundle,
+  SyncPreview,
+} from "@/lib/sync";
+import { RETURNING_NOTE } from "@/lib/sync/preview";
 import { forgottenDismissedLine } from "@/lib/sync/preview";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import {
@@ -464,6 +471,45 @@ export function FlagFixSection({ rows }: { rows: FlagFixRow[] }) {
 }
 
 /**
+ * Cards this import hands back after a "Not mine" (UIL-111): "Not mine" lasts for the haul, Dex still lists
+ * them, and they must not reappear unannounced, so each is named here and the import is a reviewed one.
+ */
+export function ReturningSection({ rows }: { rows: ReturningRow[] }) {
+  return (
+    <section>
+      <div className="hd u">Coming back · you marked these Not mine</div>
+      <p style={{ fontSize: 11, color: "var(--ink-2)", margin: "0 0 8px" }}>{RETURNING_NOTE}</p>
+      <div style={{ display: "grid", gap: 8 }}>
+        {rows.map((r) => {
+          const number = formatCollectorNumber(r.localId, r.setCardCountOfficial);
+          return (
+            <div
+              key={`${r.catalogCardId}|${r.dexVariantRaw}`}
+              className="plate"
+              style={{ padding: 10 }}
+            >
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <CardFace name={r.name} tcgdexId={r.catalogCardId} imageUrl={r.imageUrl} size="s" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700 }}>
+                    {r.name}
+                    {r.setName ? ` · ${r.setName}` : ""}
+                    {number ? <span className="no"> {number}</span> : null}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--ink-2)" }}>
+                    Dex: {r.dexVariantRaw} · ×{r.count}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/**
  * The toast after an apply. Names corrected variant flags in the preview's own words (UIL-102), and points
  * back at the preview's list, which is where the cards to check are named.
  */
@@ -609,6 +655,10 @@ export function PreviewPanel({
       ) : null}
 
       {sections.flagFixes.length > 0 ? <FlagFixSection rows={sections.flagFixes} /> : null}
+
+      {(sections.returning ?? []).length > 0 ? (
+        <ReturningSection rows={sections.returning} />
+      ) : null}
 
       {sections.variantChanges.length > 0 ? (
         <section>

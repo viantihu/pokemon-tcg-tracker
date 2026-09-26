@@ -192,27 +192,33 @@ export interface ReconcilePlan {
   fastPath: boolean;
   diff: SyncDiff;
   /**
-   * `removed_presence` rows whose key this export no longer lists, to delete in the apply's own
-   * transaction (UIL-089). Dex has stopped claiming the card, so the disagreement the memory recorded is
-   * over; keeping it would suppress a genuine future re-acquisition forever. Empty on a retry import,
-   * which has no evidence of absence — see `applyRemovedMemory`.
+   * `removed_presence` rows to delete in the apply's own transaction. On a FULL import that is every one of
+   * them: "Not mine" lasts for the haul, and a whole export ends the haul (UIL-111). Empty on a retry, which
+   * is still inside the haul — see `applyRemovedMemory`.
    */
   forgetRemoved: RemovedPresence[];
+  /**
+   * The cards this full import hands back because she had cleared them with "Not mine" and Dex still lists
+   * them (UIL-111): per key, how many of this plan's creates exist only because the memory is gone. Named in
+   * the preview, and a non-empty list gates the import. Empty on a retry.
+   */
+  returning: RemovedPresence[];
 }
 
 export interface ReconcileInput {
   rows: ResolvedRow[];
   current: CurrentGroup[];
   /**
-   * Copies she has REMOVED that Dex still lists (UIL-089), subtracted from desired presence so the import
-   * does not hand them back. Absent means none, which is the state of a collection nobody has removed
-   * from — so every existing caller stays correct without knowing about this.
+   * Copies she cleared with "Not mine" (UIL-089). Subtracted from desired presence within the haul; on a full
+   * import ignored and forgotten, the ones Dex still lists coming back (UIL-111). Absent means none, which is
+   * the state of a collection nobody has removed from — so every existing caller stays correct without
+   * knowing about this.
    */
   removed?: readonly RemovedPresence[];
   /**
-   * True when `rows` came from a WHOLE Dex export, false for a retry that promoted a few parked rows.
-   * Only used to decide whether a memory whose key is absent may be forgotten: a retry's `desired` map is
-   * nearly empty by design, so absence proves nothing there. Defaults to false, the safe answer.
+   * True when `rows` came from a WHOLE Dex export, false for a retry that promoted a few parked rows. Decides
+   * whether the haul is over (UIL-111): a full export forgets every memory, a retry keeps honouring them.
+   * Defaults to false, the safe answer.
    */
   fullExport?: boolean;
   /** Injected clock (purity). Currently unused by the plan itself; reserved for dated decisions. */
@@ -300,12 +306,6 @@ function removalConsequence(c: CopySnapshot): {
  */
 export function reconcile(input: ReconcileInput): ReconcilePlan {
   const { desired: dexDesired, unresolved } = buildDesiredPresence(input.rows);
-  // What Dex says she owns, minus what she has told the app she no longer has (UIL-089).
-  const { desired, forget: forgetRemoved } = applyRemovedMemory(
-    dexDesired,
-    input.removed ?? [],
-    input.fullExport ?? false,
-  );
 
   const groupByKey = new Map<string, CurrentGroup>();
   const currentCounts: PresenceCount[] = [];
@@ -318,6 +318,14 @@ export function reconcile(input: ReconcileInput): ReconcilePlan {
     });
   }
   const currentMap = toPresenceMap(currentCounts);
+
+  // What Dex says she owns, weighed against what she has cleared with "Not mine": subtracted within the
+  // haul, and on a full import ignored and forgotten, with the cards that come back named (UIL-089, UIL-111).
+  const {
+    desired,
+    forget: forgetRemoved,
+    returning,
+  } = applyRemovedMemory(dexDesired, input.removed ?? [], input.fullExport ?? false, currentMap);
 
   const d = diff(desired, currentMap);
 
@@ -440,5 +448,6 @@ export function reconcile(input: ReconcileInput): ReconcilePlan {
     fastPath: d.fastPath,
     diff: d,
     forgetRemoved,
+    returning,
   };
 }

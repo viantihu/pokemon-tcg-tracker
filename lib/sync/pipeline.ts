@@ -188,8 +188,9 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
     loadCurrentGroups(db),
     bytes ? unresolvedEntryRepo.listManualMatches(db) : Promise.resolve([]),
   ]);
-  // UIL-089: copies she removed that Dex still lists, subtracted from desired presence below so a card she
-  // traded away is not handed back on every sync. Read separately rather than added to the tuple above:
+  // UIL-089 / UIL-111: copies she cleared with "Not mine". A Retry subtracts them (the haul is not over); a full
+  // import forgets them and names the cards that come back (`applyRemovedMemory`). Read separately rather than
+  // added to the tuple above:
   // that `Promise.all` already mixes a conditional `Promise.resolve([])` in, and a fifth element collapses
   // its tuple inference — `waiting` silently became `{}[]`, which typechecked here and would have thrown at
   // the first field access.
@@ -344,9 +345,8 @@ export async function runSyncPipeline(db: DbClient, bytes: Uint8Array | null): P
     current: reconcileCurrent,
     clock: () => new Date(),
     removed,
-    // Only a WHOLE export is evidence that Dex has stopped listing a key. A retry reconciles against the
-    // handful of keys it just promoted, so "absent from desired" there would forget every memory she has
-    // (UIL-089; `applyRemovedMemory` states the same gate from the other side).
+    // Only a WHOLE export ends the haul and forgets the memories (UIL-111). A retry reconciles against the
+    // handful of keys it just promoted, and is still inside the haul (`applyRemovedMemory` states the gate).
     fullExport: bytes !== null,
   });
   const parks = plan.unresolved;

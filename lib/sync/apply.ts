@@ -40,12 +40,20 @@ export function consequenceOf(c: CopySnapshot): {
  * New `UNRESOLVED` parks and self-heal promotions do not disqualify it — neither touches placement.
  * A flag fix gates too (UIL-102, the Senior BA's ruling): it moves nothing, but it tells her a card may
  * have been placed as the wrong variant, and she sees that once rather than having it applied silently.
+ * So does a card coming BACK (UIL-111, the same ruling's reasoning): she cleared it with "Not mine", Dex
+ * still lists it, and it must not reappear in her collection unannounced.
  */
 export function requiresPreview(
-  plan: Pick<ReconcilePlan, "retires" | "variantUpdates"> & { flagFixes?: readonly unknown[] },
+  plan: Pick<ReconcilePlan, "retires" | "variantUpdates"> & {
+    flagFixes?: readonly unknown[];
+    returning?: readonly unknown[];
+  },
 ): boolean {
   return (
-    plan.retires.length > 0 || plan.variantUpdates.length > 0 || (plan.flagFixes?.length ?? 0) > 0
+    plan.retires.length > 0 ||
+    plan.variantUpdates.length > 0 ||
+    (plan.flagFixes?.length ?? 0) > 0 ||
+    (plan.returning?.length ?? 0) > 0
   );
 }
 

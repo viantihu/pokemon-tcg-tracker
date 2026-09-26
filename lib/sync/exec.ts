@@ -508,9 +508,24 @@ export async function executeApply(
   for (const a of dexAdds) ops.push({ op: "add_dex_presence", ...a });
   const recordTouched = Boolean(bundle.dexRecord) || dexAdds.length > 0;
 
+  /**
+   * The memories step 7b forgets, for Undo to put back (UIL-111). The plan's own counts: a memory cannot change
+   * between the preview and this apply without its copies changing too ("Not mine" deletes one, "Add it back"
+   * adds some), and then the check at the end of this transaction refuses the apply, so these are the counts
+   * any import that lands actually forgot.
+   */
+  const forgottenMemories = plan.forgetRemoved.map((f) => ({
+    catalog_card_id: f.catalogCardId,
+    dex_variant_raw: f.dexVariantRaw,
+    count: f.count,
+  }));
+
   // 7. Write the single undo snapshot LAST (overwrite-per-owner) as part of the same transaction.
   const fastPath =
-    plan.retires.length === 0 && plan.variantUpdates.length === 0 && flagFixes.length === 0;
+    plan.retires.length === 0 &&
+    plan.variantUpdates.length === 0 &&
+    flagFixes.length === 0 &&
+    (plan.returning?.length ?? 0) === 0;
   const snapshot: AppliedSnapshot = {
     version: 1,
     // What this apply applied, so a later refusal can tell "this same preview, again" from "a different file"
@@ -528,11 +543,14 @@ export async function executeApply(
     queue: q,
     // Absent unless this sync wrote the record: an Undo then leaves the record exactly alone.
     ...(recordTouched ? { priorDexRecord: priorDexRecord ?? null } : {}),
+    // Absent unless this import forgets a memory (UIL-111), so older Undo behaviour is untouched.
+    ...(forgottenMemories.length > 0 ? { priorRemovedMemories: forgottenMemories } : {}),
   };
-  // 7b. Forget the removal memories this export no longer contradicts (UIL-089). Dex has stopped listing
-  //     these keys, so the disagreement each row recorded is over; keeping them would suppress a genuine
-  //     future re-acquisition forever. In THIS transaction, so a half-applied import cannot forget half a
-  //     memory. Empty on a retry import by construction — `reconcile` only populates it for a full export.
+  // 7b. Forget the removal memories (UIL-089, UIL-111). "Not mine" lasts for the haul, and a full import ends
+  //     it: EVERY memory goes, and the cards Dex still lists come back with this import (the preview named
+  //     them). In THIS transaction and BEFORE the check below, so the check sees no memories and asks that
+  //     copies equal what Dex lists, which is what this import made them. Empty on a retry by construction:
+  //     `reconcile` only populates it for a full export.
   for (const f of plan.forgetRemoved) {
     ops.push({
       op: "forget_removed_presence",
@@ -813,6 +831,21 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
         }
       }
     }
+  }
+
+  /**
+   * The "Not mine" memories the import forgot come back (UIL-111): undoing the import undoes the end of the
+   * haul. AFTER the shrink above, which settles any memory she recorded against a card this sync handed back,
+   * so a card she cleared, got back, and cleared again ends exactly as it was before the import; and BEFORE
+   * the check below, which then expects what it expected before the import.
+   */
+  for (const m of snap.priorRemovedMemories ?? []) {
+    ops.push({
+      op: "remember_removed_presence",
+      catalog_card_id: m.catalog_card_id,
+      dex_variant_raw: m.dex_variant_raw,
+      delta: m.count,
+    });
   }
 
   for (const id of [...undo.deleteCopyIds, ...handMatchedCopyIds]) {
