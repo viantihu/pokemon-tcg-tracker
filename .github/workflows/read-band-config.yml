@@ -1226,3 +1226,55 @@ jobs:
           });
           JS
           node uil113.mjs
+
+      # UIL-113, part 2: HOW did list entries with no copy get onto a collection's list? Counts only.
+      # For every collection with such entries: their id namespace; whether a "Not mine" memory (removed_presence)
+      # or a placement decision (0025 names its card) points at them, which would mean a copy of the card WAS
+      # placed and later left; and whether the collection predates the 2026-09-26 01:27Z Testing wipe, which
+      # deleted every copy and kept every collection's list.
+      - name: "UIL-113 part 2: where the no-copy list entries came from (counts only)"
+        if: always()
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          cat > uil113b.mjs <<'JS'
+          import { createClient } from "@supabase/supabase-js";
+          const db = createClient(`https://${process.env.PROJECT_REF}.supabase.co`, process.env.SERVICE_KEY, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+          const q = async (p) => { const r = await p; if (r.error) throw new Error(r.error.message); return r.data; };
+          const WIPE = new Date("2026-09-26T01:27:19Z");
+          const [collections, copies, memories, decisions] = await Promise.all([
+            q(db.from("collection").select("id,target_catalog_card_ids,created_at,updated_at")),
+            q(db.from("copy").select("catalog_card_id").range(0, 9999)),
+            q(db.from("removed_presence").select("catalog_card_id,count")),
+            q(db.from("placement_decision").select("catalog_card_id,created_at").range(0, 9999)),
+          ]);
+          const owned = new Set(copies.map((c) => c.catalog_card_id));
+          const remembered = new Set(memories.map((m) => m.catalog_card_id));
+          const decided = new Map();
+          for (const d of decisions) if (d.catalog_card_id) decided.set(d.catalog_card_id, [...(decided.get(d.catalog_card_id) ?? []), new Date(d.created_at)]);
+          const ns = (id) => (id.startsWith("user:ja:") ? "user:ja" : id.startsWith("user:") ? "user:other" : id.startsWith("ja:") ? "ja" : "en");
+          const sorted = [...collections].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+          console.log(JSON.stringify({ placement_decisions_total: decisions.length, with_card_named: decisions.filter((d) => d.catalog_card_id).length, removal_memories: memories.length }));
+          sorted.forEach((col, i) => {
+            const noCopy = (col.target_catalog_card_ids ?? []).filter((t) => !owned.has(t));
+            if (noCopy.length === 0) return;
+            const byNs = {};
+            for (const t of noCopy) byNs[ns(t)] = (byNs[ns(t)] ?? 0) + 1;
+            const withDecision = noCopy.filter((t) => decided.has(t));
+            console.log(JSON.stringify({
+              collection: `#${i + 1}`,
+              created_before_the_0127Z_wipe: new Date(col.created_at) < WIPE,
+              no_copy_entries: noCopy.length,
+              by_namespace: byNs,
+              with_a_not_mine_memory: noCopy.filter((t) => remembered.has(t)).length,
+              with_a_placement_decision: withDecision.length,
+              whose_decisions_are_all_before_the_wipe: withDecision.filter((t) => decided.get(t).every((d) => d < WIPE)).length,
+              whose_latest_decision_is_after_the_wipe: withDecision.filter((t) => decided.get(t).some((d) => d >= WIPE)).length,
+            }));
+          });
+          JS
+          node uil113b.mjs
