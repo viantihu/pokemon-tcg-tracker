@@ -8100,12 +8100,26 @@ defects, which are about what gets written, not about the UI recovering when not
 ## UIL-106 — When a save or action call fails in transport (a page left open across a deploy, or a dropped connection), several screens either stick with controls disabled or silently drop her later edits, and none of them tells her to reload
 
 - **Reported:** 2026-09-26 (not from Karvi — found by the Tech Lead's audit for UIL-105)
-- **Status:** Open, assigned to Full Stack Dev - 2. **Part 1 (Collections autosave) DONE:** PR
-  [#351](https://github.com/viantihu/pokemon-tcg-tracker/pull/351) MERGED (`cfc351d`), deployed 2026-09-26 (Deploy run `36211839724`): a failed save shows a
+- **Status:** **Fixed** — all four parts deployed 2026-09-26, Full Stack Dev - 2, QA-gated. **Part 1
+  (Collections autosave):** PR [#351](https://github.com/viantihu/pokemon-tcg-tracker/pull/351) (`cfc351d`, Deploy run `36211839724`): a failed save shows a
   message, is re-queued, and the next edit saves; Close and Esc never strand her over an unsaved edit (QA:
-  8 mutant groups killed). Remaining, in the Tech Lead's order: autosave first; then
-  Lookup/Line/Plan/`RemoveCopyButton` on #349's shared `reach()` pattern once #349 merges; then
-  Settings/rebind messages; then an app-level `error.tsx`.
+  8 mutant groups killed). **Part 2:** PR [#354](https://github.com/viantihu/pokemon-tcg-tracker/pull/354) (`428938c`, Deploy run `36212579219`): one shared
+  `reach()` (`app/(ui)/_components/reach.ts`, which Sync now uses too) across Lookup Remove / Same card /
+  Move options / Move, Lines decision / slot Remove / Move, the Haul Plan's "Not mine" (its Done guard can
+  no longer refuse silently) and `RemoveCopyButton`; writes say "…Reload the page to see whether that went
+  through" (QA: 13 killed). Found on the way and fixed there: a failed Lines first load sat on "Loading
+  lines…" forever; the "No lines yet" screen drew no error; a failed Move or decision was hidden behind its
+  open sheet, which now closes as Lookup's does, and also on an ORDINARY refusal, so she reopens it to pick
+  again (Senior BA accepted; Karvi told, may ask for the refusal inside the sheet instead). **Parts 3 and
+  4:** PR [#355](https://github.com/viantihu/pokemon-tcg-tracker/pull/355) (`50c5e36`, Deploy run `36213427414`): Settings, the Collections rebind remedy,
+  New collection and the species filter, plus Lookup's pick and the Haul Plan's Run and Done (folded in at
+  the Senior BA's approval); Run and the species filter use cause-neutral words, since they also fail on a
+  server error; Done keeps her override when the call never arrives (UIL-084). `app/error.tsx` and
+  `app/(ui)/error.tsx` (the second keeps the nav) say "This page stopped working" with Reload / Try again
+  and a reference code, never the error's own text (QA: 12 killed). Awaiting Karvi's confirmation.
+  **Left as a Low follow-up (not stuck, not yet logged):** read-only loads that still show a raw error text.
+  **Was:** Open, assigned to Full Stack Dev - 2, in the Tech Lead's order: autosave, then the shared
+  `reach()` sites, then Settings/rebind messages, then an app-level `error.tsx`.
 - **Priority:** High (Senior BA's read; Karvi to confirm) — silent loss of Collections edits.
 - **Area:** Collections, Lookup, Lines, Haul Plan, Settings
 - **Env:** `develop` `e210d63`
