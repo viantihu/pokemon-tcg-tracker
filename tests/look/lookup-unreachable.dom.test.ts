@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * UIL-106 (2) — Lookup when an action cannot reach the server at all.
+ * UIL-106 (2, 3) — Lookup when an action cannot reach the server at all.
  *
  * A server action THROWS when the app was redeployed under an open page or the connection dropped. Remove,
  * "Same card" and Move set `moving` and awaited the action with nothing to catch a throw, so `moving` never
@@ -162,6 +162,18 @@ describe("UIL-106 · a Lookup action that cannot reach the server ends in a mess
     await waitFor(() => expect(alerts()).toContain(LOST.action));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(copiesAnswer()).toBe(true);
+  });
+
+  it("the lookup itself: COULD NOT LOOK THIS UP, in the family's words, never NO MATCH", async () => {
+    lookupAnswer.mockRejectedValue(LOST_CALL());
+    const user = userEvent.setup();
+    render(createElement(LookupScreen));
+    await user.click(screen.getByRole("button", { name: "Pick it" }));
+
+    // PRE-FIX: the raw "Failed to fetch".
+    await waitFor(() => expect(alerts()).toContain(LOST.read));
+    expect(alerts()).not.toContain("Failed to fetch");
+    expect(screen.queryByText(/No match/i)).toBeNull();
   });
 
   it("an answer the server gives is still shown in its own words", async () => {

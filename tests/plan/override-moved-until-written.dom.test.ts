@@ -27,6 +27,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MoveDestination } from "@/lib/line/types";
 import type { PlanItem } from "@/lib/plan";
 import type { DraftCard, RunPlanResult } from "@/app/(ui)/plan/plan-types";
+import { LOST } from "@/app/(ui)/_components/reach";
 import { PlanScreen } from "@/app/(ui)/plan/PlanScreen";
 
 const shelveCardAction = vi.fn();
@@ -245,6 +246,8 @@ describe("UIL-084 · a REFUSED placement is dropped, from the screen and from th
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
     expect(screen.getByRole("alert").textContent).not.toContain("was not saved");
+    // UIL-106: in the family's words, not the raw "Failed to fetch".
+    expect(screen.getByRole("alert").textContent).toBe(`!${LOST.action}`);
     expect(row().textContent).toContain("Will move");
     expect(parked().overrides["d-cruel"]).toBeDefined();
   });

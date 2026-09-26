@@ -34,6 +34,10 @@ const OWNED_LABEL: Record<OwnedFilter, string> = {
   unowned: "Cards I'm missing",
 };
 
+/** Why the species filter is off. `resolveSpeciesToDexId` throws for a server failure too, so it names no cause. */
+export const speciesLookupFailed = (name: string) =>
+  `Could not look up "${name}", so no species filter is applied. Reload the page to try again.`;
+
 export function CardSearchGrid({ collectionId }: { collectionId: string }) {
   const router = useRouter();
   const [collectionName, setCollectionName] = useState("");
@@ -126,7 +130,16 @@ export function CardSearchGrid({ collectionId }: { collectionId: string }) {
       setDexId(null);
       return;
     }
-    const id = await resolveSpeciesToDexId(name);
+    let id: number | null;
+    try {
+      id = await resolveSpeciesToDexId(name);
+    } catch {
+      // UIL-106: the lookup threw (a dropped connection, a redeploy, or the server failing), so no
+      // species is applied — said here, rather than silently leaving the last name's filter on.
+      setDexId(null);
+      setSpeciesError(speciesLookupFailed(name));
+      return;
+    }
     if (id == null) {
       setDexId(null);
       setSpeciesError(`No card named "${name}" in the catalog.`);

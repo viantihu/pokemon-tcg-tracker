@@ -23,29 +23,13 @@ import {
   type WishlistBinderGroup,
 } from "@/lib/surfaces";
 import { BandChip } from "../_components/BandChip";
+import { LOST, reach } from "../_components/reach";
 import { CardFace } from "../_components/CardFace";
 import { cardCaption } from "../_components/CardLightbox";
 import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { MoveOverlay } from "../_components/MoveOverlay";
 import type { LookupCard } from "../plan/plan-types";
 import { createAutosaveScheduler, flushBeforeNavigate } from "./autosave";
-
-/**
- * What she reads when a save cannot reach the server at all (UIL-106) — the same family as the Sync page's
- * (#349). A thrown save may or may not have landed, so none of these says "nothing was saved".
- */
-export const COLL_LOST = {
-  autosave:
-    "The app was updated while this page was open, or the connection dropped, so your last change may " +
-    "not have been saved. It will be sent again with your next change; if this keeps happening, reload " +
-    "the page.",
-  close:
-    "The app was updated while this page was open, or the connection dropped, so your last change may " +
-    "not have been saved. Press Close again to close without it, or reload the page.",
-  change:
-    "The app was updated while this page was open, or the connection dropped. Reload the page to see " +
-    "whether that change went through.",
-} as const;
 import {
   deleteCollection,
   loadCollHub,
@@ -67,6 +51,23 @@ import type {
   CollHubData,
 } from "./coll-types";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
+
+/**
+ * What she reads when a save cannot reach the server at all (UIL-106) — the same family as the Sync page's
+ * (#349). A thrown save may or may not have landed, so none of these says "nothing was saved".
+ */
+export const COLL_LOST = {
+  autosave:
+    "The app was updated while this page was open, or the connection dropped, so your last change may " +
+    "not have been saved. It will be sent again with your next change; if this keeps happening, reload " +
+    "the page.",
+  close:
+    "The app was updated while this page was open, or the connection dropped, so your last change may " +
+    "not have been saved. Press Close again to close without it, or reload the page.",
+  change:
+    "The app was updated while this page was open, or the connection dropped. Reload the page to see " +
+    "whether that change went through.",
+} as const;
 
 type Tab = "coll" | "wish";
 
@@ -191,16 +192,21 @@ export function CollHub() {
    */
   async function openNew() {
     const first = data?.specialtyBinders[0]?.id ?? "__new";
-    const res = await saveCollection(
-      {
-        id: null,
-        name: "",
-        mode: "finite",
-        binderId: first,
-        newBinderName: "",
-        targetTcgdexIds: [],
-      },
-      { draft: true },
+    // Through `reach` (UIL-106): a call that never answers used to leave "New collection" doing nothing, silently.
+    const res = await reach(
+      () =>
+        saveCollection(
+          {
+            id: null,
+            name: "",
+            mode: "finite",
+            binderId: first,
+            newBinderName: "",
+            targetTcgdexIds: [],
+          },
+          { draft: true },
+        ),
+      LOST.action,
     );
     if (!res.ok) {
       setError(res.error);
@@ -359,7 +365,11 @@ export function CollHub() {
             // outcome — success or the error that replaces it — belongs there too, not on the hub's.
             setBusy(true);
             try {
-              const res = await rebindCollectionWithMove(editor.id, toBinderId);
+              // Through `reach` (UIL-106): a call that never answers ends on the editor's bar as a message.
+              const res = await reach(
+                () => rebindCollectionWithMove(editor.id, toBinderId),
+                LOST.action,
+              );
               if (res.ok) await refresh();
               return res;
             } finally {

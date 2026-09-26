@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { binderSplit } from "@/lib/surfaces";
 import { BandChip } from "../_components/BandChip";
+import { LOST, reach } from "../_components/reach";
 import { deleteBinder, loadSettings, reorderBands, saveBinder, setTypeBand } from "./actions";
 import type { BandRow, BinderInput, SettingsData } from "./settings-types";
 
@@ -69,7 +70,8 @@ export function SettingsScreen() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fn();
+      // Through `reach` (UIL-106): a call that never answers was reset by `finally` but said nothing.
+      const res = await reach(fn, LOST.action);
       if (!res.ok) setError(res.error ?? "Something went wrong.");
       else {
         await refresh();
@@ -91,7 +93,7 @@ export function SettingsScreen() {
     setBusy(true);
     setError(null);
     try {
-      const res = await setTypeBand(cardType, band);
+      const res = await reach(() => setTypeBand(cardType, band), LOST.action);
       if (!res.ok) setError(res.error);
       else {
         await refresh();

@@ -84,13 +84,9 @@ export function LookupScreen() {
     setView((v) => ({ ...v, notFound: false, failed: null }));
     setMoveError(null);
     try {
-      applyResult(await lookupAnswer(card.tcgdexId));
-    } catch (err) {
-      // The action itself never throws; this is the request not completing (offline, session gone).
-      applyResult({
-        ok: false,
-        error: err instanceof Error ? err.message : "The request did not complete.",
-      });
+      // The action itself never throws; a throw is the request not completing (a redeploy, a dropped
+      // connection), which `reach` turns into the same COULD NOT LOOK THIS UP state, in words (UIL-106).
+      applyResult(await reach(() => lookupAnswer(card.tcgdexId), LOST.read));
     } finally {
       setLoading(false);
     }
