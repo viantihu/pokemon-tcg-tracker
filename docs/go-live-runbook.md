@@ -29,6 +29,8 @@ and the irreversible ones (A5, B5) wait for Karvi's explicit go on the day.
 | A6 | Deploy on `main` green: `migrate` applied 0003 onward, `smoke` sees `/login` 200 | Tech Lead verifies | read-only |
 | A7 | Karvi signs into Production once (creates the owner row) | Karvi | yes |
 | A8 | Backups / PITR confirmed **on** for the Production project | Karvi (dashboard) | yes |
+| A9 | Only if the repo goes private: GitHub Pro on **before** the flip, then protection re-checked | Karvi (billing), Tech Lead verifies | yes |
+| A10 | In-app feedback widget (UIL-110), when she chooses to add it | Karvi (GitHub App, Vercel), feedback session builds | yes |
 | B3 | Preconditions the script enforces | script | read-only |
 | B5 | `promote-collection.mjs --dry-run`, then the real run | Karvi runs, Tech Lead reviews the dry-run output | dry run: yes. Real run: one transaction, but not idempotent |
 | B6 | Verify in the Production app | Karvi | read-only |
@@ -40,8 +42,8 @@ and the irreversible ones (A5, B5) wait for Karvi's explicit go on the day.
 
 ## A1. Decisions that belong to Karvi
 
-None of these can be made by an engineer, and A5 must not start until all three are
-answered.
+None of these can be made by an engineer, and A5 must not start until the first three
+are answered. The fourth gates only a change of the repository's visibility (A9).
 
 - [ ] **Hosting tier and backups.** On 2026-09-09 the cutover was deferred partly
       because Supabase PITR is a paid add-on and free-tier projects pause after seven
@@ -51,6 +53,9 @@ answered.
       it merges, so it is opened and merged on the day, not parked.
 - [ ] **UAT closed.** Every open issue-log entry she wants fixed before real use is
       Fixed and deployed to Testing. Anything left open ships to Production as-is.
+- [ ] **Repository visibility.** Whether this repository stays public or goes private at
+      go-live, and if private, which of A9's options pays for CI. Not needed for A5; needed
+      before anyone flips the setting.
 
 ## A2. Measure the gap (read-only, repeatable)
 
@@ -222,6 +227,52 @@ to the `main` rail to get past it; find out what is in Production first.
 - [ ] Automated backups (and PITR if chosen in A1) are enabled on the Production
       project. Do this before B5, not after; the promotion is a one-shot write of
       everything she owns.
+
+## A9. If the repository goes private: CI minutes and branch protection
+
+The repository went public on 2026-09-17 because a private repo's free Actions minutes ran
+out and CI stopped. Going private brings that limit back, and one more.
+
+**Branch protection needs GitHub Pro.** On the Free plan a private personal repository has
+no protected branches, so the required checks on `develop` and `main` (verify,
+migration-order, Vercel) would stop being enforced, and with them QA's merge gate. Every
+private option below therefore includes Pro ($4/month).
+
+Measured 2026-09-19 → 09-26, at UAT pace: **3,596 billable minutes in 7 days** (about
+15,600 a month). CI was 80% of that and Deploy 17%. Docs-only changes were 41% of CI's
+minutes. Pro includes 3,000 minutes a month; beyond that, Linux minutes cost $0.006 each
+(the January 2026 rate). Self-hosted runner minutes carry no GitHub charge.
+
+| Option | Cost at UAT pace / quiet pace | What she gives up |
+|---|---|---|
+| 1. Stay public; only the feedback repos (A10) are private | $0 / $0 | Nothing new: code and Actions logs stay public, as today |
+| 2. Private + Pro + a spending cap | about $79 / $4 a month | When the cap is hit, CI stops until the month resets (the 2026-09-17 stall) |
+| 3. Option 2 plus docs-only changes skip the test run and Deploy's database steps | about $40 / $4 a month | Nothing visible; about half a day of CI work, including an always-green check so docs PRs are not blocked by the required checks |
+| 4. Private + Pro + a self-hosted runner | about $9 / $9 a month (Pro plus a small always-on server) | Reliability: CI stops whenever that machine is down. Setup and upkeep, and one more machine holding the deploy secrets |
+
+If she chooses to go private:
+
+- [ ] GitHub Pro is active on the owning account, and a spending cap is set, **before** the
+      visibility changes.
+- [ ] After the flip, the branch protection rules on `develop` and `main` still list verify,
+      migration-order and Vercel as required, and a test PR shows them as required.
+- [ ] One push to `develop` runs Deploy green end-to-end (the minutes are now metered).
+- [ ] The `ops/read-band-config` diagnostic still dispatches. Its logs stop being
+      world-readable; the counts-only rule stays unless she rules otherwise.
+
+## A10. In-app feedback widget (UIL-110)
+
+Backlog, not a cutover gate. The product choice is `bugdrophq/bugdrop`, built by the
+feedback session. When she adds it:
+
+- [ ] **A private feedback repository per environment** (Testing, Production). Never this
+      repository: screenshots can show her collection, and this repo may stay public (A9).
+- [ ] Karvi installs the widget's **GitHub App** on each feedback repository, and only there.
+- [ ] Its `NEXT_PUBLIC_*` settings are set on **each** Vercel environment, pointing at that
+      environment's feedback repository, so a Testing report never lands in Production's.
+- [ ] If a Content-Security-Policy is added later, the widget's origin goes in `script-src`.
+- [ ] When the app gains more than one user, the widget follows multi-user auth: a report
+      says who filed it, and nobody sees another user's reports.
 
 ---
 
