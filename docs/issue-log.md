@@ -8762,3 +8762,62 @@ No source investigation is owed at this stage; the design work itself is the nex
 **Cross-reference UIL-036** (the Haul Plan's line-join wiring this would rework) and **UIL-114** (the
 same screen's other pending restructuring, worth the UX session checking before mocking up a design that
 collides with it).
+
+## UIL-118 — There is no way to delete an evolution line, so a line she moved cards out of keeps its placeholder slots forever
+
+- **Reported:** 2026-09-26 (Karvi). In her words: "Before I asked the DE to take a snapshot, I need the
+  ability to delete lines. I accidentally added cards in the wrong place. I moved the cards, but the
+  lines still created placeholders. I want to get rid of them, and users should be able to as well."
+- **Status:** Open, assigned to Full Stack Dev - 2, plan first, coordinating with the Tech Lead's UIL-117
+  line work.
+- **Priority:** High (Senior BA's read; it blocks her next baseline snapshot, and she needs these lines
+  gone first; Karvi to confirm).
+- **Area:** Lines
+- **Env:** Testing, `develop` `676aaa7`
+
+**Confirmed: no delete or retire path exists anywhere for an evolution line.** Grepped `lib/line/*.ts`
+and every Lines-screen file for `delete`/`retire` against a line, and the migrations for a
+`delete_line`/`delete_evolution_line` op — none exist. There is no button, no server action, no
+`apply_write_ops` op that removes a line or its slots once created. Moving every card out of a line's
+slots empties them, but the line and its now-empty slot rows stay, exactly as she describes.
+
+**Corrected after Dev 2 caught a real mistake in my first pass: these foreign keys do not all behave the
+same way, and one of them deletes rather than detaches.** `wishlist_item.line_slot_id`
+([`supabase/migrations/0002_domain.sql:193`](../supabase/migrations/0002_domain.sql:193) — the column
+itself; migration 0021 only adds an index on it, which is where I mis-cited it) is `on delete cascade`:
+deleting a slot with an open wishlist row held for it DELETES that wishlist row outright, not a detach.
+`copy.line_slot_id` ([`0002:187`](../supabase/migrations/0002_domain.sql:187)) and `binder_block.line_id`
+([`0002:216`](../supabase/migrations/0002_domain.sql:216), a table my first pass missed entirely) are
+both `on delete set null`. `placement_decision.line_id` and `.line_slot_id`
+([`0013_decision_persistence.sql:73-74`](../supabase/migrations/0013_decision_persistence.sql:73)) are
+also both `on delete set null`. `line_slot.resolved_decision_kind` / `_choice` / `_collection_id`
+([`0013:68-70`](../supabase/migrations/0013_decision_persistence.sql:68)) aren't a foreign key at all —
+they're plain columns ON the slot row itself, so they go with it when the slot is deleted, nothing to
+detach. **Net effect for whoever builds this:** a plain delete is not blocked by the database, but it
+silently destroys any open wishlist row still held for one of the line's slots (cascade, not detach) —
+worth a warning or a refusal on that specific case, distinct from the placement-history question (does
+deleting a line mean forgetting what was decided about it, or should that survive as orphaned rows?),
+which stays a product question either way.
+
+**Testing's cleanup size (Dev 2's read, run `36280042139`), reported, not independently checkable from
+this repo:** 3 lines, 6 placeholder slots, all 0 filled, 3 open wishlist rows. Her cleanup today is
+exactly 3 lines.
+
+**Confirmed: a delete also has to satisfy migration 0028's new invariant, landed this same week.**
+`assert_line_slots` ([`supabase/migrations/0028_assert_line_slots.sql`](../supabase/migrations/0028_assert_line_slots.sql))
+is appended by `applyWriteOps` to every payload touching a copy or a slot, and raises if a slot and its
+copy's back-pointer disagree, or if a slot reads `filled` with no copy. A delete-line op has to clear
+`copy.line_slot_id` for every copy the line's slots point at (if any remain — though her report implies
+they're already moved out) in the SAME transaction as removing the slots, or this new check refuses the
+write outright.
+
+**Suggested fix.** A single `delete_line` (or `retire_line`) `apply_write_ops` op: refuses if any slot is
+still `filled` (a card has to be moved out first, matching her own sequence — move, then delete), then
+removes the line's slot rows and the line row itself in one transaction, letting the `set null` foreign
+keys detach cleanly — and either warns her or refuses outright if any slot still has an open wishlist
+row, since that one is a delete, not a detach. Plan first, per the Senior BA, coordinating with whatever
+UIL-117's line-popup work (PR 2, in flight) already touches in this area so the two don't collide.
+
+**Cross-reference UIL-117** (the line-popup rework already restructuring how lines are created and
+moved into; this entry is the missing inverse operation) and **UIL-087** (the slot-fill invariant,
+now enforced database-side by migration 0028, which a delete path has to satisfy).
