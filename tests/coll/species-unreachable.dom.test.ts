@@ -47,12 +47,13 @@ describe("UIL-106 · the Pokémon filter when its lookup cannot reach the server
     await user.type(box(), "Charmander");
     await waitFor(() => expect(lastDexFilter()).toBe(4));
 
+    // One more letter, and that lookup never arrives. Not a clear-and-retype: an EMPTY box drops the filter
+    // by itself, which would hide whether the failure path drops it too.
     resolveSpeciesToDexId.mockRejectedValue(new TypeError("Failed to fetch"));
-    await user.clear(box());
-    await user.type(box(), "Pikachu");
+    await user.type(box(), "s");
 
-    // PRE-FIX: no message, and the search kept filtering on Charmander (4) under the word "Pikachu".
-    await waitFor(() => expect(screen.getByText(speciesLookupFailed("Pikachu"))).toBeTruthy());
+    // PRE-FIX: no message, and the search kept filtering on Charmander (4) under the word "Charmanders".
+    await waitFor(() => expect(screen.getByText(speciesLookupFailed("Charmanders"))).toBeTruthy());
     await waitFor(() => expect(lastDexFilter()).toBeUndefined());
   });
 });
