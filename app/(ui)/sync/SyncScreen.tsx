@@ -32,7 +32,6 @@ import {
   undoLastSync,
 } from "./actions";
 import type {
-  ActionError,
   ApplyOutcome,
   LearnedAliasView,
   QueueEntryView,
@@ -40,6 +39,7 @@ import type {
   StandInOutcome,
   SyncState,
 } from "./sync-types";
+import { LOST, reach } from "../_components/reach";
 import { CountCheckPanel } from "./CountCheckPanel";
 
 type Phase = "idle" | "parsing" | "preview" | "working";
@@ -71,18 +71,9 @@ export const LOST_PREVIEW =
   "The app was updated while this page was open, or the connection dropped. Reload the page and import again. Nothing was saved.";
 export const LOST_APPLY =
   "The app was updated while this page was open, or the connection dropped. Reload the page to see whether your import was saved; importing again is safe.";
-export const LOST_ACTION =
-  "The app was updated while this page was open, or the connection dropped. Reload the page to see whether that went through.";
-export const LOST_REFRESH =
-  "The app was updated while this page was open, or the connection dropped. Reload the page to see the latest.";
-
-async function reach<T>(call: () => Promise<T>, lost: string): Promise<T | ActionError> {
-  try {
-    return await call();
-  } catch {
-    return { ok: false, error: lost };
-  }
-}
+// The generic two are the shared family's (../_components/reach, UIL-106); the import-specific two stay here.
+export const LOST_ACTION = LOST.action;
+export const LOST_REFRESH = LOST.read;
 
 export function SyncScreen({ initialState }: { initialState: SyncState }) {
   const [state, setState] = useState<SyncState>(initialState);
