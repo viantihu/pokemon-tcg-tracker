@@ -51,6 +51,7 @@ import {
 } from "./actions";
 import type { DraftCard, DraftPayloadItem, RunPlanResult } from "./plan-types";
 import { createArrivalWatch } from "./arrivals";
+import { HaulSearch, type HaulSearchTile } from "./HaulSearch";
 import {
   createRerouteBatcher,
   dropFromPlan,
@@ -107,6 +108,11 @@ interface ResumeState {
 }
 
 /** Stable fold key for one sub-group. A band key is `[a-z_]+`, so a `:` cannot collide with one. */
+/** The worklist row's element id, so "Search haul" can scroll to it (UIL-115). */
+function planRowDomId(incomingId: string): string {
+  return `plan-row-${incomingId}`;
+}
+
 export function subgroupKey(bandKey: string, kind: "basic" | "nonbasic"): string {
   return `${bandKey}:${kind}`;
 }
@@ -219,6 +225,14 @@ export const RUN_FAILED = "Could not run the plan. Reload the page and run it ag
 export const REROUTE_FAILED =
   "The rest of the plan could not be updated. Its homes may be out of date; reload the page to route it again.";
 
+/**
+ * The arrivals check has failed twice running (UIL-114 follow-up, the Senior BA's wording). Most likely the
+ * app was redeployed under an open tab, so the check calls an action that no longer exists and would fail
+ * quietly forever: new cards would stop arriving with no word. One quiet note, not an error every 30 s;
+ * it goes on the next check that works.
+ */
+export const ARRIVALS_LOST = "Can't check for new cards right now. Reload the page to get them.";
+
 /** "Leave for later" (UIL-114; the Senior BA's wording): off this plan, still waiting, nothing deleted. */
 export const LEAVE_FOR_LATER = "Leave for later";
 export const LEAVE_FOR_LATER_HINT =
@@ -265,6 +279,10 @@ export function PlanScreen({
    */
   const [arrived, setArrived] = useState<Set<string>>(() => new Set());
   const [joined, setJoined] = useState<MovedCard[] | null>(null);
+  /** Two arrivals checks in a row could not reach the server: say so, once (ARRIVALS_LOST). */
+  const [checksLost, setChecksLost] = useState(false);
+  /** A card picked in "Search haul" (UIL-115), for the scroll to its row; `n` re-scrolls a repeat pick. */
+  const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
   /**
    * The stamp the parked run is keyed to. Shelving a card changes the copy count, which is part of the
    * stamp by design (UIL-006), so without rolling it forward the resume cache would be thrown away on
@@ -592,6 +610,8 @@ export function PlanScreen({
    * on the server, so the arrivals check must be told about it or it would come straight back.
    */
   const takenOff = useRef<Set<string>>(new Set());
+  /** Arrivals checks that could not reach the server, in a row. */
+  const failedChecks = useRef(0);
 
   /**
    * Look for cards that arrived while the page was open (UIL-114 part C): an import finished in another
@@ -606,7 +626,13 @@ export function PlanScreen({
     if (!at.plan && at.draft.length > 0) return;
     const known = [...at.draft.map((d) => d.existingCopyId), ...takenOff.current];
     const res = await reach(() => loadArrivals(known), LOST.read);
-    if (isUnreached(res)) return;
+    if (isUnreached(res)) {
+      failedChecks.current += 1;
+      if (failedChecks.current >= 2) setChecksLost(true);
+      return;
+    }
+    failedChecks.current = 0;
+    setChecksLost(false);
     const now = latest.current;
     const held = new Set([...now.draft.map((d) => d.existingCopyId), ...takenOff.current]);
     const rows = res.filter((r) => !held.has(r.existingCopyId));
@@ -797,6 +823,48 @@ export function PlanScreen({
     return m;
   }, [flatItems]);
 
+  /** What "Search haul" matches on beyond the plan item: the set's name and her Dex's variant (UIL-115). */
+  const cardInfo = useMemo(
+    () =>
+      new Map(
+        draft.map((d) => [
+          d.id,
+          { setName: d.card.setName ?? null, dexVariantRaw: d.dexVariantRaw ?? null },
+        ]),
+      ),
+    [draft],
+  );
+
+  /**
+   * A card picked in "Search haul" (UIL-115): it becomes the spotlight card, its band and sub-group unfold if
+   * she had folded them, and its row scrolls into view (the effect below, once the unfold has rendered).
+   */
+  function revealCard(id: string) {
+    const i = flatIndex.get(id);
+    if (i === undefined || !plan) return;
+    setCur(i);
+    for (const g of plan.groups) {
+      const sub = g.subgroups.find((s) => s.rows.some((r) => r.incomingId === id));
+      if (!sub) continue;
+      const band = g.bandKey;
+      const key = subgroupKey(band, sub.kind);
+      setCollapsed((prev) =>
+        prev.has(band) ? new Set([...prev].filter((k) => k !== band)) : prev,
+      );
+      setCollapsedSubgroups((prev) =>
+        prev.has(key) ? new Set([...prev].filter((k) => k !== key)) : prev,
+      );
+    }
+    setReveal((r) => ({ id, n: (r?.n ?? 0) + 1 }));
+  }
+  // Scrolling is a DOM side effect after render, which is what an effect is for; it sets no state.
+  useEffect(() => {
+    if (!reveal) return;
+    document
+      .getElementById(planRowDomId(reveal.id))
+      ?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  }, [reveal]);
+
   // Name maps for override destination sentences (UIL-037), null until the move options have loaded.
   const overrideNames = useMemo<MoveNameLookups | null>(
     () =>
@@ -950,6 +1018,13 @@ export function PlanScreen({
         <DroppedTypedNotice rows={droppedTyped} onDismiss={() => setDroppedTyped([])} />
       ) : null}
 
+      {checksLost ? (
+        <div className="alertbar" role="status">
+          <span>↻</span>
+          <b>{ARRIVALS_LOST}</b>
+        </div>
+      ) : null}
+
       {running ? (
         // UIL-114: no first screen. The page routes what is waiting as it opens; routing her full haul takes
         // a few seconds (UIL-008), so the bar says what is happening rather than showing an empty page.
@@ -987,6 +1062,8 @@ export function PlanScreen({
           arrived={arrived}
           joined={joined}
           onDismissJoined={() => setJoined(null)}
+          cardInfo={cardInfo}
+          onSearchPick={revealCard}
           overrides={overrides}
           overrideNames={overrideNames}
           onMove={openMove}
@@ -1213,6 +1290,10 @@ function PlanView(props: {
   /** The arrivals the plan has placed, named with their homes until dismissed. */
   joined: MovedCard[] | null;
   onDismissJoined: () => void;
+  /** The set name and Dex variant of each card, by draft id, for "Search haul" (UIL-115). */
+  cardInfo: Map<string, { setName: string | null; dexVariantRaw: string | null }>;
+  /** A card picked in "Search haul": spotlight it and scroll to its row. */
+  onSearchPick: (incomingId: string) => void;
   overrides: Record<string, MoveDestination>;
   /** Name maps for override destination sentences (UIL-037); null until options load. */
   overrideNames: MoveNameLookups | null;
@@ -1251,6 +1332,8 @@ function PlanView(props: {
     arrived,
     joined,
     onDismissJoined,
+    cardInfo,
+    onSearchPick,
     overrides,
     overrideNames,
     onMove,
@@ -1303,6 +1386,14 @@ function PlanView(props: {
 
   const total = flatItems.length;
   const doneCount = flatItems.filter((it) => done.has(it.incomingId)).length;
+  // "Search haul" (UIL-115): every card on the plan, shelved ones too, described as its row describes it.
+  const searchEntries: HaulSearchTile[] = flatItems.map((it) => ({
+    item: it,
+    setName: cardInfo.get(it.incomingId)?.setName ?? null,
+    dexVariantRaw: cardInfo.get(it.incomingId)?.dexVariantRaw ?? null,
+    done: done.has(it.incomingId),
+    destination: displayFor(it, overrides[it.incomingId], overrideNames).destination,
+  }));
 
   /* ---- band folding (UIL-018) ----
      Per-band check-off counts. A folded band is otherwise opaque: its rows are gone from the tree, so
@@ -1448,6 +1539,8 @@ function PlanView(props: {
           </button>
         </div>
       ) : null}
+
+      <HaulSearch entries={searchEntries} onPick={onSearchPick} />
 
       <div className="planwrap">
         <div className="worklist panel">
@@ -1767,6 +1860,7 @@ export function PlanRow(props: {
   const meta = bandMeta(item.bandKey);
   return (
     <div
+      id={planRowDomId(item.incomingId)}
       className={"row" + (current ? " cur" : "") + (done ? " done" : "")}
       onClick={onSelect}
       role="button"

@@ -7,14 +7,14 @@
  *   - an arrival joins the plan with no tap, badged "New", and named with where it goes;
  *   - the spotlight never changes card by itself, even when an arrival sorts ahead of it;
  *   - a card she left for later is not brought back by the next check;
- *   - a check that cannot reach the server says nothing.
+ *   - a check that cannot reach the server says nothing, but two in a row say so once, quietly.
  */
 import { createElement } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DraftCard, DraftPayloadItem, LookupCard } from "@/app/(ui)/plan/plan-types";
-import { PlanScreen } from "@/app/(ui)/plan/PlanScreen";
+import { ARRIVALS_LOST, PlanScreen } from "@/app/(ui)/plan/PlanScreen";
 import { routedPlan } from "../support/plan-route";
 
 const runHaulPlan = vi.fn();
@@ -238,5 +238,28 @@ describe("UIL-114 · live arrivals", () => {
     await screen.findAllByText("Machop");
     expect(document.querySelector(".newcard")).toBeNull();
     expect(screen.queryByText(/joined the plan/)).toBeNull();
+  });
+
+  it("two failed checks in a row say so once, quietly; a check that works clears it", async () => {
+    mount();
+    await screen.findAllByText("Abra");
+    const lost = () => new TypeError("Failed to fetch"); // what a retired action ID looks like here
+    loadArrivals.mockRejectedValueOnce(lost());
+    await nextCheck();
+    expect(screen.queryByText(ARRIVALS_LOST)).toBeNull(); // one miss is not worth a word
+    loadArrivals.mockRejectedValueOnce(lost());
+    await nextCheck();
+    // PRE-FIX: silence, every 30 s, for as long as the tab stays open.
+    expect(await screen.findByText(ARRIVALS_LOST)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull(); // a note, not an error
+    loadArrivals.mockRejectedValueOnce(lost());
+    await nextCheck();
+    expect(screen.getAllByText(ARRIVALS_LOST)).toHaveLength(1); // still the one note
+    await nextCheck(); // this one reaches the server
+    await waitFor(() => expect(screen.queryByText(ARRIVALS_LOST)).toBeNull());
+    // And the count starts again: one miss after a check that worked is still not worth a word.
+    loadArrivals.mockRejectedValueOnce(lost());
+    await nextCheck();
+    expect(screen.queryByText(ARRIVALS_LOST)).toBeNull();
   });
 });
