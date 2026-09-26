@@ -8298,3 +8298,51 @@ UIL-082/UIL-099 E4.
 **Cross-reference UIL-060** (the stand-in feature this extends), **UIL-047 C1/C2** and **migration 0016**
 (the existing but namespace-tied locale mechanism this can't simply reuse), **UIL-082** and **UIL-099
 E4** (the promotion-matching this is meant to fix downstream of).
+
+## UIL-109 — Several loads and a few writes that already reset their own busy state still show the raw error message instead of the app's reload wording, once a call cannot reach the server
+
+- **Reported:** 2026-09-26 (not from Karvi — follow-up to UIL-106, filed by Full Stack Dev - 2 in #355's
+  own "Left alone" list, from the Tech Lead's original audit)
+- **Status:** Open, assigned to Full Stack Dev - 2.
+- **Priority:** Low (Senior BA's read; Karvi has cleared Lows to start).
+- **Area:** all screens
+- **Env:** Testing, `develop` `a66cbc9`
+
+**Corrected framing before writing this up: not all of these are reads.** The intake title named
+"read-only page loads," but #355's own list and this session's own spot-check of it against source
+include at least two writes — `CardSearchGrid`'s `addSelected` (`app/(ui)/coll/CardSearchGrid.tsx:160`)
+and Backfill's own save handlers, which repeat the identical shape at four sites
+(`app/(ui)/backfill/BackfillScreen.tsx:301-302, 421-422, 507-508, 859-860`) — that already reset their
+busy state in `finally` and are not stuck, but still surface `err.message` raw. The shared `LOST` family
+([`app/(ui)/_components/reach.ts`](<../app/(ui)/_components/reach.ts>)) already distinguishes
+`LOST.action` (a write) from `LOST.read`, so this entry covers both, not reads alone.
+
+**Verified `reach()` itself, since every fix here routes through it.**
+[`reach.ts:30-35`](<../app/(ui)/_components/reach.ts>:30) wraps a call in `try`/`catch`, returning
+`{ ok: false, error: lost, unreached: true }` on a throw rather than letting it escape — confirmed this
+is exactly #349's Sync-page fix, generalized (its own doc comment says so directly).
+
+**Verified the "left alone" list against current source, not taken on #355's word — one correction
+worth recording.** #355 named "the Lookup type-ahead" as one of the sites. That component,
+`CardLookup.tsx`, no longer exists — UIL-071 deleted it once every call site moved to the shared
+`CardResultsGrid`. Confirmed `CardResultsGrid.tsx:80-84` still shows `err.message` raw on a caught
+failure (keeping the last good results on screen rather than blanking them, which is correct and stays).
+Because this component is now shared by every UIL-071 site — Lookup, Backfill (two sites), Sync, the
+Haul Plan intake and Collections' Log-a-card — fixing it here fixes all of them at once, not Lookup
+alone. The rest of #355's list, spot-checked but not exhaustively re-verified line-by-line in this pass:
+Collections and Settings first loads, `CardSearchGrid`'s `loadMore`, Backfill's remaining handlers,
+Binders/Capacity loads.
+
+**Why these were correctly left out of #355 rather than folded in.** Each already resets its own busy
+or loading state in a `finally` (or, for `CardResultsGrid`, deliberately does not blank prior results),
+so none of them hang the way UIL-105/UIL-106's original worst cases did — the Tech Lead's audit filed
+them as already correct on that basis, and it was right to: nothing here is stuck, only worded wrong.
+
+**Suggested fix.** Route each through the same `reach()`/`LOST` family #349, #351, #354 and #355 already
+used: `LOST.action` for the two writes named above, `LOST.read` for the loads, no "Nothing was saved"
+anywhere since a read changes nothing and a write's own `finally` already resets state cleanly either
+way. One DOM test per site, following #355's own pattern (assert the friendly message, not the raw one,
+on a thrown rejection).
+
+**Cross-reference UIL-105** (the first site this shape was found and fixed on) and **UIL-106** (the
+app-wide audit this is the tail end of).
