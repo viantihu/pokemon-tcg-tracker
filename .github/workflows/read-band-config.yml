@@ -1127,3 +1127,102 @@ jobs:
             }'
           echo "--- current magic link template (HTML, no secrets) ---"
           printf '%s' "$body" | jq -r '.mailer_templates_magic_link_content // "(empty: Supabase default template in use)"'
+
+      # UIL-113 (2026-09-26): "I only shelved 10 cards, 12 are in the collection." What the Collections view
+      # counts, per collection, against what is actually shelved there. READ-ONLY, and COUNTS ONLY: collections
+      # are named by their position in the Collections list (most recently changed first, as the view sorts
+      # them), never by name, and no card is ever printed. Mirrors app/(ui)/coll/actions.ts loadCollHub:
+      # a card is "owned" in a collection when a SHELVED copy of it sits in one of the collection's binders;
+      # a finite collection shows "owned / total", an open one shows "total logged", where total is the
+      # number of cards on its list (target_catalog_card_ids), shelved or not.
+      - name: "UIL-113: what each collection's count counts (counts only)"
+        if: always()
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          cat > uil113.mjs <<'JS'
+          import { createClient } from "@supabase/supabase-js";
+          const db = createClient(`https://${process.env.PROJECT_REF}.supabase.co`, process.env.SERVICE_KEY, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+          const all = async (table, cols) => {
+            const out = [];
+            for (let from = 0; ; from += 1000) {
+              const { data, error } = await db.from(table).select(cols).range(from, from + 999);
+              if (error) throw new Error(`${table}: ${error.message}`);
+              out.push(...data);
+              if (data.length < 1000) return out;
+            }
+          };
+          const [collections, copies, wishes] = await Promise.all([
+            all("collection", "id,mode,target_catalog_card_ids,current_binder_ids,updated_at"),
+            all("copy", "id,catalog_card_id,role,binder_id"),
+            db.from("wishlist_item").select("chosen_catalog_card_id").is("resolved_at", null).then((r) => {
+              if (r.error) throw new Error(`wishlist_item: ${r.error.message}`);
+              return r.data;
+            }),
+          ]);
+          const targetIds = [...new Set(collections.flatMap((c) => c.target_catalog_card_ids ?? []))];
+          const cards = [];
+          for (let i = 0; i < targetIds.length; i += 200) {
+            const { data, error } = await db.from("catalog_card").select("tcgdex_id,name,set_name,local_id,source").in("tcgdex_id", targetIds.slice(i, i + 200));
+            if (error) throw new Error(`catalog_card: ${error.message}`);
+            cards.push(...data);
+          }
+          const cardById = new Map(cards.map((c) => [c.tcgdex_id, c]));
+          const wished = new Set(wishes.map((w) => w.chosen_catalog_card_id).filter(Boolean));
+          const ns = (id) => (id.startsWith("user:ja:") ? "user:ja" : id.startsWith("user:") ? "user:other" : id.startsWith("ja:") ? "ja" : "en");
+          const norm = (v) => (v ?? "").trim().toLowerCase();
+          const sorted = [...collections].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+          sorted.forEach((col, i) => {
+            const targets = col.target_catalog_card_ids ?? [];
+            const binders = new Set(col.current_binder_ids ?? []);
+            const tset = new Set(targets);
+            const inBinders = copies.filter((c) => c.role === "shelved" && c.binder_id && binders.has(c.binder_id));
+            const byNs = {};
+            for (const t of targets) byNs[ns(t)] = (byNs[ns(t)] ?? 0) + 1;
+            let owned = 0, ownedElsewhereOnly = 0, noCopyWished = 0, noCopyNotWished = 0, missingCatalog = 0;
+            for (const t of targets) {
+              if (!cardById.has(t)) { missingCatalog++; continue; }
+              const mine = copies.filter((c) => c.catalog_card_id === t);
+              if (inBinders.some((c) => c.catalog_card_id === t)) owned++;
+              else if (mine.length > 0) ownedElsewhereOnly++;
+              else if (wished.has(t)) noCopyWished++;
+              else noCopyNotWished++;
+            }
+            const elsewhereRoles = {};
+            for (const t of targets) {
+              if (inBinders.some((c) => c.catalog_card_id === t)) continue;
+              for (const c of copies.filter((c) => c.catalog_card_id === t)) {
+                const r = c.role === "shelved" ? "shelved_in_another_binder" : c.role;
+                elsewhereRoles[r] = (elsewhereRoles[r] ?? 0) + 1;
+              }
+            }
+            // A stand-in and a catalog card on the SAME list with the same name, set and number: one card, twice.
+            const listed = targets.map((t) => cardById.get(t)).filter(Boolean);
+            const key = (c) => `${norm(c.name)}|${norm(c.set_name)}|${norm(c.local_id).replace(/^0+/, "")}`;
+            const realKeys = new Set(listed.filter((c) => c.source !== "user").map(key));
+            const standInTwins = listed.filter((c) => c.source === "user" && realKeys.has(key(c))).length;
+            const totalCount = targets.length - missingCatalog;
+            console.log(JSON.stringify({
+              collection: `#${i + 1}`,
+              mode: col.mode,
+              view_shows: col.mode === "finite" ? `${owned} / ${totalCount} owned` : `${totalCount} logged`,
+              list_entries: targets.length,
+              list_by_namespace: byNs,
+              on_list_and_shelved_in_its_binders: owned,
+              shelved_copies_of_list_cards_in_its_binders: inBinders.filter((c) => tset.has(c.catalog_card_id)).length,
+              shelved_copies_in_its_binders_NOT_on_list: inBinders.filter((c) => !tset.has(c.catalog_card_id)).length,
+              on_list_owned_but_not_shelved_there: ownedElsewhereOnly,
+              where_those_copies_are: elsewhereRoles,
+              on_list_no_copy_wishlisted: noCopyWished,
+              on_list_no_copy_not_wishlisted: noCopyNotWished,
+              on_list_missing_from_catalog: missingCatalog,
+              stand_in_twin_of_a_listed_catalog_card: standInTwins,
+              binders: binders.size,
+            }));
+          });
+          JS
+          node uil113.mjs
