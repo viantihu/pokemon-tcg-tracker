@@ -8396,3 +8396,62 @@ included.
 **Tied to Production cutover, not to UAT — priority follows that timeline, not the bug queue.**
 
 **Cross-reference UIL-024** (Production readiness — this belongs in that same pre-cutover scope).
+
+## UIL-111 — "Not mine" should clear a card from the current haul only, not suppress it from every future Dex import forever
+
+- **Reported:** 2026-09-26 (Karvi). In her words: "the 'not mine' should not be permanent. It's possible
+  that the user obtains those cards in a future haul. The 'not mine' button exists to allow users to
+  remove cards from the haul for whatever reason." Asked to choose, she ruled "Remove for this haul
+  only": "Not mine" clears the card from the current haul, and the next Dex import brings it back if Dex
+  still lists it; a Dex error is fixed in Dex, or by pressing "Not mine" again.
+- **Status:** Open, assigned to Full Stack Dev - 2, plan first; the Tech Lead reviews (count-check and
+  removal territory).
+- **Priority:** High (Senior BA's read; it reverses a data-model rule that every import applies; Karvi
+  to confirm).
+- **Area:** Sync / Haul Plan
+- **Env:** Testing, `develop` `07197b6`
+
+**Confirmed: "Not mine" already goes through UIL-089's general removal mechanism, not a separate
+path.** The Haul Plan's `removeCopyFromApp` calls `removeCopy`, whose write
+([`lib/copy/remove.ts:114-119`](../lib/copy/remove.ts:114)) includes a `remember_removed_presence` op
+when the plan carries a `rememberKey` — the same op every other "Remove" (Lookup, Line, Collections) can
+trigger. There is no "Not mine"-specific code path to change; the fix is to this one shared mechanism,
+or to how the Haul Plan calls it.
+
+**Confirmed: the current rule is "subtract until Dex itself stops listing the card," which is what
+makes a standing Dex error read as permanent.** `applyRemovedMemory`
+([`lib/sync/diff.ts:219-244`](../lib/sync/diff.ts:219)) subtracts every removal from Dex's desired count
+(`max(0, dex − removed)`) on every import, and only drops the memory
+([`:232-235`](../lib/sync/diff.ts:232)) once a FULL export no longer lists the key at all — confirmed by
+the function's own doc comment: "the memory would otherwise suppress a genuine future re-acquisition
+forever" is named as the exact failure this gate exists to prevent, for the case where Dex has actually
+stopped listing the card. It does not cover Karvi's case: a card Dex keeps listing every time (her
+"Dex error" scenario) is subtracted back out on every single import, indefinitely, which behaves as
+permanent suppression in practice even though the mechanism isn't literally unconditional.
+
+**Confirmed the two places this same memory already surfaces, so a fix has to account for both.**
+`matchOps` honours it via UIL-099 E2 (#330): the Sync page's "Add {it} back" button
+([`app/(ui)/sync/SyncScreen.tsx:416-417`](<../app/(ui)/sync/SyncScreen.tsx>:416)) is the only existing way
+to override a removal early, one match at a time. UIL-100's Count check panel
+([`app/(ui)/sync/CountCheckPanel.tsx:37`](<../app/(ui)/sync/CountCheckPanel.tsx>:37)) renders `{n} you
+removed` as a standing line item for as long as the memory exists. **No general undo exists outside
+that one notice** — `RemoveCopyButton`'s two-tap confirm has none, matching what UIL-106 already
+established.
+
+**Testing now, reported by the Senior BA, not independently checkable from this repo:**
+`removed_presence` holds 2 rows — her two "Not mine" presses, both Dex errors by her own account — and
+her next import will bring both back under the new per-haul rule, which she has already accepted.
+
+**Suggested fix, framed as a scope question for the plan the Tech Lead reviews, not decided here.**
+Either "Not mine" stops writing a `removed_presence` row at all (a haul-local skip, no memory beyond the
+current session — closest to her literal words) or it keeps writing one but the entry is scoped to skip
+only the CURRENT haul's own import rather than every future one (closer to "for this haul only" if a
+"haul" spans more than the session that pressed it). Whichever shape, it's a distinct action from every
+other "Remove" this button's shared mechanism serves — Lookup/Line/Collections removals are "I traded
+this away," which should stay standing exactly as it does today; only the Haul Plan's "Not mine" is
+being asked to mean something narrower.
+
+**Cross-reference UIL-089** (the removal memory this changes the scope of), **UIL-099 E2** (the manual
+match honour + "Add it back," the nearest existing override this could inform the design of), and
+**UIL-100** (the Count check that renders this memory and would need to reflect whatever the new scope
+is).
