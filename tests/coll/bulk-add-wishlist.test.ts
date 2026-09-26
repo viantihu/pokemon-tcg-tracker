@@ -216,6 +216,24 @@ describe("UIL-101 · one write, all or nothing", () => {
     });
   });
 
+  it("a list overwritten right after the add (the editor autosaving from another tab) is not reported as a success", async () => {
+    // The collection still exists, but a save carrying a stale target list replaced the one the add just
+    // grew, so the cards are not on it. Saying "Added" would be false.
+    await asOwner(db);
+    const client = pgliteClient(db);
+    const realRpc = client.rpc.bind(client);
+    vi.spyOn(client, "rpc").mockImplementation(async (fn, args) => {
+      const out = await realRpc(fn, args);
+      await db.query("update collection set target_catalog_card_ids = '{}' where id = $1", [COL]);
+      return out;
+    });
+    const res = await applyBulkAddTargets(client, OWNER, COL, ["sv01-001"]);
+    expect(res).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/^That collection changed under you/),
+    });
+  });
+
   it("a draft with no binder yet still wishes: a wish needs no binder", async () => {
     await asSuperuser(db);
     await db.query("update collection set current_binder_ids = '{}' where id = $1", [COL]);
