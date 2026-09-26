@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UIL-117 v3 — one line popup for every move into a back half</title>
+<style>
+/* Palette + primitives copied from docs/design/prototype.html / app/globals.css so this reads as the
+   real app. Card art is a placeholder block here; the real screen shows TCGdex art in each face. */
+:root{
+  color-scheme: light;
+  --olive:#6D7B3C; --panel:#FBF2DD; --panel-2:#F1D6AF;
+  --ink:#3C3C3B; --ink-2:#5F5035; --ink-3:#84572F; --hi:#FFFAF0; --lo:#E4BA77;
+  --note:#FEDF4F; --mint:#ADEBB3; --lime:#9FD45B; --dead:#A89D85; --ok:#3AA94F; --warn:#FFD9DF;
+  --b-red:#EC6F4D; --b-orange:#C9762B; --b-yellow:#FEDF4F; --b-olive:#8F9A3A; --b-green:#45C55D;
+  --b-navy:#3B5687; --b-sky:#6FB9DD; --b-purple:#9D6FB8; --b-pink:#FF94A6; --b-white:#FDF6E6;
+  --font:"Silkscreen","Press Start 2P","DotGothic16",ui-monospace,"Cascadia Mono","Segoe UI Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--olive);
+  background-image:linear-gradient(rgba(255,255,255,.10) 1px,transparent 1px),linear-gradient(90deg,rgba(0,0,0,.07) 1px,transparent 1px);
+  background-size:4px 4px,4px 4px;
+  color:var(--ink);font-family:var(--font);font-size:13px;line-height:1.45;letter-spacing:.02em;padding:20px 20px 80px;
+}
+.u{text-transform:uppercase}
+code{font-family:inherit;background:rgba(0,0,0,.08);padding:0 3px}
+h1{font-size:15px;letter-spacing:.1em;color:var(--panel);text-shadow:2px 2px 0 rgba(0,0,0,.25)}
+h1 small{display:block;font-size:10px;color:#e4ba77;letter-spacing:.06em;margin-top:6px;text-transform:none}
+.changes{margin:12px 0 0;max-width:760px;font-size:11px;color:#f1e2c4}
+.changes li{margin:3px 0 3px 18px}
+.toc{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 28px}
+.toc a{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border:3px solid var(--ink);background:var(--panel-2);color:inherit;text-decoration:none;font-size:11px;letter-spacing:.06em;box-shadow:inset 2px 2px 0 var(--hi),inset -2px -2px 0 var(--lo)}
+section{margin-bottom:52px}
+.stephead{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+.stepnum{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:3px solid var(--ink);background:var(--ink);color:var(--panel);font-size:11px;flex:0 0 auto}
+.stephead h2{font-size:13px;letter-spacing:.08em;color:var(--panel);text-shadow:1px 1px 0 rgba(0,0,0,.3)}
+.stepnote{font-size:11px;color:#f1e2c4;margin:0 0 14px 32px;max-width:700px}
+.stepnote b{color:var(--panel)}
+
+.panel{background:var(--panel);border:3px solid var(--ink);box-shadow:inset 2px 2px 0 var(--hi),inset -2px -2px 0 var(--lo),5px 5px 0 rgba(60,60,59,.2)}
+.plate{border:3px solid var(--ink);background:var(--panel-2);box-shadow:inset 2px 2px 0 var(--hi),inset -2px -2px 0 var(--lo)}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border:3px solid var(--ink);background:var(--panel-2);box-shadow:inset 2px 2px 0 var(--hi),inset -2px -2px 0 var(--lo),4px 4px 0 rgba(60,60,59,.22);text-transform:uppercase;font-size:12px;color:inherit;cursor:pointer;letter-spacing:.06em;font-family:inherit}
+.btn.primary{background:var(--ink);color:var(--panel);box-shadow:inset 2px 2px 0 rgba(255,255,255,.22),inset -2px -2px 0 rgba(0,0,0,.35),4px 4px 0 rgba(60,60,59,.28)}
+.btn.sm{padding:6px 10px;font-size:10px}
+.chip{width:18px;height:18px;border:3px solid var(--ink);flex:0 0 auto;display:inline-block;vertical-align:middle}
+.ochips{display:flex;flex-wrap:wrap;gap:7px}
+.ochip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:3px solid var(--ink);background:var(--panel);font-size:10px;letter-spacing:.05em;text-transform:uppercase;font-family:inherit;cursor:pointer}
+.ochip.on{background:var(--note)}
+
+/* card faces — placeholder art in band colours */
+.face{position:relative;display:block;flex:0 0 auto;border:3px solid var(--ink);background:var(--hi);overflow:hidden}
+.face.s{width:34px;height:47px;border-width:2px}
+.face.m{width:52px;height:72px}
+.face.l{width:78px;height:109px}
+.face .art{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--panel);text-shadow:1px 1px 0 rgba(0,0,0,.35)}
+.face.l .art{font-size:12px}
+.face.open{border-style:dashed;background:repeating-linear-gradient(45deg,var(--panel) 0 6px,var(--panel-2) 6px 12px)}
+.face.open .art{color:var(--ink-2);text-shadow:none;font-size:18px}
+.face.leaving{opacity:.45;filter:grayscale(.6)}
+.face.leaving::after{content:"";position:absolute;inset:0;background:linear-gradient(to top right,transparent calc(50% - 2px),var(--ink) calc(50% - 2px),var(--ink) calc(50% + 2px),transparent calc(50% + 2px))}
+.red{background:linear-gradient(160deg,#f08a6c,#c4492b)}
+.redD{background:linear-gradient(160deg,#e65f3b,#9e3217)}
+.redH{background:linear-gradient(160deg,#ffd27a,#ec6f4d 45%,#9d6fb8)}
+.orange{background:linear-gradient(160deg,#d98e46,#9a561a)}
+
+/* ---- the haul plan behind the popup ---- */
+.frame{display:grid;max-width:980px}
+.frame > *{grid-area:1/1}
+.haul{padding:0}
+.haulbar{display:flex;align-items:center;gap:12px;padding:9px 13px;border-bottom:3px solid var(--ink);flex-wrap:wrap}
+.haulbar .hk{font-size:10px;color:var(--ink-2);letter-spacing:.13em}
+.search{flex:1;min-width:180px;padding:8px 10px;border:3px solid var(--ink);background:var(--hi);font-family:inherit;font-size:11px;color:var(--ink-2)}
+.bandhead{display:flex;align-items:center;gap:10px;padding:7px 12px;background:var(--panel-2);border-bottom:3px solid var(--ink);font-size:11px;letter-spacing:.1em}
+.row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:2px solid var(--lo)}
+.row:last-child{border-bottom:0}
+.row .rail{width:6px;height:40px;flex:0 0 auto}
+.row .meta{flex:1;min-width:0}
+.row .meta b{display:block;font-size:12px}
+.row .meta i{font-style:normal;font-size:10px;color:var(--ink-2)}
+.act{font-size:9px;letter-spacing:.08em;padding:4px 8px;border:2px solid var(--ink);background:var(--panel-2);white-space:nowrap}
+.lbadge{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:2px solid var(--ink);font-size:9px;letter-spacing:.06em;font-weight:700;white-space:nowrap;font-family:inherit;cursor:pointer}
+.lbadge.start{background:var(--mint)}
+.lbadge.join{background:var(--note)}
+.lbadge.swap{background:var(--warn)}
+.row.hl{background:var(--hi);box-shadow:inset 4px 0 0 var(--ink)}
+.dim{opacity:.32;pointer-events:none}
+
+/* ---- the popup ---- */
+.pop{position:relative;justify-self:center;align-self:start;margin:38px 10px 10px;width:min(720px,calc(100% - 20px));z-index:2}
+.pop .cap{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--ink);color:var(--panel);flex-wrap:wrap}
+.pop .cap .t{font-size:12px;letter-spacing:.12em}
+.pop .cap .n{font-size:10px;color:#e4ba77}
+.pop .cap .x{margin-left:auto;font-size:10px;padding:5px 9px;border:2px solid var(--panel);color:var(--panel);background:transparent;font-family:inherit;cursor:pointer}
+.pop .body{padding:16px}
+.lbl{font-size:9px;letter-spacing:.14em;color:var(--ink-2);margin:0 0 8px}
+
+/* the line strip */
+.strip{display:flex;align-items:stretch;gap:0;flex-wrap:wrap;background:var(--panel-2);border:3px solid var(--ink);padding:14px 10px;justify-content:center}
+.slot{display:flex;flex-direction:column;align-items:center;gap:5px;width:150px;text-align:center;padding:4px 6px}
+.slot .stage{font-size:9px;letter-spacing:.14em;color:var(--ink-2)}
+.slot .nm{font-size:10px;font-weight:700;letter-spacing:.04em}
+.slot .no{font-size:9px;color:var(--ink-2)}
+.arrow{display:flex;align-items:center;font-size:16px;color:var(--ink-2);padding:0 2px;margin-top:34px}
+.src{font-size:8px;letter-spacing:.08em;padding:3px 6px;border:2px solid var(--ink);text-transform:uppercase;line-height:1.3}
+.src.haul{background:var(--mint)}
+.src.binder{background:var(--hi)}
+.src.want{background:var(--panel);border-style:dashed;color:var(--ink-2)}
+.src.out{background:var(--warn)}
+.pull{display:flex;align-items:center;gap:6px;font-size:9px;letter-spacing:.06em;margin-top:2px;cursor:pointer}
+.pull input{width:14px;height:14px;accent-color:#3c3c3b}
+.stack{display:flex;align-items:flex-end;gap:6px;justify-content:center}
+.stack .tag{font-size:8px;letter-spacing:.08em;margin-top:3px}
+
+/* what moves */
+.moves{margin-top:14px;border:3px solid var(--ink);background:var(--hi)}
+.moves .mrow{display:flex;align-items:center;gap:10px;padding:7px 10px;border-bottom:2px solid var(--lo);font-size:11px}
+.moves .mrow:last-child{border-bottom:0}
+.moves .verb{width:84px;flex:0 0 auto;font-size:9px;letter-spacing:.1em;font-weight:700}
+.moves .where{color:var(--ink-2);font-size:10px}
+.moves .mrow.muted{color:var(--ink-2)}
+
+.also{margin-top:14px;padding:10px 12px;background:var(--note);border:3px solid var(--ink);font-size:11px}
+.also b{display:block;margin-bottom:6px;font-size:11px}
+.minigrid{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.mini{display:flex;align-items:center;gap:8px;padding:6px 8px;border:2px solid var(--ink);background:var(--panel);font-size:9px;letter-spacing:.04em}
+.foot{display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap}
+.foot .sum{font-size:10px;color:var(--ink-2);flex:1;min-width:200px}
+
+.q{margin-top:10px;padding:8px 10px;border:2px dashed var(--ink-2);background:var(--hi);font-size:10px;color:var(--ink-2)}
+.q b{color:var(--ink)}
+.choice{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+.choice .opt{flex:1;min-width:220px;border:3px solid var(--ink);background:var(--panel);padding:10px;font-size:11px;cursor:pointer}
+.choice .opt.on{background:var(--note)}
+.choice .opt b{display:block;font-size:11px;margin-bottom:4px;letter-spacing:.04em}
+.choice .opt span{font-size:10px;color:var(--ink-2)}
+
+.questions{max-width:760px;padding:16px}
+.questions ol{margin-left:18px;font-size:11px}
+.questions li{margin:8px 0}
+.questions li i{font-style:normal;color:var(--ink-2)}
+@media (max-width:640px){.arrow{display:none}.slot{width:130px}}
+</style>
+</head>
+<body>
+
+<h1>UIL-117 v3 — one line popup for every move into a back half
+  <small>Proposed direction · not implemented · for Karvi's review before any code · card art is a placeholder here, the real screen shows each card's TCGdex image</small>
+</h1>
+<ul class="changes">
+  <li><b>Your answer 1:</b> any card going into a back half must be put in a line or start one, through
+    this popup, from <b>every</b> screen. New section ② shows every way in.</li>
+  <li><b>Your answer 2:</b> a replace opens on "keep the one that's there." Nothing moves until you confirm.</li>
+  <li><b>Your answer 3:</b> a card taken out of a line can go <b>anywhere you choose</b>; the <b>bulk box is
+    suggested</b>, and you confirm the move.</li>
+</ul>
+
+<div class="toc">
+  <a href="#s1">① The Haul Plan, with line badges</a>
+  <a href="#s0">② One popup, every screen</a>
+  <a href="#s2">③ Starting a line</a>
+  <a href="#s3">④ Adding to a line</a>
+  <a href="#s4">⑤ Replacing a card in a line</a>
+  <a href="#s5">⑥ Ready to approve?</a>
+</div>
+
+<!-- =================================================================== 1 -->
+<section id="s1">
+  <div class="stephead"><span class="stepnum">1</span><h2>THE HAUL PLAN, WITH LINE BADGES</h2></div>
+  <p class="stepnote">
+    The Haul Plan is the main screen (the intake screen and yellow Decisions banner are gone, and
+    "Search haul" is Dev 2's UIL-114 to 116). Every card headed for a back half gets a coloured badge on
+    its row: <b>green</b> starts a line, <b>yellow</b> adds to one, <b>pink</b> could replace a card already in
+    one. <b>You have to confirm each one.</b> Tapping the badge opens its popup, and reaching the card in
+    the checklist opens it too, so a back-half card can't be marked done without your OK. Inside the popup,
+    "Confirm &amp; next" takes you straight to the next line card, so a big haul is one pass, not a hunt.
+    Front-half, bulk and collection cards look exactly as they do today.<br><br>
+    <b>This changes a rule:</b> today the plan fills and starts lines on its own, and only flagged
+    decisions ask you. After this, every back-half card waits for you.
+  </p>
+  <div class="frame">
+    <div class="panel haul">
+      <div class="haulbar">
+        <span class="hk u">Haul · Show · 14 cards</span>
+        <span class="search u">Search haul…</span>
+      </div>
+      <div class="bandhead u"><span class="chip" style="background:var(--b-red)"></span> Red · Fire</div>
+      <div class="row">
+        <div class="rail" style="background:var(--b-red)"></div>
+        <div class="face s"><div class="art red">CML</div></div>
+        <div class="meta"><b>Charmeleon · 027/197</b><i>KB-001 · Back · Red</i></div>
+        <button class="lbadge start u">＋ Starts Charizard line</button>
+      </div>
+      <div class="row">
+        <div class="rail" style="background:var(--b-red)"></div>
+        <div class="face s"><div class="art redD">CZD</div></div>
+        <div class="meta"><b>Charizard · 028/197</b><i>KB-001 · Back · Red</i></div>
+        <button class="lbadge start u">＋ Starts Charizard line</button>
+      </div>
+      <div class="row">
+        <div class="rail" style="background:var(--b-red)"></div>
+        <div class="face s"><div class="art redH">CML</div></div>
+        <div class="meta"><b>Charmeleon · 169/165 · alt art</b><i>KB-003 · Back · Red</i></div>
+        <button class="lbadge swap u">⇄ Could replace a card</button>
+      </div>
+      <div class="row">
+        <div class="rail" style="background:var(--b-red)"></div>
+        <div class="face s"><div class="art red">VUL</div></div>
+        <div class="meta"><b>Vulpix · 037/165</b><i>KB-001 · Front · Red</i></div>
+        <span class="act u">Shelf</span>
+      </div>
+      <div class="bandhead u"><span class="chip" style="background:var(--b-orange)"></span> Orange</div>
+      <div class="row">
+        <div class="rail" style="background:var(--b-orange)"></div>
+        <div class="face s"><div class="art orange">TSC</div></div>
+        <div class="meta"><b>Toedscruel · 089/159</b><i>KB-004 · Back · Orange</i></div>
+        <button class="lbadge join u">◆ Adds to Toedscruel line</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================================================================== 2 (new in v3) -->
+<section id="s0">
+  <div class="stephead"><span class="stepnum">2</span><h2>ONE POPUP, EVERY SCREEN</h2></div>
+  <p class="stepnote">
+    Whichever screen you're on, the moment a card's destination is a back half, <b>this same popup
+    opens</b>: same layout, same "what moves" list, same confirm. Front halves, the bulk box and
+    collections have no lines, so moving a card there works the way it does today.<br><br>
+    <b>What changes on each screen:</b> the Move sheet already won't put a card in a back half without a
+    line, but today that choice is a row of text chips inside the sheet; picking "Back half" will open the
+    popup instead. Backfill's back half has its own separate line builder today; it switches to the popup
+    too, so there's one way to build a line, not two.
+  </p>
+  <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;max-width:980px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;flex:1 1 560px">
+      <div class="panel" style="padding:10px">
+        <div class="lbl u">Haul Plan</div>
+        <div style="font-size:11px">A card the plan sends to a back half. <b>Badge</b> or the checklist opens it.</div>
+        <div style="margin-top:8px"><span class="lbadge start u">＋ Starts Charizard line</span></div>
+      </div>
+      <div class="panel" style="padding:10px">
+        <div class="lbl u">Move sheet · Lines, Lookup, Collections</div>
+        <div style="font-size:11px">"↔ Move" on any card, then pick where it goes:</div>
+        <div class="ochips" style="margin-top:8px">
+          <span class="ochip">Front half</span><span class="ochip">Bulk box</span><span class="ochip">A collection</span><span class="ochip on">Back half ▶</span>
+        </div>
+      </div>
+      <div class="panel" style="padding:10px">
+        <div class="lbl u">Backfill · back half</div>
+        <div style="font-size:11px">Loading an existing binder. Each line you record goes through the popup instead of today's separate builder.</div>
+      </div>
+      <div class="panel" style="padding:10px">
+        <div class="lbl u">Lines page · a filled slot</div>
+        <div style="font-size:11px">Tap a card already in a line, then "Replace this card". Opens the replace view (section ⑤).</div>
+      </div>
+    </div>
+    <div style="font-size:26px;color:var(--panel);text-shadow:2px 2px 0 rgba(0,0,0,.25)">▶</div>
+    <div class="panel" style="padding:0;width:230px;flex:0 0 auto">
+      <div class="cap" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--ink);color:var(--panel);font-size:10px;letter-spacing:.12em">THE LINE POPUP</div>
+      <div style="padding:10px">
+        <div class="strip" style="padding:8px 4px">
+          <div class="face m"><div class="art red">CMD</div></div>
+          <div class="arrow" style="margin-top:22px">▶</div>
+          <div class="face m"><div class="art red">CML</div></div>
+          <div class="arrow" style="margin-top:22px">▶</div>
+          <div class="face m open"><div class="art">+</div></div>
+        </div>
+        <div style="font-size:9px;color:var(--ink-2);margin-top:8px" class="u">Same popup from every screen</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================================================================== 3 -->
+<section id="s2">
+  <div class="stephead"><span class="stepnum">3</span><h2>STARTING A LINE — SEE THE WHOLE LINE BEFORE IT EXISTS</h2></div>
+  <p class="stepnote">
+    Tapping "Starts Charizard line" opens this over the plan. The line is laid out stage by stage,
+    the same shape as the Lines screen, with <b>every card that would go into it</b>: the two from this
+    haul, and the Charmander already sitting in your front half. That one is <b>not moved unless you
+    tick it</b>, same as today's rule that nothing moves without your say. "What moves" is the physical
+    to-do list: what to take out of which binder and where it goes. If a Charizard line already exists
+    somewhere, it shows here with a Join button instead of you finding out later.
+  </p>
+  <div class="frame">
+    <div class="panel haul dim">
+      <div class="haulbar"><span class="hk u">Haul · Show · 14 cards</span><span class="search u">Search haul…</span></div>
+      <div class="bandhead u"><span class="chip" style="background:var(--b-red)"></span> Red · Fire</div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art red">CML</div></div><div class="meta"><b>Charmeleon · 027/197</b><i>KB-001 · Back · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art redD">CZD</div></div><div class="meta"><b>Charizard · 028/197</b><i>KB-001 · Back · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art redH">CML</div></div><div class="meta"><b>Charmeleon · 169/165</b><i>KB-003 · Back · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art red">VUL</div></div><div class="meta"><b>Vulpix · 037/165</b><i>KB-001 · Front · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-orange)"></div><div class="face s"><div class="art orange">TSC</div></div><div class="meta"><b>Toedscruel · 089/159</b><i>KB-004 · Back · Orange</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-orange)"></div><div class="face s"><div class="art orange">TSL</div></div><div class="meta"><b>Toedscool · 088/159</b><i>KB-004 · Back · Orange</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art red">GWL</div></div><div class="meta"><b>Growlithe · 058/198</b><i>KB-001 · Front · Red</i></div></div>
+    </div>
+    <div class="pop panel" style="padding:0">
+      <div class="cap">
+        <span class="t u">Start a line</span>
+        <span class="n u">Charizard · KB-001 · Back · <span class="chip" style="background:var(--b-red);width:12px;height:12px;border-width:2px"></span> Red · 🇬🇧 English</span>
+        <button class="x u">Close</button>
+      </div>
+      <div class="body">
+        <div class="strip">
+          <div class="slot">
+            <div class="stage u">Basic</div>
+            <div class="face l"><div class="art red">CMD</div></div>
+            <div class="nm u">Charmander</div>
+            <div class="no">046/197</div>
+            <span class="src binder">In KB-001 · Front · Red</span>
+            <label class="pull u"><input type="checkbox"> Pull it into this line</label>
+          </div>
+          <div class="arrow">▶</div>
+          <div class="slot">
+            <div class="stage u">Stage 1</div>
+            <div class="face l"><div class="art red">CML</div></div>
+            <div class="nm u">Charmeleon</div>
+            <div class="no">027/197</div>
+            <span class="src haul">New · this haul</span>
+          </div>
+          <div class="arrow">▶</div>
+          <div class="slot">
+            <div class="stage u">Stage 2</div>
+            <div class="face l"><div class="art redD">CZD</div></div>
+            <div class="nm u">Charizard</div>
+            <div class="no">028/197</div>
+            <span class="src haul">New · this haul</span>
+          </div>
+        </div>
+
+        <div class="lbl u" style="margin-top:14px">What moves</div>
+        <div class="moves">
+          <div class="mrow"><span class="verb u">Shelve</span><span class="face s"><span class="art red">CML</span></span><span>Charmeleon <span class="where">→ KB-001 · Back · Red, new line</span></span></div>
+          <div class="mrow"><span class="verb u">Shelve</span><span class="face s"><span class="art redD">CZD</span></span><span>Charizard <span class="where">→ next to it</span></span></div>
+          <div class="mrow muted"><span class="verb u">Stays put</span><span class="face s"><span class="art red">CMD</span></span><span>Charmander <span class="where">stays in KB-001 · Front · Red unless you tick "Pull it into this line" above</span></span></div>
+        </div>
+
+        <div class="also">
+          <b class="u">You already have 1 Charizard line</b>
+          Adding to it instead of starting a second one is one tap. Starting a second one is fine too.
+          <div class="minigrid">
+            <div class="mini"><span class="face s"><span class="art redD">CZD</span></span><span class="u">KB-002 · Back · Red<br>🇯🇵 Japanese · 1/3 filled</span><button class="btn sm">Add to that line</button></div>
+          </div>
+          <div style="font-size:10px;margin-top:6px;color:var(--ink-2)">It's a Japanese line, so an English Charmeleon won't join it by default. You can still choose to.</div>
+        </div>
+
+        <div class="foot">
+          <span class="sum u">Line card 1 of 3 in this haul · 2 cards go in · nothing written until you confirm</span>
+          <button class="btn">Cancel</button>
+          <button class="btn primary">Start line · next ▶</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================================================================== 3 -->
+<section id="s3">
+  <div class="stephead"><span class="stepnum">4</span><h2>ADDING TO A LINE — THE CARD LANDS IN ITS SLOT</h2></div>
+  <p class="stepnote">
+    Your Toedscruel example. The popup shows the existing line with the card you already own in
+    it, and the new card <b>dropping into the open slot</b>, so you can see how the two look side by side
+    before you commit. The count moves from 1/2 to 2/2 and says the line will be complete.
+  </p>
+  <div class="frame">
+    <div class="panel haul dim">
+      <div class="haulbar"><span class="hk u">Haul · Show · 14 cards</span><span class="search u">Search haul…</span></div>
+      <div class="bandhead u"><span class="chip" style="background:var(--b-orange)"></span> Orange</div>
+      <div class="row"><div class="rail" style="background:var(--b-orange)"></div><div class="face s"><div class="art orange">TSC</div></div><div class="meta"><b>Toedscruel · 089/159</b><i>KB-004 · Back · Orange</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art red">VUL</div></div><div class="meta"><b>Vulpix · 037/165</b><i>KB-001 · Front · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art red">GWL</div></div><div class="meta"><b>Growlithe · 058/198</b><i>KB-001 · Front · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art red">CML</div></div><div class="meta"><b>Charmeleon · 027/197</b><i>KB-001 · Back · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art redD">CZD</div></div><div class="meta"><b>Charizard · 028/197</b><i>KB-001 · Back · Red</i></div></div>
+    </div>
+    <div class="pop panel" style="padding:0">
+      <div class="cap">
+        <span class="t u">Add to a line</span>
+        <span class="n u">Toedscruel · KB-004 · Back · <span class="chip" style="background:var(--b-orange);width:12px;height:12px;border-width:2px"></span> Orange · 🇬🇧 English</span>
+        <button class="x u">Close</button>
+      </div>
+      <div class="body">
+        <div class="strip">
+          <div class="slot">
+            <div class="stage u">Basic</div>
+            <div class="face l"><div class="art orange">TSL</div></div>
+            <div class="nm u">Toedscool</div>
+            <div class="no">088/159</div>
+            <span class="src binder">Already here</span>
+          </div>
+          <div class="arrow">▶</div>
+          <div class="slot">
+            <div class="stage u">Stage 1</div>
+            <div class="face l" style="box-shadow:0 0 0 4px var(--note)"><div class="art orange">TSC</div></div>
+            <div class="nm u">Toedscruel</div>
+            <div class="no">089/159</div>
+            <span class="src haul">New · this haul</span>
+          </div>
+        </div>
+        <div class="lbl u" style="margin-top:14px">What moves</div>
+        <div class="moves">
+          <div class="mrow"><span class="verb u">Shelve</span><span class="face s"><span class="art orange">TSC</span></span><span>Toedscruel <span class="where">→ KB-004 · Back · Orange, right after Toedscool</span></span></div>
+        </div>
+        <div class="foot">
+          <span class="sum u">Line card 2 of 3 · 1/2 → 2/2 · line complete</span>
+          <button class="btn">Pick a different line</button>
+          <button class="btn primary">Add to line · next ▶</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================================================================== 4 -->
+<section id="s4">
+  <div class="stephead"><span class="stepnum">5</span><h2>REPLACING A CARD IN A LINE</h2></div>
+  <p class="stepnote">
+    <b>What happens today:</b> if a new copy of a stage you already have arrives (say an alt-art
+    Charmeleon for a line that already holds a Charmeleon), the app sends the new one to the front half
+    without asking, "lines tracked once." The only swap it offers is a holo arriving over the same card's
+    normal. To put a nicer card into a line you have to do two separate Moves by hand, and the line
+    shows as incomplete in between.<br><br>
+    <b>Proposed:</b> that card gets the pink badge, and its popup shows the line with both cards
+    for that slot side by side. You pick which one stays in the line. <b>The default is "keep the one
+    that's there"</b>, so nothing changes unless you choose it. If you swap, you also pick where the card
+    coming out goes: <b>anywhere you like</b> (a front half, another line, a collection, the bulk box),
+    with <b>the bulk box suggested</b>. The whole swap is done in one step, so the line never shows a gap.
+    The holo upgrade uses this same screen, pre-set to swap with the old copy going to bulk, which is
+    today's rule for it.
+  </p>
+  <div class="frame">
+    <div class="panel haul dim">
+      <div class="haulbar"><span class="hk u">Haul · Show · 14 cards</span><span class="search u">Search haul…</span></div>
+      <div class="bandhead u"><span class="chip" style="background:var(--b-red)"></span> Red · Fire</div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art redH">CML</div></div><div class="meta"><b>Charmeleon · 169/165 · alt art</b><i>KB-003 · Back · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art red">VUL</div></div><div class="meta"><b>Vulpix · 037/165</b><i>KB-001 · Front · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art red">GWL</div></div><div class="meta"><b>Growlithe · 058/198</b><i>KB-001 · Front · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-orange)"></div><div class="face s"><div class="art orange">TSC</div></div><div class="meta"><b>Toedscruel · 089/159</b><i>KB-004 · Back · Orange</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-orange)"></div><div class="face s"><div class="art orange">TSL</div></div><div class="meta"><b>Toedscool · 088/159</b><i>KB-004 · Back · Orange</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art red">CML</div></div><div class="meta"><b>Charmeleon · 027/197</b><i>KB-001 · Back · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art redD">CZD</div></div><div class="meta"><b>Charizard · 028/197</b><i>KB-001 · Back · Red</i></div></div>
+      <div class="row"><div class="rail" style="background:var(--b-red)"></div><div class="face s"><div class="art red">PON</div></div><div class="meta"><b>Ponyta · 029/165</b><i>KB-001 · Front · Red</i></div></div>
+    </div>
+    <div class="pop panel" style="padding:0">
+      <div class="cap">
+        <span class="t u">A copy for a filled slot</span>
+        <span class="n u">Charizard line · KB-003 · Back · <span class="chip" style="background:var(--b-red);width:12px;height:12px;border-width:2px"></span> Red · 🇬🇧 English · 3/3</span>
+        <button class="x u">Close</button>
+      </div>
+      <div class="body">
+        <div class="strip">
+          <div class="slot">
+            <div class="stage u">Basic</div>
+            <div class="face l"><div class="art red">CMD</div></div>
+            <div class="nm u">Charmander</div>
+            <div class="no">046/197</div>
+            <span class="src binder">Already here</span>
+          </div>
+          <div class="arrow">▶</div>
+          <div class="slot" style="width:190px">
+            <div class="stage u">Stage 1 · pick one</div>
+            <div class="stack">
+              <div style="display:flex;flex-direction:column;align-items:center">
+                <div class="face l leaving"><div class="art red">CML</div></div>
+                <span class="tag u">027/197 · now</span>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:center">
+                <div class="face l" style="box-shadow:0 0 0 4px var(--note)"><div class="art redH">CML</div></div>
+                <span class="tag u">169/165 · new</span>
+              </div>
+            </div>
+            <div class="nm u" style="margin-top:4px">Charmeleon</div>
+          </div>
+          <div class="arrow">▶</div>
+          <div class="slot">
+            <div class="stage u">Stage 2</div>
+            <div class="face l"><div class="art redD">CZD</div></div>
+            <div class="nm u">Charizard</div>
+            <div class="no">028/197</div>
+            <span class="src binder">Already here</span>
+          </div>
+        </div>
+
+        <div class="lbl u" style="margin-top:14px">Which Charmeleon stays in the line? <span style="letter-spacing:.04em;text-transform:none">(opens on "Keep". Shown here with "Swap" picked so you can see what it does)</span></div>
+        <div class="choice">
+          <div class="opt">
+            <b class="u">Keep 027/197 (the one there now)</b>
+            <span>The new alt art goes to KB-003 · Front · Red, same as today. Nothing in the line moves.</span>
+          </div>
+          <div class="opt on">
+            <b class="u">Swap in 169/165 (the alt art)</b>
+            <span>The alt art takes the Stage 1 slot. 027/197 comes out and goes where you pick below.</span>
+          </div>
+        </div>
+
+        <div class="lbl u" style="margin-top:14px">Where does 027/197 go? <span style="letter-spacing:.04em;text-transform:none">(anywhere, your choice. Bulk box is suggested)</span></div>
+        <div class="ochips">
+          <span class="ochip on">Bulk box <span style="font-size:8px;padding:1px 5px;border:2px solid var(--ink);background:var(--mint)">Suggested</span></span>
+          <span class="ochip">A front half…</span>
+          <span class="ochip">Another line…</span>
+          <span class="ochip">A collection…</span>
+        </div>
+        <div style="font-size:10px;color:var(--ink-2);margin-top:6px">
+          "A front half" lets you pick any binder and colour. "Another line" opens the line popup for
+          this card too, so it goes into a line or starts one, same as any other back-half move.
+          "A collection" lists your collections. These are the same choices as the Move sheet anywhere else.
+        </div>
+
+        <div class="lbl u" style="margin-top:14px">What moves</div>
+        <div class="moves">
+          <div class="mrow"><span class="verb u" style="color:#9e3217">Take out</span><span class="face s leaving"><span class="art red">CML</span></span><span>Charmeleon 027/197 <span class="where">from KB-003 · Back · Red</span></span></div>
+          <div class="mrow"><span class="verb u">Shelve</span><span class="face s"><span class="art redH">CML</span></span><span>Charmeleon 169/165 <span class="where">→ into its spot, between Charmander and Charizard</span></span></div>
+          <div class="mrow"><span class="verb u">To bulk</span><span class="face s"><span class="art red">CML</span></span><span>Charmeleon 027/197 <span class="where">→ the bulk box</span></span></div>
+        </div>
+
+        <div class="foot">
+          <span class="sum u">Line stays 3/3 the whole time · one step, no gap</span>
+          <button class="btn">Cancel</button>
+          <button class="btn primary">Swap them ▶</button>
+        </div>
+
+        <div class="q">
+          <b>The same screen from the Lines page.</b> Tap a filled slot in any line → "Replace this card"
+          → pick from copies you already own (front half or bulk). Same side-by-side, same "where does the
+          old one go." And if a card simply leaves your collection with nothing replacing it, that's
+          unchanged: the slot goes back to "wanted" and onto your wishlist.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================================================================== 5 -->
+<section id="s5">
+  <div class="stephead"><span class="stepnum">6</span><h2>READY TO APPROVE?</h2></div>
+  <div class="panel questions">
+    <b class="u" style="font-size:11px;letter-spacing:.08em">Your answers, and where they are in this mockup</b>
+    <ol>
+      <li><b>Every move into a back half goes through this popup, on every screen.</b> <i>Sections ①
+        and ②. Each back-half card needs your OK; none is placed on its own.</i></li>
+      <li><b>Replace opens on "keep the one that's there."</b> <i>Section ⑤. You authorize every move.</i></li>
+      <li><b>A card coming out of a line can go anywhere you choose</b>: a front half, another line, a
+        collection or the bulk box. <b>The bulk box is suggested</b>, and you confirm it. <i>Section ⑤.</i></li>
+    </ol>
+    <p style="font-size:11px;margin-top:12px">
+      If this matches what you want, say <b>approved</b> and the Senior BA assigns the build. Otherwise,
+      tell me what to change.
+    </p>
+  </div>
+</section>
+
+</body>
+</html>
