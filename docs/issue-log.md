@@ -7269,8 +7269,17 @@ the card; it must never let her make a second one.
 ## UIL-094 — Placement history loses the card it is about: `placement_decision.copy_id` is ON DELETE SET NULL, so every retired or removed copy leaves a decision row that names no card unless its free-text reason happens to
 
 - **Reported:** 2026-09-23 (found by Full Stack Dev - 2 while designing UIL-089; body by the Senior BA)
-- **Status:** Open — assigned to Full Stack Dev - 2, last in its queue (after UIL-099 E1/E2, the Backfill
-  half of UIL-098 and UIL-097). UIL-089 works
+- **Status:** **Fixed** — PR [#341](https://github.com/viantihu/pokemon-tcg-tracker/pull/341) MERGED to `develop` 2026-09-25 (squash `4e4ece9`),
+  migration `0025` applied on Testing (Deploy run `36207167325`). `placement_decision` gains
+  `catalog_card_id`, `variant` and `dex_variant_raw`, with deliberately NO foreign key (a label that must
+  outlive catalog changes, ruled by the Senior BA); a backfill fills them from `copy` where the link still
+  exists, and a BEFORE INSERT trigger (SECURITY INVOKER) fills them for every one of the 11 decision
+  writers and any future one; `apply_write_ops` is untouched. The Senior BA's BEFORE (run `36206748621`:
+  57 decisions, 57 linked, 0 unlinked, 0 dangling) and AFTER (run `36207593185`: all 57 named, 0 linked
+  but unnamed, every other count unchanged) match; QA: 4 mutant groups killed, including the trigger run
+  as SECURITY DEFINER (which would bypass RLS). Nothing she sees changes; a removed card's history now
+  keeps its name. Awaiting Karvi's confirmation. **Was:** Open — assigned to Full Stack Dev - 2, last in its
+  queue (after UIL-099 E1/E2, the Backfill half of UIL-098 and UIL-097). UIL-089 works
   around it by writing a self-describing `reason` ("Removed — <card id> <variant>, was <placement>"), which
   is the only surviving identity of a removed copy; this entry is the proper fix, a nullable
   `catalog_card_id` (and `variant`) on `placement_decision`, back-filled from `copy` where the link still
@@ -7417,7 +7426,9 @@ the same card.
   verification (no test runs against real Supabase). **Not fixed here, stated in the PR:** the built-in
   sender's 2 emails per hour (custom SMTP before cutover), and an iPad home-screen app's separate cookie
   jar. **Follow-up R2b** (a second link opened where she is already signed in leaves its new session
-  alive; revoke it by session id, never by refreshing hers): PR [#342](https://github.com/viantihu/pokemon-tcg-tracker/pull/342), in review. **Was:**
+  alive; revoke it by session id, never by refreshing hers): DONE, PR [#342](https://github.com/viantihu/pokemon-tcg-tracker/pull/342) MERGED (`bbde468`),
+  the Tech Lead's security pass at `108906b`; QA: 6 mutants killed, including revoking her session and a
+  global sign-out. **Was:**
   re-scoped 2026-09-23: code fix assigned to Full Stack Dev - 2 (after UIL-099's E5 and UIL-098 parts 2
   and 3); config half merged. Config half: PR
   [#315](https://github.com/viantihu/pokemon-tcg-tracker/pull/315) MERGED (`07ff166`) with the token_hash
@@ -7714,7 +7725,14 @@ legitimately do, creating too many), **UIL-089** (the removed-presence memory E2
   card another row already fills now adds to that card instead of retiring the other row's copies
   without review (card-entry audit finding 3). The removal path is deliberately not checked: it moves
   copies and removals together, so it cannot create a mismatch, and checking it would only block her
-  remedy.
+  remedy. **Hardening DONE:** PR [#343](https://github.com/viantihu/pokemon-tcg-tracker/pull/343), migration `0024` (squash `2a48b67`), checks the
+  file-level identity (Dex file total = the record + waiting + dismissed) inside every non-import writer
+  (manual match, stand-in, Retry, Undo), so a write that adds the same amount to the record and the copies
+  (the second-Match-press shape, which the per-card check cannot see) is refused whole with "Import your
+  Dex file again to refresh the record", the same words the panel shows at rest. It also carries the
+  Senior BA's ruling (i) for Undo: a hand-matched card from a row that was already in the earlier import
+  survives the Undo, which also fixes a false "doesn't add up" warning. BEFORE (run `36167924379`, taken by
+  the returning Senior BA (New)) and AFTER (run `36206748621`) match; QA: 10 mutant groups killed.
 - **Priority:** High (Senior BA's read; Karvi to confirm) — a silent wrong count on import is exactly the
   defect class UIL-098 and UIL-099 exist to close.
 - **Area:** Sync
@@ -7850,8 +7868,8 @@ the queue, rather than guessing further now.
   placed while recorded as Normal; check its pocket"; nothing is re-placed automatically, and Undo puts the
   flags back. A flag fix never changes the copy's group or Dex variant, so UIL-100's count is unaffected
   (pinned). **Expected at her next import** (the Senior BA's read, run `36163592989`): "3 variant flags
-  corrected", all 3 Dex "Holo" copies already shelved. Awaiting Karvi's confirmation. Follow-up: the apply
-  toast will mention flag fixes too (display only). **Was:** Open: assigned to Full Stack Dev - 2, right
+  corrected", all 3 Dex "Holo" copies already shelved. Awaiting Karvi's confirmation. Follow-up DONE: the apply
+  toast says how many flags it corrected, PR [#345](https://github.com/viantihu/pokemon-tcg-tracker/pull/345) (`53f0da2`). **Was:** Open: assigned to Full Stack Dev - 2, right
   after UIL-099's #330 merges and ahead of UIL-094 (High before Medium). The fix derives the flag in `matchOps` and in #330's Add-it-back path the
   same way the import does, AND repairs copies already stored wrong: Testing holds 6 hand matches today,
   and Production is promoted from Testing.
@@ -7961,9 +7979,13 @@ re-import).
 ## UIL-104 — A row dismissed on the Sync page makes the next import of a file that still lists it fail whole, and a dismissed row that later leaves the file is never forgotten, so the Count check reads "doesn't add up"
 
 - **Reported:** 2026-09-25 (not from Karvi — found by the Tech Lead while building migration 0024)
-- **Status:** Open: assigned to the Tech Lead (new). **(b) DONE:** PR [#339](https://github.com/viantihu/pokemon-tcg-tracker/pull/339) MERGED to
+- **Status:** **Fixed** — both parts deployed. **(a) DONE:** in PR [#343](https://github.com/viantihu/pokemon-tcg-tracker/pull/343) (the Tech Lead's
+  migration `0024`, squash `2a48b67`, Deploy run `36169432428`): a dismissed row whose line has left the Dex
+  file is dropped like a waiting one, the preview says "1 dismissed row is no longer in your Dex file and
+  will be forgotten", and Undo restores it (ruled by the Senior BA; Karvi told, may overrule); QA killed
+  the dead-end mutant. Awaiting Karvi's confirmation. **(b) DONE:** PR [#339](https://github.com/viantihu/pokemon-tcg-tracker/pull/339) MERGED to
   `develop` 2026-09-25 (squash `72d9c6b`), deployed green (Deploy run `36166517935`): a re-import of a file
-  that still lists a dismissed row refreshes that entry and keeps it DISMISSED (QA: 5 mutants killed; the
+  that still lists a dismissed row refreshes that entry and keeps it DISMISSED (QA: 4 mutants killed; the
   pre-fix control reproduces the unique-key failure). Dismiss is safe to use again. **(a)** rides in the
   Tech Lead's migration `0024` PR (the file-level check), with the preview line "1 dismissed row is no
   longer in your Dex file and will be forgotten". **Was:** Open: assigned to the Tech Lead (new). Interim:
