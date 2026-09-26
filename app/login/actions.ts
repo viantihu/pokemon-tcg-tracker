@@ -13,6 +13,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { isAllowedEmail } from "@/lib/auth/allowlist";
 import { publicEnv } from "@/lib/env";
+import { RATE_LIMITED } from "./messages";
 
 export type SignInState =
   { status: "idle" } | { status: "error"; message: string } | { status: "sent"; email: string };
@@ -26,11 +27,6 @@ async function requestOrigin(): Promise<string> {
   const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   return `${proto}://${host}`;
 }
-
-/** What she reads when Supabase's hourly email limit is hit — the message she used to get was Supabase's. */
-export const RATE_LIMITED =
-  "Too many sign-in emails were sent in the last hour. The limit resets on the hour. If an earlier " +
-  "link is still in your inbox, open that one.";
 
 /**
  * The client that REQUESTS the link, in the IMPLICIT flow (UIL-097).
