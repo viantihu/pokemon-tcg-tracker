@@ -8086,3 +8086,66 @@ handlers for the same missing-catch shape is being tracked separately, not folde
 
 **Cross-reference:** none — first report of this failure shape; distinct from UIL-099/UIL-104's Sync
 defects, which are about what gets written, not about the UI recovering when nothing does.
+
+## UIL-106 — When a save or action call fails in transport (a page left open across a deploy, or a dropped connection), several screens either stick with controls disabled or silently drop her later edits, and none of them tells her to reload
+
+- **Reported:** 2026-09-26 (not from Karvi — found by the Tech Lead's audit for UIL-105)
+- **Status:** Open, assigned to Full Stack Dev - 2, in the Tech Lead's order: autosave first; then
+  Lookup/Line/Plan/`RemoveCopyButton` on #349's shared `reach()` pattern once #349 merges; then
+  Settings/rebind messages; then an app-level `error.tsx`.
+- **Priority:** High (Senior BA's read; Karvi to confirm) — silent loss of Collections edits.
+- **Area:** Collections, Lookup, Lines, Haul Plan, Settings
+- **Env:** `develop` `e210d63`
+
+**One functional requirement, many screens — the same UIL-105 shape (a transport failure has nowhere to
+go) recurring across the app, grouped as one entry per Karvi's rule rather than one per screen.**
+
+**Verified myself, in full, before writing — the worst case.** `createAutosaveScheduler`'s save chain
+([`app/(ui)/coll/autosave.ts:60`](<../app/(ui)/coll/autosave.ts>:60)) is exactly
+`pending = pending.then(() => save(value));` — no rejection handler, and no `.catch` anywhere in the
+module. Once `save(value)` rejects once, `pending` is a rejected promise; every later call chains
+`.then(() => save(value))` onto it with no failure handler, so `.then` just re-propagates the rejection
+and **never calls `save` again** — silently skipping every subsequent autosave, with nothing that
+observes the rejection to tell her. `flush()` ([`:73-81`](<../app/(ui)/coll/autosave.ts>:73)) returns
+that same `pending`, so it inherits the poisoning too. Confirmed one of its four call sites in
+`CollHub.tsx` directly: `requestClose` ([`:1062-1064`](<../app/(ui)/coll/CollHub.tsx>:1062)) does
+`await autosave.flush();` with no try/catch, so once `pending` is poisoned, Close/Esc's own `await`
+throws and everything after it — including whatever actually closes the panel — never runs. The other
+three `flush()` sites (`:1020` immediate changes, `:1048` rebind, `:1334` Save collection) share the same
+unguarded shape.
+
+**Verified myself: the shared `RemoveCopyButton` never disarms on a thrown rejection.**
+([`app/(ui)/_components/RemoveCopyButton.tsx:62`](<../app/(ui)/_components/RemoveCopyButton.tsx>:62))
+does `await onRemove(); setArmed(false);` with no try/catch — if `onRemove()` throws, `setArmed(false)`
+never runs and the two-tap confirm stays armed on "Yes, remove" permanently. This one component is
+shared by every screen that shows a copy (Lookup, Line, Haul Plan, Collections), so the same gap reaches
+all of them through one file.
+
+**Verified myself: the Haul Plan's "Not mine" chain is exactly the two-part claim reported.**
+`removeCopyFromApp` ([`app/(ui)/plan/PlanScreen.tsx:432-434`](<../app/(ui)/plan/PlanScreen.tsx>:432))
+calls `setShelving(row.id)` then `await removeCopy(...)` with no try/catch — a thrown rejection leaves
+`shelving` set forever. `shelveCard`'s own guard
+([`:477-478`](<../app/(ui)/plan/PlanScreen.tsx>:477)), `if (done.has(item.incomingId) || shelving)
+return false;`, then silently blocks **every** later Done/shelve for **any** card, not just the one that
+failed, because it checks `shelving` truthiness with no distinction between "in flight" and "stuck."
+
+**Reported by the Tech Lead's audit, not independently re-verified line-by-line in this pass — recorded
+as findings, not as claims this entry certifies to the same depth as the three above.** Stuck controls:
+Lookup (`LookupScreen.tsx` `onRemove` `:118`, `onMerge` `:138` leaves "Removing…" with Move/Merge/Remove
+disabled; `onMoveConfirm` `:152` leaves the sheet stuck; `openMove` `:98` fails silently); Line
+(`LineScreen.tsx` `onChoose` `:203`, `onRemoveSlotCopy` `:246`, `onMoveConfirm` `:259`, each leaving
+`busy=true`). Lower severity, reset but show no error: Collections rebind (`CollHub.tsx` `:1040`/`:340`)
+and Settings save/reorder/delete/type-band (`SettingsScreen.tsx` `:68`/`:90`); silent with no reset:
+`CardSearchGrid`'s `resolveSpecies` (`:121`) and `CollHub`'s `openNew` (`:175`). Framework-level: `LoginForm`
+and `SignOutButton` throw to Next's default error page, since no `error.tsx` exists under `app/`.
+**Already correct, per the audit** (no fix needed): Backfill, Binders, Collections' own `run()` and
+search, Plan's `onRun`/shelve/move, Lookup's `onPick`, and auth's `FragmentSignIn`.
+
+**Suggested fix, as ordered in the status line above.** Autosave first, since it's the one path that
+loses data rather than just leaving a control stuck. Then the shared `reach()` pattern #349 is building
+for UIL-105, reused across Lookup/Line/Plan/`RemoveCopyButton` rather than four separate fixes for one
+shape. Then the lower-severity reset-but-silent cases. An app-level `error.tsx` last, as a backstop for
+whatever this pass didn't name specifically, not a substitute for fixing the named cases.
+
+**Cross-reference UIL-105** (the same missing-catch shape, first found on the Sync page; this entry is
+every other screen the same audit found it on).
