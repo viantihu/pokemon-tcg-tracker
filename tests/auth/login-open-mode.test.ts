@@ -30,11 +30,22 @@ afterEach(() => {
 });
 
 describe("UIL-127c · the sign-in screen, by mode", () => {
-  it("invite: today's words, and no bot check even with a site key set", async () => {
-    const html = await page({ SIGNUP_MODE: "invite", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "site-key" });
+  it("invite with no site key: today's words, and no bot check", async () => {
+    const html = await page({ SIGNUP_MODE: "invite", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "" });
     expect(html).toContain("This binder is private. Enter the owner email");
     expect(html).toContain("Owner email");
     expect(html).not.toContain("cf-turnstile");
+  });
+
+  it("invite WITH a site key: still invite words, and the bot check shows (so CAPTCHA can go on before sign-up opens)", async () => {
+    const html = await page({
+      SIGNUP_MODE: "invite",
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: "0x4AAA-site-key",
+    });
+    expect(html).toContain("This binder is private. Enter the owner email");
+    expect(html).toMatch(
+      /<form[\s\S]*class="cf-turnstile" data-sitekey="0x4AAA-site-key"[\s\S]*<\/form>/,
+    );
   });
 
   it("open: says an account is created, and labels the field Email", async () => {
