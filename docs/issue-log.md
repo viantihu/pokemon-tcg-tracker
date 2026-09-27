@@ -9059,3 +9059,45 @@ is a design change to a rule stated on purpose, not a bug fix.
 is one of the three options that entry names) and **UIL-030** ("the user must be able to track where ALL
 cards are, including blocks" — this backlog item is the energy-specific instance of that same standing
 ask).
+
+## UIL-125 — On a phone, the Haul Plan's spotlight panel covers more than half the screen, leaving little room to work the card list
+
+- **Reported:** 2026-09-27 (Karvi, confirmed "Yes, log it" via the UX Dev session's relay).
+- **Status:** Open, assigned to the UX Dev to build (it found it): a CSS/layout change around
+  `app/globals.css:1670-1677`'s `56vh` rule, with a DOM or layout check at 375 and 390.
+- **Priority:** Medium (Senior BA's read: usability on a phone, no data risk).
+- **Area:** Haul Plan
+- **Env:** Testing, `develop` `b34f7ff`, measured at 375×812 (phone width)
+
+**Confirmed the measurement, and found it isn't a missing mobile rule — it's an existing one that's
+still too generous.** `.spot`'s base rule ([`app/globals.css:567-583`](../app/globals.css:567)) is
+`position: sticky`. At `≤1080px` ([`:1645-1647`](../app/globals.css:1645)) it drops to `position:
+static` — not sticky, not overlapping anything — but at the narrower `≤720px`
+([`:1670-1677`](../app/globals.css:1670)), which covers a 375px phone, it becomes sticky again: `order:
+-1; position: sticky; top: 0; z-index: 8; max-height: 56vh; overflow: auto;`. At an 812px viewport,
+`56vh` is 454.7px — matching the reported "~455px" almost exactly, and confirming the reported height is
+this rule doing exactly what it says, not an accident or an unrelated overflow. The worklist gets
+whatever's left below it, roughly the bottom 40% of the screen at this viewport, and any row scrolled up
+underneath — its line badge included — is covered.
+
+**Confirmed this predates UIL-117 and PR #392 didn't touch it.** `gh pr diff 392` for `app/globals.css`
+has no hits for `.spot` or `56vh` — the rule is unchanged by that PR, consistent with Dev 2's own
+measurement (taken while working on UIL-117 PR 4) and the UX Dev's independent 375px screenshot
+(panel from roughly y 190 to 645, a 455px span) agreeing with it.
+
+**No existing entry to group this with — checked first, per the instruction.** Grepped every UIL title
+for "phone," "375," "mobile" and "spotlight" — nothing already covers "Haul Plan usable on a phone" as a
+surface; UIL-058 is the closest by component (spotlight) but is a desktop-only progress-bar overlap, a
+different mechanism entirely. This is a new entry, not a duplicate.
+
+**Functional requirement, stated by the UX Dev at intake.** On a phone she must be able to see and work
+the card list while a card is in hand — `56vh` for the spotlight alone doesn't leave enough of the
+screen for that.
+
+**Suggested fix, as scoped at intake, not decided here.** A compact or collapsible spotlight at `≤640px`
+(narrower than today's `≤720px` breakpoint, or replacing its `56vh` cap with something smaller), or
+dropping `sticky` on phones the way `≤1080px` already does — either directly changes the one rule
+identified above, not a new mobile layer.
+
+**Cross-reference UIL-058** (the same `.spot` component, a different desktop-only overlap bug — not the
+same mechanism, noted only to distinguish the two).
