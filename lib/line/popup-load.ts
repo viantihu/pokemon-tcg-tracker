@@ -201,11 +201,19 @@ export async function loadLinePopupModel(
       },
       stages,
     };
-  } else if (proposal.kind === "add") {
+  } else {
+    // ADD lays out the line with the card landing in its open slot; REPLACE the same, with the card there now
+    // beside it (v3 section 5: the two cards for the one slot, side by side).
     const line = lines.find((l) => l.id === proposal.lineId);
     const lineSlots = slotsByLine.get(proposal.lineId) ?? [];
-    if (!line || !lineSlots.some((s) => s.id === proposal.slotId)) {
+    const target = lineSlots.find((s) => s.id === proposal.slotId);
+    if (!line || !target) {
       throw new Error("That line slot no longer exists — reload the screen and pick again.");
+    }
+    const current = target.copy_id ? copyById.get(target.copy_id) : undefined;
+    const currentCard = current ? catalogById.get(current.catalog_card_id) : undefined;
+    if (proposal.kind === "replace" && (target.state !== "filled" || !current || !currentCard)) {
+      throw new Error("That slot is no longer filled — add this card to it instead of replacing.");
     }
     hereBinder = line.binder_id;
     hereBand = line.color_band;
@@ -240,8 +248,9 @@ export async function loadLinePopupModel(
       };
     });
     const filledBefore = lineSlots.filter((s) => s.state === "filled").length;
+    const replacing = proposal.kind === "replace";
     model = {
-      mode: "add",
+      mode: replacing ? "replace" : "add",
       copyId: copy.id,
       card: { ...identity(card, hereBand), locale: cardLocale },
       line: {
@@ -252,13 +261,27 @@ export async function loadLinePopupModel(
         bandDisplay: bandDisplay.get(hereBand) ?? hereBand,
         locale: localeOfLine(line.id),
         filledBefore,
-        filledAfter: filledBefore + 1,
+        filledAfter: replacing ? filledBefore : filledBefore + 1,
         total: lineSlots.length,
       },
       stages,
+      ...(replacing && current && currentCard
+        ? {
+            replace: {
+              slotId: target.id,
+              stageIndex: target.stage_index,
+              current: {
+                copyId: current.id,
+                card: identity(currentCard, hereBand),
+                where: whereIs(current),
+              },
+              incoming: { copyId: copy.id, card: identity(card, hereBand), where: whereIs(copy) },
+              defaultKeep: proposal.defaultKeep,
+              suggestedOutgoing: { kind: "bulk" as const },
+            },
+          }
+        : {}),
     };
-  } else {
-    throw new Error("Replacing a card in a line is not available here yet.");
   }
 
   const existingLines: LinePopupExistingLine[] = (options?.existingLines ?? [])

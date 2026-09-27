@@ -3586,6 +3586,127 @@ button.subhead.folded:hover {
   background: var(--note);
   box-shadow: 2px 2px 0 var(--ink);
 }
+/* UIL-117 PR 3 · v3 section 5: two cards for one slot, and the two-option choices (replace; UIL-069 colour). */
+.lp-slot.lp-two {
+  width: 240px;
+}
+.lp-pair {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.lp-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.lp-side.lp-in .face {
+  box-shadow:
+    0 0 0 4px var(--note),
+    2px 2px 0 rgba(60, 60, 59, 0.2);
+}
+.lp-side.lp-out .face {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}
+.lp-choice {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.lp-opt {
+  flex: 1;
+  min-width: 220px;
+  border: 3px solid var(--ink);
+  background: var(--panel);
+  padding: 10px;
+  font-family: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.lp-opt.on {
+  background: var(--note);
+}
+.lp-opt b {
+  display: block;
+  font-size: 11px;
+  margin-bottom: 4px;
+  letter-spacing: 0.04em;
+}
+.lp-opt span {
+  font-size: 10px;
+  color: var(--ink-2);
+}
+.lp-hint {
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.lp-sugg {
+  margin-left: 6px;
+  padding: 0 5px;
+  line-height: 1.3;
+  border: 2px solid var(--ink);
+  background: var(--mint);
+  font-size: 8px;
+}
+.lp-dest {
+  margin-top: 4px;
+}
+.lp-colour {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 4px;
+  font-size: 11px;
+}
+.lp-colour .chip {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+}
+/* "Replace this card" (UIL-117 PR 3): pick one of her copies, image first (her visual-search rule). */
+.rp-hint {
+  font-size: 11px;
+  color: var(--ink-2);
+  margin-bottom: 12px;
+}
+.rp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+}
+.rp-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  border: 3px solid var(--ink);
+  background: var(--panel);
+  font-family: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+.rp-card:hover:not(:disabled) {
+  background: var(--note);
+}
+.rp-nm {
+  font-size: 10px;
+  font-weight: 700;
+}
+.rp-no {
+  font-size: 9px;
+  color: var(--ink-2);
+}
+.rp-where {
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+}
 /* v3: the strip wraps on a phone, so its arrows would point past the edge; Confirm stays in reach. */
 @media (max-width: 640px) {
   .lp-arrow {
