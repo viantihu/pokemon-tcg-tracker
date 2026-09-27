@@ -67,6 +67,8 @@ export interface PlanItem {
    * front-half Done), so the spotlight names the line and offers "⇄ Swap this one into the line…". Null otherwise.
    */
   extraCopyOf?: ExtraCopyOf | null;
+  /** The card's species (dex ids), so the step-through can tell which line a waiting card goes into (UIL-120). */
+  dexIds?: number[];
 }
 
 /** The line a plain extra copy duplicates, in her words (UIL-126). */

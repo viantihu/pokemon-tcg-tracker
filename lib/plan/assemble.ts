@@ -162,5 +162,6 @@ export function toPlanItem(
     lineProposal: l.lines ? lineProposalFor(result, l.lines) : null,
     lineName: l.lines ? lineNameFor(result, l.lines) : null,
     extraCopyOf: l.lines ? extraCopyOfFor(result, l.lines) : null,
+    dexIds: [...incoming.card.dexId],
   };
 }

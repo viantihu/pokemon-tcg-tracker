@@ -97,12 +97,28 @@ const LINE = {
   total: 3,
 };
 /** A stage with no card yet: while it is there, a confirm does not leave the line done (UIL-120). */
+/**
+ * Species by card name (UIL-120: the step-through opens the next card only for THIS line). In these fixtures the line's
+ * open Stage 2 wants the SECOND card's species ("Kadabra"), so a Charmeleon-then-Kadabra haul is one line's two cards;
+ * "Machop" is always another line's card.
+ */
+const DEX: Record<string, number> = {
+  Abra: 63,
+  Charmander: 4,
+  Charmeleon: 5,
+  Charizard: 6,
+  Kadabra: 64,
+  Machop: 66,
+};
 const WANTED = {
   stageIndex: 2,
   stage: "Stage2",
   state: "wanted" as const,
   card: identity("Charizard"),
+  dexId: DEX.Kadabra,
 };
+/** The line as the server reads it after a confirm that leaves its Stage 2 open (for the second card's species). */
+const LINE_AFTER = { lineId: "L1", openDexIds: [DEX.Kadabra], locale: "en" };
 /** The same popup model with nothing left to chase: the confirm leaves its line done. */
 const withNothingLeft = (m: LinePopupModel): LinePopupModel => ({
   ...m,
@@ -121,6 +137,7 @@ function modelFor(name: string, proposal: LineProposal): LinePopupModel {
           stageIndex: 0,
           stage: "Basic",
           state: "pullable",
+          dexId: DEX.Charmander,
           card: identity("Charmander"),
           pull: { copyId: "own-charmander", fromLabel: "KB-001 · Front · Red" },
           // UIL-121: left unticked, the stage is hers to decide, with this printing suggested (never chosen).
@@ -193,7 +210,13 @@ function park(
           : proposal
             ? "SWAP"
             : "FRONT";
-    return { ...it, action, lineProposal: proposal, lineName: lineNames[it.name] ?? null };
+    return {
+      ...it,
+      action,
+      lineProposal: proposal,
+      lineName: lineNames[it.name] ?? null,
+      dexIds: DEX[it.name] !== undefined ? [DEX[it.name]] : [],
+    };
   });
   const plan: RunPlanResult = { ...base, groups: groupPlan(items, ["orange"]) };
   window.sessionStorage.setItem(
@@ -228,6 +251,7 @@ beforeEach(() => {
     counts: { routed: 1, lines: 1, slots: 1, decisions: 1, wishlist: 0 },
     stamp: "s2",
     lineDone: false,
+    line: LINE_AFTER,
   });
   runHaulPlan.mockImplementation(async (p: DraftPayloadItem[]) => routedPlan(p));
   lineModelAction.mockImplementation(async (copyId: string, proposal: LineProposal) => ({
@@ -241,6 +265,7 @@ async function mount(
   rows: { name: string; proposal: LineProposal | null }[],
   bandMismatch: unknown = null,
   lineNames: Record<string, string> = {},
+  screenProps: Partial<Parameters<typeof PlanScreen>[0]> = {},
 ) {
   const { items } = park(rows, lineNames);
   refreshSpotlightAction.mockImplementation(async ({ card: c }: { card: { id: string } }) => ({
@@ -251,7 +276,7 @@ async function mount(
     bandMismatch,
   }));
   const user = userEvent.setup();
-  render(createElement(PlanScreen, { stateStamp: "s" }));
+  render(createElement(PlanScreen, { stateStamp: "s", ...screenProps }));
   await screen.findAllByText(rows[0].name);
   return user;
 }
@@ -525,16 +550,22 @@ describe("UIL-117 4b · the popup", () => {
     await waitFor(() => expect(within(popup()).getByText(/Line card 2 of 2/)).toBeTruthy());
   });
 
-  it("UIL-120: a start's button says '· next' until her ticked pull leaves nothing to chase", async () => {
+  it("UIL-120: a start's button says '· next' while another haul card could fill its open Basic, until she ticks her pull", async () => {
     lineModelAction.mockImplementation(async (copyId: string, proposal: LineProposal) => ({
       ok: true,
       model: withNothingLeft(modelFor(copyId.replace(/^id-/, ""), proposal)),
     }));
+    // A second Charmander waits in the haul: it could fill the Basic only while her own stays unpulled.
     const user = await mount([
       { name: "Charmeleon", proposal: START },
-      { name: "Kadabra", proposal: START },
+      { name: "Charmander", proposal: START },
     ]);
-    await user.click(screen.getAllByRole("button", { name: "＋ Starts a line" })[0]);
+    // Charmeleon's own popup (the plan sorts Charmander first).
+    await user.click(
+      within(document.getElementById("plan-row-id-Charmeleon")!).getByRole("button", {
+        name: "＋ Starts a line",
+      }),
+    );
     await screen.findByRole("dialog", { name: "Start a line" });
     // The Basic stays in her front half unless she ticks it; she chases it, so the line still has it to chase.
     await user.click(within(popup()).getByRole("button", { name: "Chase this" }));
@@ -662,12 +693,89 @@ describe("UIL-117 4b · the popup", () => {
     expect(await screen.findByText("Line closed")).toBeTruthy();
   });
 
+  it("UIL-120, her retest: a new line with 2 placed and its 3rd a placeholder never jumps to ANOTHER line's card", async () => {
+    // Karvi, 2026-09-27: "Confirm & next" never opens another line's card by itself.
+    const OTHER: LineProposal = { kind: "add", lineId: "L2", slotId: "S9" };
+    lineModelAction.mockImplementation(async (copyId: string, proposal: LineProposal) => {
+      const m = modelFor(copyId.replace(/^id-/, ""), proposal);
+      // Her new line wants a Charizard for its Stage 2; nothing in this haul is one.
+      const stages = m.stages.map((st) =>
+        st.stage === "Stage2" ? { ...st, dexId: DEX.Charizard } : st,
+      );
+      return {
+        ok: true,
+        model: {
+          ...m,
+          stages: [
+            ...stages,
+            ...(proposal.kind === "start" ? [{ ...WANTED, dexId: DEX.Charizard }] : []),
+          ],
+        },
+      };
+    });
+    shelveCardAction.mockResolvedValue({
+      ok: true,
+      counts: { routed: 1, lines: 1, slots: 3, decisions: 2, wishlist: 0 },
+      stamp: "s2",
+      lineDone: false,
+      line: { lineId: "L-new", openDexIds: [DEX.Charizard], locale: "en" },
+    });
+    const user = await mount(
+      [
+        { name: "Charmeleon", proposal: START },
+        { name: "Machop", proposal: OTHER }, // another line's card, still waiting
+      ],
+      null,
+      { Charmeleon: "Charizard" },
+    );
+    await user.click(
+      within(document.getElementById("plan-row-id-Charmeleon")!).getByRole("button", {
+        name: /Starts Charizard line/,
+      }),
+    );
+    await screen.findByRole("dialog", { name: "Start a line" });
+    await user.click(within(popup()).getByRole("checkbox")); // her Charmander: the 2nd card placed
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    // Nothing else in this haul goes into this line: no next is promised.
+    expect(confirmIn().textContent).not.toContain("next");
+    await user.click(confirmIn());
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
+    // PRE-FIX: Machop's popup opened ("Line card 2 of 2").
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(lineModelAction.mock.calls.map((c) => c[0])).toEqual(["id-Charmeleon"]);
+    expect(
+      await screen.findByText("That's every card you have for the Charizard line"),
+    ).toBeTruthy();
+  });
+
+  it("UIL-120: an open line with no more haul cards for it says '▶', stops, and says why", async () => {
+    const user = await mount([
+      { name: "Charmeleon", proposal: ADD },
+      { name: "Machop", proposal: { kind: "add", lineId: "L2", slotId: "S9" } },
+    ]);
+    await user.click(
+      within(document.getElementById("plan-row-id-Charmeleon")!).getByRole("button", {
+        name: "◆ Adds to a line",
+      }),
+    );
+    await screen.findByRole("dialog", { name: "Add to a line" });
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    expect(confirmIn().textContent).not.toContain("next");
+    await user.click(confirmIn());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Named as the popup names the line: its top stage.
+    expect(
+      await screen.findByText("That's every card you have for the Charizard line"),
+    ).toBeTruthy();
+  });
+
   it("UIL-120: a confirm that leaves a stage open still opens the next one, as today", async () => {
     shelveCardAction.mockResolvedValue({
       ok: true,
       counts: { routed: 1, lines: 0, slots: 0, decisions: 1, wishlist: 0 },
       stamp: "s2",
       lineDone: false,
+      line: LINE_AFTER,
     });
     const user = await mount([
       { name: "Charmeleon", proposal: ADD },

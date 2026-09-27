@@ -23,13 +23,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // `import type` below is fine because types are erased; a VALUE import is not.
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { progressPips } from "@/lib/plan/progress";
-import type { BandMismatchChoice, PlanBandGroup, PlanItem, ProposedPull } from "@/lib/plan";
+import type {
+  BandMismatchChoice,
+  LineAfterWrite,
+  PlanBandGroup,
+  PlanItem,
+  ProposedPull,
+} from "@/lib/plan";
 import type { BlockNeedCandidate, MoveDestination, MoveOptions } from "@/lib/line/types";
 import type { LineJoinOptions } from "@/lib/line/join-options";
 // Leaf import of the pure move module (its only dependency is ./types; the `WriteOp` it names is a
 // type-only import), so bringing `describeMove` into the browser bundle drags in no server code.
 import { describeMove, moveNameLookups, type MoveNameLookups } from "@/lib/line/move";
-import { cardTag, stripLocaleNamespace } from "@/lib/catalog/locale";
+import { cardTag, localeOfId, stripLocaleNamespace } from "@/lib/catalog/locale";
 import { BandChip } from "../_components/BandChip";
 import { NoBinderNotice } from "../_components/NoBinderNotice";
 import { CardFace } from "../_components/CardFace";
@@ -63,6 +69,7 @@ import {
 import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
 import { lineModelAction } from "../_components/line-popup-actions";
 import { PlanLinePopup } from "./PlanLinePopup";
+import { sameLineWaiting, type WaitingHaulCard } from "@/lib/plan/line-done";
 
 /* ------------------------- resuming a plan in progress (UIL-006) ------------------------- */
 
@@ -732,7 +739,7 @@ export function PlanScreen({
     item: PlanItem,
     /** From the line popup (UIL-117): her line choice, or her "file by its own colour" destination. */
     extra?: { lineChoice?: LineChoice; override?: MoveDestination },
-  ): Promise<false | { lineDone: boolean }> {
+  ): Promise<false | { lineDone: boolean; line?: LineAfterWrite }> {
     if (done.has(item.incomingId) || shelving) return false;
     const entry = draft.find((d) => d.id === item.incomingId);
     if (!entry) return false;
@@ -822,7 +829,7 @@ export function PlanScreen({
       // Roll the cache forward rather than letting the write invalidate it (see shelveCardAction).
       setLiveStamp(res.stamp);
       setDone((prev) => new Set(prev).add(item.incomingId));
-      return { lineDone: res.lineDone === true };
+      return { lineDone: res.lineDone === true, ...(res.line ? { line: res.line } : {}) };
     } finally {
       setShelving(null);
     }
@@ -1026,11 +1033,25 @@ export function PlanScreen({
     });
   }
   /** The next line card after this one that is not shelved yet, wrapping round; the step-through's one rule. */
-  function nextLineCard(afterId: string): PlanItem | undefined {
+  /** The cards still waiting in this haul, other than this one, as the step-through reads them (UIL-120). */
+  function waitingHaulCards(exceptId: string): WaitingHaulCard[] {
+    return flatItems
+      .filter((it) => it.incomingId !== exceptId && !done.has(it.incomingId))
+      .map((it) => ({
+        id: it.incomingId,
+        dexIds: it.dexIds ?? [],
+        locale: localeOfId(it.tcgdexId),
+      }));
+  }
+
+  /**
+   * The next card for THIS line, after this one in the plan, wrapping round (UIL-120, Karvi 2026-09-27: "Confirm &
+   * next" never opens another line's card by itself). The line is the server's read of it after her write.
+   */
+  function nextSameLineCard(afterId: string, line: LineAfterWrite): PlanItem | undefined {
+    const same = new Set(sameLineWaiting(line.openDexIds, line.locale, waitingHaulCards(afterId)));
     const after = flatItems.slice((flatIndex.get(afterId) ?? -1) + 1);
-    return [...after, ...flatItems].find(
-      (it) => it.lineProposal && it.incomingId !== afterId && !done.has(it.incomingId),
-    );
+    return [...after, ...flatItems].find((it) => same.has(it.incomingId));
   }
 
   /**
@@ -1101,16 +1122,27 @@ export function PlanScreen({
     // A line write can change what the other cards would do (a card that would have started this line now joins
     // it), so the rest re-route and their badges follow; the batch runs a moment later, as for any change.
     if (extra.lineChoice) scheduleReroute();
-    const next = shelved.lineDone ? undefined : nextLineCard(item.incomingId);
-    // The one time a confirm does not lead on, say why, so the popup closing reads as a finish (UX review of #402).
+    // "Confirm & next" opens only the next card for THIS line (UIL-120, her ruling); a closed line has none.
+    const next =
+      !shelved.lineDone && shelved.line
+        ? nextSameLineCard(item.incomingId, shelved.line)
+        : undefined;
+    if (next) {
+      openLinePopup(next);
+      return;
+    }
+    // A confirm that does not lead on says why, so the popup closing reads as a finish (UX review of #402).
     if (shelved.lineDone) {
       flashToast(opts.lineName ? `Line closed · ${opts.lineName} line` : "Line closed");
+    } else if (shelved.line) {
+      flashToast(
+        opts.lineName
+          ? `That's every card you have for the ${opts.lineName} line`
+          : "That's every card you have for this line",
+      );
     }
-    if (next) openLinePopup(next);
-    else {
-      closeLinePopup();
-      advance();
-    }
+    closeLinePopup();
+    advance();
   }
 
   function advance() {
@@ -1226,10 +1258,10 @@ export function PlanScreen({
               : {
                   index: lineCards.findIndex((it) => it.incomingId === popLive.incomingId) + 1,
                   total: lineCards.length,
-                  // " · next ▶" only when confirming really opens another one (UX review of #392).
-                  next: !!nextLineCard(popLive.incomingId),
                 }
           }
+          // " · next ▶" only when confirming really opens another card for this line (UIL-120; UX review of #392).
+          waiting={waitingHaulCards(popLive.incomingId)}
           busy={shelving === popLive.incomingId}
           error={error}
           onConfirm={(choice, lineName) =>
@@ -1429,7 +1461,7 @@ function PlanView(props: {
   done: Set<string>;
   /** Writes ONE card now; resolves true when it was shelved (UIL-027). */
   /** Truthy once written; `lineDone` says the line it concerned has nothing left to chase (UIL-120). */
-  shelveCard: (item: PlanItem) => Promise<false | { lineDone: boolean }>;
+  shelveCard: (item: PlanItem) => Promise<false | { lineDone: boolean; line?: LineAfterWrite }>;
   /** Draft id of the card mid-write, so only its own control shows a pending state. */
   shelving: string | null;
   /** The spotlight card re-derived against current state, keyed by draft id (UIL-045). */

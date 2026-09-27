@@ -9,7 +9,7 @@
  * (`await getOwnerContext()` — RLS-scoped client + session owner id; see lib/plan/session.ts).
  */
 
-import { availableVariants, toCardVariants, toCatalogCard } from "@/lib/plan";
+import { availableVariants, toCardVariants, toCatalogCard, type LineAfterWrite } from "@/lib/plan";
 import {
   commitCardPlacement,
   deriveSpotlightPlacement,
@@ -195,8 +195,11 @@ export async function shelveCardAction(input: {
   /** Her choice in the line popup, for a card headed into a line (UIL-117). */
   lineChoice?: LineChoice | null;
 }): Promise<
-  /** `lineDone`: the line her confirm concerned has nothing left to chase, so the step-through stops (UIL-120). */
-  | { ok: true; counts: CommitCounts; stamp: string; lineDone: boolean }
+  /**
+   * `lineDone`: the line her confirm concerned has nothing left to chase; `line`: what it still wants, so the
+   * step-through opens the next card only for THIS line (UIL-120). Both absent for a card with no line choice.
+   */
+  | { ok: true; counts: CommitCounts; stamp: string; lineDone: boolean; line?: LineAfterWrite }
   /**
    * Not a failure: the placement moved under her, nothing was written, and the screen should show
    * `fresh` and let her look again. Distinguished from `ok: false` so the UI does not offer "retry"
@@ -222,7 +225,13 @@ export async function shelveCardAction(input: {
       lineChoice: input.lineChoice ?? null,
     });
     const stamp = await loadPlanFingerprint(db, input.pendingCopyIds ?? []);
-    return { ok: true, counts: res.counts, stamp, lineDone: res.lineDone === true };
+    return {
+      ok: true,
+      counts: res.counts,
+      stamp,
+      lineDone: res.lineDone === true,
+      ...(res.line ? { line: res.line } : {}),
+    };
   } catch (err) {
     if (err instanceof PlacementChangedError) {
       // `actualDigest` is what the server just derived, so the next Done is still guarded rather than

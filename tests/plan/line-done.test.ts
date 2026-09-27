@@ -19,7 +19,7 @@ import {
   deriveSpotlightPlacement,
   type DraftItem,
 } from "@/lib/plan";
-import { lineDoneFor } from "@/lib/plan/line-done";
+import { lineDoneFor, sameLineWaiting } from "@/lib/plan/line-done";
 import {
   CHARIZARD_BASE1_4,
   CHARMANDER_SV03_026,
@@ -140,6 +140,18 @@ async function seedLine(opts: {
   }
 }
 
+describe("sameLineWaiting, the one next-card rule (UIL-120)", () => {
+  it("only a waiting card of a species an open stage wants, in the line's language", () => {
+    const waiting = [
+      { id: "cml", dexIds: [5], locale: "en" },
+      { id: "cml-ja", dexIds: [5], locale: "ja" },
+      { id: "machop", dexIds: [66], locale: "en" },
+    ];
+    expect(sameLineWaiting([5], "en", waiting)).toEqual(["cml"]);
+    expect(sameLineWaiting([], "en", waiting)).toEqual([]);
+  });
+});
+
 describe("lineDoneFor, the one rule: the line reads closed, OR no slot waits (the Senior BA's ruling)", () => {
   it("done when no slot is a placeholder: filled and block slots both count", () => {
     expect(lineDoneFor(["filled", "filled"])).toBe(true);
@@ -241,7 +253,19 @@ describe("UIL-120 (a) · a join or a start that leaves the line done", () => {
         stages: { 2: { kind: "chase", catalogCardId: CHARIZARD_BASE1_4.tcgdexId } },
       },
     });
-    expect(first.lineDone).toBe(false); // the Charizard stage is still open: it steps on
+    expect(first.lineDone).toBe(false); // the Charizard stage is still open
+    // …and the line as the server reads it says what that stage wants, so the step-through opens only a card for
+    // THIS line (UIL-120, her ruling): here the Charizard in her haul.
+    expect(first.line).toMatchObject({
+      openDexIds: [CHARIZARD_BASE1_4.dexId[0]],
+      locale: "en",
+    });
+    expect(
+      sameLineWaiting(first.line!.openDexIds, first.line!.locale, [
+        { id: CZD.id, dexIds: CHARIZARD_BASE1_4.dexId, locale: "en" },
+        { id: "another-line", dexIds: [66], locale: "en" },
+      ]),
+    ).toEqual([CZD.id]);
     const add = await proposalFor(CZD);
     if (add?.kind !== "add") throw new Error(`expected an add, got ${add?.kind}`);
     const last = await commit({

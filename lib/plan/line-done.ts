@@ -21,6 +21,30 @@
 
 import { lineReadsClosed } from "@/lib/line/popup";
 
+/** A card still waiting in this haul, as the step-through reads it: its species, in its language. */
+export interface WaitingHaulCard {
+  id: string;
+  dexIds: readonly number[];
+  locale: string;
+}
+
+/**
+ * The haul cards still waiting that go into THIS line (UIL-120, Karvi 2026-09-27: "Confirm & next" never opens another
+ * line's card by itself): a card of a species one of the line's open stages wants, in the line's language. ONE
+ * predicate for the step-through's `next` (fed the line as the server reads it after the write) and for the popup's
+ * "· next" label (fed the line as the popup lays it out), so the label never promises a jump that will not happen.
+ */
+export function sameLineWaiting(
+  openDexIds: readonly number[],
+  lineLocale: string,
+  waiting: readonly WaitingHaulCard[],
+): string[] {
+  const open = new Set(openDexIds);
+  return waiting
+    .filter((c) => c.locale === lineLocale && c.dexIds.some((d) => open.has(d)))
+    .map((c) => c.id);
+}
+
 /** The one rule: the line reads closed, or it has slots and none is a placeholder still waiting for a card. */
 export function lineDoneFor(slotStates: readonly string[], status?: string | null): boolean {
   return (

@@ -29,7 +29,7 @@ import {
 } from "@/lib/line/popup";
 import { LinePopup } from "../_components/LinePopup";
 import { useEscapeLayer } from "../_components/escape-layer";
-import { lineDoneFor } from "@/lib/plan/line-done";
+import { lineDoneFor, sameLineWaiting, type WaitingHaulCard } from "@/lib/plan/line-done";
 
 export function PlanLinePopup({
   item,
@@ -38,6 +38,7 @@ export function PlanLinePopup({
   loadModelFor,
   bandMismatch,
   position,
+  waiting,
   extraCopy = false,
   busy,
   error,
@@ -60,7 +61,12 @@ export function PlanLinePopup({
    * "Line card k of N" in this haul, and whether another unshelved line card remains after this one. Absent for the
    * swap on a plain extra copy (UIL-126), which is not in the step-through.
    */
-  position?: { index: number; total: number; next: boolean };
+  position?: { index: number; total: number };
+  /**
+   * The other cards still waiting in this haul. "· next" only when one of them goes into THIS line, by the same
+   * predicate the step-through opens the next card with (`sameLineWaiting`, UIL-120).
+   */
+  waiting: WaitingHaulCard[];
   /**
    * UIL-126: opened from a plain extra copy's "⇄ Swap this one into the line…". Swap is picked, the card coming out to
    * bulk; Keep is her normal Done, this card to where an extra copy goes (the front half), named in the popup.
@@ -154,6 +160,19 @@ export function PlanLinePopup({
       model.line.status,
     );
 
+  // Whether confirming leads on to another card for THIS line: a waiting card of a species one of its stages will
+  // still want after this confirm (a wanted stage, or a pull she did not tick), in the line's language.
+  const openAfter = model.stages
+    .filter(
+      (st) =>
+        st.state === "wanted" ||
+        (st.state === "pullable" && !(st.pull && ticked.includes(st.pull.copyId))),
+    )
+    .map((st) => st.dexId)
+    .filter((d): d is number => d !== undefined);
+  const nextHere =
+    colour !== "own" && sameLineWaiting(openAfter, model.line.locale, waiting).length > 0;
+
   return (
     <div className="lp-overlay">
       <LinePopup
@@ -163,7 +182,7 @@ export function PlanLinePopup({
         onCancel={onCancel}
         onConfirm={(choice) => onConfirm(choice, model.stages.at(-1)?.card?.name ?? null)}
         onSwitch={(p) => setProposal(p)}
-        position={position ? { ...position, next: position.next && !completes } : undefined}
+        position={position ? { ...position, next: !completes && nextHere } : undefined}
         busy={busy}
         error={error ?? loadError}
         incomingLabel="New · this haul"
