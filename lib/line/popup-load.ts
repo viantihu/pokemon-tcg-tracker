@@ -129,42 +129,6 @@ export async function loadLinePopupModel(
     variant: (copy.variant as Variant) ?? "normal",
   };
 
-  // UIL-096: every line this family has, anywhere; each with the open slot THIS card's species would take there.
-  const index = buildLineJoinIndex(
-    lines.map((l) => ({
-      id: l.id,
-      rootDexId: l.root_dex_id,
-      colorBand: l.color_band,
-      binderId: l.binder_id,
-    })),
-    slotsByLine,
-    catalog,
-    cardOfCopy,
-  );
-  const options = joinOptionsFor(card, index, typeColorMap, catalog);
-  const openSlotFor = (lineId: string): string | null =>
-    (slotsByLine.get(lineId) ?? []).find(
-      (s) =>
-        s.state !== "filled" &&
-        !!s.target_catalog_card_id &&
-        (catalogById.get(s.target_catalog_card_id)?.dexId ?? []).some((d) =>
-          card.dexId.includes(d),
-        ),
-    )?.id ?? null;
-
-  /** An existing line's tile image: its most evolved card she holds there, else its top target. */
-  const faceOfLine = (lineId: string, bandKey: string): CardIdentity | null => {
-    const lineSlots = slotsByLine.get(lineId) ?? [];
-    for (const s of [...lineSlots].reverse()) {
-      const held = s.state === "filled" && s.copy_id ? cardOfCopy(s.copy_id) : null;
-      const cc = held ? catalogById.get(held) : undefined;
-      if (cc) return identity(cc, bandKey);
-    }
-    const top = lineSlots.at(-1)?.target_catalog_card_id;
-    const target = top ? catalogById.get(top) : undefined;
-    return target ? identity(target, bandKey) : null;
-  };
-
   let model: Omit<LinePopupModel, "existingLines">;
   let hereBinder: string | null;
   let hereBand: string;
@@ -316,17 +280,136 @@ export async function loadLinePopupModel(
     };
   }
 
-  const existingLines: LinePopupExistingLine[] = (options?.existingLines ?? [])
-    .filter((l) => l.lineId !== model.line.lineId)
+  const existingLines = familyLinesFrom(
+    { card, lines, slotsByLine, catalog, catalogById, typeColorMap, cardOfCopy, identity },
+    { binderName, bandDisplay },
+    { binderId: hereBinder, band: hereBand, locale: cardLocale },
+    model.line.lineId,
+  );
+  return { ...model, existingLines };
+}
+
+/**
+ * UIL-096 for a screen with no single moving copy (Backfill's confirm sheet, UIL-117 PR 5): every line the SEED
+ * card's family already has, anywhere, from fresh state, each with the open slot that card's species would take
+ * there, its tile image, and whether it is in this binder and band. Read only; the same list the popup's START shows.
+ */
+export async function loadFamilyLines(
+  db: DbClient,
+  seedTcgdexId: string,
+  here: { binderId: string | null; band: string },
+): Promise<LinePopupExistingLine[]> {
+  const [catalogRows, typeMapRows, copies, lines, slots, binders, bands] = await Promise.all([
+    catalogCardRepo.listAll(db),
+    typeColorMapRepo.list(db),
+    copyRepo.list(db),
+    evolutionLineRepo.list(db),
+    lineSlotRepo.list(db),
+    binderRepo.list(db),
+    colorBandRepo.listOrdered(db),
+  ]);
+  const catalog = catalogRows.map(toCatalogCard);
+  const catalogById = new Map(catalog.map((c) => [c.tcgdexId, c]));
+  const card = catalogById.get(seedTcgdexId);
+  if (!card) throw new Error("That card's catalog entry is missing — reload and try again.");
+  const imageUrlById = new Map(catalogRows.map((r) => [r.tcgdex_id, r.image_url]));
+  const typeColorMap: TypeColorMap = {};
+  for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
+  const copyById = new Map(copies.map((c) => [c.id, c]));
+  const slotsByLine = new Map<string, Row<"line_slot">[]>();
+  for (const s of slots) slotsByLine.set(s.line_id, [...(slotsByLine.get(s.line_id) ?? []), s]);
+  for (const list of slotsByLine.values()) list.sort((a, b) => a.stage_index - b.stage_index);
+  const identity = (cc: CatalogCard, bandKey: string): CardIdentity => ({
+    tcgdexId: cc.tcgdexId,
+    name: cc.name,
+    setId: cc.setId,
+    setName: cc.setName ?? null,
+    localId: cc.localId,
+    setCardCountOfficial: cc.setCardCountOfficial ?? null,
+    imageUrl: imageUrlById.get(cc.tcgdexId) ?? null,
+    bandKey,
+  });
+  return familyLinesFrom(
+    {
+      card,
+      lines,
+      slotsByLine,
+      catalog,
+      catalogById,
+      typeColorMap,
+      cardOfCopy: (id) => copyById.get(id)?.catalog_card_id ?? null,
+      identity,
+    },
+    {
+      binderName: new Map(binders.map((b) => [b.id, b.name])),
+      bandDisplay: new Map(bands.map((b) => [b.band, b.display_name])),
+    },
+    { ...here, locale: localeOfId(card.tcgdexId) },
+    null,
+  );
+}
+
+/** The one derivation behind both: pure over state already read. */
+function familyLinesFrom(
+  st: {
+    card: CatalogCard;
+    lines: Row<"evolution_line">[];
+    slotsByLine: Map<string, Row<"line_slot">[]>;
+    catalog: CatalogCard[];
+    catalogById: Map<string, CatalogCard>;
+    typeColorMap: TypeColorMap;
+    cardOfCopy: (copyId: string) => string | null;
+    identity: (cc: CatalogCard, bandKey: string) => CardIdentity;
+  },
+  names: { binderName: Map<string, string>; bandDisplay: Map<string, string> },
+  here: { binderId: string | null; band: string; locale: string },
+  excludeLineId: string | null,
+): LinePopupExistingLine[] {
+  const { card, slotsByLine, catalogById, cardOfCopy, identity } = st;
+  // UIL-096: every line this family has, anywhere; each with the open slot THIS card's species would take there.
+  const index = buildLineJoinIndex(
+    st.lines.map((l) => ({
+      id: l.id,
+      rootDexId: l.root_dex_id,
+      colorBand: l.color_band,
+      binderId: l.binder_id,
+    })),
+    slotsByLine,
+    st.catalog,
+    cardOfCopy,
+  );
+  const options = joinOptionsFor(card, index, st.typeColorMap, st.catalog);
+  const openSlotFor = (lineId: string): string | null =>
+    (slotsByLine.get(lineId) ?? []).find(
+      (s) =>
+        s.state !== "filled" &&
+        !!s.target_catalog_card_id &&
+        (catalogById.get(s.target_catalog_card_id)?.dexId ?? []).some((d) =>
+          card.dexId.includes(d),
+        ),
+    )?.id ?? null;
+  /** An existing line's tile image: its most evolved card she holds there, else its top target. */
+  const faceOfLine = (lineId: string, bandKey: string): CardIdentity | null => {
+    const lineSlots = slotsByLine.get(lineId) ?? [];
+    for (const s of [...lineSlots].reverse()) {
+      const held = s.state === "filled" && s.copy_id ? cardOfCopy(s.copy_id) : null;
+      const cc = held ? catalogById.get(held) : undefined;
+      if (cc) return identity(cc, bandKey);
+    }
+    const top = lineSlots.at(-1)?.target_catalog_card_id;
+    const target = top ? catalogById.get(top) : undefined;
+    return target ? identity(target, bandKey) : null;
+  };
+  return (options?.existingLines ?? [])
+    .filter((l) => l.lineId !== excludeLineId)
     .map((l) => ({
       ...l,
-      binderName: l.binderId ? (binderName.get(l.binderId) ?? "A binder") : "No binder",
-      bandDisplay: bandDisplay.get(l.bandKey) ?? l.bandKey,
+      binderName: l.binderId ? (names.binderName.get(l.binderId) ?? "A binder") : "No binder",
+      bandDisplay: names.bandDisplay.get(l.bandKey) ?? l.bandKey,
       joinSlotId: openSlotFor(l.lineId),
-      sameHere: l.binderId === hereBinder && l.bandKey === hereBand && l.locale === cardLocale,
+      sameHere: l.binderId === here.binderId && l.bandKey === here.band && l.locale === here.locale,
       face: faceOfLine(l.lineId, l.bandKey),
     }));
-  return { ...model, existingLines };
 }
 
 function toSlotRecord(s: Row<"line_slot">): LineSlotRecord {

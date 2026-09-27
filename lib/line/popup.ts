@@ -70,7 +70,7 @@ export type LineBadge = LineProposal["kind"];
  *   incoming  the card being placed ("New · this haul" / "Moving in")
  *   here      a card already filling the slot ("Already here")
  *   pullable  a card she owns elsewhere that could fill it: shown UNTICKED, "Pull it into this line"
- *   wanted    an open slot with no card yet (a placeholder; it goes on her wishlist as today)
+ *   wanted    an open slot with no card yet (a placeholder; on her wishlist only if SHE adds it: Karvi, UIL-119)
  *   blocked   a slot no card can fill
  */
 export type LineStageState = "incoming" | "here" | "pullable" | "wanted" | "blocked";

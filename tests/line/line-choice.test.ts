@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import { applyMove, type MoveNameLookups } from "@/lib/line";
 import type { LineChoice } from "@/lib/line/popup";
-import { loadLinePopupModel } from "@/lib/line/popup-load";
+import { loadFamilyLines, loadLinePopupModel } from "@/lib/line/popup-load";
 import { lineLocaleOf } from "@/lib/engine";
 import { asOwner, asSuperuser, freshRpcDb, OWNER, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
@@ -366,6 +366,8 @@ describe("the popup's model (loadLinePopupModel), built from fresh state", () =>
       ["Basic", "here"],
       ["Stage1", "incoming"],
     ]);
+    // The line being added to is the popup's subject, not one of "the lines you already have".
+    expect(m.existingLines.map((l) => l.lineId)).not.toContain(LINE);
   });
 
   it("START names the line a pull would leave one short, and only when the card really fills it (UIL-061)", async () => {
@@ -432,5 +434,34 @@ describe("the popup's model (loadLinePopupModel), built from fresh state", () =>
         face: expect.objectContaining({ tcgdexId: "emberdrake", name: "Emberdrake" }),
       }),
     ]);
+  });
+
+  it("loadFamilyLines (Backfill's confirm sheet) gives the same family list for a seed card, from fresh state", async () => {
+    await shelvedFront(MOVING, "emberdrake");
+    await asSuperuser(db);
+    await db.query(
+      `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+         values ($1, $2, $3, 'red', $4, 'back', 'open')`,
+      [LINE, OWNER, EMBERLING, GEN],
+    );
+    await db.query(
+      `insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id, target_catalog_card_id) values
+         ($1, $3, $4, 0, 'Basic', 'placeholder', null, 'emberling'),
+         ($2, $3, $4, 1, 'Stage1', 'placeholder', null, 'emberdrake')`,
+      [SLOT0, SLOT1, OWNER, LINE],
+    );
+    await asOwner(db);
+    const here = { binderId: GEN, band: "red" };
+    const viaPopup = await loadLinePopupModel(pgliteClient(db), MOVING, { kind: "start", ...here });
+    const forSeed = await loadFamilyLines(pgliteClient(db), "emberdrake", here);
+    expect(forSeed).toEqual(viaPopup.existingLines);
+    expect(forSeed).toEqual([
+      expect.objectContaining({ lineId: LINE, joinSlotId: SLOT1, sameHere: true }),
+    ]);
+    // Another band here: the same line, but not "the same here".
+    expect(
+      (await loadFamilyLines(pgliteClient(db), "emberdrake", { binderId: GEN, band: "green" }))[0]
+        .sameHere,
+    ).toBe(false);
   });
 });

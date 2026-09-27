@@ -17,37 +17,20 @@ import {
   type LineChoice,
   type LinePopupProps,
   type LinePopupReplace,
-  type LinePopupStage,
 } from "@/lib/line/popup";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { BandChip } from "./BandChip";
 import { CardFace } from "./CardFace";
-import { ColourChoiceSection, destinationLabel, lineNote, ReplaceChoice } from "./LinePopupParts";
-
-const LANGUAGE: Record<string, { name: string; flag: string }> = {
-  en: { name: "English", flag: "🇬🇧" },
-  ja: { name: "Japanese", flag: "🇯🇵" },
-};
-const language = (l: string) => LANGUAGE[l] ?? { name: l, flag: "" };
-
-/** "KB-001 · Front · Red" with each part kept whole, so a narrow tag never breaks "· Red" off on its own. */
-function Segments({ label }: { label: string }) {
-  const parts = label.split(" · ");
-  return (
-    <>
-      {parts.map((p, i) => (
-        // The space before each "·" is the only place the tag may wrap.
-        <Fragment key={i}>
-          {i > 0 ? " " : null}
-          <span className="lp-seg">
-            {i > 0 ? "· " : ""}
-            {p}
-          </span>
-        </Fragment>
-      ))}
-    </>
-  );
-}
+import {
+  ColourChoiceSection,
+  destinationLabel,
+  ExistingLinesBlock,
+  language,
+  lineNote,
+  LineStageTile,
+  ReplaceChoice,
+  stageName,
+} from "./LinePopupParts";
 
 export function LinePopup({
   model,
@@ -165,7 +148,7 @@ export function LinePopup({
         ) : null}
         <div ref={stripRef} className={"lp-strip" + (isReplace ? " lp-scroll" : "")}>
           {model.stages.map((s, i) => (
-            <Stage
+            <LineStageTile
               key={s.stageIndex}
               stage={s}
               first={i === 0}
@@ -319,52 +302,14 @@ export function LinePopup({
           </div>
         ) : null}
 
-        {model.mode === "start" && model.existingLines.length > 0 ? (
-          <div className="lp-also">
-            <b className="u">
-              You already have {model.existingLines.length} {lineName} line
-              {model.existingLines.length === 1 ? "" : "s"}
-            </b>
-            Adding to one instead of starting another is one tap. Starting a second one is fine too.
-            <div className="lp-minigrid">
-              {model.existingLines.map((l) => (
-                <div className="lp-mini" key={l.lineId}>
-                  {l.face ? (
-                    <CardFace
-                      name={l.face.name}
-                      tcgdexId={l.face.tcgdexId}
-                      imageUrl={l.face.imageUrl}
-                      size="s"
-                    />
-                  ) : null}
-                  <span className="u">
-                    {l.binderName} · Back · {l.bandDisplay}
-                    <br />
-                    {language(l.locale).flag} {language(l.locale).name} · {l.filledCount}/
-                    {l.totalCount} filled
-                  </span>
-                  {l.joinSlotId && onSwitch ? (
-                    <button
-                      type="button"
-                      className="btn"
-                      disabled={busy}
-                      onClick={() =>
-                        onSwitch({ kind: "add", lineId: l.lineId, slotId: l.joinSlotId! })
-                      }
-                    >
-                      Add to that line
-                    </button>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-            {model.existingLines.some((l) => l.locale !== card.locale) ? (
-              <div className="lp-note">
-                A line in another language won&apos;t take this {language(card.locale).name} card by
-                default. You can still choose to.
-              </div>
-            ) : null}
-          </div>
+        {model.mode === "start" ? (
+          <ExistingLinesBlock
+            existingLines={model.existingLines}
+            lineName={lineName}
+            cardLocale={card.locale}
+            onSwitch={onSwitch}
+            busy={busy}
+          />
         ) : null}
 
         {error ? (
@@ -407,116 +352,6 @@ export function LinePopup({
         </div>
       </div>
     </div>
-  );
-}
-
-/** "Stage 1" for the engine's "Stage1". */
-function stageName(stage: string | undefined): string {
-  return stage === "Stage1" ? "Stage 1" : stage === "Stage2" ? "Stage 2" : (stage ?? "");
-}
-
-function Stage({
-  stage,
-  first,
-  incomingLabel,
-  asWanted,
-  replace,
-  swapping,
-  ticked,
-  onTogglePull,
-  busy,
-}: {
-  stage: LinePopupStage;
-  first: boolean;
-  incomingLabel: string;
-  /** UIL-069, filing by its own colour: the slot is wanted again, with no ring. */
-  asWanted: boolean;
-  /** A replace: this stage shows the card there now beside the one that could take its place. */
-  replace?: LinePopupReplace;
-  swapping: boolean;
-  ticked: boolean;
-  onTogglePull: () => void;
-  busy: boolean;
-}) {
-  const c = asWanted ? null : stage.card;
-  const number = c ? formatCollectorNumber(c.localId, c.setCardCountOfficial ?? null) : null;
-  const arrow = first ? null : (
-    <div className="lp-arrow" aria-hidden>
-      ▶
-    </div>
-  );
-  if (replace) {
-    const side = (who: "now" | "new") => {
-      const it = who === "now" ? replace.current : replace.incoming;
-      const no = formatCollectorNumber(it.card.localId, it.card.setCardCountOfficial ?? null);
-      const staying = who === "now" ? !swapping : swapping;
-      return (
-        <div
-          className={
-            "lp-side" + (who === "new" && swapping ? " lp-in" : "") + (staying ? "" : " lp-out")
-          }
-          data-side={who}
-        >
-          <CardFace
-            name={it.card.name}
-            tcgdexId={it.card.tcgdexId}
-            imageUrl={it.card.imageUrl}
-            size="l"
-            zoomable
-          />
-          <div className="lp-no">
-            {no ?? it.card.name} · {who === "now" ? "now" : "new"}
-          </div>
-        </div>
-      );
-    };
-    return (
-      <>
-        {arrow}
-        <div className="lp-slot lp-two" data-stage-state="replace">
-          <div className="lp-stage u">{stageName(stage.stage)} · pick one</div>
-          <div className="lp-pair">
-            {side("now")}
-            {side("new")}
-          </div>
-          <div className="lp-nm u">{replace.current.card.name}</div>
-        </div>
-      </>
-    );
-  }
-  const state = asWanted ? "wanted" : stage.state;
-  return (
-    <>
-      {arrow}
-      <div className={"lp-slot" + (state === "incoming" ? " lp-in" : "")} data-stage-state={state}>
-        <div className="lp-stage u">{stageName(stage.stage)}</div>
-        {c ? (
-          <CardFace name={c.name} tcgdexId={c.tcgdexId} imageUrl={c.imageUrl} size="l" zoomable />
-        ) : (
-          <div className="lp-empty" />
-        )}
-        <div className="lp-nm u">{c?.name ?? "No card yet"}</div>
-        {number ? <div className="lp-no">{number}</div> : null}
-        {state === "incoming" ? <span className="lp-src lp-haul">{incomingLabel}</span> : null}
-        {state === "here" ? <span className="lp-src lp-binder">Already here</span> : null}
-        {state === "wanted" ? <span className="lp-src lp-want">Wanted</span> : null}
-        {state === "blocked" ? <span className="lp-src lp-want">Blocked</span> : null}
-        {state === "pullable" && stage.pull ? (
-          <>
-            <span className="lp-src lp-binder">
-              In <Segments label={stage.pull.fromLabel} />
-              {stage.pull.leaves ? (
-                <span className="lp-seg"> · leaves the {stage.pull.leaves.lineName} one short</span>
-              ) : null}
-            </span>
-            <label className="lp-pull u">
-              <input type="checkbox" checked={ticked} onChange={onTogglePull} disabled={busy} />{" "}
-              Pull it into this line
-            </label>
-          </>
-        ) : null}
-      </div>
-    </>
   );
 }
 
