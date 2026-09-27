@@ -520,12 +520,6 @@ export function PlanScreen({
     );
   }
 
-  function onMoveConfirm(dest: MoveDestination) {
-    if (!moveTarget) return;
-    setOverrides((prev) => ({ ...prev, [moveTarget.copyId]: dest }));
-    flashToast(`Placement override set · ${moveTarget.name}`);
-    setMoveTarget(null);
-  }
   /**
    * "I do not have this card" — remove the COPY from the app (UIL-089), from the plan she is working
    * (UIL-114: there is no first screen to do it from). "Leave for later" beside it means something different
@@ -785,7 +779,12 @@ export function PlanScreen({
             expectedDigest: fresh?.id === item.incomingId ? fresh.digest : null,
             // Her choice in the line popup for a card headed into a line (UIL-117). Pulls, a colour question and
             // a replace all live in the popup now; an override names its own destination and needs none.
-            lineChoice: overrides[item.incomingId] ? null : (extra?.lineChoice ?? null),
+            // Her Move sheet's line popup sends the two together: a back half, and the line choice that places it there.
+            lineChoice: extra?.override
+              ? (extra.lineChoice ?? null)
+              : overrides[item.incomingId]
+                ? null
+                : (extra?.lineChoice ?? null),
             // Her collection for a specialty card (UIL-053). An override names its own destination.
             collectionChoice: overrides[item.incomingId]
               ? null
@@ -885,6 +884,30 @@ export function PlanScreen({
     flatItems.forEach((it, i) => m.set(it.incomingId, i));
     return m;
   }, [flatItems]);
+
+  /**
+   * Her Move. Anywhere but a line, it is an override written with her Done (M7). Into a line it went through the
+   * sheet's line popup (UIL-117: the one popup on every screen, her stage choices included), and her confirm there is
+   * the write, now, as the plan's own line popup's is.
+   */
+  async function onMoveConfirm(dest: MoveDestination, lineChoice?: LineChoice) {
+    if (!moveTarget) return;
+    const target = moveTarget;
+    setMoveTarget(null);
+    if (!lineChoice) {
+      setOverrides((prev) => ({ ...prev, [target.copyId]: dest }));
+      flashToast(`Placement override set · ${target.name}`);
+      return;
+    }
+    const item = flatItems.find((it) => it.incomingId === target.copyId);
+    if (!item) return;
+    const shelved = await shelveCard(item, { override: dest, lineChoice });
+    if (!shelved) return;
+    // A line write can change what the other cards would do, so the rest re-route, as after any line write.
+    scheduleReroute();
+    flashToast(`Moved · ${target.name} → its line`);
+    if (flatItems[cur]?.incomingId === item.incomingId) advance();
+  }
 
   // UIL-117: the line card whose popup is open, its place among its line's cards, and its model loader.
   const popItem = linePop ? (flatItems.find((it) => it.incomingId === linePop) ?? null) : null;
@@ -1354,10 +1377,17 @@ export function PlanScreen({
         <MoveOverlay
           card={moveTarget}
           options={moveOptions}
-          // No `allowLineJoin` here on purpose: MoveOverlay derives it from `card.joinCandidates`,
-          // which `moveTargetFor` threads from the line-join lookup (UIL-070 part 1). One signal,
-          // owned by the component that renders the picker, so a call site cannot drop it.
-          onConfirm={onMoveConfirm}
+          // UIL-117: BACK HALF opens the one line popup, as on Lines, Lookup and Collections, so she is asked her stage
+          // choices and shown what a pull leaves behind. The older inline line picker is off; the line-join lookup
+          // (`card.joinCandidates`) still tells the popup whether her binder and band hold an open slot for this card.
+          allowLineJoin={false}
+          lineModel={(proposal) =>
+            loadLineModelFor(
+              draft.find((d) => d.id === moveTarget.copyId)?.existingCopyId ?? moveTarget.copyId,
+              proposal,
+            )
+          }
+          onConfirm={(dest, lineChoice) => void onMoveConfirm(dest, lineChoice)}
           onClose={() => setMoveTarget(null)}
         />
       ) : null}

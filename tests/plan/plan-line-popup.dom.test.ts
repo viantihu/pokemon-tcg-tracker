@@ -390,6 +390,50 @@ async function mountExtra(
   return user;
 }
 
+describe("UIL-117 · the Plan's own Move sheet: BACK HALF opens the one line popup (the Senior BA's follow-up to #422)", () => {
+  it("BACK HALF opens the line popup for this card; her confirm there writes it into the line, now", async () => {
+    // Abra, a front-half card: the plan proposes no line, so only her Move puts it in one.
+    const user = await mount([{ name: "Abra", proposal: null }]);
+    await user.click(screen.getByRole("button", { name: "↔ Change position" }));
+    const sheet = await screen.findByRole("dialog", { name: "Move Abra" });
+    // PRE-FIX: the sheet had no line popup; BACK HALF was the older inline line picker, and never asked her anything.
+    await user.click(within(sheet).getByRole("button", { name: "BACK HALF" }));
+    await screen.findByRole("dialog", { name: "Start a line" });
+    expect(lineModelAction.mock.calls.at(-1)?.slice(0, 2)).toEqual([
+      "id-Abra",
+      expect.objectContaining({ kind: "start", binderId: "kb1" }),
+    ]);
+    // Her pull, ticked: nothing left undecided, so she can confirm.
+    await user.click(within(popup()).getByRole("checkbox"));
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    expect(shelveCardAction).not.toHaveBeenCalled();
+    await user.click(confirmIn());
+
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
+    const sent = shelveCardAction.mock.calls[0][0];
+    expect(sent.card.id).toBe("id-Abra");
+    expect(sent.override).toMatchObject({ kind: "shelf", binderId: "kb1", half: "back" });
+    expect(sent.lineChoice).toMatchObject({
+      mode: "start",
+      binderId: "kb1",
+      pulls: ["own-charmander"],
+      stages: {},
+    });
+    expect(await screen.findByText("Moved · Abra → its line")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("a Move anywhere else is still an override, written with her Done", async () => {
+    const user = await mount([{ name: "Abra", proposal: null }]);
+    await user.click(screen.getByRole("button", { name: "↔ Change position" }));
+    const sheet = await screen.findByRole("dialog", { name: "Move Abra" });
+    await user.click(within(sheet).getByRole("button", { name: "Place it here ▶" }));
+    expect(await screen.findByText("Placement override set · Abra")).toBeTruthy();
+    expect(shelveCardAction).not.toHaveBeenCalled();
+    expect(lineModelAction).not.toHaveBeenCalled();
+  });
+});
+
 describe("UIL-126 · a PLAIN extra copy is not a line card", () => {
   it("wears no badge, Done reads as a normal Done, and the spotlight names the line it duplicates", async () => {
     await mountExtra(["Charmeleon"]);
