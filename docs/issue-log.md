@@ -8919,3 +8919,97 @@ mechanism.
 **Note, not logged as its own entry per the Senior BA's explicit instruction:** a second, related note
 from Karvi (choosing which card to chase to complete a line, and whether to complete it) is being held
 until the Senior BA has explained the current line rules to her — deliberately not written up yet.
+
+## UIL-121 — A line's blocked stages and its "capped" status are written at line creation, before she confirms anything, breaking the app's own "never auto-blocks" rule
+
+- **Reported:** 2026-09-27 (not from Karvi — verified by the Tech Lead on `develop` `a181336`, source
+  reading plus PGlite through the real paths).
+- **Status:** Open, design pending Karvi; the builder is to be assigned.
+- **Priority:** High (Senior BA's read; it breaks a rule she set).
+- **Area:** Lines / line popup / Backfill
+- **Env:** Testing, `develop` `a181336`
+
+**Confirmed: the rule this breaks is written down, and the violating code contradicts its own stated
+intent in the same function.** `docs/system-design.md:101`'s discovery table states plainly: "Termination
+| System proposes, user confirms. Never auto-blocks." `generateSlots`
+([`lib/engine/line.ts`](../lib/engine/line.ts)) writes `state: "block"`
+([`:445`](../lib/engine/line.ts:445)) for a stage with no same-colour printing, and `capped = true`
+([`:411`](../lib/engine/line.ts:411)) for a specialty-only stage, then derives the line's own `status`
+from that same `capped` flag ([`:459`](../lib/engine/line.ts:459)) — all before she has confirmed
+anything. The block proposal's own reason text, written by the same function two lines above the write it
+describes, says "propose blocking this slot (never auto-blocked)"
+([`:454`](../lib/engine/line.ts:454)) — the code names the rule it is about to violate.
+
+**Confirmed: one writer copies both values in, so every entry point inherits the same gap.**
+`lib/line/line-choice.ts` carries `slot.state` through unchanged unless a fill/pull overrides it
+(`:142`) and derives the written `status` from `gen.status === "capped"` (`:168`) — the same `gen` object
+`generateSlots` produced. Since every popup Start (Lines, Lookup, Collections, the Haul Plan) and the
+legacy new-line join ([`lib/line/write.ts:165-170`](../lib/line/write.ts:165)) all route through this one
+writer, all of them write pre-blocked, pre-capped rows the moment a line starts, not when she says so.
+
+**Confirmed: the popup shows only a bare tag, no reason, no alternative, no mention of a cap.**
+[`app/(ui)/_components/LinePopup.tsx:503`](<../app/(ui)/_components/LinePopup.tsx>:503):
+`{state === "blocked" ? <span className="lp-src lp-want">Blocked</span> : null}` — nothing else renders
+for that state.
+
+**PGlite, reported by the Tech Lead, not independently re-run in this pass:** a Flygon Start writes
+`["block", "placeholder", "filled"]` in one transaction, and only afterward does the Lines screen ask
+"ROOT BLOCK" — the confirm step happens after the fact, on a row that already exists.
+
+**Confirmed: Backfill pre-sets `block` too, independently of the engine path above, but this half is
+already being fixed.** [`defaultEntry`](<../app/(ui)/backfill/BackfillScreen.tsx>:378)
+(`app/(ui)/backfill/BackfillScreen.tsx:380`): `decision: info.sameColorPrintingExists ? "placeholder" :
+"block"` — a stage defaults to blocked the moment its entry is built, before she has touched it. UIL-117
+PR 5a removes this specific pre-set (confirmed as in-flight work, not yet landed as of this entry).
+
+**Her related note, 2026-09-27, recorded as the same functional requirement per her own rule, not a
+second entry.** In her words: "We need to add logic in the popup that lets the user make a decision for
+which card they want to chase to complete the line and whether or not to complete the line." Every empty
+stage's fate — chase a specific card, leave it a placeholder, or block it — and any resulting cap, should
+be decided by her in the popup before anything is written, not derived and written ahead of her by
+`generateSlots`.
+
+**Design is pending her answers — not scoped further here.** How the popup should let her choose per
+stage, and how blocking/capping should be re-sequenced to happen only after that choice, are open
+questions for whoever designs this, coordinated with UIL-117's in-flight line-popup work so the two don't
+collide.
+
+**Cross-reference UIL-117** (the line-popup rework this design question belongs inside) and **UIL-120**
+(a different gap in the same popup's step-through, sequenced ahead of this one).
+
+## UIL-122 — A Haul Plan card that cannot form a line points her at the Lines screen, but no line exists there to confirm or override
+
+- **Reported:** 2026-09-27 (not from Karvi — verified by the Tech Lead on `develop` `a181336`).
+- **Status:** Open, unassigned; the fix waits on UIL-121's design (the termination needs a home: the
+  spotlight, or dropped).
+- **Priority:** Medium (Senior BA's read; misleading, no data harm).
+- **Area:** Haul Plan
+- **Env:** Testing, `develop` `a181336`
+
+**Confirmed the exact banner text and the mechanism behind it.**
+[`app/(ui)/plan/PlanScreen.tsx:2307-2311`](<../app/(ui)/plan/PlanScreen.tsx>:2307) renders, whenever
+`item.needsDecision` is true: "Needs a decision" / "Confirm or override it on the Lines screen. The
+proposal is recorded when you shelve it." `needsDecision` is `resultNeedsDecision(result)`
+([`lib/plan/action.ts:49-51`](../lib/plan/action.ts:49)): `(result.proposals?.length ?? 0) > 0`. A
+`line-nonviable` cascade step ([`lib/engine/cascade.ts:533`](../lib/engine/cascade.ts:533)) routes the
+card to the front half — no line is ever created for it — but if it also carries a proposal, the banner
+fires anyway, sending her to a screen with nothing on it about that card.
+
+**PGlite, reported by the Tech Lead, not independently re-run in this pass:** a Scizor in the haul was
+shelved to the front half with 0 lines and 0 decisions on Lines — confirming the banner pointed nowhere
+for that exact card.
+
+**Confirmed a second, related path fires the same banner for a reason that's no longer accurate.** A
+holo-swap result also populates `proposals`
+([`lib/engine/cascade.ts:374-380`](../lib/engine/cascade.ts:374)), which sets `needsDecision` the same
+way — but since PR #392 (UIL-117 PR 4), a holo-swap's confirmation happens IN the line popup itself, not
+on the Lines screen. The banner's "Confirm or override it on the Lines screen" is stale for this case
+specifically, not just for the no-line case above.
+
+**Why this waits on UIL-121, not a standalone fix.** The right home for "here's a proposal, go decide
+it" — the spotlight, inline, or dropped entirely now that popups exist for the cases that need one — is
+exactly the design question UIL-121 raises. Fixing this banner's wording without that design risks
+pointing her at a different wrong place instead of a real fix.
+
+**Cross-reference UIL-121** (the design question this entry's fix depends on) and **UIL-117** (PR #392,
+which changed where a holo-swap is actually confirmed, making this banner's wording stale for that case).
