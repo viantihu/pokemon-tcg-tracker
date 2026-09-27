@@ -6,7 +6,7 @@
  * this only flattens and describes.
  */
 
-import { lineNameFor, lineProposalFor, type LineLookups } from "./line-proposal";
+import { extraCopyOfFor, lineNameFor, lineProposalFor, type LineLookups } from "./line-proposal";
 import type { CascadeResult, IncomingCard, PlacementTarget } from "@/lib/engine";
 import { actionForResult, resultNeedsDecision } from "./action";
 import type { PlanItem } from "./types";
@@ -29,6 +29,8 @@ export interface AssembleLookups {
    * test that builds lookups by hand still compiles; the plan context always supplies them.
    */
   lines?: LineLookups;
+  /** A copy as she would name it, "Charmeleon 027/197", and its variant, for an upgrade's reason (UIL-126). */
+  copyLabel?(copyId: string): { label: string; variant: string } | null;
 }
 
 const binderName = (id: string | null, l: AssembleLookups) =>
@@ -93,12 +95,18 @@ export function describeReason(
         ? `${kind} — goes to the specialty binder. Pick which of its collections it belongs to.`
         : `${kind} — goes to the specialty binder.`;
     }
-    case "duplicate":
-      return result.swap
-        ? `Holo duplicate of a card already on the shelf — the holo takes its place${
-            result.swap.incomingInherits.lineSlotId ? ", including its line slot," : ""
-          } and the plain copy moves to the bulk box.`
-        : "Duplicate of a card already on the shelf — goes to the bulk box.";
+    case "duplicate": {
+      if (!result.swap) return "Duplicate of a card already on the shelf — goes to the bulk box.";
+      // An upgrade (UIL-126): say what moves, so a swap never happens silently.
+      const kind = incoming.variant === "reverse" ? "reverse holo" : "holo";
+      const out = l.copyLabel?.(result.swap.displacedCopyId);
+      const theirs = out
+        ? `your ${out.variant === "normal" ? "normal" : out.variant} ${out.label}`
+        : "the plain copy on the shelf";
+      return result.swap.incomingInherits.lineSlotId
+        ? `An upgrade: this ${kind} can take the line slot of ${theirs}, which goes to the bulk box.`
+        : `Swaps in for ${theirs}; the ${out?.variant === "normal" || !out ? "normal" : out.variant} goes to the bulk box.`;
+    }
     case "line-existing":
       return result.filledExistingSlot
         ? `Fills the open ${incoming.card.stage ?? "line"} slot on the existing ${band()} line, in the back half.`
@@ -153,5 +161,6 @@ export function toPlanItem(
     // UIL-117: the badge, and what the line popup opens on. Null for every card with no line.
     lineProposal: l.lines ? lineProposalFor(result, l.lines) : null,
     lineName: l.lines ? lineNameFor(result, l.lines) : null,
+    extraCopyOf: l.lines ? extraCopyOfFor(result, l.lines) : null,
   };
 }

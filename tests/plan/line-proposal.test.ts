@@ -4,7 +4,12 @@
  */
 import { describe, expect, it } from "vitest";
 import type { CascadeResult } from "@/lib/engine";
-import { lineProposalFor, type LineLookups } from "@/lib/plan/line-proposal";
+import {
+  extraCopyOfFor,
+  isLineCard,
+  lineProposalFor,
+  type LineLookups,
+} from "@/lib/plan/line-proposal";
 
 const SLOTS: Record<string, string[]> = { "line-char": ["s0", "s1", "s2"] };
 const lookups: LineLookups = {
@@ -49,18 +54,29 @@ describe("UIL-117 · which back-half cards get which badge", () => {
     expect(lineProposalFor(r, lookups)).toEqual({ kind: "add", lineId: "line-char", slotId: "s1" });
   });
 
-  it("a copy for a FILLED stage is a pink REPLACE that opens on Keep", () => {
+  it("a PLAIN extra copy for a filled stage is no line card: no badge, and the spotlight names its line (UIL-126)", () => {
     const r: CascadeResult = {
       ...base,
       step: "line-existing",
       target: front,
       filledStage: { lineId: "line-char", stageIndex: 1 },
     };
-    expect(lineProposalFor(r, lookups)).toEqual({
-      kind: "replace",
+    // PRE-FIX (#392): a pink REPLACE opening on Keep, and a line card her Done could not shelve without the popup.
+    expect(lineProposalFor(r, lookups)).toBeNull();
+    expect(isLineCard(r)).toBe(false);
+    expect(
+      extraCopyOfFor(r, {
+        ...lookups,
+        lineName: () => "Charizard",
+        lineWhere: () => "KB-003 · Back · Red",
+        heldAt: (slotId) => (slotId === "s1" ? "Charmeleon 027/197" : null),
+      }),
+    ).toEqual({
       lineId: "line-char",
       slotId: "s1",
-      defaultKeep: true,
+      lineName: "Charizard",
+      where: "KB-003 · Back · Red",
+      held: "Charmeleon 027/197",
     });
   });
 

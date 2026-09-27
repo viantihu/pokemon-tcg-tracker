@@ -221,6 +221,21 @@ nav.menu .tab .n {
   padding: 9px 13px;
   margin-bottom: 10px;
 }
+/* UIL-126: a plain extra copy's note in the spotlight, and its "Swap this one into the line…". */
+.spot .extracopy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border: 2px solid var(--ink);
+  background: var(--panel-2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.spot .extracopy .btn {
+  align-self: flex-start;
+}
 /* The Haul Plan's line badge (UIL-117, v3 section 1): start green, add yellow, replace pink; it opens the popup. */
 .linebadge {
   display: inline-block;

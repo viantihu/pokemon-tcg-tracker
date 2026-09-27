@@ -38,6 +38,7 @@ export function PlanLinePopup({
   loadModelFor,
   bandMismatch,
   position,
+  extraCopy = false,
   busy,
   error,
   onConfirm,
@@ -55,8 +56,16 @@ export function PlanLinePopup({
   loadModelFor(copyId: string, proposal: LineProposal): Promise<LinePopupModel>;
   /** The card's colour question, when its line is another colour (UIL-069); null when there is none. */
   bandMismatch: BandMismatchChoice | null;
-  /** "Line card k of N" in this haul, and whether another unshelved line card remains after this one. */
-  position: { index: number; total: number; next: boolean };
+  /**
+   * "Line card k of N" in this haul, and whether another unshelved line card remains after this one. Absent for the
+   * swap on a plain extra copy (UIL-126), which is not in the step-through.
+   */
+  position?: { index: number; total: number; next: boolean };
+  /**
+   * UIL-126: opened from a plain extra copy's "⇄ Swap this one into the line…". Swap is picked, the card coming out to
+   * bulk; Keep is her normal Done, this card to where an extra copy goes (the front half), named in the popup.
+   */
+  extraCopy?: boolean;
   busy: boolean;
   error: string | null;
   /** Her confirm, with the line's name as the popup shows it (its top stage), or null when it has none. */
@@ -113,7 +122,7 @@ export function PlanLinePopup({
     );
   }
 
-  const holo = proposal.kind === "replace" && !proposal.defaultKeep;
+  const holo = proposal.kind === "replace" && !proposal.defaultKeep && !extraCopy;
   const bandName = (key: string) => moveOptions?.bands.find((b) => b.key === key)?.display ?? key;
   // The colour question belongs to the line it was asked about: after "Add to that line" it no longer applies
   // (UX review of #392).
@@ -151,7 +160,7 @@ export function PlanLinePopup({
         onCancel={onCancel}
         onConfirm={(choice) => onConfirm(choice, model.stages.at(-1)?.card?.name ?? null)}
         onSwitch={(p) => setProposal(p)}
-        position={{ ...position, next: position.next && !completes }}
+        position={position ? { ...position, next: position.next && !completes } : undefined}
         busy={busy}
         error={error ?? loadError}
         incomingLabel="New · this haul"

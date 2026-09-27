@@ -11,9 +11,30 @@
  * Holo-swap: when the incoming card is a holo and the matched shelved copy is a plain normal, the
  * incoming holo INHERITS the shelved copy's entire role — binder, half, band, and its line slot if
  * it held one — and the displaced normal is sent to bulk.
+ *
+ * UPGRADES (UIL-126). Karvi: "Yes, any holo or reverse holo counts", and for a front half "Yes, same as a holo". A
+ * shelved NORMAL is upgraded by a holo OR a reverse holo (`isUpgradeOver`), in a front half
+ * or a line. Here that covers the same art or printing; the cascade's line step covers any other printing of the
+ * species in a line, through the SAME predicate, so the two cannot drift. A normal over a reverse, a reverse over a
+ * holo, a holo over a holo, and anything over a 1st Edition or a W Promo are not upgrades: to the bulk box, as before.
  */
 
 import type { CatalogCard, OwnedCopy, Variant } from "./types";
+
+/** The variants that upgrade a card (UIL-126): a holo or a reverse holo. */
+export function isUpgradeVariant(v: Variant): boolean {
+  return v === "holo" || v === "reverse";
+}
+
+/**
+ * Whether an incoming variant upgrades a shelved card (UIL-126): the incoming card is a holo or a reverse holo, and the
+ * one shelved is a plain NORMAL. Not a 1st Edition or a W Promo: her ruling is an upgrade over a normal, and swapping one
+ * of those out to the bulk box is not hers (TL review). The one rule for an upgrade, shared by the duplicate step and
+ * the cascade's line step.
+ */
+export function isUpgradeOver(incoming: Variant, held: Variant): boolean {
+  return isUpgradeVariant(incoming) && held === "normal";
+}
 
 /** True when two catalog printings collide under the duplicate key (art OR same printing). */
 export function isDuplicateCard(a: CatalogCard, b: CatalogCard): boolean {
@@ -81,8 +102,8 @@ export function resolveDuplicate(
   const match = duplicateOf(incoming, owned);
   if (!match) return { kind: "not-duplicate" };
 
-  // Holo-swap: incoming holo over a shelved normal of the same card.
-  if (incomingVariant === "holo" && match.variant === "normal") {
+  // The swap: an upgrade over the shelved copy of the same card, in a front half or a line (UIL-126).
+  if (isUpgradeOver(incomingVariant, match.variant)) {
     return {
       kind: "holo-swap",
       matchedCopyId: match.id,

@@ -80,6 +80,7 @@ export const LINE_CHOICE = {
   missing: "This card goes into a line. Open it and confirm its line first.",
   holoNeedsHome: "Pick where the holo goes, then confirm.",
   lineGone: "That line is no longer there. Reload the plan and pick again.",
+  notALineCard: "This card isn't headed into a line. Reload the plan and pick again.",
 } as const;
 
 /**
@@ -355,42 +356,53 @@ export async function commitCardPlacement(
    * UIL-117: EVERY card headed into a line waits for her OK; the cascade no longer starts, fills or swaps a line on
    * its own. Her Move (`override`) is her OK too, and goes the way it always has (a card must always be movable).
    *   - start / join / swap: the ONE line builder, over fresh state, then this card, then its decision;
-   *   - keep (the card already in the line stays): no line write. This card goes where she sent it (a kept holo
-   *     always names where, the Senior BA's ruling), else where the cascade already put an extra copy.
+   *   - keep (the card already in the line stays): no line write. This card goes where she sent it (a kept upgrade
+   *     always names where, the Senior BA's ruling).
    */
   let override = input.override ?? null;
   let overrideReason: string | null = null;
   /** A Keep writes no line, but it concerned one: the step-through asks whether that line is done (UIL-120). */
   let keptLineId: string | null = null;
   const lead = planned[0];
+  /**
+   * UIL-126: a PLAIN extra copy of a stage a line holds is not a line card; a normal Done files it in the front half.
+   * Her one line choice for it is "⇄ Swap this one into the line…": a swap into exactly the line and slot it
+   * duplicates. Any other line choice sent for a card that is not a line card is REFUSED, never quietly ignored
+   * (TL review): it would mean the screen and the server disagree about the card.
+   */
+  if (lead && !isLineCard(lead.result) && !override && input.lineChoice) {
+    const choice = input.lineChoice;
+    const fs =
+      lead.result.step === "line-existing" && !lead.result.swap ? lead.result.filledStage : null;
+    const slotId = fs ? (pc.lookups.lines?.slotIdAt(fs.lineId, fs.stageIndex) ?? null) : null;
+    if (
+      !fs ||
+      choice.mode !== "replace" ||
+      choice.keep ||
+      choice.lineId !== fs.lineId ||
+      choice.slotId !== slotId
+    ) {
+      throw new Error(LINE_CHOICE.notALineCard);
+    }
+    return commitLineChoice(db, pc, lead, copy, choice);
+  }
   if (lead && isLineCard(lead.result) && !override) {
     const choice = input.lineChoice;
     if (!choice) throw new Error(LINE_CHOICE.missing);
     if (choice.mode === "replace" && choice.keep) {
-      // Keep means "the card already in the line stays". Only a card that could replace one has that choice; sent
-      // for any other line card it would fall through to the cascade, which writes the line itself (TL review).
-      if (!lead.result.filledStage && !lead.result.swap) throw new Error(LINE_CHOICE.missing);
-      // The line it concerned, from the server's own derivation, not the browser's choice (QA on #410).
-      const heldSlot = lead.result.swap?.incomingInherits.lineSlotId ?? null;
-      keptLineId =
-        lead.result.filledStage?.lineId ??
-        (heldSlot ? (pc.lookups.lines?.lineOfSlot(heldSlot) ?? null) : null);
-      if (choice.incoming) {
-        if (!isMoveDestinationComplete(choice.incoming)) throw new Error(REFUSE.incomplete);
-        override = choice.incoming;
-        overrideReason =
-          "Kept the card already in the line (her call, UIL-117); this copy went where she sent it.";
-      } else if (lead.result.swap) {
-        throw new Error(LINE_CHOICE.holoNeedsHome);
-      } else {
-        // An extra copy for a filled stage: where the cascade already puts one, the front half. Nothing else is a
-        // Keep, so nothing here may fall through to the cascade.
-        const t = lead.result.target;
-        if (t.kind !== "front-half") throw new Error(LINE_CHOICE.missing);
-        override = { kind: "shelf", binderId: t.binderId ?? "", half: "front", band: t.band };
-        overrideReason =
-          "Kept the card already in the line (her call, UIL-117); this copy goes to the front half, as an extra copy does.";
-      }
+      // Keep means "the card already in the line stays". Only an UPGRADE of a card in a line has that choice (a plain
+      // extra copy is not a line card since UIL-126); sent for any other line card it would fall through to the
+      // cascade, which writes the line itself (TL review).
+      if (!lead.result.swap) throw new Error(LINE_CHOICE.missing);
+      // The line it concerned, from the server's own derivation (the upgrade's slot), not the browser's (QA on #410).
+      const heldSlot = lead.result.swap.incomingInherits.lineSlotId;
+      keptLineId = heldSlot ? (pc.lookups.lines?.lineOfSlot(heldSlot) ?? null) : null;
+      // A kept upgrade always names where it goes (the Senior BA's ruling; bulk suggested).
+      if (!choice.incoming) throw new Error(LINE_CHOICE.holoNeedsHome);
+      if (!isMoveDestinationComplete(choice.incoming)) throw new Error(REFUSE.incomplete);
+      override = choice.incoming;
+      overrideReason =
+        "Kept the card already in the line (her call, UIL-117); this copy went where she sent it.";
     } else {
       return commitLineChoice(db, pc, lead, copy, choice);
     }

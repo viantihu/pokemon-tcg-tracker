@@ -219,10 +219,17 @@ describe("UIL-120 (b)(c) · on a line that was ALREADY complete", () => {
   });
 
   it("(b) a Keep writes no line, and still stops: that line is done", async () => {
-    // PRE-FIX (#402): false, so the next popup opened.
+    // PRE-FIX (#402): false, so the next popup opened. An upgrade's Keep: since UIL-126 it is the only Keep there is
+    // (a plain extra copy is no line card), and a kept upgrade names where it goes.
     const res = await commit({
-      card: CML_ALT,
-      lineChoice: { mode: "replace", lineId: LINE, slotId: S1, keep: true },
+      card: CML_HOLO,
+      lineChoice: {
+        mode: "replace",
+        lineId: LINE,
+        slotId: S1,
+        keep: true,
+        incoming: { kind: "bulk" },
+      },
     });
     expect(res.lineDone).toBe(true);
     expect(await statusOf(LINE)).toBe("complete");
@@ -288,13 +295,15 @@ describe("UIL-120 (e)(f) · it keeps stepping while a stage is still open", () =
   });
 
   it("(f) a pull that demotes ANOTHER line does not count: only the line she confirmed is asked", async () => {
-    // Her complete Charmander line (Basic + Stage 1, no Charizard stage). A second Charmeleon starts a NEW line that
-    // pulls her Charmander out of it; the new line still has its Charizard stage open.
+    // Her complete Charmander line (Basic + Stage 1, no Charizard stage). A Charizard starts a NEW line that pulls
+    // her Charmander out of it but leaves her Charmeleon where it is, so the new line's Stage 1 is still open.
     await seedLine({ stage1: "cml" });
-    await seedHaulRows(db, [CML_ALT]);
+    await seedHaulRows(db, [CZD]);
     await asOwner(db);
+    const start = await proposalFor(CZD);
+    if (start?.kind !== "start") throw new Error(`expected a start, got ${start?.kind}`);
     const res = await commit({
-      card: CML_ALT,
+      card: CZD,
       lineChoice: { mode: "start", binderId: KB1, band: "red", pulls: [OWNED_CMD] },
     });
     expect(await statusOf(LINE)).toBe("open"); // the other line was demoted
