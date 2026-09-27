@@ -24,6 +24,7 @@ vi.mock("@/app/(ui)/backfill/actions", () => ({
   commitSpecialtyAction: vi.fn(),
   loadContext: vi.fn(),
   lookupCatalog: vi.fn(),
+  lookupLineSpecies: vi.fn(),
   resolveLine: vi.fn(),
   searchWaiting: vi.fn(),
 }));
@@ -74,6 +75,17 @@ const LINE: ResolvedBackLine = {
       suggestedTargetId: "sv03-026",
       alternateTargetIds: [],
     },
+    // A line has two stages or more (Karvi, 2026-09-27: a Basic with no evolutions is never a line).
+    {
+      stageIndex: 1,
+      stage: "Stage1",
+      dexId: 5,
+      name: "Charmeleon",
+      sameColorPrintingExists: true,
+      specialtyOnly: false,
+      suggestedTargetId: "sv03-027",
+      alternateTargetIds: [],
+    },
   ],
 };
 
@@ -86,6 +98,7 @@ beforeEach(() => {
   m.loadContext.mockResolvedValue(CTX);
   m.searchWaiting.mockResolvedValue([waiting("Normal", 1), waiting("Reverse Holo", 2)]);
   m.lookupCatalog.mockResolvedValue([CHARMANDER]);
+  m.lookupLineSpecies.mockResolvedValue([CHARMANDER]);
   m.resolveLine.mockResolvedValue(LINE);
 });
 afterEach(cleanup);
@@ -168,17 +181,17 @@ describe("UIL-098 · a refused line keeps what she entered", () => {
     render(createElement(BackfillScreen));
     await user.click(await screen.findByRole("button", { name: "Back half" }));
 
-    // Start the line from the CATALOG species picker…
+    // Start the line from the CATALOG species picker (a species that forms a line)…
     await typeInto(user, screen.getByLabelText("Card lookup"), "Char");
     await waitFor(() => expect(tiles()).toHaveLength(1));
-    expect(m.lookupCatalog).toHaveBeenCalled();
+    expect(m.lookupLineSpecies).toHaveBeenCalled();
     await user.click(tiles()[0]);
 
-    // …then mark the Basic Filled (every stage opens undecided, UIL-117 PR 5) and pick the one she owns from her
-    // HAUL, in the stage's own picker.
+    // …then mark the Basic "I have it" (every stage opens undecided, UIL-117 PR 5) and pick the one she has from
+    // her HAUL, in the stage's own picker.
     await user.click(
       within(await screen.findByRole("group", { name: "Basic decision" })).getByRole("button", {
-        name: "Filled",
+        name: "I have it",
       }),
     );
     const stageBox = await screen.findByLabelText("Card lookup");
@@ -186,6 +199,12 @@ describe("UIL-098 · a refused line keeps what she entered", () => {
     await waitFor(() => expect(tiles()).toHaveLength(2));
     expect(m.searchWaiting).toHaveBeenCalled();
     await user.click(tiles()[0]);
+    // Its Stage 1 she leaves empty.
+    await user.click(
+      within(screen.getByRole("group", { name: "Stage1 decision" })).getByRole("button", {
+        name: "Leave empty",
+      }),
+    );
     await user.click(screen.getByRole("button", { name: "Save line" }));
 
     expect(await screen.findByText(REFUSAL)).toBeTruthy();
@@ -198,10 +217,9 @@ describe("UIL-098 · a refused line keeps what she entered", () => {
       expect.objectContaining({
         stages: [
           expect.objectContaining({
-            decision: "filled",
-            filledTcgdexId: "sv03-026",
-            filledDexVariantRaw: "Normal",
+            choice: { kind: "have", tcgdexId: "sv03-026", dexVariantRaw: "Normal" },
           }),
+          expect.objectContaining({ choice: { kind: "empty" } }),
         ],
       }),
     );

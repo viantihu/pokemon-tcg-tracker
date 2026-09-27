@@ -338,6 +338,14 @@ export function referencedCatalogIds(payload: WritePayload): string[] {
       if (op.chosen_catalog_card_id) ids.push(op.chosen_catalog_card_id);
       ids.push(...op.alternate_catalog_card_ids);
     }
+    // Her stage choices (UIL-121): a chased slot's target, and its wish.
+    if (op.op === "update_slot" && op.patch.target_catalog_card_id) {
+      ids.push(op.patch.target_catalog_card_id);
+    }
+    if (op.op === "upsert_wishlist_for_slot") {
+      if (op.chosen_catalog_card_id) ids.push(op.chosen_catalog_card_id);
+      ids.push(...(op.alternate_catalog_card_ids ?? []));
+    }
     if (op.op === "insert_presence_group") ids.push(op.catalog_card_id);
     if (op.op === "insert_unresolved_entry" && op.manual_match_id) ids.push(op.manual_match_id);
   }

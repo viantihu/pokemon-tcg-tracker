@@ -10,11 +10,15 @@
  * static render in a node environment cannot drive. So the tag is what is pinned. (The text list is now
  * deleted, so the remaining risk this guards is a site quietly dropping the grid.)
  *
- * UIL-098 split the five sites in two, and this pins the split. The FOUR that pick a card she owns search
+ * UIL-098 split the sites in two, and this pins the split. The FOUR that pick a card she owns search
  * only what is waiting in her haul (the memoised `search` from `useWaitingSearch`) and say "import it
  * first" when nothing matches; ONE — the species picker that starts a line — still searches the catalog,
- * because it chooses a chain, not a copy. A site drifting back to `lookupCatalog` would let Backfill offer
- * a card with no copy behind it.
+ * because it chooses a chain, not a copy, and offers only a species that forms a line (`lookupLineSpecies`,
+ * Karvi 2026-09-27: a Basic with no evolutions never goes in the lines area). A site drifting back to
+ * `lookupCatalog` would let Backfill offer a card with no copy behind it, or a species with no line.
+ *
+ * A pocket's spare card (a stage's filler, the third pocket) is one picker, `SparePicker`: her bulk box first, then
+ * this haul through the same waiting search (the Senior BA's ruling).
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -40,18 +44,20 @@ describe("UIL-071 · every Backfill type-ahead is the image-first grid", () => {
     expect(sites.map(placeholderOf)).toEqual([
       "Set + number or name…", // front half · in order
       "Pick a species in this line (any stage)…", // back half · start a line
-      "Which card?", // stage row · the owned card
-      "Which duplicate was repurposed?", // stage row · a repurposed-dup block
+      "Which spare card fills it?", // a pocket's spare card, from this haul (a stage's filler, the third pocket)
+      "Which card?", // stage row · the card she has
       "Set + number or name…", // specialty · flat list
     ]);
+    // Both pockets that take a spare card use the one picker.
+    expect(src.match(/<SparePicker\b/g)).toHaveLength(2);
   });
 
   const SPECIES = "Pick a species in this line (any stage)…";
 
-  it("the species picker alone searches the catalog, with exactly the contract", () => {
+  it("the species picker alone searches the catalog, for a species that forms a line, with exactly the contract", () => {
     const species = sites.filter((p) => placeholderOf(p) === SPECIES);
     expect(species).toHaveLength(1);
-    expect(species[0]).toMatch(/\bsearch=\{lookupCatalog\}/);
+    expect(species[0]).toMatch(/\bsearch=\{lookupLineSpecies\}/);
     const names = [...species[0].matchAll(/(\w+)=/g)].map((m) => m[1]).sort();
     expect(names).toEqual(["onPick", "placeholder", "search"]);
   });
@@ -68,7 +74,7 @@ describe("UIL-071 · every Backfill type-ahead is the image-first grid", () => {
       expect(names).toEqual(["emptyText", "onPick", "placeholder", "search"]);
     }
     // Every `search` on the screen is the waiting search.
-    expect(src.match(/const search = useWaitingSearch\(/g)).toHaveLength(3);
+    expect(src.match(/const search = useWaitingSearch\(/g)).toHaveLength(4);
   });
 });
 

@@ -19,7 +19,13 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
-import { commitBackLine, commitFrontHalf, commitSpecialty } from "@/lib/backfill";
+import {
+  commitBackLine,
+  commitFrontHalf,
+  commitSpecialty,
+  type BackLineCommit,
+  type BackLineStageInput,
+} from "@/lib/backfill";
 import { clearCatalogCache, loadPendingPlacements } from "@/lib/plan";
 import {
   ARVEN_SV03_186,
@@ -118,34 +124,31 @@ const charmander = (dexVariantRaw = "Normal") => ({
   dexVariantRaw,
 });
 
-/** A Charmander line whose Basic is FILLED — the card that has to be waiting. */
-const charmanderLine = (filled = charmander()) => ({
+/** A Charmander line whose Basic she HAS — the card that has to be waiting — and a chased Stage 1. */
+const charmanderLine = (filled = charmander()): BackLineCommit => ({
   binderId: B1,
   bandKey: "red",
   seedTcgdexId: CHARMANDER_SV03_026.tcgdexId,
   rootDexId: 4,
-  requiredType: "Fire",
-  terminated: false,
   stages: [
-    {
-      stageIndex: 0,
-      stage: "Basic",
-      dexId: 4,
-      decision: "filled" as const,
-      filledTcgdexId: filled.tcgdexId,
-      filledDexVariantRaw: filled.dexVariantRaw,
-    },
+    { stageIndex: 0, stage: "Basic", dexId: 4, choice: { kind: "have", ...filled } },
     {
       stageIndex: 1,
       stage: "Stage1",
       dexId: 5,
-      decision: "placeholder" as const,
-      hunt: true,
-      targetCatalogCardId: CHARMELEON_SV03_027.tcgdexId,
-      alternateCatalogCardIds: [],
-      specialtyOnly: false,
+      choice: { kind: "chase", catalogCardId: CHARMELEON_SV03_027.tcgdexId },
     },
   ],
+});
+/** A spare Scizor from her haul as the Stage 1 filler (Backfill's filler source, UIL-121). */
+const scizorFiller = (dexVariantRaw: string): BackLineStageInput => ({
+  stageIndex: 1,
+  stage: "Stage1",
+  dexId: 5,
+  choice: {
+    kind: "filler",
+    filler: { material: "card", tcgdexId: SCIZOR_SV03_141.tcgdexId, dexVariantRaw },
+  },
 });
 
 describe("UIL-098 · Backfill places waiting copies and creates none", () => {
@@ -182,23 +185,11 @@ describe("UIL-098 · Backfill places waiting copies and creates none", () => {
     expect(await roleOf(OLD_CHARMANDER)).toBe("haul");
   });
 
-  it("places a repurposed duplicate as the block's copy", async () => {
+  it("places a spare card from her haul as a filler's block", async () => {
     const line = charmanderLine();
     await commitBackLine(client(), OWNER, {
       ...line,
-      stages: [
-        line.stages[0],
-        {
-          stageIndex: 1,
-          stage: "Stage1",
-          dexId: 5,
-          decision: "block",
-          blockMaterial: "repurposedDuplicate",
-          blockCopyTcgdexId: SCIZOR_SV03_141.tcgdexId,
-          blockCopyDexVariantRaw: "Holo",
-          pocketCount: 1,
-        },
-      ],
+      stages: [line.stages[0], scizorFiller("Holo")],
     });
     expect(await roleOf(SCIZOR)).toBe("block");
     await asSuperuser(db);
@@ -267,25 +258,13 @@ describe("UIL-098 · a save that asks for a card not waiting is refused, naming 
     }
   });
 
-  it("a repurposed duplicate that is not waiting refuses the line the same way", async () => {
-    // A block's sacrificed card is a card she owns too. Only the Holo Scizor is waiting.
+  it("a filler card that is not waiting refuses the line the same way", async () => {
+    // A filler card is a card she owns too. Only the Holo Scizor is waiting.
     const line = charmanderLine();
     await expect(
       commitBackLine(client(), OWNER, {
         ...line,
-        stages: [
-          line.stages[0],
-          {
-            stageIndex: 1,
-            stage: "Stage1",
-            dexId: 5,
-            decision: "block",
-            blockMaterial: "repurposedDuplicate",
-            blockCopyTcgdexId: SCIZOR_SV03_141.tcgdexId,
-            blockCopyDexVariantRaw: "Normal",
-            pocketCount: 1,
-          },
-        ],
+        stages: [line.stages[0], scizorFiller("Normal")],
       }),
     ).rejects.toThrow(
       "Scizor (Normal) is not waiting in your haul. Add it in Dex, import it on the Sync page, then save " +

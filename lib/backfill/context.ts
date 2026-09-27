@@ -20,6 +20,9 @@ import { toCatalogCard } from "@/lib/plan";
 import { resolveBackLine } from "./resolve";
 import type { BackfillBinder, BackfillCollection, BandOption, ResolvedBackLine } from "./types";
 import type { PlanDeps } from "./plan";
+import type { WaitingPool } from "./waiting";
+import { isStandInId, localeOfId, standInIdFor } from "@/lib/catalog/locale";
+import type { StageCatalogCard, StageState } from "@/lib/line/stage-choice";
 
 export interface BackfillContext {
   binders: BackfillBinder[];
@@ -78,13 +81,55 @@ export function resolveBackLineFromContext(
   return resolveBackLine(picked, bandKey, [...ctx.catalogById.values()], ctx.typeColorMap);
 }
 
+/**
+ * Fresh state for the shared stage-choice rule (UIL-121), over Backfill's loaded context: the catalog, her stand-ins,
+ * and her copies WAITING in the haul (a Backfill filler card is one of them, so it reads role 'haul').
+ */
+export function stageStateFor(
+  ctx: BackfillContext,
+  pool: WaitingPool,
+  newId: () => string,
+  /** Her bulk box copies, for a filler card picked from it (the Senior BA's ruling: bulk box first, then haul). */
+  bulkIds: ReadonlySet<string> = new Set(),
+): StageState {
+  const waitingIds = new Set([...pool.values()].flatMap((k) => k.copyIds));
+  const toStage = (c: CatalogCard): StageCatalogCard => ({
+    tcgdexId: c.tcgdexId,
+    name: c.name,
+    dexId: c.dexId,
+    cardClass: c.cardClass,
+    setName: c.setName ?? null,
+    localId: c.localId,
+    locale: localeOfId(c.tcgdexId),
+  });
+  const all = [...ctx.catalogById.values()];
+  const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
+  return {
+    card: (id) => {
+      const c = ctx.catalogById.get(id);
+      return c ? toStage(c) : null;
+    },
+    copy: (id) =>
+      waitingIds.has(id) ? { id, role: "haul" } : bulkIds.has(id) ? { id, role: "bulk" } : null,
+    standIns: all.filter((c) => isStandInId(c.tcgdexId)).map(toStage),
+    mirrorCandidates: (draft) => all.filter((c) => norm(c.name) === norm(draft.name)).map(toStage),
+    newId,
+    newStandInId: (language) => standInIdFor(language),
+  };
+}
+
 /** Assemble the pure-planner deps from a loaded context + owner + the waiting-copy source. */
 export function planDeps(
   ctx: BackfillContext,
   ownerId: string,
   takeCopy: PlanDeps["takeCopy"],
+  pool: WaitingPool = new Map(),
+  bulkIds: ReadonlySet<string> = new Set(),
 ): PlanDeps {
+  // A real uuid: every id column it names is uuid-typed (TL review of #422).
+  const newId = () => crypto.randomUUID();
   return {
+    stageState: stageStateFor(ctx, pool, newId, bulkIds),
     takeCopy,
     ownerId,
     catalogById: ctx.catalogById,
@@ -92,10 +137,7 @@ export function planDeps(
     binderNameById: ctx.binderNameById,
     bandDisplayByKey: ctx.bandDisplayByKey,
     collectionNameById: ctx.collectionNameById,
-    newId: () =>
-      typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `bf-${Math.random().toString(36).slice(2)}`,
+    newId,
     now: new Date().toISOString(),
   };
 }

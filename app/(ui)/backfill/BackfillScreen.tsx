@@ -23,8 +23,17 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { band, type LineStatus } from "@/lib/engine";
+import { band } from "@/lib/engine";
 import type { BackLineStageInfo, BackLineStageInput, ResolvedBackLine } from "@/lib/backfill";
+import { mixedLanguageNote } from "@/lib/backfill/language";
+import { localeOfId } from "@/lib/catalog/locale";
+import {
+  LINE_ROW_POCKETS,
+  lineStatusOf,
+  NOT_A_LINE,
+  stageLabel,
+  type FillerCardOption,
+} from "@/lib/line/popup";
 import { BandChip } from "../_components/BandChip";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
@@ -32,13 +41,14 @@ import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { bandMeta } from "../_components/plan-meta";
 import { isUnreached, LOST, reach } from "../_components/reach";
 import { NoBinderNotice } from "../_components/NoBinderNotice";
+import { bulkFillerAction } from "../_components/line-popup-actions";
 import type { LookupCard } from "../plan/plan-types";
 import {
   commitFrontAction,
   commitLineAction,
   commitSpecialtyAction,
   loadContext,
-  lookupCatalog,
+  lookupLineSpecies,
   resolveLine,
   searchWaiting,
 } from "./actions";
@@ -369,45 +379,54 @@ function FrontHalfPanel({
 /* -------------------------------- back half ------------------------------- */
 
 /**
- * Her decision for a stage (UIL-117 PR 5): a card she owns, a wishlist hunt, left empty (a slot on no wishlist), or
- * a block. Null until she decides; nothing is decided for her.
+ * Her choice for a stage (UIL-117 C; UIL-121): the card she has (from her haul), chase a card (her wishlist add),
+ * leave it empty (nothing on her wishlist), or a filler in its pocket (a basic energy, or a spare card from her haul).
+ * Null until she decides; nothing is decided for her. The shared parts (pick another card to chase, a placeholder
+ * card) come with the line sheet; this row chases the suggested card.
  */
-type StageChoice = "filled" | "hunt" | "empty" | "block";
+type StageChoice = "have" | "chase" | "empty" | "filler";
 
 interface StageEntry {
   info: BackLineStageInfo;
   choice: StageChoice | null;
-  /** FILLED: the copy she owns, picked from her haul (UIL-098). */
-  filledCard: WaitingCard | null;
-  blockMaterial: "basicEnergy" | "repurposedDuplicate";
-  /** A repurposed duplicate is a card she owns too, so it is picked from her haul as well. */
-  blockCard: WaitingCard | null;
-  pocketCount: number;
-  /**
-   * Her hunt was cleared when she marked the line terminated. The row says so while the stage is undecided (UX review
-   * of #400); unticking terminated drops it.
-   */
-  huntCleared?: boolean;
+  /** HAVE: the copy she has, picked from her haul (UIL-098). */
+  haveCard: WaitingCard | null;
+  /** Null until she picks: a filler is her choice too (UX review of #422). */
+  fillerMaterial: "energy" | "card" | null;
+  /** A filler card: a spare from her bulk box, or one waiting in her haul (the Senior BA's ruling). */
+  fillerCard: SpareCard | null;
 }
+
+/** A spare card for a pocket: one of her bulk box copies (offered first), or a card waiting in her haul. */
+type SpareCard = { from: "bulk"; option: FillerCardOption } | { from: "haul"; card: WaitingCard };
+
+/** A spare card as the server takes it: that bulk box copy, or the next waiting copy of the haul printing. */
+function spareFiller(s: SpareCard) {
+  return s.from === "bulk"
+    ? { material: "card" as const, from: "bulk" as const, copyId: s.option.copyId }
+    : { material: "card" as const, tcgdexId: s.card.tcgdexId, dexVariantRaw: s.card.dexVariantRaw };
+}
+const spareName = (s: SpareCard) => (s.from === "bulk" ? s.option.card.name : s.card.name);
 
 function defaultEntry(info: BackLineStageInfo): StageEntry {
-  return {
-    info,
-    choice: null,
-    filledCard: null,
-    blockMaterial: "basicEnergy",
-    blockCard: null,
-    pocketCount: 1,
-  };
+  return { info, choice: null, haveCard: null, fillerMaterial: null, fillerCard: null };
 }
 
-/** The status the server will derive (`deriveLineStatus`), previewed: a hunt or an empty stage is a placeholder. */
-function deriveStatus(entries: StageEntry[], terminated: boolean): LineStatus {
-  if (terminated) return "terminated";
-  const placeholder = (e: StageEntry) => e.choice === "hunt" || e.choice === "empty";
-  if (entries.some((e) => placeholder(e) && e.info.specialtyOnly)) return "capped";
-  if (entries.length > 0 && entries.every((e) => e.choice === "filled")) return "complete";
-  return "open";
+/** The status the server will write (`lineStatusOf`), previewed: CLOSED unless a stage is chased or undecided. */
+function previewStatus(entries: StageEntry[]): "open" | "closed" {
+  return lineStatusOf(
+    entries.map((e) =>
+      e.choice === "have"
+        ? { state: "filled" }
+        : { state: e.choice === "filler" ? "block" : "placeholder", stageChoice: e.choice },
+    ),
+  );
+}
+
+/** What fills a complete short line's third pocket (UIL-121 Q4), until she picks. */
+interface ThirdPocketEntry {
+  material: "energy" | "card" | "empty" | null;
+  card: SpareCard | null;
 }
 
 function BackHalfPanel({
@@ -424,7 +443,8 @@ function BackHalfPanel({
   /** The card she picked the species by: the server resolves the same chain from it to check her line. */
   const [seedId, setSeedId] = useState<string | null>(null);
   const [entries, setEntries] = useState<StageEntry[]>([]);
-  const [terminated, setTerminated] = useState(false);
+  const [third, setThird] = useState<ThirdPocketEntry>({ material: null, card: null });
+  const [mixedOk, setMixedOk] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -442,12 +462,19 @@ function BackHalfPanel({
         onResult({ kind: "err", text: "Could not find that species' evolution line." });
         return;
       }
+      // A basic with no evolution is not a line (Karvi, 2026-09-27); the picker does not offer one, and this holds
+      // if one ever arrives.
+      if (r.stages.length < 2) {
+        onResult({ kind: "err", text: NOT_A_LINE });
+        return;
+      }
       setResolved(r);
       setSeedId(card.tcgdexId);
-      setTerminated(false);
       // Every stage opens undecided, the one she picked the species by too (UIL-117 PR 5): the species picker
-      // searches the catalog, so it says nothing about which card she owns (UIL-098).
+      // searches the catalog, so it says nothing about which card she has (UIL-098).
       setEntries(r.stages.map(defaultEntry));
+      setThird({ material: null, card: null });
+      setMixedOk(false);
     } finally {
       setResolving(false);
     }
@@ -461,81 +488,82 @@ function BackHalfPanel({
     setResolved(null);
     setSeedId(null);
     setEntries([]);
-    setTerminated(false);
+    setThird({ material: null, card: null });
+    setMixedOk(false);
   }
 
-  /** A terminated line hunts nothing (the Senior BA's Q1), so a hunt goes back to undecided for her to redo. */
-  function markTerminated(on: boolean) {
-    setTerminated(on);
-    // Never silently: the row she hunted says why it went back to undecided (the UX Dev's review of #400).
-    setEntries((es) =>
-      es.map((e) =>
-        on && e.choice === "hunt"
-          ? { ...e, choice: null, huntCleared: true }
-          : !on && e.huntCleared
-            ? { ...e, huntCleared: false }
-            : e,
-      ),
-    );
-  }
-
-  const status = deriveStatus(entries, terminated);
-  const hunts = entries.filter((e) => e.choice === "hunt").length;
+  const status = previewStatus(entries);
+  const chases = entries.filter((e) => e.choice === "chase").length;
   const empties = entries.filter((e) => e.choice === "empty").length;
-  const blocks = entries.filter((e) => e.choice === "block").length;
-  const undecided = entries.filter((e) => e.choice === null).length;
+  const fillers = entries.filter((e) => e.choice === "filler").length;
+  // A complete line shorter than three pockets has a third pocket; she says what fills it (UIL-121 Q4).
+  const needsThird =
+    entries.length > 0 &&
+    entries.length < LINE_ROW_POCKETS &&
+    entries.every((e) => e.choice === "have");
+  // The line reads as its lowest card's language (UIL-090); mixing them needs her OK (the Senior BA's ruling).
+  const haveLocales = entries.flatMap((e) =>
+    e.choice === "have" && e.haveCard ? [localeOfId(e.haveCard.tcgdexId)] : [],
+  );
+  const mixed = mixedLanguageNote(
+    haveLocales,
+    haveLocales[0] ?? localeOfId(seedId ?? resolved?.stages[0]?.suggestedTargetId ?? ""),
+  );
+
+  /** What still stops the save, in her words; null when the line can be saved. */
+  const blocker = (() => {
+    const undecided = entries.filter((e) => e.choice === null).length;
+    if (undecided > 0) return `Decide every stage (${undecided} left), then save the line.`;
+    const noFiller = entries.find((e) => e.choice === "filler" && e.fillerMaterial === null);
+    if (noFiller) return `Pick the filler for ${stageLabel(noFiller.info.stage)}.`;
+    const noCard = entries.find(
+      (e) =>
+        (e.choice === "have" && !e.haveCard) ||
+        (e.choice === "filler" && e.fillerMaterial === "card" && !e.fillerCard),
+    );
+    if (noCard)
+      return `Pick the card for the ${stageLabel(noCard.info.stage)} stage from your haul.`;
+    if (needsThird && (third.material === null || (third.material === "card" && !third.card))) {
+      return "Choose what fills the third pocket.";
+    }
+    if (mixed && !mixedOk) return "Confirm the line's language below.";
+    return null;
+  })();
 
   async function save() {
-    if (!resolved || !seedId || undecided > 0) return;
-    // Validate required selections.
-    for (const e of entries) {
-      if (e.choice === "filled" && !e.filledCard) {
-        onResult({
-          kind: "err",
-          text: `Pick the ${e.info.stage} card you own, or choose another option for it.`,
-        });
-        return;
-      }
-      if (e.choice === "block" && e.blockMaterial === "repurposedDuplicate" && !e.blockCard) {
-        onResult({
-          kind: "err",
-          text: `Pick which duplicate was repurposed for the ${e.info.stage} block.`,
-        });
-        return;
-      }
-    }
+    if (!resolved || !seedId || blocker) return;
     setSaving(true);
     onResult(null);
     try {
       const stages: BackLineStageInput[] = entries.map((e) => {
         const base = { stageIndex: e.info.stageIndex, stage: e.info.stage, dexId: e.info.dexId };
-        if (e.choice === "filled") {
-          return {
-            ...base,
-            decision: "filled" as const,
-            filledTcgdexId: e.filledCard!.tcgdexId,
-            filledDexVariantRaw: e.filledCard!.dexVariantRaw,
-          };
+        switch (e.choice) {
+          case "have":
+            return {
+              ...base,
+              choice: {
+                kind: "have",
+                tcgdexId: e.haveCard!.tcgdexId,
+                dexVariantRaw: e.haveCard!.dexVariantRaw,
+              },
+            };
+          case "chase":
+            // Her wishlist add, for exactly this card (UIL-119: only a chase goes on her wishlist).
+            return { ...base, choice: { kind: "chase", catalogCardId: e.info.suggestedTargetId! } };
+          case "empty":
+            return { ...base, choice: { kind: "empty" } };
+          default:
+            return {
+              ...base,
+              choice: {
+                kind: "filler",
+                filler:
+                  e.fillerMaterial === "card" && e.fillerCard
+                    ? spareFiller(e.fillerCard)
+                    : { material: "energy" },
+              },
+            };
         }
-        if (e.choice === "hunt" || e.choice === "empty") {
-          return {
-            ...base,
-            decision: "placeholder" as const,
-            // Her answer, said out loud: only a hunt goes on her wishlist (UIL-119).
-            hunt: e.choice === "hunt",
-            targetCatalogCardId: e.info.suggestedTargetId,
-            alternateCatalogCardIds: e.info.alternateTargetIds,
-            specialtyOnly: e.info.specialtyOnly,
-          };
-        }
-        return {
-          ...base,
-          decision: "block" as const,
-          blockMaterial: e.blockMaterial,
-          blockCopyTcgdexId: e.blockCard?.tcgdexId ?? null,
-          blockCopyDexVariantRaw: e.blockCard?.dexVariantRaw ?? null,
-          pocketCount: e.pocketCount,
-        };
       });
       // The commit returns `{ ok }` for its own failures, so a throw is a call that never arrived (UIL-109).
       const res = await reach(
@@ -545,16 +573,23 @@ function BackHalfPanel({
             bandKey: resolved.bandKey,
             seedTcgdexId: seedId,
             rootDexId: resolved.rootDexId,
-            requiredType: resolved.requiredType,
-            terminated,
             stages,
+            ...(needsThird && third.material
+              ? {
+                  thirdPocket:
+                    third.material === "card" && third.card
+                      ? spareFiller(third.card)
+                      : { material: third.material === "card" ? "energy" : third.material },
+                }
+              : {}),
+            ...(mixed && mixedOk ? { mixedLanguageOk: true as const } : {}),
           }),
         LOST.action,
       );
       if (res.ok) {
         onResult({
           kind: "ok",
-          text: `Saved the ${bandMeta(resolved.bandKey).display} ${resolved.speciesName} line (${res.counts.slots} slots, ${res.counts.wishlist} on your wishlist, ${empties} left empty, ${res.counts.blocks} blocks).`,
+          text: `Saved the ${bandMeta(resolved.bandKey).display} ${resolved.speciesName} line (${res.counts.slots} slots, ${res.counts.wishlist} on your wishlist, ${empties} left empty, ${res.counts.blocks} fillers).`,
         });
         reset();
       } else onResult({ kind: "err", text: res.error });
@@ -562,6 +597,21 @@ function BackHalfPanel({
       setSaving(false);
     }
   }
+
+  const thirdSpare = third.material === "card" ? third.card : null;
+  /** The haul cards the line's OTHER pickers have taken, so each picker counts what is really left. */
+  const allPicks = (except: StageEntry | null, withThird = true) => [
+    ...entries.filter((o) => o !== except).flatMap(stagePicks),
+    ...(withThird && thirdSpare?.from === "haul" ? [thirdSpare.card] : []),
+  ];
+  /** The bulk box copies the OTHER pockets hold: one copy fills one pocket. */
+  const usedBulk = (except: StageEntry | null, withThird = true) =>
+    new Set([
+      ...entries
+        .filter((o) => o !== except && o.choice === "filler" && o.fillerMaterial === "card")
+        .flatMap((o) => (o.fillerCard?.from === "bulk" ? [o.fillerCard.option.copyId] : [])),
+      ...(withThird && thirdSpare?.from === "bulk" ? [thirdSpare.option.copyId] : []),
+    ]);
 
   return (
     <div className="entry panel">
@@ -591,14 +641,14 @@ function BackHalfPanel({
             </span>
           </div>
           <CardResultsGrid
-            search={lookupCatalog}
+            search={lookupLineSpecies}
             onPick={startLine}
             placeholder="Pick a species in this line (any stage)…"
           />
           <p style={{ marginTop: 14, fontSize: 11, color: "var(--ink-2)", lineHeight: 1.8 }}>
             {resolving
               ? "Resolving the chain…"
-              : "Choose the line colour, then pick any card of the species. The stages come from the catalog; you decide each one: owned, a wishlist hunt, left empty, or a block."}
+              : "Choose the line colour, then pick any card of the species. The stages come from the catalog; you decide each one: a card you have, a card to chase, left empty, or a filler."}
           </p>
         </>
       ) : (
@@ -608,10 +658,10 @@ function BackHalfPanel({
               {bandMeta(resolved.bandKey).display} · {resolved.speciesName}
             </span>
             <span>
-              {String(status).toUpperCase()}
-              {hunts ? ` · ${hunts} HUNT${hunts > 1 ? "S" : ""}` : ""}
+              {status.toUpperCase()}
+              {chases ? ` · ${chases} CHASED` : ""}
               {empties ? ` · ${empties} EMPTY` : ""}
-              {blocks ? ` · ${blocks} BLOCK${blocks > 1 ? "S" : ""}` : ""}
+              {fillers ? ` · ${fillers} FILLER${fillers > 1 ? "S" : ""}` : ""}
             </span>
           </div>
 
@@ -619,35 +669,41 @@ function BackHalfPanel({
             <StageRow
               key={e.info.stageIndex}
               entry={e}
-              otherPicks={entries.filter((o) => o !== e).flatMap(stagePicks)}
-              terminated={terminated}
-              onDecision={(d) => patch(e.info.stageIndex, { choice: d })}
-              onFilled={(card) => patch(e.info.stageIndex, { filledCard: card })}
-              onBlockMaterial={(m) => patch(e.info.stageIndex, { blockMaterial: m })}
-              onBlockCard={(card) => patch(e.info.stageIndex, { blockCard: card })}
-              onPocketCount={(n) => patch(e.info.stageIndex, { pocketCount: n })}
+              otherPicks={allPicks(e)}
+              usedBulk={usedBulk(e)}
+              onChoice={(d) => patch(e.info.stageIndex, { choice: d })}
+              onHaveCard={(card) => patch(e.info.stageIndex, { haveCard: card })}
+              onFillerMaterial={(m) => patch(e.info.stageIndex, { fillerMaterial: m })}
+              onFillerCard={(card) => patch(e.info.stageIndex, { fillerCard: card })}
             />
           ))}
 
-          <div className="lf" style={{ gridTemplateColumns: "70px minmax(0,1fr)" }}>
-            <span className="st">STATUS</span>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11 }}>
-              <input
-                type="checkbox"
-                checked={terminated}
-                onChange={(ev) => markTerminated(ev.target.checked)}
-              />
-              Line terminated (no same-colour evolution) — nothing in it is hunted
-            </label>
-          </div>
+          {needsThird ? (
+            <ThirdPocketRow
+              value={third}
+              otherPicks={allPicks(null, false)}
+              usedBulk={usedBulk(null, false)}
+              onChange={setThird}
+            />
+          ) : null}
+
+          {mixed ? (
+            <div className="lf" style={{ gridTemplateColumns: "70px minmax(0,1fr)" }}>
+              <span className="st">LANGUAGE</span>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11 }}>
+                <input
+                  type="checkbox"
+                  checked={mixedOk}
+                  onChange={(ev) => setMixedOk(ev.target.checked)}
+                />
+                {mixed} Save it that way.
+              </label>
+            </div>
+          ) : null}
 
           <div className="lf" style={{ gridTemplateColumns: "1fr auto auto", gap: 8 }}>
             <span className="st">
-              {undecided > 0
-                ? `Decide every stage (${undecided} left), then save the line.`
-                : terminated
-                  ? "Terminated — no stage is hunted."
-                  : "Every stage decided. Save the line."}
+              {blocker ?? `Every stage decided. This line will read as ${status}.`}
             </span>
             <button type="button" className="btn" onClick={reset} disabled={saving}>
               Discard
@@ -656,7 +712,7 @@ function BackHalfPanel({
               type="button"
               className="btn btn-primary"
               onClick={save}
-              disabled={saving || undecided > 0}
+              disabled={saving || !!blocker}
             >
               {saving ? "Saving…" : "Save line"}
             </button>
@@ -667,69 +723,189 @@ function BackHalfPanel({
   );
 }
 
-/** The waiting copies a stage takes as entered: its FILLED card, or its repurposed duplicate. */
+/** The waiting copies a stage takes as entered: the card she has, or its filler card from her haul. */
 function stagePicks(e: StageEntry): WaitingCard[] {
-  if (e.choice === "filled" && e.filledCard) return [e.filledCard];
-  if (e.choice === "block" && e.blockMaterial === "repurposedDuplicate" && e.blockCard) {
-    return [e.blockCard];
+  if (e.choice === "have" && e.haveCard) return [e.haveCard];
+  if (e.choice === "filler" && e.fillerMaterial === "card" && e.fillerCard?.from === "haul") {
+    return [e.fillerCard.card];
   }
   return [];
+}
+
+/**
+ * The spare cards that can fill a pocket (the Senior BA's ruling): her bulk box first, each copy tagged "Bulk box",
+ * then the cards waiting in this haul. `usedBulk`: bulk box copies another pocket of this line already holds.
+ */
+function SparePicker({
+  search,
+  usedBulk,
+  onPick,
+}: {
+  search: (query: string) => Promise<WaitingCard[]>;
+  usedBulk: ReadonlySet<string>;
+  onPick: (s: SpareCard) => void;
+}) {
+  const [bulk, setBulk] = useState<FillerCardOption[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    // The popups' own bulk box read (it returns its refusal, so her words survive a production build); a call that
+    // never answers is `reach`'s.
+    void reach(() => bulkFillerAction(), LOST.read).then((res) => {
+      if (!live) return;
+      if (res.ok) setBulk(res.options);
+      else setError(res.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  const left = bulk?.filter((o) => !usedBulk.has(o.copyId)) ?? null;
+  const onHaul = (card: WaitingCard) => onPick({ from: "haul", card });
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span className="hint u">Your bulk box</span>
+      {error ? (
+        <div className="hint u" role="alert">
+          {error}
+        </div>
+      ) : left === null ? (
+        <div className="hint u" role="status">
+          Loading your bulk box…
+        </div>
+      ) : left.length === 0 ? (
+        <div className="hint u">No spare card in your bulk box.</div>
+      ) : (
+        // Capped and scrollable: a big bulk box must not push the rest of the line off the page (UX review of #422).
+        <div
+          className="cgrid"
+          role="group"
+          aria-label="Spare cards in your bulk box"
+          style={{ maxHeight: 360, overflowY: "auto" }}
+        >
+          {left.map((o) => {
+            const number = formatCollectorNumber(
+              o.card.localId,
+              o.card.setCardCountOfficial ?? null,
+            );
+            return (
+              <button
+                key={o.copyId}
+                type="button"
+                className="ccard"
+                aria-label={`${o.card.name}${number ? ` ${number}` : ""} · Bulk box`}
+                onClick={() => onPick({ from: "bulk", option: o })}
+              >
+                <CardFace
+                  name={o.card.name}
+                  tcgdexId={o.card.tcgdexId}
+                  imageUrl={o.card.imageUrl}
+                  size="m"
+                />
+                <div className="cn u">{o.card.name}</div>
+                {number ? <div className="cno">{number}</div> : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <span className="hint u">This haul</span>
+      <CardResultsGrid
+        search={search}
+        onPick={onHaul}
+        placeholder="Which spare card fills it?"
+        emptyText={NOT_WAITING_EMPTY}
+      />
+    </div>
+  );
+}
+
+/** A picked spare card: its face and number, where it comes from, and "Change" to pick again. */
+function PickedSpare({ spare, onChange }: { spare: SpareCard; onChange: () => void }) {
+  const c = spare.from === "haul" ? spare.card : spare.option.card;
+  const number = formatCollectorNumber(c.localId, c.setCardCountOfficial ?? null);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <CardFace name={c.name} tcgdexId={c.tcgdexId} imageUrl={c.imageUrl} size="s" />
+        <span className="nm" style={{ fontSize: 12 }}>
+          {c.name}
+          {number ? ` · ${number}` : ""}
+          {spare.from === "bulk" ? ` · ${spare.option.where}` : ""}
+        </span>
+        <button type="button" className="btn sm" onClick={onChange}>
+          Change
+        </button>
+      </div>
+      {spare.from === "haul" ? <WaitingTag card={spare.card} /> : null}
+    </div>
+  );
+}
+
+/** A picked card from her haul: its face, number and Dex variant. */
+function PickedCard({ card }: { card: WaitingCard }) {
+  const number = formatCollectorNumber(card.localId, card.setCardCountOfficial);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <CardFace name={card.name} tcgdexId={card.tcgdexId} imageUrl={card.imageUrl} size="s" />
+      <span className="nm" style={{ fontSize: 12 }}>
+        {card.name}
+        {number ? ` · ${number}` : ""}
+      </span>
+    </div>
+  );
 }
 
 function StageRow({
   entry,
   otherPicks,
-  terminated,
-  onDecision,
-  onFilled,
-  onBlockMaterial,
-  onBlockCard,
-  onPocketCount,
+  usedBulk,
+  onChoice,
+  onHaveCard,
+  onFillerMaterial,
+  onFillerCard,
 }: {
   entry: StageEntry;
   /** What the line's OTHER stages have picked, so this stage's picker counts what is really left. */
   otherPicks: WaitingCard[];
-  terminated: boolean;
-  onDecision: (d: StageChoice) => void;
-  onFilled: (card: WaitingCard) => void;
-  onBlockMaterial: (m: "basicEnergy" | "repurposedDuplicate") => void;
-  onBlockCard: (card: WaitingCard) => void;
-  onPocketCount: (n: number) => void;
+  /** The bulk box copies the line's other pockets hold. */
+  usedBulk: ReadonlySet<string>;
+  onChoice: (d: StageChoice) => void;
+  onHaveCard: (card: WaitingCard) => void;
+  onFillerMaterial: (m: "energy" | "card") => void;
+  onFillerCard: (card: SpareCard | null) => void;
 }) {
   const { info, choice } = entry;
   const search = useWaitingSearch(otherPicks);
   const faceClass =
-    choice === "hunt"
+    choice === "chase"
       ? "f ph"
       : choice === "empty"
         ? "f em"
-        : choice === "block"
+        : choice === "filler"
           ? "f blk"
           : choice === null
             ? "f und"
             : "f";
-  // A terminated line hunts nothing (the Senior BA's Q1); a stage with no same-colour printing has nothing to hunt.
-  const huntOff = terminated || !info.sameColorPrintingExists;
+  const chaseOff = !info.suggestedTargetId;
 
   return (
     <div className="lf">
       <span className="st">{info.stage.toUpperCase()}</span>
       <span className={faceClass}>
-        {choice === "filled" && entry.filledCard ? (
-          entry.filledCard.name
-        ) : choice === "hunt" || choice === "empty" ? (
+        {choice === "have" && entry.haveCard ? (
+          entry.haveCard.name
+        ) : choice === "chase" ? (
+          <>CHASE · {info.name}</>
+        ) : choice === "empty" ? (
+          <>EMPTY · {info.name}</>
+        ) : choice === "filler" ? (
           <>
-            {choice === "hunt" ? "HUNT" : "EMPTY"} · {info.name}
-            {info.specialtyOnly ? <br /> : null}
-            {info.specialtyOnly ? "SPECIALTY · CAPS LINE" : ""}
-          </>
-        ) : choice === "block" ? (
-          <>
-            BLOCK · {info.name}
-            {entry.blockMaterial === "repurposedDuplicate" && entry.blockCard ? (
+            FILLER · {info.name}
+            {entry.fillerMaterial === "card" && entry.fillerCard ? (
               <>
                 <br />
-                WEDGE · {entry.blockCard.name}
+                {spareName(entry.fillerCard)}
               </>
             ) : null}
           </>
@@ -739,163 +915,171 @@ function StageRow({
       </span>
 
       <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-        {choice === null && entry.huntCleared ? (
-          <span className="bf-cleared" role="status">
-            Wishlist hunt cleared: a terminated line hunts nothing. Pick another option.
-          </span>
-        ) : choice === null ? (
+        {choice === null ? (
           <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
-            {huntOff
-              ? `Not decided yet: Filled, Leave empty or Block. Hunt is off: ${
-                  terminated ? "a terminated line hunts nothing" : "no same-colour printing to hunt"
-                }.`
-              : "Not decided yet: Filled, Hunt, Leave empty or Block."}
+            {chaseOff
+              ? "Not decided yet: I have it, Leave empty or Filler. Chase is off: no same-colour printing to chase."
+              : "Not decided yet: I have it, Chase, Leave empty or Filler."}
           </span>
         ) : null}
 
-        {/* FILLED: which printing do you own */}
-        {choice === "filled" && (
+        {choice === "have" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {entry.filledCard ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <CardFace
-                  name={entry.filledCard.name}
-                  tcgdexId={entry.filledCard.tcgdexId}
-                  imageUrl={entry.filledCard.imageUrl}
-                  size="s"
-                />
-                <span className="nm" style={{ fontSize: 12 }}>
-                  {entry.filledCard.name}
-                  {formatCollectorNumber(
-                    entry.filledCard.localId,
-                    entry.filledCard.setCardCountOfficial,
-                  )
-                    ? ` · ${formatCollectorNumber(entry.filledCard.localId, entry.filledCard.setCardCountOfficial)}`
-                    : ""}
-                </span>
-              </div>
+            {entry.haveCard ? (
+              <PickedCard card={entry.haveCard} />
             ) : (
               <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
-                Pick the card you own from your haul:
+                Pick the card you have from your haul:
               </span>
             )}
             <CardResultsGrid
               search={search}
-              onPick={onFilled}
+              onPick={onHaveCard}
               placeholder="Which card?"
               emptyText={NOT_WAITING_EMPTY}
             />
-            {entry.filledCard ? <WaitingTag card={entry.filledCard} /> : null}
+            {entry.haveCard ? <WaitingTag card={entry.haveCard} /> : null}
           </div>
         )}
 
-        {/* BLOCK: material + (repurposed) which card + pocket count */}
-        {choice === "block" && (
+        {choice === "chase" && (
+          <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
+            Goes on your wishlist · {info.alternateTargetIds.length} alternate(s)
+          </span>
+        )}
+
+        {choice === "empty" && (
+          <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
+            An empty slot · not on your wishlist
+          </span>
+        )}
+
+        {choice === "filler" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <div className="variants" role="group" aria-label="Block material">
+            <div className="variants" role="group" aria-label="Filler">
               <button
                 type="button"
-                className={entry.blockMaterial === "basicEnergy" ? "on" : ""}
-                onClick={() => onBlockMaterial("basicEnergy")}
+                className={entry.fillerMaterial === "energy" ? "on" : ""}
+                aria-pressed={entry.fillerMaterial === "energy"}
+                onClick={() => onFillerMaterial("energy")}
               >
                 Basic energy
               </button>
               <button
                 type="button"
-                className={entry.blockMaterial === "repurposedDuplicate" ? "on" : ""}
-                onClick={() => onBlockMaterial("repurposedDuplicate")}
+                className={entry.fillerMaterial === "card" ? "on" : ""}
+                aria-pressed={entry.fillerMaterial === "card"}
+                onClick={() => onFillerMaterial("card")}
               >
-                Repurposed dup
+                A spare card
               </button>
             </div>
-            {entry.blockMaterial === "repurposedDuplicate" && (
-              <CardResultsGrid
-                search={search}
-                onPick={onBlockCard}
-                placeholder="Which duplicate was repurposed?"
-                emptyText={NOT_WAITING_EMPTY}
-              />
-            )}
-            <label
-              style={{
-                fontSize: 10,
-                color: "var(--ink-2)",
-                display: "flex",
-                gap: 6,
-                alignItems: "center",
-              }}
-            >
-              Pockets
-              <input
-                className="field"
-                style={{ width: 64 }}
-                type="number"
-                min={1}
-                value={entry.pocketCount}
-                onChange={(ev) => onPocketCount(Math.max(1, Number(ev.target.value) || 1))}
-              />
-            </label>
+            {entry.fillerMaterial === "card" &&
+              (entry.fillerCard ? (
+                <PickedSpare spare={entry.fillerCard} onChange={() => onFillerCard(null)} />
+              ) : (
+                <SparePicker search={search} usedBulk={usedBulk} onPick={onFillerCard} />
+              ))}
           </div>
-        )}
-
-        {/* HUNT: nothing to enter — the wishlist target + alternates come from the catalog */}
-        {choice === "hunt" && (
-          <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
-            {info.suggestedTargetId
-              ? `Goes on your wishlist · ${info.alternateTargetIds.length} alternate(s)`
-              : "No same-colour printing found for the wishlist target."}
-          </span>
-        )}
-
-        {/* LEAVE EMPTY: the slot is kept, and nothing goes on her wishlist (UIL-119) */}
-        {choice === "empty" && (
-          <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
-            An empty slot · not on your wishlist
-          </span>
         )}
       </div>
 
       <span className="seg3" role="group" aria-label={`${info.stage} decision`}>
         <button
           type="button"
-          className={choice === "filled" ? "on" : ""}
-          aria-pressed={choice === "filled"}
-          onClick={() => onDecision("filled")}
+          className={choice === "have" ? "on" : ""}
+          aria-pressed={choice === "have"}
+          onClick={() => onChoice("have")}
         >
-          Filled
+          I have it
         </button>
         <button
           type="button"
-          className={choice === "hunt" ? "on ph" : ""}
-          aria-pressed={choice === "hunt"}
-          disabled={huntOff}
-          title={
-            terminated
-              ? "A terminated line hunts nothing"
-              : info.sameColorPrintingExists
-                ? "Goes on your wishlist"
-                : "No same-colour printing to hunt"
-          }
-          onClick={() => onDecision("hunt")}
+          className={choice === "chase" ? "on ph" : ""}
+          aria-pressed={choice === "chase"}
+          disabled={chaseOff}
+          title={chaseOff ? "No same-colour printing to chase" : "Goes on your wishlist"}
+          onClick={() => onChoice("chase")}
         >
-          Hunt
+          Chase
         </button>
         <button
           type="button"
           className={choice === "empty" ? "on em" : ""}
           aria-pressed={choice === "empty"}
           title="An empty slot, not on your wishlist"
-          onClick={() => onDecision("empty")}
+          onClick={() => onChoice("empty")}
         >
           Leave empty
         </button>
         <button
           type="button"
-          className={choice === "block" ? "on blk" : ""}
-          aria-pressed={choice === "block"}
-          onClick={() => onDecision("block")}
+          className={choice === "filler" ? "on blk" : ""}
+          aria-pressed={choice === "filler"}
+          onClick={() => onChoice("filler")}
         >
-          Block
+          Filler
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/** A complete line shorter than three pockets: what fills its third pocket (UIL-121 Q4). */
+function ThirdPocketRow({
+  value,
+  otherPicks,
+  usedBulk,
+  onChange,
+}: {
+  value: ThirdPocketEntry;
+  otherPicks: WaitingCard[];
+  usedBulk: ReadonlySet<string>;
+  onChange: (v: ThirdPocketEntry) => void;
+}) {
+  const search = useWaitingSearch(otherPicks);
+  const pick = (material: ThirdPocketEntry["material"]) =>
+    onChange({ material, card: material === "card" ? value.card : null });
+  const onPickCard = (card: SpareCard | null) => onChange({ material: "card", card });
+  return (
+    <div className="lf">
+      <span className="st">3RD POCKET</span>
+      <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
+        <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
+          This line is complete in fewer than three pockets. What fills the third?
+        </span>
+        {value.material === "card" ? (
+          value.card ? (
+            <PickedSpare spare={value.card} onChange={() => onPickCard(null)} />
+          ) : (
+            <SparePicker search={search} usedBulk={usedBulk} onPick={onPickCard} />
+          )
+        ) : null}
+      </div>
+      <span className="seg3" role="group" aria-label="Third pocket">
+        <button
+          type="button"
+          className={value.material === "energy" ? "on blk" : ""}
+          aria-pressed={value.material === "energy"}
+          onClick={() => pick("energy")}
+        >
+          Basic energy
+        </button>
+        <button
+          type="button"
+          className={value.material === "card" ? "on blk" : ""}
+          aria-pressed={value.material === "card"}
+          onClick={() => pick("card")}
+        >
+          A spare card
+        </button>
+        <button
+          type="button"
+          className={value.material === "empty" ? "on em" : ""}
+          aria-pressed={value.material === "empty"}
+          onClick={() => pick("empty")}
+        >
+          Leave empty
         </button>
       </span>
     </div>

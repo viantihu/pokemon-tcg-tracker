@@ -1815,6 +1815,23 @@ nav.menu .tab .n {
 .seg3 button:last-child {
   border-right-width: 3px;
 }
+/* Four choices on a phone (UIL-117 C): one line each, never "I have / it" (measured at 375). Below 360 the row is
+   narrower than the four labels, so the choices wrap onto a second line, each label still whole (UX review of #422). */
+@media (max-width: 420px) {
+  .seg3 button {
+    padding: 6px 7px;
+    white-space: nowrap;
+  }
+}
+@media (max-width: 360px) {
+  .seg3 {
+    flex-wrap: wrap;
+  }
+  .seg3 button {
+    border-right-width: 3px;
+    margin-bottom: -3px;
+  }
+}
 .seg3 button.on {
   background: var(--ink);
   color: var(--panel);
@@ -1822,6 +1839,9 @@ nav.menu .tab .n {
 .seg3 button.on.ph {
   background: var(--note);
   color: var(--ink);
+  /* A picked Chase reads as picked beside the tan (the note fill alone is about 1.06:1; UX review of #422). */
+  box-shadow: inset 0 0 0 3px var(--ink);
+  font-weight: 700;
 }
 .seg3 button.on.blk {
   background: #5f5035;
@@ -1834,13 +1854,6 @@ nav.menu .tab .n {
   color: var(--ink);
   box-shadow: inset 0 0 0 3px var(--ink);
   font-weight: 700;
-}
-.bf-cleared {
-  font-size: 10px;
-  color: var(--ink);
-  background: var(--note);
-  border: 2px solid var(--ink);
-  padding: 4px 6px;
 }
 .seg3 button:disabled {
   opacity: 0.45;
