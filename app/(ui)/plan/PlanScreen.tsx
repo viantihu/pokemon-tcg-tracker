@@ -726,7 +726,7 @@ export function PlanScreen({
     item: PlanItem,
     /** From the line popup (UIL-117): her line choice, or her "file by its own colour" destination. */
     extra?: { lineChoice?: LineChoice; override?: MoveDestination },
-  ): Promise<boolean> {
+  ): Promise<false | { completedLine: boolean }> {
     if (done.has(item.incomingId) || shelving) return false;
     const entry = draft.find((d) => d.id === item.incomingId);
     if (!entry) return false;
@@ -816,7 +816,7 @@ export function PlanScreen({
       // Roll the cache forward rather than letting the write invalidate it (see shelveCardAction).
       setLiveStamp(res.stamp);
       setDone((prev) => new Set(prev).add(item.incomingId));
-      return true;
+      return { completedLine: res.completedLine === true };
     } finally {
       setShelving(null);
     }
@@ -1048,16 +1048,21 @@ export function PlanScreen({
    * Her confirm in the line popup, then "Confirm & next": the next line card in the plan that is not shelved yet
    * opens straight away, so a big haul is one pass rather than a hunt (v3 section 1). A refusal keeps the popup
    * open with the reason in it.
+   *
+   * EXCEPT when her confirm COMPLETED a line (UIL-120). Karvi: "Once the line is complete, it should not open the
+   * popup again for the next card automatically." The popup closes and she stays on the plan; the next line card
+   * waits for her tap. Whether it completed is the server's answer, read off the write it built.
    */
   async function confirmLinePopup(
     item: PlanItem,
     extra: { lineChoice?: LineChoice; override?: MoveDestination },
   ) {
-    if (!(await shelveCard(item, extra))) return;
+    const shelved = await shelveCard(item, extra);
+    if (!shelved) return;
     // A line write can change what the other cards would do (a card that would have started this line now joins
     // it), so the rest re-route and their badges follow; the batch runs a moment later, as for any change.
     if (extra.lineChoice) scheduleReroute();
-    const next = nextLineCard(item.incomingId);
+    const next = shelved.completedLine ? undefined : nextLineCard(item.incomingId);
     if (next) openLinePopup(next);
     else {
       setLinePop(null);
@@ -1362,7 +1367,8 @@ function PlanView(props: {
   setCur: (i: number) => void;
   done: Set<string>;
   /** Writes ONE card now; resolves true when it was shelved (UIL-027). */
-  shelveCard: (item: PlanItem) => Promise<boolean>;
+  /** Truthy once written; `completedLine` says it completed a line (UIL-120). */
+  shelveCard: (item: PlanItem) => Promise<false | { completedLine: boolean }>;
   /** Draft id of the card mid-write, so only its own control shows a pending state. */
   shelving: string | null;
   /** The spotlight card re-derived against current state, keyed by draft id (UIL-045). */

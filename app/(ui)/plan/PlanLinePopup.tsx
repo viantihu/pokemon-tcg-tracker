@@ -14,7 +14,8 @@
  *   - "Add to that line" on a line she already has reloads the popup for that line.
  *
  * The step-through ("Line card k of N", "Confirm & next") is the screen's: it opens the next line card after a
- * confirm. Escape cancels, through the app's layer stack.
+ * confirm, unless that confirm completes the line (UIL-120), so a confirm that will complete it does not say
+ * "· next". Escape cancels, through the app's layer stack.
  */
 
 import { useEffect, useState } from "react";
@@ -121,6 +122,12 @@ export function PlanLinePopup({
     proposal.lineId === opened.lineId &&
     proposal.slotId === opened.slotId;
   const mismatch = model.mode === "add" && onOpenedLine && bandMismatch ? bandMismatch : null;
+  // UIL-120: a confirm that fills the line's last slot completes it, and the screen then stops stepping; the popup's
+  // own count ("N/M filled") is the forecast. Filing by its own colour puts it in no line at all.
+  const completes =
+    model.mode !== "replace" &&
+    colour !== "own" &&
+    model.line.filledAfter + (value.mode === "start" ? value.pulls.length : 0) >= model.line.total;
 
   return (
     <div className="lp-overlay">
@@ -131,7 +138,7 @@ export function PlanLinePopup({
         onCancel={onCancel}
         onConfirm={onConfirm}
         onSwitch={(p) => setProposal(p)}
-        position={position}
+        position={{ ...position, next: position.next && !completes }}
         busy={busy}
         error={error ?? loadError}
         incomingLabel="New · this haul"
