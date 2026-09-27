@@ -25,6 +25,7 @@ import {
   LINE_ROW_POCKETS,
   stageLabel,
   type FillerChoice,
+  type FillerSource,
   type StageDecision,
   type StandInDraft,
   type ThirdPocketChoice,
@@ -77,8 +78,11 @@ export interface StageTarget {
   requiredType: string | null;
 }
 
-/** Where a filler card may come from: her bulk box (every popup screen), or her haul (Backfill transcribing). */
-export type FillerSource = "bulk" | "haul";
+/**
+ * Where a filler card may come from: her bulk box (every popup screen), or for Backfill, her bulk box or her haul (the
+ * Senior BA's ruling: Backfill offers both, bulk box first). The type lives with the choice, in ./popup.
+ */
+export type { FillerSource };
 
 /* ------------------------------------------ refusals ------------------------------------------ */
 
@@ -282,11 +286,12 @@ function fillerWrites(
   });
   if (filler.material === "energy") return { block: block(null) };
 
+  // The card is held to where she picked it from (the bulk box unless she says her haul), which this screen must
+  // offer; the refusal names that place.
+  const from: FillerSource = filler.from ?? "bulk";
   const copy = st.copy(filler.copyId);
-  if (!copy || !fillerFrom.includes(copy.role as FillerSource)) {
-    refuse(
-      fillerFrom.includes("bulk") ? STAGE_REFUSAL.fillerNotInBulk : STAGE_REFUSAL.fillerNotInHaul,
-    );
+  if (!fillerFrom.includes(from) || !copy || copy.role !== from) {
+    refuse(from === "haul" ? STAGE_REFUSAL.fillerNotInHaul : STAGE_REFUSAL.fillerNotInBulk);
   }
   return {
     copyPatch: {

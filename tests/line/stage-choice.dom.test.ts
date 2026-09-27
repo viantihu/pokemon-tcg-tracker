@@ -245,7 +245,7 @@ describe("Backfill's filler comes from her haul (fillerFrom)", () => {
         onChange,
         loadOptions: async () => [],
         loadBulk: async () => BULK,
-        fillerFrom: "haul",
+        fillerFrom: ["haul"],
       }),
     );
     await user.click(screen.getByRole("button", { name: "Fill the pocket" }));
@@ -257,10 +257,62 @@ describe("Backfill's filler comes from her haul (fillerFrom)", () => {
         value: { material: "card", copyId: "c-bulk" },
         onChange,
         loadBulk: async () => BULK,
-        fillerFrom: "haul",
+        fillerFrom: ["haul"],
       }),
     );
     expect(screen.getByText(/Third pocket · A spare card from your haul/)).toBeTruthy();
+  });
+});
+
+describe("Backfill offers both sources, bulk box first (the Senior BA's ruling)", () => {
+  it("each card says where it is, and the header names it", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    const both: FillerCardOption[] = [
+      BULK[0],
+      {
+        copyId: "c-haul",
+        card: { ...card("sv02-002", "002"), name: "Fuecoco" },
+        where: "This haul",
+        from: "haul",
+      },
+    ];
+    const view = render(
+      createElement(StageChoice, {
+        stage: STAGE,
+        lineLocale: "en",
+        value: null,
+        onChange,
+        loadOptions: async () => [],
+        loadBulk: async () => both,
+        fillerFrom: ["bulk", "haul"],
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Fill the pocket" }));
+    await user.click(
+      screen.getByRole("button", { name: /A spare card from your bulk box or this haul/ }),
+    );
+    const grid = await screen.findByRole("group", {
+      name: /Spare cards: your bulk box, then this haul/,
+    });
+    expect(grid.textContent).toMatch(/Sprigatito[\s\S]*Bulk box[\s\S]*Fuecoco[\s\S]*This haul/);
+    await user.click(screen.getByRole("button", { name: /Fuecoco/ }));
+    expect(onChange).toHaveBeenLastCalledWith({
+      kind: "filler",
+      filler: { material: "card", copyId: "c-haul", from: "haul" },
+    });
+    view.rerender(
+      createElement(StageChoice, {
+        stage: STAGE,
+        lineLocale: "en",
+        value: { kind: "filler", filler: { material: "card", copyId: "c-haul" } },
+        onChange,
+        loadOptions: async () => [],
+        loadBulk: async () => both,
+        fillerFrom: ["bulk", "haul"],
+      }),
+    );
+    expect(screen.getByText(/Stage 1 · Filler: Fuecoco 002\/197 · This haul/)).toBeTruthy();
   });
 });
 
