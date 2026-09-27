@@ -1400,3 +1400,57 @@ jobs:
           console.log(JSON.stringify(out));
           JS
           node uil053.mjs
+
+      # UIL-121 PLAN (2026-09-27): Karvi ruled a line is only OPEN or CLOSED, nothing is blocked or capped for her,
+      # and a short complete line's extra pocket is her choice. What the migration and promotion would have to
+      # carry over on Testing. READ-ONLY, COUNTS ONLY (no card or line identity).
+      - name: "UIL-121: line status, block and filler counts (counts only)"
+        if: always()
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          cat > uil121.mjs <<'JS'
+          import { createClient } from "@supabase/supabase-js";
+          const db = createClient(`https://${process.env.PROJECT_REF}.supabase.co`, process.env.SERVICE_KEY, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+          const all = async (table, cols) => {
+            const out = [];
+            for (let from = 0; ; from += 1000) {
+              const { data, error } = await db.from(table).select(cols).order("id").range(from, from + 999);
+              if (error) throw new Error(`${table}: ${error.message}`);
+              out.push(...data);
+              if (data.length < 1000) return out;
+            }
+          };
+          const [lines, slots, blocks, copies, wishes, standIns] = await Promise.all([
+            all("evolution_line", "id,status"),
+            all("line_slot", "id,line_id,state,copy_id,resolved_decision_kind"),
+            all("binder_block", "id,purpose,material,copy_id,line_id"),
+            all("copy", "id,role"),
+            all("wishlist_item", "id,line_slot_id,resolved_at"),
+            all("catalog_card", "tcgdex_id,source").then((r) => r.filter((c) => c.source === "user")),
+          ]);
+          const tally = (xs, f) => xs.reduce((m, x) => ((m[f(x)] = (m[f(x)] ?? 0) + 1), m), {});
+          const slotsByLine = new Map();
+          for (const s of slots) slotsByLine.set(s.line_id, [...(slotsByLine.get(s.line_id) ?? []), s]);
+          const blockLineIds = new Set(blocks.map((b) => b.line_id).filter(Boolean));
+          const slotState = new Map(slots.map((s) => [s.id, s.state]));
+          const short = lines.filter((l) => (slotsByLine.get(l.id) ?? []).length < 3);
+          console.log(JSON.stringify({
+            lines_by_status: tally(lines, (l) => l.status),
+            slots_by_state: tally(slots, (s) => s.state),
+            block_slots_on_lines_with_a_block_row: slots.filter((s) => s.state === "block" && blockLineIds.has(s.line_id)).length,
+            block_slots_with_no_block_row: slots.filter((s) => s.state === "block" && !blockLineIds.has(s.line_id)).length,
+            binder_blocks_by_purpose_material: tally(blocks, (b) => `${b.purpose}/${b.material}/${b.copy_id ? "copy" : "no-copy"}`),
+            copies_by_role: tally(copies, (c) => c.role),
+            lines_by_slot_count: tally(lines, (l) => String((slotsByLine.get(l.id) ?? []).length)),
+            short_lines_by_status_and_all_filled: tally(short, (l) => `${l.status}/${(slotsByLine.get(l.id) ?? []).every((s) => s.state === "filled") ? "all-filled" : "not-all-filled"}`),
+            resolved_decision_markers: tally(slots.filter((s) => s.resolved_decision_kind), (s) => s.resolved_decision_kind),
+            wishlist: { total: wishes.length, open: wishes.filter((w) => !w.resolved_at).length, on_a_slot_by_state: tally(wishes.filter((w) => w.line_slot_id), (w) => slotState.get(w.line_slot_id) ?? "slot-gone") },
+            catalog_stand_ins: standIns.length,
+          }));
+          JS
+          node uil121.mjs
