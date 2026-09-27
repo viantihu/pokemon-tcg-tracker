@@ -31,6 +31,7 @@ import { CardFace } from "../_components/CardFace";
 import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { bandMeta } from "../_components/plan-meta";
 import { isUnreached, LOST, reach } from "../_components/reach";
+import { NoBinderNotice } from "../_components/NoBinderNotice";
 import type { LookupCard } from "../plan/plan-types";
 import {
   commitFrontAction,
@@ -134,6 +135,8 @@ export function BackfillScreen() {
       </div>
     );
   }
+  // UIL-127a: a new account has no binder yet. Say so, and where to add one; this used to spin forever.
+  if (ctx && ctx.binders.length === 0) return <NoBinderNotice />;
   if (!ctx || !binder) {
     return (
       <div className="entry panel">

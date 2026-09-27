@@ -31,6 +31,7 @@ import type { LineJoinOptions } from "@/lib/line/join-options";
 import { describeMove, moveNameLookups, type MoveNameLookups } from "@/lib/line/move";
 import { cardTag, stripLocaleNamespace } from "@/lib/catalog/locale";
 import { BandChip } from "../_components/BandChip";
+import { NoBinderNotice } from "../_components/NoBinderNotice";
 import { CardFace } from "../_components/CardFace";
 import { cardCaption } from "../_components/CardLightbox";
 import { ProgressBar } from "../_components/ProgressBar";
@@ -1137,6 +1138,9 @@ export function PlanScreen({
           <b>{ARRIVALS_LOST}</b>
         </div>
       ) : null}
+
+      {/* UIL-127a: a new account's first import arrives before any binder exists. Nothing can be placed yet. */}
+      {plan?.noBinders ? <NoBinderNotice /> : null}
 
       {running ? (
         // UIL-114: no first screen. The page routes what is waiting as it opens; routing her full haul takes
