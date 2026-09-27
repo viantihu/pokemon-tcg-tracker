@@ -513,6 +513,46 @@ describe("promote-collection: preflight refusals", () => {
     expect(await count(source, "haul")).toBe(2);
   });
 
+  it("a multi-user Testing: --source-owner-email picks her by email, and refuses an unknown or empty one", async () => {
+    await source.query(
+      `insert into haul (id, owner_id, source) values (gen_random_uuid(), $1, 'pack-rip')`,
+      [SEED_OWNER],
+    );
+    await source.query(`insert into auth.users (id, email) values ($1, $2), ($3, $4)`, [
+      TESTING_OWNER,
+      "Her@Example.com",
+      SEED_OWNER,
+      "someone-else@example.com",
+    ]);
+    await expect(
+      promoteCollection({
+        source,
+        target,
+        ownerEmail: PROD_EMAIL,
+        sourceOwnerEmail: "nobody@example.com",
+      }),
+    ).rejects.toThrow(/no Testing auth\.users row for nobody@example\.com/);
+    await expect(
+      promoteCollection({
+        source,
+        target,
+        ownerEmail: PROD_EMAIL,
+        sourceOwner: TESTING_OWNER,
+        sourceOwnerEmail: "her@example.com",
+      }),
+    ).rejects.toThrow(/not both/);
+    expect(await count(target, "haul")).toBe(0);
+
+    const report = await promoteCollection({
+      source,
+      target,
+      ownerEmail: PROD_EMAIL,
+      sourceOwnerEmail: " her@example.com ",
+    });
+    expect(report.sourceOwner).toBe(TESTING_OWNER);
+    expect(await count(target, "haul")).toBe(1); // only hers; the other owner's haul stayed behind
+  });
+
   it("refuses a --source-owner that owns nothing in Testing", async () => {
     await expect(
       promoteCollection({ source, target, ownerEmail: PROD_EMAIL, sourceOwner: SEED_OWNER }),

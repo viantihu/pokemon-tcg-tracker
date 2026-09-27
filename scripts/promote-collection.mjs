@@ -53,6 +53,8 @@
  *   --target-owner=<uuid>  skip email lookup and use this production owner uuid
  *   --source-owner=<uuid>  which Testing owner to promote (required only if Testing
  *                          holds rows for more than one owner, e.g. seed + real data)
+ *   --source-owner-email=<email>  the same, resolved from Testing's auth.users by email
+ *                          (for a multi-user Testing, where she is one owner of several)
  *   --allow-nonempty       proceed even though production already holds owner rows.
  *                          Off by default: a second run would duplicate everything.
  *
@@ -296,6 +298,7 @@ async function patchDeferred(client, copyRows) {
  * @param {string} [options.ownerEmail]
  * @param {string} [options.targetOwner]
  * @param {string} [options.sourceOwner]
+ * @param {string} [options.sourceOwnerEmail]
  * @param {boolean} [options.dryRun]
  * @param {boolean} [options.allowNonempty]
  * @param {(message: string) => void} [options.log]
@@ -306,6 +309,7 @@ export async function promoteCollection({
   ownerEmail,
   targetOwner,
   sourceOwner,
+  sourceOwnerEmail,
   dryRun = false,
   allowNonempty = false,
   log = () => {},
@@ -373,7 +377,21 @@ export async function promoteCollection({
   if (sourceOwners.length === 0) fail("Testing holds no owner-scoped rows; nothing to promote");
 
   let resolvedSource;
-  if (sourceOwner) {
+  if (sourceOwner && sourceOwnerEmail) {
+    fail("pass --source-owner OR --source-owner-email, not both");
+  }
+  if (sourceOwnerEmail) {
+    const email = sourceOwnerEmail.trim().toLowerCase();
+    const { rows } = await source.query(`select id from auth.users where lower(email) = $1`, [
+      email,
+    ]);
+    if (rows.length === 0) fail(`no Testing auth.users row for ${email}`);
+    if (rows.length > 1) fail(`${rows.length} Testing users match ${email}; pass --source-owner`);
+    if (!sourceOwners.some((o) => o.owner_id === rows[0].id)) {
+      fail(`--source-owner-email ${email} owns no rows in Testing`);
+    }
+    resolvedSource = rows[0].id;
+  } else if (sourceOwner) {
     if (!UUID_RE.test(sourceOwner)) fail(`--source-owner is not a uuid: ${sourceOwner}`);
     if (!sourceOwners.some((o) => o.owner_id === sourceOwner)) {
       fail(`--source-owner ${sourceOwner} owns no rows in Testing`);
@@ -383,7 +401,8 @@ export async function promoteCollection({
     const listing = sourceOwners.map((o) => `    ${o.owner_id}  ${o.rows} rows`).join("\n");
     fail(
       `Testing holds rows for ${sourceOwners.length} owners, so the real collection is ambiguous ` +
-        `(the seed uses 00000000-0000-0000-0000-000000000001). Pass --source-owner=<uuid>:\n${listing}`,
+        `(the seed uses 00000000-0000-0000-0000-000000000001). Pass --source-owner-email=<email> or ` +
+        `--source-owner=<uuid>:\n${listing}`,
     );
   } else {
     resolvedSource = sourceOwners[0].owner_id;
@@ -521,6 +540,7 @@ function parseArgs(argv) {
     else if (arg.startsWith("--owner-email=")) options.ownerEmail = arg.slice(14);
     else if (arg.startsWith("--target-owner=")) options.targetOwner = arg.slice(15);
     else if (arg.startsWith("--source-owner=")) options.sourceOwner = arg.slice(15);
+    else if (arg.startsWith("--source-owner-email=")) options.sourceOwnerEmail = arg.slice(21);
     else throw new PromotionError(`unknown argument: ${arg}`);
   }
   return options;
