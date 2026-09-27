@@ -289,6 +289,18 @@ export type WriteOp =
    */
   | { op: "delete_set_alias"; locale: string; dex_code: string }
   /**
+   * 0033 (UIL-127b): her rainbow order, written whole. `bands` must name every configured band exactly once, or the
+   * database refuses the write before any row changes.
+   */
+  | { op: "set_band_order"; bands: string[] }
+  /** 0033 (UIL-127b): one type's band in her map. Her map starts as a copy of the defaults, so it is always whole. */
+  | { op: "set_type_band"; card_type: string; band: string }
+  /**
+   * 0033: the database's backstop for UIL-127a. Refuses when a named copy is shelved or a block with no binder.
+   * Appended by `applyWriteOps` naming ONLY the copies whose binder the payload SETS (see `withCopyBinderCheck`).
+   */
+  | { op: "assert_copy_binders"; copy_ids: string[] }
+  /**
    * UIL-100 (migration 0022): what the Dex file said, kept so every sync write can be checked against it.
    * A full import REPLACES the record (raw Dex quantities, before removals) and its file-level header;
    * a Retry promotion or a manual match ADDS the row it resolves; Undo of the first recorded import CLEARS
@@ -420,12 +432,34 @@ export function withLineSlotCheck(ops: readonly WriteOp[]): WriteOp[] {
 }
 
 /**
+ * The copies whose binder this write set SETS (UIL-127a/b): every insert (a new copy's binder is set by creating it),
+ * and every update whose patch carries `binder_id`. Only these are checked for "shelved with no binder", so a card left binderless by a deleted
+ * binder is never refused for being touched and stays movable (the Tech Lead's C3).
+ */
+export function copiesWhoseBinderIsSet(ops: readonly WriteOp[]): string[] {
+  const ids = new Set<string>();
+  for (const o of ops) {
+    if (o.op === "insert_copy") ids.add(o.id);
+    else if (o.op === "update_copy" && "binder_id" in o.patch) ids.add(o.id);
+  }
+  return [...ids];
+}
+
+/** The write set with the copy-binder check appended LAST when it sets any copy's binder (and not already present). */
+export function withCopyBinderCheck(ops: readonly WriteOp[]): WriteOp[] {
+  if (ops.some((o) => o.op === "assert_copy_binders")) return [...ops];
+  const copyIds = copiesWhoseBinderIsSet(ops);
+  if (copyIds.length === 0) return [...ops];
+  return [...ops, { op: "assert_copy_binders", copy_ids: copyIds }];
+}
+
+/**
  * Apply a write set atomically via the `apply_write_ops` RPC. Throws on any DB error — the whole set
  * has already rolled back server-side, so the caller never has to compensate.
  */
 export async function applyWriteOps(db: DbClient, payload: WritePayload): Promise<void> {
   const body = {
-    ops: withLineSlotCheck(payload.ops),
+    ops: withCopyBinderCheck(withLineSlotCheck(payload.ops)),
     resync_group_ids: payload.resyncGroupIds ?? [],
   };
   const { error } = await db.rpc("apply_write_ops", { payload: body as unknown as Json });

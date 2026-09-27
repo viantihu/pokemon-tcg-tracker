@@ -12,6 +12,7 @@
 
 import { getOwnerContext, toCatalogCard } from "@/lib/plan";
 import {
+  applyWriteOps,
   binderRepo,
   catalogCardRepo,
   colorBandRepo,
@@ -128,18 +129,13 @@ export async function deleteBinder(id: string): Promise<SettingsResult> {
 }
 
 /**
- * Re-assign rainbow positions from an ordered list of band keys. Two-phase (negative temp positions
- * first) so the `position` UNIQUE constraint never trips mid-swap.
+ * Set HER rainbow order from an ordered list of band keys (UIL-127b: per owner, 0033). One apply_write_ops call,
+ * so the order is replaced whole or not at all; the database refuses a list that does not name every band once.
  */
 export async function reorderBands(orderedKeys: string[]): Promise<SettingsResult> {
   try {
     const { db } = await getOwnerContext();
-    for (let i = 0; i < orderedKeys.length; i++) {
-      await colorBandRepo.update(db, orderedKeys[i], { position: -(i + 1) });
-    }
-    for (let i = 0; i < orderedKeys.length; i++) {
-      await colorBandRepo.update(db, orderedKeys[i], { position: i + 1 });
-    }
+    await applyWriteOps(db, { ops: [{ op: "set_band_order", bands: orderedKeys }] });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
@@ -158,10 +154,8 @@ export async function setTypeBand(
   try {
     const { db } = await getOwnerContext();
 
-    // 1. Persist the map edit (update existing, else insert the pairing).
-    const existing = await typeColorMapRepo.getByPk(db, cardType);
-    if (existing) await typeColorMapRepo.update(db, cardType, { band });
-    else await typeColorMapRepo.insert(db, { card_type: cardType, band });
+    // 1. Persist the map edit in HER map (UIL-127b: per owner, 0033; the defaults are copied in first).
+    await applyWriteOps(db, { ops: [{ op: "set_type_band", card_type: cardType, band }] });
 
     // 2. Load everything the recompute needs.
     const [copies, catalogRows, lines, slots, typeMapRows] = await Promise.all([

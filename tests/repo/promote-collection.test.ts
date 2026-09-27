@@ -117,7 +117,8 @@ async function seedCollection(db: PGlite, owner: string): Promise<void> {
             ('sv01-084', 'Ralts', '{280}', 'sv01', '084', '{Psychic}', 'Basic', '{"normal":true}'::jsonb, null, null)`,
   );
   await db.query(
-    `insert into set_alias (locale, dex_code, tcgdex_set_id, source) values ('en', 'OBF', 'sv03', 'manual')`,
+    `insert into set_alias (owner_id, locale, dex_code, tcgdex_set_id, source) values ($1, 'en', 'OBF', 'sv03', 'manual')`,
+    [owner],
   );
 
   await db.query(
@@ -588,5 +589,87 @@ describe("promote-collection: preflight refusals", () => {
     await expect(
       promoteCollection({ source, target, ownerEmail: PROD_EMAIL }),
     ).rejects.toBeInstanceOf(PromotionError);
+  });
+});
+
+describe("promote-collection: what 0033 made hers travels as hers (UIL-127b)", () => {
+  let source: PGlite;
+  let target: PGlite;
+  const HERS = "user:en:a1111111-1111-4111-8111-111111111111";
+  const THEIRS = "user:en:b1111111-1111-4111-8111-111111111111";
+
+  beforeEach(async () => {
+    [source, target] = await Promise.all([freshDb(), freshDb()]);
+    await seedCollection(source, TESTING_OWNER);
+    // Her stand-in, and another Testing account's, and that account's own rows so the promotion can pick her.
+    await source.query(
+      `insert into catalog_card (tcgdex_id, name, source, owner_id) values ($1, 'Her promo', 'user', $2), ($3, 'Their promo', 'user', $4)`,
+      [HERS, TESTING_OWNER, THEIRS, SEED_OWNER],
+    );
+    await source.query(
+      `insert into owner_band_order (owner_id, band, position) select $1, band, position from color_band`,
+      [TESTING_OWNER],
+    );
+    await source.query(
+      `insert into owner_type_band (owner_id, card_type, band) select $1, card_type, band from type_color_map`,
+      [TESTING_OWNER],
+    );
+    await source.query(
+      `update owner_type_band set band = 'pink' where owner_id = $1 and card_type = 'Fire'`,
+      [TESTING_OWNER],
+    );
+    await target.query(`insert into auth.users (id, email) values ($1, $2)`, [
+      PROD_OWNER,
+      PROD_EMAIL,
+    ]);
+  });
+
+  it("her stand-in arrives under the Production owner, and another account's does not arrive", async () => {
+    await promoteCollection({ source, target, ownerEmail: PROD_EMAIL, sourceOwner: TESTING_OWNER });
+    const rows = await target.query<{ tcgdex_id: string; owner_id: string | null }>(
+      `select tcgdex_id, owner_id from catalog_card where source = 'user' order by 1`,
+    );
+    expect(rows.rows).toEqual([{ tcgdex_id: HERS, owner_id: PROD_OWNER }]);
+    // The mirror rows arrive ownerless, as before.
+    const mirror = await target.query<{ n: number }>(
+      `select count(*)::int as n from catalog_card where source = 'tcgdex' and owner_id is not null`,
+    );
+    expect(mirror.rows[0].n).toBe(0);
+  });
+
+  it("her learned aliases and her colours arrive as hers", async () => {
+    await promoteCollection({ source, target, ownerEmail: PROD_EMAIL, sourceOwner: TESTING_OWNER });
+    const alias = await target.query(`select owner_id, dex_code from set_alias`);
+    expect(alias.rows).toEqual([{ owner_id: PROD_OWNER, dex_code: "OBF" }]);
+    const order = await target.query<{ n: number }>(
+      `select count(*)::int as n from owner_band_order where owner_id = $1`,
+      [PROD_OWNER],
+    );
+    expect(order.rows[0].n).toBe(10);
+    const fire = await target.query(
+      `select band from owner_type_band where owner_id = $1 and card_type = 'Fire'`,
+      [PROD_OWNER],
+    );
+    expect(fire.rows).toEqual([{ band: "pink" }]);
+  });
+
+  it("refuses loudly when the Production owner already changed her type map there (the Tech Lead's case)", async () => {
+    await target.query(
+      `insert into owner_type_band (owner_id, card_type, band) values ($1, 'Fire', 'orange')`,
+      [PROD_OWNER],
+    );
+    await expect(
+      promoteCollection({ source, target, ownerEmail: PROD_EMAIL, sourceOwner: TESTING_OWNER }),
+    ).rejects.toThrow(/owner_type_band: 1/);
+  });
+
+  it("refuses loudly when the Production owner already changed her rainbow order there (the Tech Lead's case)", async () => {
+    await target.query(
+      `insert into owner_band_order (owner_id, band, position) select $1, band, position from color_band`,
+      [PROD_OWNER],
+    );
+    await expect(
+      promoteCollection({ source, target, ownerEmail: PROD_EMAIL, sourceOwner: TESTING_OWNER }),
+    ).rejects.toThrow(/owner_band_order: 10/);
   });
 });

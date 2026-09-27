@@ -43,6 +43,13 @@ const REWRITTEN: Record<string, { lines: string[]; why: string }> = {
     ],
     why: "the third-pocket rule no longer requires a complete line, and delete_line no longer counts energy fillers (UIL-121)",
   },
+  "0033_owner_scoped_shared_data.sql": {
+    lines: [
+      "on conflict (locale, dex_code)",
+      "where locale = (op ->> 'locale') and dex_code = (op ->> 'dex_code');",
+    ],
+    why: "the set_alias upsert and delete are keyed by owner (UIL-127b)",
+  },
 };
 
 /** A line as SQL reads it: whitespace collapsed, a trailing comma dropped. */
