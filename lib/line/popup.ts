@@ -208,6 +208,9 @@ export interface LinePopupColourChoice {
 
 /* --------------------------------------- small shared rules --------------------------------------- */
 
+/** Where a card still in her haul is, in her words: produced by the popup's loaders, read by the popup itself. */
+export const IN_THE_HAUL = "Still in the haul";
+
 /**
  * A line's status from the slots it holds: `complete` only when every slot is filled (the Senior BA's rule, which
  * 0028 now enforces), `capped` when the engine capped it, else `open`. The one derivation every line writer uses.

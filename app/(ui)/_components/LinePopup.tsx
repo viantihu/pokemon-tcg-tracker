@@ -11,11 +11,12 @@
  */
 
 import { Fragment, useEffect, useRef } from "react";
-import type {
-  LineChoice,
-  LinePopupProps,
-  LinePopupReplace,
-  LinePopupStage,
+import {
+  IN_THE_HAUL,
+  type LineChoice,
+  type LinePopupProps,
+  type LinePopupReplace,
+  type LinePopupStage,
 } from "@/lib/line/popup";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { BandChip } from "./BandChip";
@@ -390,7 +391,8 @@ export function LinePopup({
             }}
           >
             {label}
-            {position ? " · next ▶" : " ▶"}
+            {/* "· next" only when another line card follows: the last one of N just confirms. */}
+            {position && position.index < position.total ? " · next ▶" : " ▶"}
           </button>
         </div>
       </div>
@@ -507,7 +509,7 @@ function Stage({
 
 /** "from this haul" rather than "from Still in the haul" (a Haul Plan card, UX review of #391). */
 function fromWhere(where: string): string {
-  return where === "Still in the haul" ? "this haul" : where;
+  return where === IN_THE_HAUL ? "this haul" : where;
 }
 
 /** "What moves" for a replace: the swap as three physical steps, or the Keep as nothing in the line moving. */
