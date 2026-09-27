@@ -144,7 +144,8 @@ export function validateStageDecision(
   d: StageDecision | undefined,
   opts: { fillerFrom?: readonly FillerSource[] } = {},
 ): StageWrite {
-  if (!d) return refuse(STAGE_REFUSAL.missing(target.stage));
+  // "Decide later" writes nothing, so it is the caller's to honour where it offers it; here it is no choice.
+  if (!d || d.kind === "later") return refuse(STAGE_REFUSAL.missing(target.stage));
   // Anything but a chase closes the slot's open wish, if it has one (a stage she re-decides on Lines); on a slot with
   // none it changes nothing.
   const closeWish = { resolveWish: true as const };
@@ -360,7 +361,7 @@ export function validateThirdPocket(
     if (choice) refuse(STAGE_REFUSAL.noThirdPocket);
     return null;
   }
-  if (!choice) return refuse(STAGE_REFUSAL.thirdPocketMissing);
+  if (!choice || choice.material === "later") return refuse(STAGE_REFUSAL.thirdPocketMissing);
   if (choice.material === "empty") return { extraPocket: "empty" };
   const pocket = fillerWrites(st, t.lineId, t.binderId, choice, opts.fillerFrom, null);
   return { extraPocket: choice.material === "energy" ? "energy" : "card", ...pocket };

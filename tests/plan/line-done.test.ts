@@ -373,7 +373,11 @@ describe("UIL-120 (e)(f) · it keeps stepping while a stage is still open", () =
     await seedLine({ stage1: "open", stage2: "open", status: "capped" });
     await seedHaulRows(db, [CML]);
     await asOwner(db);
-    const res = await commit({ card: CML, lineChoice: { mode: "join", lineId: LINE, slotId: S1 } });
+    // UIL-121: her last card for the line, so the open Stage 2 is asked; she decides it later.
+    const res = await commit({
+      card: CML,
+      lineChoice: { mode: "join", lineId: LINE, slotId: S1, stages: { 2: { kind: "later" } } },
+    });
     expect(res.lineDone).toBe(false);
   });
 
@@ -381,7 +385,11 @@ describe("UIL-120 (e)(f) · it keeps stepping while a stage is still open", () =
     await seedLine({ stage1: "open", stage2: "open" });
     await seedHaulRows(db, [CML]);
     await asOwner(db);
-    const res = await commit({ card: CML, lineChoice: { mode: "join", lineId: LINE, slotId: S1 } });
+    // UIL-121: her last card for the line, so the open Stage 2 is asked; she decides it later.
+    const res = await commit({
+      card: CML,
+      lineChoice: { mode: "join", lineId: LINE, slotId: S1, stages: { 2: { kind: "later" } } },
+    });
     expect(res.lineDone).toBe(false);
   });
 

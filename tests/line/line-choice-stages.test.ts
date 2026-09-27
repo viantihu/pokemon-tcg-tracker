@@ -13,7 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import { applyMove, type MoveNameLookups } from "@/lib/line";
-import type { LineChoice } from "@/lib/line/popup";
+import type { LineChoice, StageDecision } from "@/lib/line/popup";
 import { loadLinePopupModel } from "@/lib/line/popup-load";
 import { asOwner, asSuperuser, freshRpcDb, OWNER, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
@@ -289,6 +289,144 @@ describe("JOIN · a stage that held a filler, and the third pocket once", () => 
     expect(await q(`select extra_pocket from evolution_line where id = $1`, [LINE])).toEqual([
       { extra_pocket: "empty" },
     ]);
+  });
+});
+
+describe("JOIN / SWAP · the last card she has for a line asks about its other open stages (Karvi's ruling)", () => {
+  const S2 = "20000000-0000-4000-8000-0000000121b3";
+  /** An open line: her Emberling in the Basic, the Stage 1 and Stage 2 open and not decided. */
+  beforeEach(async () => {
+    await q(
+      `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+         values ($1, $2, 9301, 'red', $3, 'back', 'open')`,
+      [LINE, OWNER, GEN],
+    );
+    await copy("c0000000-0000-4000-8000-0000000121c0", "emberling");
+    await q(
+      `update copy set binder_half = 'back' where id = 'c0000000-0000-4000-8000-0000000121c0'`,
+    );
+    await q(
+      `insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id) values
+         ($1, $4, $5, 0, 'Basic', 'filled', 'c0000000-0000-4000-8000-0000000121c0'),
+         ($2, $4, $5, 1, 'Stage1', 'placeholder', null),
+         ($3, $4, $5, 2, 'Stage2', 'placeholder', null)`,
+      [SL0, SL1, S2, OWNER, LINE],
+    );
+    await q(`update copy set line_slot_id = $1 where id = 'c0000000-0000-4000-8000-0000000121c0'`, [
+      SL0,
+    ]);
+    await copy(MOVING, "emberdrake", "haul"); // her Stage 1, the last card she has for the line
+  });
+
+  it("without her answer for the Stage 2 it is refused and nothing is written; nothing is chosen for her", async () => {
+    await expect(move({ mode: "join", lineId: LINE, slotId: SL1 })).rejects.toThrow(
+      "Choose what goes in the Stage 2 slot.",
+    );
+    expect(await q(`select state, stage_choice from line_slot where id = $1`, [S2])).toEqual([
+      { state: "placeholder", stage_choice: null },
+    ]);
+    expect(await q(`select state from line_slot where id = $1`, [SL1])).toEqual([
+      { state: "placeholder" },
+    ]);
+  });
+
+  it("her chase is written with the card; 'Decide later' writes nothing for it and the line stays open", async () => {
+    await move({ mode: "join", lineId: LINE, slotId: SL1, stages: { 2: { kind: "later" } } });
+    expect(
+      await q(`select state, stage_choice, target_catalog_card_id t from line_slot where id = $1`, [
+        S2,
+      ]),
+    ).toEqual([{ state: "placeholder", stage_choice: null, t: null }]);
+    expect(await q(`select status from evolution_line where id = $1`, [LINE])).toEqual([
+      { status: "open" },
+    ]);
+    expect(await q(`select count(*)::int n from wishlist_item`)).toEqual([{ n: 0 }]);
+  });
+
+  it("a chase answer is her wishlist add", async () => {
+    await move({
+      mode: "join",
+      lineId: LINE,
+      slotId: SL1,
+      stages: { 2: { kind: "chase", catalogCardId: "emberlord" } },
+    });
+    expect(
+      await q(`select stage_choice, target_catalog_card_id t from line_slot where id = $1`, [S2]),
+    ).toEqual([{ stage_choice: "chase", t: "emberlord" }]);
+  });
+
+  it("with another card for the line still in the haul, this one asks nothing: the last one asks (condition 1)", async () => {
+    await copy(SPARE, "emberlord", "haul"); // her Stage 2 is waiting too
+    await move({ mode: "join", lineId: LINE, slotId: SL1 });
+    expect(await q(`select state, stage_choice from line_slot where id = $1`, [S2])).toEqual([
+      { state: "placeholder", stage_choice: null },
+    ]);
+  });
+
+  it("a SWAP places her card too, so it asks the same", async () => {
+    // Put a card in the Stage 1 to swap out: a second Emberdrake, shelved there.
+    await q(
+      `insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band, line_slot_id)
+         values ('c0000000-0000-4000-8000-0000000121c9', $1, 'emberdrake', 'shelved', $2, 'back', 'red', null)`,
+      [OWNER, GEN],
+    );
+    await q(
+      `update line_slot set state = 'filled', copy_id = 'c0000000-0000-4000-8000-0000000121c9' where id = $1`,
+      [SL1],
+    );
+    await q(`update copy set line_slot_id = $1 where id = 'c0000000-0000-4000-8000-0000000121c9'`, [
+      SL1,
+    ]);
+    const swap: LineChoice = {
+      mode: "replace",
+      lineId: LINE,
+      slotId: SL1,
+      keep: false,
+      outgoing: { kind: "bulk" },
+    };
+    await expect(move(swap)).rejects.toThrow("Choose what goes in the Stage 2 slot.");
+    await move({ ...swap, stages: { 2: { kind: "empty" } } } as LineChoice);
+    expect(await q(`select stage_choice from line_slot where id = $1`, [S2])).toEqual([
+      { stage_choice: "empty" },
+    ]);
+  });
+});
+
+describe("the Senior BA's case: Basic + Stage 1 in the haul, Stage 2 missing", () => {
+  it("the Basic's start asks nothing; the Stage 1's join, the last card, asks about the Stage 2 only", async () => {
+    await copy(MOVING, "emberling", "haul");
+    await copy(SPARE, "emberdrake", "haul");
+    await move(start()); // the Basic: another card for the line (the Stage 1) waits, so nothing is asked
+    const [line] = await q<{ id: string }>(`select id from evolution_line`);
+    const slots = await q<{ id: string; stage_index: number; stage_choice: string | null }>(
+      `select id, stage_index, stage_choice from line_slot order by stage_index`,
+    );
+    expect(slots.map((s) => s.stage_choice)).toEqual([null, null, null]);
+    await asOwner(db);
+    const join = (stages?: Record<number, StageDecision>) =>
+      applyMove(
+        pgliteClient(db),
+        {
+          copyId: SPARE,
+          destination: { kind: "shelf", binderId: GEN, half: "back", band: "red" },
+          lineChoice: {
+            mode: "join",
+            lineId: line.id,
+            slotId: slots[1].id,
+            ...(stages ? { stages } : {}),
+          },
+        },
+        names,
+      );
+    await expect(join()).rejects.toThrow("Choose what goes in the Stage 2 slot.");
+    await join({ 2: { kind: "empty" } });
+    expect(
+      (
+        await q<{ stage_choice: string | null }>(
+          `select stage_choice from line_slot order by stage_index`,
+        )
+      ).map((s) => s.stage_choice),
+    ).toEqual([null, null, "empty"]);
   });
 });
 

@@ -414,7 +414,7 @@ describe("UIL-121 · her choice for each empty stage and the third pocket", () =
 });
 
 describe("UIL-121 · a stage whose card is still in this haul is not asked about", () => {
-  it("it shows as coming in this haul; she is asked only about the other stages, and no third pocket yet", async () => {
+  it("while another card for the line waits in this haul, nothing is asked yet: that card's confirm asks", async () => {
     const onConfirm = vi.fn();
     const user = userEvent.setup();
     const coming: LinePopupModel = {
@@ -441,11 +441,121 @@ describe("UIL-121 · a stage whose card is still in this haul is not asked about
     };
     render(createElement(Harness, { model: coming, initial, onConfirm }));
     expect(screen.getByText("In this haul")).toBeTruthy();
-    expect(screen.queryByText(/Basic · Choose/)).toBeNull();
-    expect(screen.getByText(/Stage 2 · Choose/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Leave empty" }));
+    // The Senior BA's condition 1: the Stage 2 is asked on the LAST card she has for the line, not on this one.
+    expect(screen.queryByText(/Your choice for each empty stage/)).toBeNull();
     expect(screen.queryByText(/Third pocket/)).toBeNull();
     await user.click(screen.getByRole("button", { name: /Start line/ }));
-    expect(onConfirm).toHaveBeenCalledWith({ ...initial, stages: { 2: { kind: "empty" } } });
+    expect(onConfirm).toHaveBeenCalledWith({ ...initial, stages: {} });
+  });
+});
+
+describe("UIL-121 · a join of her last card for a line asks about its other open stages (Karvi's ruling)", () => {
+  const LINE3: LinePopupModel = {
+    ...FOREIGN_ADD,
+    line: { ...FOREIGN_ADD.line, locale: "en", total: 3, filledAfter: 2 },
+    stages: [
+      { ...FOREIGN_ADD.stages[0], card: identity("sv03-026", "Charmander") },
+      FOREIGN_ADD.stages[1],
+      {
+        stageIndex: 2,
+        stage: "Stage2",
+        state: "wanted",
+        card: null,
+        choice: null,
+        dexId: 6,
+        suggestion: { card: identity("sv03-125", "Charizard"), special: false },
+      },
+    ],
+  };
+  const join: LineChoice = { mode: "join", lineId: "line-ja", slotId: "slot-1" };
+  const addButton = () => screen.getByRole("button", { name: /Add to line/ }) as HTMLButtonElement;
+
+  it("asks, with nothing pre-picked (Decide later included); Confirm waits; Decide later counts and is sent", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    render(createElement(Harness, { model: LINE3, initial: join, onConfirm }));
+    expect(screen.getByText(/This line's other empty stages: your choice/)).toBeTruthy();
+    expect(screen.getByText(/Stage 2 · Choose/)).toBeTruthy();
+    expect(document.querySelectorAll(".lp-stagechoice .picked")).toHaveLength(0);
+    expect(addButton().disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Decide later" }));
+    expect(screen.getByRole("button", { name: "Decide later" }).className).toContain("picked");
+    expect(addButton().disabled).toBe(false);
+    await user.click(addButton());
+    expect(onConfirm).toHaveBeenCalledWith({ ...join, stages: { 2: { kind: "later" } } });
+  });
+
+  it("a chase answer names its card in 'What moves' as a wishlist add", async () => {
+    const user = userEvent.setup();
+    render(createElement(Harness, { model: LINE3, initial: join, onConfirm: vi.fn() }));
+    await user.click(screen.getByRole("button", { name: "Chase this" }));
+    const rows = Array.from(document.querySelectorAll(".lp-moves .lp-mrow")).map(
+      (r) => r.textContent,
+    );
+    expect(rows.some((t) => /Wishlist.*Charizard.*for the Stage 2/.test(t ?? ""))).toBe(true);
+  });
+
+  it("with another card for the line still in the haul, nothing is asked: that card's confirm asks", () => {
+    const withComing: LinePopupModel = {
+      ...LINE3,
+      stages: [
+        LINE3.stages[0],
+        LINE3.stages[1],
+        {
+          ...LINE3.stages[2],
+          state: "coming",
+          card: identity("sv03-125", "Charizard"),
+          coming: { copyId: "h" },
+        },
+      ],
+    };
+    render(createElement(Harness, { model: withComing, initial: join, onConfirm: vi.fn() }));
+    expect(screen.queryByText(/other empty stages/)).toBeNull();
+    expect(addButton().disabled).toBe(false);
+  });
+});
+
+describe("UIL-121 · UX on #429: a picked choice and an open panel look different", () => {
+  const initial: LineChoice = { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} };
+  const suggested: LinePopupModel = {
+    ...START,
+    stages: [
+      {
+        ...START.stages[0],
+        dexId: 4,
+        suggestion: { card: identity("sv03-026", "Charmander"), special: false },
+      },
+      START.stages[1],
+    ],
+  };
+
+  it("'Chase this' shows it is picked; an opened panel is marked open, not picked", async () => {
+    const user = userEvent.setup();
+    render(createElement(Harness, { model: suggested, initial, onConfirm: vi.fn() }));
+    await user.click(screen.getByRole("button", { name: "Fill the pocket" }));
+    const fill = screen.getByRole("button", { name: "Fill the pocket" });
+    expect(fill.getAttribute("aria-expanded")).toBe("true");
+    expect(fill.className).not.toContain("picked");
+    await user.click(screen.getByRole("button", { name: "Chase this" }));
+    expect(screen.getByRole("button", { name: "Chase this" }).className).toContain("picked");
+  });
+
+  it("a START's tile follows her choice: 'Not decided', then 'Filler'", async () => {
+    const user = userEvent.setup();
+    const wanted: LinePopupModel = {
+      ...START,
+      line: { ...START.line, total: 3 },
+      stages: [
+        ...START.stages,
+        { stageIndex: 2, stage: "Stage2", state: "wanted", card: null, dexId: 6 },
+      ],
+    };
+    render(createElement(Harness, { model: wanted, initial, onConfirm: vi.fn() }));
+    const tile = () => document.querySelectorAll(".lp-strip .lp-slot")[2] as HTMLElement;
+    expect(tile().textContent).toContain("Not decided");
+    const stage2 = screen.getByRole("region", { name: /Stage 2/ });
+    await user.click(within(stage2).getByRole("button", { name: "Fill the pocket" }));
+    await user.click(within(stage2).getByRole("button", { name: /A basic energy/ }));
+    expect(tile().textContent).toContain("Filler");
   });
 });

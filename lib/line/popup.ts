@@ -43,6 +43,11 @@ export type LineChoice =
       slotId: string;
       foreignLocale?: true;
       thirdPocket?: ThirdPocketChoice;
+      /**
+       * Her choice for the line's OTHER open stages she has not decided yet (UIL-121, Karvi's ruling: once she places
+       * the last card she has for a line, she is asked about the stages still missing). By stage index.
+       */
+      stages?: Record<number, StageDecision>;
     }
   /**
    * A copy for a filled slot: keep the one that's there (nothing in the line moves). NOT a line write: the builder
@@ -64,6 +69,8 @@ export type LineChoice =
       outgoing: MoveDestination;
       outgoingLine?: OutgoingLineChoice;
       foreignLocale?: true;
+      /** As a join's: her choice for the line's other open stages she has not decided yet (UIL-121). */
+      stages?: Record<number, StageDecision>;
     };
 
 /** Where a card coming out of a line goes when that is another back half: a line it starts or joins. */
@@ -80,7 +87,13 @@ export type StageDecision =
   | { kind: "chase"; catalogCardId: string }
   | { kind: "chase"; newStandIn: StandInDraft }
   | { kind: "empty" }
-  | { kind: "filler"; filler: FillerChoice };
+  | { kind: "filler"; filler: FillerChoice }
+  /**
+   * "Decide later" (the Senior BA, from her always-movable rule: placing a card never waits on deciding another
+   * stage). Writes nothing for the stage: it stays "Not decided" and the line open, for Lines' Choose. The line popup
+   * offers it; a screen that does not is refused it.
+   */
+  | { kind: "later" };
 
 /**
  * A pocket's filler: a basic energy (untracked), or one of her copies, which becomes a block there. `from` is where
@@ -93,7 +106,7 @@ export type FillerChoice =
 export type FillerSource = "bulk" | "haul";
 
 /** What fills a complete short line's third pocket (UIL-121 Q4): a filler, or nothing. */
-export type ThirdPocketChoice = FillerChoice | { material: "empty" };
+export type ThirdPocketChoice = FillerChoice | { material: "empty" } | { material: "later" };
 
 /**
  * A placeholder card she makes from the popup: a CATALOG-ONLY stand-in (no copy; UIL-108's form). Its dex id, stage,

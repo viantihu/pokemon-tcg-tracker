@@ -501,9 +501,11 @@ export function LineStageTile({
               ? "Chasing"
               : stage.choice === "empty"
                 ? "Left empty"
-                : stage.choice === null
-                  ? "Not decided"
-                  : "Wanted"}
+                : stage.choice === "filler"
+                  ? "Filler"
+                  : stage.choice === null
+                    ? "Not decided"
+                    : "Wanted"}
           </span>
         ) : null}
         {state === "blocked" ? (

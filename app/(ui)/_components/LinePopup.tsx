@@ -84,23 +84,38 @@ export function LinePopup({
   // UIL-121: on a START, every stage the line leaves unfilled (an open slot, or an owned card she did not tick) waits
   // for HER choice; nothing is decided for her. A confirm that completes a line shorter than LINE_ROW_POCKETS asks
   // what fills its third pocket (once: an existing line whose pocket she already chose does not ask again).
-  const undecided: LinePopupStage[] =
-    value.mode === "start"
+  // UIL-121, Karvi's ruling: she is asked about the stages still missing once she places the LAST card she has for the
+  // line. While another card for this line waits in the haul ("In this haul"), nothing is asked yet: that card's
+  // confirm asks. On a START every stage left unfilled is asked (an open slot, or an owned card she did not tick); on
+  // a join or a swap, the line's other open stages she has not decided. Each answer is hers, "Decide later" included.
+  const swappingIn = value.mode === "replace" && !value.keep;
+  const cardWaits = model.stages.some((s) => s.state === "coming");
+  const undecided: LinePopupStage[] = cardWaits
+    ? []
+    : value.mode === "start"
       ? model.stages.filter(
           (s) =>
             s.state === "wanted" ||
             s.state === "blocked" ||
             (s.state === "pullable" && !!s.pull && !pulls.includes(s.pull.copyId)),
         )
-      : [];
-  const stagesDecided =
-    value.mode !== "start" || undecided.every((s) => value.stages?.[s.stageIndex] !== undefined);
+      : (value.mode === "join" || swappingIn) && !filingOwn
+        ? model.stages.filter(
+            (s) => s.state === "wanted" && s.choice === null && s.dexId !== undefined,
+          )
+        : [];
+  const decisions =
+    value.mode === "start" || value.mode === "join" || value.mode === "replace"
+      ? "stages" in value
+        ? value.stages
+        : undefined
+      : undefined;
+  const stagesDecided = undecided.every((s) => decisions?.[s.stageIndex] !== undefined);
   const pocketAsked =
     !filingOwn &&
+    !cardWaits &&
     line.total < LINE_ROW_POCKETS &&
-    ((value.mode === "start" &&
-      undecided.length === 0 &&
-      !model.stages.some((s) => s.state === "coming")) ||
+    ((value.mode === "start" && undecided.length === 0) ||
       (value.mode === "join" && line.thirdPocketOpen === true && line.filledAfter === line.total));
   const pocketValue =
     value.mode === "start" || value.mode === "join" ? value.thirdPocket : undefined;
@@ -110,7 +125,7 @@ export function LinePopup({
     (!cc || cc.picked !== null) &&
     stagesDecided &&
     (!pocketAsked || pocketValue !== undefined);
-  /** The pockets she fills by hand, for "What moves": an energy or a spare card in a stage's pocket or the third one. */
+  /** What she physically does besides moving cards, for "What moves": fillers she puts in, and what she now chases. */
   const fillerMoves: { key: string; verb: string; what: string; where: string }[] = [];
   const fillerMove = (key: string, f: { material: string }, where: string) => {
     if (f.material === "energy")
@@ -118,32 +133,66 @@ export function LinePopup({
     if (f.material === "card")
       fillerMoves.push({ key, verb: "Take out", what: "A card from your bulk box", where });
   };
-  if (value.mode === "start") {
-    for (const st of undecided) {
-      const d = value.stages?.[st.stageIndex];
-      if (d?.kind === "filler")
-        fillerMove(`s${st.stageIndex}`, d.filler, `the ${stageName(st.stage)} pocket`);
+  for (const st of undecided) {
+    const d = decisions?.[st.stageIndex];
+    if (d?.kind === "filler")
+      fillerMove(`s${st.stageIndex}`, d.filler, `the ${stageName(st.stage)} pocket`);
+    if (d?.kind === "chase") {
+      const named =
+        "catalogCardId" in d
+          ? d.catalogCardId === st.suggestion?.card.tcgdexId
+            ? st.suggestion.card.name
+            : "The card you picked"
+          : `Your placeholder card (${d.newStandIn.name.trim()})`;
+      fillerMoves.push({
+        key: `w${st.stageIndex}`,
+        verb: "Wishlist",
+        what: named,
+        where: `for the ${stageName(st.stage)}`,
+      });
     }
   }
   if (pocketAsked && pocketValue) fillerMove("third", pocketValue, "the third pocket");
 
-  /** The choice as sent: a third-pocket answer only when the pocket is asked, and stage answers only for open stages. */
+  /** The choice as sent: stage answers only for the stages asked, and a third-pocket answer only when it is asked. */
   function finalChoice(): LineChoice {
+    const open = new Set(undecided.map((s) => s.stageIndex));
+    const asked = Object.fromEntries(
+      Object.entries(decisions ?? {}).filter(([k]) => open.has(Number(k))),
+    );
     if (value.mode === "start") {
-      const open = new Set(undecided.map((s) => s.stageIndex));
-      const stages = Object.fromEntries(
-        Object.entries(value.stages ?? {}).filter(([k]) => open.has(Number(k))),
-      );
       const { thirdPocket, ...rest } = value;
-      return pocketAsked && thirdPocket ? { ...rest, stages, thirdPocket } : { ...rest, stages };
+      return pocketAsked && thirdPocket
+        ? { ...rest, stages: asked, thirdPocket }
+        : { ...rest, stages: asked };
     }
-    if (value.mode === "join" && !pocketAsked && value.thirdPocket) {
-      const { thirdPocket: _drop, ...rest } = value;
-      void _drop;
-      return rest;
+    if (value.mode === "join") {
+      const { thirdPocket, stages: _s, ...rest } = value;
+      void _s;
+      return {
+        ...rest,
+        ...(open.size > 0 ? { stages: asked } : {}),
+        ...(pocketAsked && thirdPocket ? { thirdPocket } : {}),
+      };
+    }
+    if (value.mode === "replace" && !value.keep) {
+      const { stages: _s, ...rest } = value;
+      void _s;
+      return { ...rest, ...(open.size > 0 ? { stages: asked } : {}) };
     }
     return value;
   }
+  /** A START's tiles say what she chose for each stage as she chooses (UX on #429). */
+  const shownStages: LinePopupStage[] =
+    value.mode === "start"
+      ? model.stages.map((s) => {
+          if (s.state !== "wanted" && s.state !== "blocked") return s;
+          const d = value.stages?.[s.stageIndex];
+          const choice =
+            d?.kind === "chase" || d?.kind === "empty" || d?.kind === "filler" ? d.kind : null;
+          return { ...s, choice };
+        })
+      : model.stages;
   const lineName = model.stages.at(-1)?.card?.name ?? card.name;
   const title =
     model.mode === "start"
@@ -223,7 +272,7 @@ export function LinePopup({
           </>
         ) : null}
         <div ref={stripRef} className={"lp-strip" + (isReplace ? " lp-scroll" : "")}>
-          {model.stages.map((s, i) => (
+          {shownStages.map((s, i) => (
             <LineStageTile
               key={s.stageIndex}
               stage={s}
@@ -258,17 +307,24 @@ export function LinePopup({
         ) : null}
         {cc ? <ColourChoiceSection {...cc} busy={busy} /> : null}
 
-        {value.mode === "start" && undecided.length > 0 ? (
+        {undecided.length > 0 ? (
           <>
-            <div className="lp-lbl u">Your choice for each empty stage</div>
+            <div className="lp-lbl u">
+              {value.mode === "start"
+                ? "Your choice for each empty stage"
+                : "This line's other empty stages: your choice"}
+            </div>
             {undecided.map((s) => (
               <StageChoice
                 key={s.stageIndex}
                 stage={s}
                 lineLocale={line.locale}
-                value={value.stages?.[s.stageIndex] ?? null}
+                value={decisions?.[s.stageIndex] ?? null}
                 onChange={(d) =>
-                  onChange({ ...value, stages: { ...(value.stages ?? {}), [s.stageIndex]: d } })
+                  onChange({
+                    ...value,
+                    stages: { ...(decisions ?? {}), [s.stageIndex]: d },
+                  } as LineChoice)
                 }
                 loadOptions={(): Promise<StageOption[]> =>
                   s.dexId === undefined
@@ -277,6 +333,7 @@ export function LinePopup({
                 }
                 loadBulk={loadBulk}
                 busy={busy}
+                allowLater
               />
             ))}
           </>
@@ -287,6 +344,7 @@ export function LinePopup({
             onChange={(t) => onChange({ ...value, thirdPocket: t })}
             loadBulk={loadBulk}
             busy={busy}
+            allowLater
           />
         ) : null}
 

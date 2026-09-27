@@ -40,7 +40,7 @@ import {
   placementForMove,
   releaseSlotOps,
 } from "./move";
-import { lineReadsClosed, lineStatusOf, type LineChoice } from "./popup";
+import { lineReadsClosed, lineStatusOf, type LineChoice, type StageDecision } from "./popup";
 import {
   stageWriteOps,
   thirdPocketWriteOps,
@@ -149,6 +149,13 @@ function startLine(
   const pullOps: WriteOp[] = [];
   let ownSlotId: string | null = null;
 
+  // Another card for this line still waiting in her haul: then nothing is asked on this confirm.
+  const cardWaits = gen.slots.some(
+    (sl) =>
+      sl.stageIndex !== gen.incomingStageIndex &&
+      !(sl.copyId && ticked.has(sl.copyId)) &&
+      waitingInHaul(state, sl.dexId),
+  );
   // UIL-121: every stage the line leaves unfilled is HER choice (chase a card, leave it empty, or a filler), checked
   // here on fresh state. Nothing is blocked, capped or wishlisted for her: an unfilled stage is inserted as an open
   // slot and then written as she chose.
@@ -179,12 +186,11 @@ function startLine(
       finalStages.push({ state: "filled" });
       continue;
     }
-    // Not asked about yet: an older request with no popup, or a stage whose card is still waiting in her haul (she is
-    // asked about a missing stage only after the last card she has for the line: Karvi's ruling).
-    if (
-      choice.stages?.[slot.stageIndex] === undefined &&
-      (undecidedOk || waitingInHaul(state, slot.dexId))
-    ) {
+    // Not decided now: she chose "Decide later"; or it is not asked yet, because this is an older request with no
+    // popup, or another card for this line still waits in her haul (Karvi's ruling: she is asked about what is
+    // missing only once she places the LAST card she has for the line).
+    const d = choice.stages?.[slot.stageIndex];
+    if (d?.kind === "later" || (d === undefined && (undecidedOk || cardWaits))) {
       finalStages.push({ state: "placeholder", stageChoice: null });
       continue;
     }
@@ -217,9 +223,11 @@ function startLine(
       binderId: choice.binderId,
       slotCount: gen.slots.length,
       completeAfterWrite:
-        finalStages.every((f) => f.state === "filled") && !(undecidedOk && !choice.thirdPocket),
+        finalStages.every((f) => f.state === "filled") &&
+        !(undecidedOk && !choice.thirdPocket) &&
+        choice.thirdPocket?.material !== "later",
     },
-    choice.thirdPocket,
+    choice.thirdPocket?.material === "later" ? undefined : choice.thirdPocket,
   );
 
   const ops: WriteOp[] = [
@@ -320,12 +328,13 @@ function joinLine(
   const cardOf = (id: string) => state.copiesById.get(id)?.catalog_card_id ?? null;
   assertLanguageHolds(state, slots, slot, cardOf, choice.foreignLocale === true);
 
-  // UIL-121: the line reads closed once no stage waits (filled, left empty, or a filler), and a card that completes a
-  // short line asks what fills its third pocket, unless she has already said.
-  const after = slots.map((s) =>
-    s.id === slot.id ? { state: "filled" } : { state: s.state, stageChoice: s.stage_choice },
-  );
-  const closes = lineStatusOf(after) === "closed" && !lineReadsClosed(line.status);
+  // UIL-121: her choice for the line's other open stages she has not decided (Karvi's ruling: with the last card she
+  // has placed, she is asked about what is still missing); then the line reads closed once no stage waits, and a card
+  // that completes a short line asks what fills its third pocket, unless she has already said.
+  const others = decideOtherStages(state, line, slots, slot.id, choice.stages, undecidedOk);
+  const after = others.after;
+  const nowClosed = lineStatusOf(after) === "closed";
+  const closes = nowClosed && !lineReadsClosed(line.status);
   const pocket = validateThirdPocket(
     stageStateOf(state),
     {
@@ -336,9 +345,10 @@ function joinLine(
       completeAfterWrite:
         line.extra_pocket == null &&
         after.every((a) => a.state === "filled") &&
-        !(undecidedOk && !choice.thirdPocket),
+        !(undecidedOk && !choice.thirdPocket) &&
+        choice.thirdPocket?.material !== "later",
     },
-    choice.thirdPocket,
+    choice.thirdPocket?.material === "later" ? undefined : choice.thirdPocket,
   );
   return {
     ops: [
@@ -351,6 +361,11 @@ function joinLine(
         slotId: slot.id,
         slotIsLastOpen: closes,
       }).ops,
+      ...others.ops,
+      // A closed line she now chases a stage on reads open again.
+      ...(!nowClosed && lineReadsClosed(line.status)
+        ? [{ op: "update_line" as const, id: line.id, patch: { status: "open" } }]
+        : []),
       ...(pocket ? thirdPocketWriteOps(line.id, pocket) : []),
     ],
     lineId: line.id,
@@ -491,6 +506,13 @@ function replaceInLine(
       `now ${describePatch(outPatch)}.`,
     resolved_by: "user",
   });
+  // UIL-121: a swap places her card in the line too, so the line's other open stages she has not decided are asked.
+  const others = decideOtherStages(state, line, slots, slot.id, choice.stages, false);
+  ops.push(...others.ops);
+  const nowClosed = lineStatusOf(others.after) === "closed";
+  if (nowClosed !== lineReadsClosed(line.status)) {
+    ops.push({ op: "update_line", id: line.id, patch: { status: nowClosed ? "closed" : "open" } });
+  }
   return {
     ops,
     lineId: line.id,
@@ -571,8 +593,11 @@ function fillerOutOps(state: LineWriteState, lineId: string, slot: Row<"line_slo
 }
 
 /** A copy of this stage's species still waiting in her haul, in the line's language: its stage is not asked yet. */
-function waitingInHaul(state: LineWriteState, dexId: number): boolean {
-  const locale = localeOfId(state.incoming.card.tcgdexId);
+function waitingInHaul(
+  state: LineWriteState,
+  dexId: number,
+  locale = localeOfId(state.incoming.card.tcgdexId),
+): boolean {
   const cardOf = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
   return [...state.copiesById.values()].some(
     (c) =>
@@ -582,3 +607,83 @@ function waitingInHaul(state: LineWriteState, dexId: number): boolean {
       localeOfId(c.catalog_card_id) === locale,
   );
 }
+
+/**
+ * UIL-121, Karvi's ruling: once she places the last card she has for a line, she is asked about the stages still
+ * missing. For a join or a swap, every OTHER open stage of the line she has not decided (a placeholder with no stage
+ * choice) takes her choice, checked by the shared rule, unless its card is still waiting in her haul (it is asked
+ * when that card is placed) or the request is an older one with no popup. The slots' states afterwards, for the
+ * line's status, come back with the writes.
+ */
+function decideOtherStages(
+  state: LineWriteState,
+  line: Row<"evolution_line">,
+  slots: Row<"line_slot">[],
+  placedSlotId: string,
+  decisions: Record<number, StageDecision> | undefined,
+  undecidedOk: boolean,
+): { ops: WriteOp[]; after: { state: string; stageChoice?: string | null }[] } {
+  const chain = testViability(state.incoming, [], state.catalog, state.typeColorMap).chain;
+  const cardOf = (id: string) => state.copiesById.get(id)?.catalog_card_id ?? null;
+  const lineLocale = lineLocaleOf(slots.map(toRecord), cardOf);
+  const st = stageStateOf(state);
+  const ops: WriteOp[] = [];
+  const after: { state: string; stageChoice?: string | null }[] = [];
+  const isOpen = (s: Row<"line_slot">) => s.state === "placeholder" && s.stage_choice == null;
+  // Another card for this line still waiting in her haul: nothing is asked on this confirm; the last one asks.
+  const cardWaits = slots.some(
+    (s) =>
+      s.id !== placedSlotId &&
+      isOpen(s) &&
+      !!chain[s.stage_index] &&
+      waitingInHaul(state, chain[s.stage_index].dexId, lineLocale),
+  );
+  for (const s of slots) {
+    if (s.id === placedSlotId) {
+      after.push({ state: "filled" });
+      continue;
+    }
+    const node = chain[s.stage_index];
+    const d = decisions?.[s.stage_index];
+    if (
+      !isOpen(s) ||
+      !node ||
+      d?.kind === "later" ||
+      (d === undefined && (undecidedOk || cardWaits))
+    ) {
+      after.push({ state: s.state, stageChoice: s.stage_choice });
+      continue;
+    }
+    const w = validateStageDecision(
+      st,
+      {
+        lineId: line.id,
+        slotId: s.id,
+        stageIndex: s.stage_index,
+        stage: s.stage,
+        dexId: node.dexId,
+        speciesName: node.name,
+        lineLocale,
+        binderId: line.binder_id ?? "",
+        requiredType: typeOfBand(line.color_band, state.typeColorMap),
+      },
+      d,
+    );
+    ops.push(...stageWriteOps(s.id, w));
+    after.push({
+      state: w.slotPatch.state ?? "placeholder",
+      stageChoice: w.slotPatch.stage_choice,
+    });
+  }
+  return { ops, after };
+}
+
+const toRecord = (s: Row<"line_slot">): LineSlotRecord => ({
+  id: s.id,
+  stageIndex: s.stage_index,
+  stage: s.stage,
+  state: s.state as LineSlotRecord["state"],
+  copyId: s.copy_id,
+  dexId: null,
+  targetCatalogCardId: s.target_catalog_card_id,
+});

@@ -136,6 +136,28 @@ export async function loadLinePopupModel(
   let hereBinder: string | null;
   let hereBand: string;
 
+  /** UIL-121: a stage she may decide carries its species and its suggestion (shown, never selected). */
+  const decidableIn = (dexId: number, locale: string, bandKey: string) => ({
+    dexId,
+    suggestion: stageSuggestion(
+      stageOptionsFrom(
+        catalogRows
+          .filter((r) => r.dex_id.includes(dexId))
+          .map((r) => printingFromRow(r, typeColorMap)),
+        { locale: locale as typeof cardLocale, bandKey },
+      ),
+    ),
+  });
+  /** A copy of that species still waiting in this haul, in that language (its stage is not asked yet). */
+  const waitingFor = (dexId: number, locale: string) =>
+    copies.find(
+      (c) =>
+        c.id !== copy.id &&
+        c.role === "haul" &&
+        (catalogById.get(c.catalog_card_id)?.dexId ?? []).includes(dexId) &&
+        localeOfId(c.catalog_card_id) === locale,
+    );
+
   if (proposal.kind === "start") {
     const general = binders.filter((b) => b.type === "general");
     hereBinder = proposal.binderId ?? general[0]?.id ?? null;
@@ -150,18 +172,7 @@ export async function loadLinePopupModel(
       viable: true,
     };
     const gen = generateSlots(incoming, viability, owned, catalog, typeColorMap);
-    // UIL-121: each stage she may leave unfilled carries its species and its suggestion (shown, never selected).
-    const decidable = (dexId: number) => ({
-      dexId,
-      suggestion: stageSuggestion(
-        stageOptionsFrom(
-          catalogRows
-            .filter((r) => r.dex_id.includes(dexId))
-            .map((r) => printingFromRow(r, typeColorMap)),
-          { locale: cardLocale, bandKey: hereBand },
-        ),
-      ),
-    });
+    const decidable = (dexId: number) => decidableIn(dexId, cardLocale, hereBand);
     const stages: LinePopupStage[] = gen.slots.map((s) => {
       if (s.stageIndex === gen.incomingStageIndex) {
         return {
@@ -191,13 +202,7 @@ export async function loadLinePopupModel(
       }
       // Its card still waiting in THIS haul: not asked about now; it joins when she places that card (Karvi's ruling:
       // she is asked about a missing stage only after the last card she has for the line).
-      const waiting = copies.find(
-        (c) =>
-          c.id !== copy.id &&
-          c.role === "haul" &&
-          (catalogById.get(c.catalog_card_id)?.dexId ?? []).includes(s.dexId) &&
-          localeOfId(c.catalog_card_id) === cardLocale,
-      );
+      const waiting = waitingFor(s.dexId, cardLocale);
       const waitingCard = waiting ? catalogById.get(waiting.catalog_card_id) : undefined;
       if (waiting && waitingCard) {
         return {
@@ -252,6 +257,8 @@ export async function loadLinePopupModel(
     }
     hereBinder = line.binder_id;
     hereBand = line.color_band;
+    const chain = testViability(incoming, [], catalog, typeColorMap).chain;
+    const lineLocale = localeOfLine(line.id);
     const stages: LinePopupStage[] = lineSlots.map((s) => {
       if (s.id === proposal.slotId) {
         return {
@@ -279,6 +286,31 @@ export async function loadLinePopupModel(
         choice === "chase" && s.target_catalog_card_id
           ? catalogById.get(s.target_catalog_card_id)
           : undefined;
+      // An open stage she has not decided: its card still in this haul (not asked yet), or hers to decide now.
+      const node = chain[s.stage_index];
+      if (s.state === "placeholder" && choice === null && node) {
+        const waiting = waitingFor(node.dexId, lineLocale);
+        const waitingCard = waiting ? catalogById.get(waiting.catalog_card_id) : undefined;
+        if (waiting && waitingCard) {
+          return {
+            stageIndex: s.stage_index,
+            stage: s.stage,
+            state: "coming",
+            card: identity(waitingCard, hereBand),
+            dexId: node.dexId,
+            choice,
+            coming: { copyId: waiting.id },
+          };
+        }
+        return {
+          stageIndex: s.stage_index,
+          stage: s.stage,
+          state: "wanted",
+          card: null,
+          choice,
+          ...decidableIn(node.dexId, lineLocale, hereBand),
+        };
+      }
       return {
         stageIndex: s.stage_index,
         stage: s.stage,
