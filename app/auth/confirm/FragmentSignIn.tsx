@@ -22,14 +22,28 @@
  * On /login a page with no qualifying fragment is left alone; on /auth/confirm it is a failed link.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { parseAuthFragment } from "@/lib/auth/fragment";
 import { completeSignIn } from "./actions";
 
-export function FragmentSignIn({ onEmpty }: { onEmpty: "ignore" | "fail" }) {
+/**
+ * `pending`: what the page shows while the sign-in finishes (the confirm page's "Signing you in…").
+ *
+ * ALREADY SIGNED IN AS SOMEONE ELSE (UIL-127c; the Tech Lead's condition on R2): her session is kept, and instead of
+ * moving on as though the link had worked, this names the account she is in and how to use the link.
+ */
+export function FragmentSignIn({
+  onEmpty,
+  pending = null,
+}: {
+  onEmpty: "ignore" | "fail";
+  pending?: ReactNode;
+}) {
   const router = useRouter();
   const started = useRef(false);
+  const [signedInAs, setSignedInAs] = useState<string | null>(null);
 
   useEffect(() => {
     // Once per page: React may run an effect twice in development, and the fragment is gone after the
@@ -52,10 +66,24 @@ export function FragmentSignIn({ onEmpty }: { onEmpty: "ignore" | "fail" }) {
     }
 
     completeSignIn(fragment.accessToken, fragment.refreshToken).then(
-      (res) => router.replace(res.ok ? "/plan" : `/login?error=${res.error}`),
+      (res) => {
+        if (res.ok && res.signedInAs) setSignedInAs(res.signedInAs);
+        else router.replace(res.ok ? "/plan" : `/login?error=${res.error}`);
+      },
       () => router.replace("/login?error=auth"),
     );
   }, [onEmpty, router]);
 
-  return null;
+  if (!signedInAs) return pending;
+  return (
+    <div role="status" style={{ fontSize: 12, lineHeight: 1.7 }}>
+      <p style={{ marginBottom: 12 }}>
+        You&apos;re already signed in as <strong>{signedInAs}</strong>. That link was for a
+        different account. To use it, sign out first, then open the link again.
+      </p>
+      <Link href="/plan" className="btn btn-primary u">
+        Continue as {signedInAs}
+      </Link>
+    </div>
+  );
 }

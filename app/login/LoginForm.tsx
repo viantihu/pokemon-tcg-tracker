@@ -6,7 +6,8 @@
  * button shows pending state and inline errors without a client-side fetch.
  */
 
-import { useActionState } from "react";
+import { useActionState, useEffect } from "react";
+import Script from "next/script";
 import { reach } from "../(ui)/_components/reach";
 import { signIn, type SignInState } from "./actions";
 import { SIGN_IN_UNREACHED } from "./messages";
@@ -23,8 +24,25 @@ async function signInOrSay(prev: SignInState, formData: FormData): Promise<SignI
   return "unreached" in res ? { status: "error", message: res.error } : res;
 }
 
-export function LoginForm() {
+/** Cloudflare Turnstile's browser API, once its script has loaded (only where a site key is set). */
+declare global {
+  interface Window {
+    turnstile?: { reset: (widget?: string) => void };
+  }
+}
+
+/**
+ * `open`: this environment lets any address sign up (UIL-127c), so the words say "sign in or create an account".
+ * `siteKey`: Cloudflare Turnstile's public key, set only where open sign-up is protected (the Tech Lead's D1). The
+ * widget adds its token to the form as `cf-turnstile-response`, which the action hands to Supabase.
+ */
+export function LoginForm({ open = false, siteKey = "" }: { open?: boolean; siteKey?: string }) {
   const [state, action, pending] = useActionState(signInOrSay, initialState);
+
+  // A token is single-use: after a refusal, the check resets so she can send again at once.
+  useEffect(() => {
+    if (siteKey && state.status === "error") window.turnstile?.reset();
+  }, [siteKey, state]);
 
   if (state.status === "sent") {
     return (
@@ -43,7 +61,7 @@ export function LoginForm() {
   return (
     <form action={action} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <label htmlFor="email" className="u" style={{ fontSize: 10, letterSpacing: "0.14em" }}>
-        Owner email
+        {open ? "Email" : "Owner email"}
       </label>
       <input
         id="email"
@@ -58,6 +76,15 @@ export function LoginForm() {
         <p role="alert" style={{ fontSize: 11, color: "var(--ink-3)", letterSpacing: "0.04em" }}>
           {state.message}
         </p>
+      ) : null}
+      {siteKey ? (
+        <>
+          <Script
+            src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+            strategy="afterInteractive"
+          />
+          <div className="cf-turnstile" data-sitekey={siteKey} data-theme="light" />
+        </>
       ) : null}
       <button type="submit" className="btn btn-primary u" disabled={pending}>
         {pending ? "Sending…" : "Send magic link"}

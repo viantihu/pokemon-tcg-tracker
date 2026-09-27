@@ -1,9 +1,14 @@
 "use server";
 
 /**
- * Auth server actions (dev-spec §3 decision 4; §7 gate 1). Magic-link sign-in restricted to a
- * single allow-listed email, plus sign-out. Server Actions run only on the server, so the
- * allow-list check and the Supabase call never touch the client.
+ * Auth server actions (dev-spec §3 decision 4; §7 gate 1; UIL-127c). Magic-link sign-in, plus sign-out. Who may get
+ * a link is the environment's call (lib/auth/signup-mode.ts): INVITE mode, only listed addresses; OPEN mode, any
+ * address, and the first link to a new one creates its account. Server Actions run only on the server, so the
+ * checks and the Supabase call never touch the client.
+ *
+ * THE ORDER IS PINNED (the Tech Lead's D2; the deploy smoke's two probes): a malformed address is refused first,
+ * before any other check or any Supabase call, and a stranger in invite mode next, both in exactly these words.
+ * Only then the bot check (open mode, where a Turnstile key is set), then the link.
  */
 
 import { headers } from "next/headers";
@@ -12,8 +17,9 @@ import { z } from "zod";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { isAllowedEmail } from "@/lib/auth/allowlist";
+import { signupMode } from "@/lib/auth/signup-mode";
 import { publicEnv } from "@/lib/env";
-import { RATE_LIMITED } from "./messages";
+import { CAPTCHA_NEEDED, RATE_LIMITED } from "./messages";
 
 export type SignInState =
   { status: "idle" } | { status: "error"; message: string } | { status: "sent"; email: string };
@@ -49,8 +55,9 @@ function linkClient() {
 }
 
 /**
- * Send a Supabase magic link — but only to the one allow-listed owner email. `useActionState`
- * form action: takes the previous state + the submitted form and returns the next state.
+ * Send a Supabase magic link to an address that may sign in here. `useActionState` form action: takes the previous
+ * state + the submitted form and returns the next state. The same "check your email" answer comes back for a new
+ * address and a known one, so the form never says who has an account.
  */
 export async function signIn(_prev: SignInState, formData: FormData): Promise<SignInState> {
   const parsed = emailSchema.safeParse({ email: String(formData.get("email") ?? "").trim() });
@@ -59,9 +66,16 @@ export async function signIn(_prev: SignInState, formData: FormData): Promise<Si
   }
   const email = parsed.data.email;
 
-  // Primary gate: never send a link to a non-allow-listed address.
+  // Primary gate: never send a link to an address that may not sign in here (invite mode: not on the list).
   if (!isAllowedEmail(email)) {
     return { status: "error", message: "That email is not authorised for this binder." };
+  }
+
+  // The bot check (the Tech Lead's D1): open mode always shows the Turnstile widget (it cannot be open without a site
+  // key), and its token must come with the form; Supabase Auth's CAPTCHA verifies it. Refused here in her words.
+  const captchaToken = String(formData.get("cf-turnstile-response") ?? "").trim() || undefined;
+  if (signupMode() === "open" && !captchaToken) {
+    return { status: "error", message: CAPTCHA_NEEDED };
   }
 
   const origin = await requestOrigin();
@@ -70,12 +84,16 @@ export async function signIn(_prev: SignInState, formData: FormData): Promise<Si
     options: {
       emailRedirectTo: `${origin}/auth/confirm`,
       shouldCreateUser: true,
+      captchaToken,
     },
   });
 
   if (error) {
     if (error.status === 429 || error.code === "over_email_send_rate_limit") {
       return { status: "error", message: RATE_LIMITED };
+    }
+    if (error.code === "captcha_failed" || /captcha/i.test(error.message ?? "")) {
+      return { status: "error", message: CAPTCHA_NEEDED };
     }
     return { status: "error", message: error.message };
   }

@@ -133,3 +133,31 @@ describe("UIL-097 · a magic link finishes in any browser", () => {
     for (const spy of consoleSpies) expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe("UIL-127c · a link for another account, while she is signed in", () => {
+  it("names the account she is in and how to use the link, instead of moving on as though it worked", async () => {
+    window.history.replaceState(null, "", `/auth/confirm${SESSION}`);
+    completeSignIn.mockResolvedValue({ ok: true, signedInAs: "owner@example.com" });
+    const view = render(
+      createElement(FragmentSignIn, { onEmpty: "fail", pending: "Signing you in…" }),
+    );
+    const note = await view.findByRole("status");
+    expect(note.textContent).toContain("You're already signed in as owner@example.com");
+    expect(note.textContent).toContain("sign out first, then open the link again");
+    expect(
+      view.getByRole("link", { name: "Continue as owner@example.com" }).getAttribute("href"),
+    ).toBe("/plan");
+    expect(replace).not.toHaveBeenCalled();
+    // The fragment was still wiped before the call (the order is the security).
+    expect(window.location.hash).toBe("");
+  });
+
+  it("shows what the page gave it while the sign-in finishes", () => {
+    window.history.replaceState(null, "", `/auth/confirm${SESSION}`);
+    completeSignIn.mockReturnValue(new Promise(() => {}));
+    const view = render(
+      createElement(FragmentSignIn, { onEmpty: "fail", pending: "Signing you in…" }),
+    );
+    expect(view.container.textContent).toBe("Signing you in…");
+  });
+});

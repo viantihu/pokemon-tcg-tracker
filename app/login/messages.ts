@@ -11,6 +11,12 @@ export const RATE_LIMITED =
   "link is still in your inbox, open that one.";
 
 /**
+ * The bot check was missing or did not pass (UIL-127c, open mode only). Said in her words, never Supabase's; the
+ * form resets the check so she can try again at once.
+ */
+export const CAPTCHA_NEEDED = "Complete the check above the button, then send the link again.";
+
+/**
  * When Sign in or Sign out cannot reach the server at all (UIL-106's family: a redeploy under an open page,
  * or a dropped connection). Neither says what did or did not happen, because a call that never answered may
  * still have landed.

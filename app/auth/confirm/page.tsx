@@ -12,10 +12,14 @@ export default function ConfirmPage() {
   return (
     <main className="flex-1 flex items-center justify-center p-6">
       <div className="panel" style={{ width: "100%", maxWidth: 420, padding: 22 }}>
-        <p role="status" style={{ fontSize: 12, lineHeight: 1.7 }}>
-          Signing you in…
-        </p>
-        <FragmentSignIn onEmpty="fail" />
+        <FragmentSignIn
+          onEmpty="fail"
+          pending={
+            <p role="status" style={{ fontSize: 12, lineHeight: 1.7 }}>
+              Signing you in…
+            </p>
+          }
+        />
       </div>
     </main>
   );

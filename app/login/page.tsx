@@ -6,6 +6,8 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { signupMode } from "@/lib/auth/signup-mode";
+import { publicEnv } from "@/lib/env";
 import { FragmentSignIn } from "../auth/confirm/FragmentSignIn";
 import { LoginForm } from "./LoginForm";
 
@@ -28,6 +30,8 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const params = await searchParams;
   const errorKey = typeof params.error === "string" ? params.error : null;
   const errorMessage = errorKey ? ERROR_MESSAGES[errorKey] : null;
+  // UIL-127c: an environment open to sign-up says so, and shows the bot check where one is configured.
+  const open = signupMode() === "open";
 
   return (
     <main className="flex-1 flex items-center justify-center p-6">
@@ -49,9 +53,11 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
           </div>
         ) : null}
         <p style={{ fontSize: 11, color: "var(--ink-2)", lineHeight: 1.7, marginBottom: 16 }}>
-          This binder is private. Enter the owner email to receive a one-time sign-in link.
+          {open
+            ? "Enter your email to sign in or create an account. We'll send you a one-time sign-in link."
+            : "This binder is private. Enter the owner email to receive a one-time sign-in link."}
         </p>
-        <LoginForm />
+        <LoginForm open={open} siteKey={open ? publicEnv.turnstileSiteKey : ""} />
         {/* UIL-097's safety net: a link sent to the Site URL arrives here, fragment intact. */}
         <FragmentSignIn onEmpty="ignore" />
       </div>
