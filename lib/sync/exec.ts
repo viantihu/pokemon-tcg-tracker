@@ -37,6 +37,7 @@ import {
   standInIdFor,
   type Language,
 } from "@/lib/catalog/locale";
+import { standInTwin } from "@/lib/catalog/stand-in";
 import { entryAsDexRow, loadAliasMap } from "./pipeline";
 import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
@@ -1074,8 +1075,6 @@ export class StandInTwinError extends Error {
   }
 }
 
-const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
-
 /**
  * The ops that pin ONE entry to ONE catalog id — alias (when the set was unknown and the target has a
  * set), presence group, N bulk copies, entry RESOLVED — shared by the real-card match and the stand-in
@@ -1423,13 +1422,15 @@ async function findStandInTwin(
   db: DbClient,
   input: Pick<StandInInput, "name" | "setName" | "localId" | "language">,
 ): Promise<Row<"catalog_card"> | undefined> {
-  return (await catalogCardRepo.listStandIns(db)).find(
-    (c) =>
-      languageOfId(c.tcgdex_id) === input.language &&
-      norm(c.name) === norm(input.name) &&
-      norm(c.set_name) === norm(input.setName) &&
-      norm(c.local_id) === norm(input.localId),
-  );
+  const rows = (await catalogCardRepo.listStandIns(db)).map((row) => ({
+    row,
+    tcgdexId: row.tcgdex_id,
+    name: row.name,
+    setName: row.set_name,
+    localId: row.local_id,
+  }));
+  // The one twin rule, shared with the line popup's stand-in (lib/catalog/stand-in.ts, UIL-121).
+  return standInTwin(rows, input)?.row;
 }
 
 /**

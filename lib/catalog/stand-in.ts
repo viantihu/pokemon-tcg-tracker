@@ -59,3 +59,66 @@ export function realPrintingFor(
   );
   return hit?.tcgdexId ?? null;
 }
+
+/* ------------------------------ a new stand-in: is it one she already has? ------------------------------ */
+
+/** What she typed for a new stand-in, and the language it is printed in (UIL-108). */
+export interface StandInKey {
+  name: string;
+  setName: string | null;
+  localId: string | null;
+  language: string;
+}
+
+/** A catalog row as the two checks below read it. */
+export interface StandInCheckRow {
+  tcgdexId: string;
+  name: string;
+  setName: string | null;
+  localId: string | null;
+}
+
+const norm = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
+
+/**
+ * The stand-in she already made for this card, if any: same language, name, set name and number. An English and a
+ * Japanese stand-in of one card are two cards, as their printings are (UIL-090); a stand-in made before UIL-108
+ * recorded no language, so it is nobody's twin. The same key 0027's unique index holds, so Sync's match and the line
+ * popup refuse the same twin.
+ */
+export function standInTwin<T extends StandInCheckRow>(
+  standIns: readonly T[],
+  key: StandInKey,
+): T | undefined {
+  return standIns.find(
+    (c) =>
+      isStandInId(c.tcgdexId) &&
+      languageOfId(c.tcgdexId) === key.language &&
+      norm(c.name) === norm(key.name) &&
+      norm(c.setName) === norm(key.setName) &&
+      norm(c.localId) === norm(key.localId),
+  );
+}
+
+/**
+ * A MIRRORED printing of the card she is describing (UIL-121): same language, name, set name, and collector number
+ * normalised the way the importer does ("5", "005"). Then the card is in the catalog and she picks it rather than
+ * making a stand-in. Nothing checked this before: a stand-in could duplicate a real TCGdex card. A draft with no set
+ * or no number has nothing to compare, so it is not refused here.
+ */
+export function mirrorPrintingLike<T extends StandInCheckRow & { locale: string }>(
+  catalog: readonly T[],
+  key: StandInKey,
+): T | undefined {
+  if (!norm(key.setName) || !norm(key.localId)) return undefined;
+  const numbers = new Set(localIdCandidates(key.localId ?? ""));
+  return catalog.find(
+    (c) =>
+      !isStandInId(c.tcgdexId) &&
+      c.locale === key.language &&
+      norm(c.name) === norm(key.name) &&
+      norm(c.setName) === norm(key.setName) &&
+      c.localId !== null &&
+      localIdCandidates(c.localId).some((n) => numbers.has(n)),
+  );
+}
