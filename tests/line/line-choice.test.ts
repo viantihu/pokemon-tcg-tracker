@@ -118,8 +118,9 @@ describe("START · only what she ticked moves, and the status is the slots'", ()
         await q(`select role, binder_id, binder_half, color_band from copy where id = $1`, [OWNED])
       )[0],
     ).toEqual({ role: "shelved", binder_id: GEN, binder_half: "back", color_band: "red" });
+    // UIL-121: every slot filled reads CLOSED (was "complete").
     expect((await q<{ status: string }>(`select status from evolution_line`))[0].status).toBe(
-      "complete",
+      "closed",
     );
     const audit = await q<{ decision: string; resolved_by: string }>(
       `select decision, resolved_by from placement_decision where copy_id = $1`,

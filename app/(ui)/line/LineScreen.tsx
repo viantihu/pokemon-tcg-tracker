@@ -74,6 +74,7 @@ const SLOT_TAG: Record<SlotView["state"], string> = {
 };
 const STATUS_GLYPH: Record<LineView["status"], string> = {
   open: "● OPEN",
+  closed: "◆ CLOSED",
   capped: "▲ CAPPED",
   complete: "◆ COMPLETE",
   terminated: "■ TERMINATED",

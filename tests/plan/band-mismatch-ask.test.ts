@@ -236,7 +236,7 @@ describe('UIL-069 · picking "join the line"', () => {
     const line = (
       await db.query<{ status: string }>(`select status from evolution_line where id = '${LINE}'`)
     ).rows[0];
-    expect(line.status).toBe("complete");
+    expect(line.status).toBe("closed"); // UIL-121: was "complete"
 
     const decision = await decisionRow();
     expect(decision?.resolved_by).toBe("user"); // her call, not "auto" — she was explicitly asked

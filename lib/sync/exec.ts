@@ -71,6 +71,7 @@ import {
   type SnapshotVariantPrior,
   type PriorDexRecord,
 } from "./undo";
+import { lineReadsClosed } from "@/lib/line/popup";
 
 export interface ApplyResult {
   snapshotId: string;
@@ -855,7 +856,7 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
       // Positive match only: a crossed pointer must not evict a card that never moved (UIL-062).
       if (slot && slot.copy_id === id) {
         const line = await evolutionLineRepo.getByPk(db, slot.line_id);
-        ops.push(...releaseSlotOps(slot.id, line?.status === "complete" ? line.id : null));
+        ops.push(...releaseSlotOps(slot.id, lineReadsClosed(line?.status) ? line!.id : null));
       }
     }
     ops.push({ op: "delete_copy", id });

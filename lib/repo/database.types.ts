@@ -236,6 +236,7 @@ export type Database = {
           binder_id: string | null;
           half: string;
           status: string;
+          extra_pocket: string | null;
           created_at: string;
         };
         Insert: {
@@ -246,6 +247,7 @@ export type Database = {
           binder_id?: string | null;
           half?: string;
           status?: string;
+          extra_pocket?: string | null;
           created_at?: string;
         };
         Update: {
@@ -256,6 +258,7 @@ export type Database = {
           binder_id?: string | null;
           half?: string;
           status?: string;
+          extra_pocket?: string | null;
           created_at?: string;
         };
         Relationships: [
@@ -503,6 +506,7 @@ export type Database = {
           target_catalog_card_id: string | null;
           note: string | null;
           resolved_decision_kind: string | null;
+          stage_choice: string | null;
           resolved_decision_choice: string | null;
           resolved_decision_collection_id: string | null;
         };
@@ -517,6 +521,7 @@ export type Database = {
           target_catalog_card_id?: string | null;
           note?: string | null;
           resolved_decision_kind?: string | null;
+          stage_choice?: string | null;
           resolved_decision_choice?: string | null;
           resolved_decision_collection_id?: string | null;
         };
@@ -531,6 +536,7 @@ export type Database = {
           target_catalog_card_id?: string | null;
           note?: string | null;
           resolved_decision_kind?: string | null;
+          stage_choice?: string | null;
           resolved_decision_choice?: string | null;
           resolved_decision_collection_id?: string | null;
         };
@@ -636,6 +642,7 @@ export type Database = {
           material: string;
           copy_id: string | null;
           line_id: string | null;
+          line_slot_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -648,6 +655,7 @@ export type Database = {
           material: string;
           copy_id?: string | null;
           line_id?: string | null;
+          line_slot_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -660,6 +668,7 @@ export type Database = {
           material?: string;
           copy_id?: string | null;
           line_id?: string | null;
+          line_slot_id?: string | null;
           created_at?: string;
         };
         Relationships: [

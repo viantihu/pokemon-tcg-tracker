@@ -895,7 +895,8 @@ nav.menu .tab .n {
 .status.open {
   background: var(--note);
 }
-.status.complete {
+.status.complete,
+.status.closed {
   background: var(--mint);
 }
 

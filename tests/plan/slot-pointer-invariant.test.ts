@@ -529,7 +529,7 @@ describe("UIL-117 gap 4 · the Haul Plan completes a line when it fills the last
       `select status from evolution_line where id = $1`,
       [LINE],
     );
-    expect(line.rows[0].status).toBe("complete");
+    expect(line.rows[0].status).toBe("closed"); // UIL-121: was "complete"
   });
 });
 

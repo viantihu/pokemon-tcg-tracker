@@ -226,7 +226,9 @@ describe("0029 · every foreign key onto a line or a slot is accounted for", () 
   // Read from the catalog, not a hand-kept list (the Tech Lead's condition): a future FK fails here until the
   // delete either refuses on it, deletes it, or it is shown to be history that survives with its link nulled.
   const DELETED = ["line_slot.line_id", "wishlist_item.line_slot_id"];
-  const REFUSED = ["copy.line_slot_id", "binder_block.line_id"];
+  // binder_block.line_slot_id (0030, UIL-121): a stage filler's block always names its line too
+  // (binder_block_slot_names_line), so the refusal on binder_block.line_id covers it.
+  const REFUSED = ["copy.line_slot_id", "binder_block.line_id", "binder_block.line_slot_id"];
   const HISTORY = ["placement_decision.line_id", "placement_decision.line_slot_id"];
 
   it("each is deleted by the op, refused by it, or is history that keeps its label", async () => {

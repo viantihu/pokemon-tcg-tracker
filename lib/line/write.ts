@@ -55,6 +55,7 @@ import {
 import type { DecisionChoiceId, LineJoinChoice, MoveDestination, MoveRequest } from "./types";
 import { buildLineChoiceOps, type LineWriteState } from "./line-choice";
 import type { LineChoice } from "./popup";
+import { lineReadsClosed } from "./popup";
 
 export interface MoveResult {
   copyId: string;
@@ -244,7 +245,7 @@ export async function applyMove(
     if (slot && slot.copy_id === req.copyId) {
       reopenSlotId = slot.id;
       const line = await evolutionLineRepo.getByPk(db, slot.line_id);
-      if (line && line.status === "complete") demoteLineId = line.id;
+      if (line && lineReadsClosed(line.status)) demoteLineId = line.id;
     }
   }
 
@@ -408,12 +409,22 @@ export async function applyDecision(
     if (p.resolvedDecisionCollectionId !== undefined) {
       patch.resolved_decision_collection_id = p.resolvedDecisionCollectionId;
     }
-    if (Object.keys(patch).length > 0) ops.push({ op: "update_slot", id: p.slotId, patch });
+    // UIL-121 (0030): these cards predate her stage choices and retire in A2. A slot one of them rewrites goes
+    // back to "undecided" rather than keeping a chase or an empty its answer no longer matches (0030 checks both).
+    if (Object.keys(patch).length > 0) {
+      patch.stage_choice = null;
+      ops.push({ op: "update_slot", id: p.slotId, patch });
+    }
   }
 
   // Wishlist: resolve (close) some, upsert (create/refresh) others. No read first — see the note above.
+  const patched = new Set(writes.slotPatches.map((p) => p.slotId));
   for (const slotId of writes.wishlistResolveSlotIds) {
     ops.push({ op: "resolve_wishlist_for_slot", line_slot_id: slotId });
+    // A closed wish on a stage she was chasing: the chase is over, so the stage is undecided again (0030).
+    if (!patched.has(slotId)) {
+      ops.push({ op: "update_slot", id: slotId, patch: { stage_choice: null } });
+    }
   }
   for (const up of writes.wishlistUpserts) {
     ops.push({

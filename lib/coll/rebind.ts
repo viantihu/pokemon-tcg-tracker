@@ -51,6 +51,7 @@ import {
   type WriteOp,
 } from "@/lib/repo";
 import { placementForMove, releaseSlotOps } from "@/lib/line/move";
+import { lineReadsClosed } from "@/lib/line/popup";
 
 /* ------------------------------- pure planning ------------------------------ */
 
@@ -364,7 +365,7 @@ export async function applyCollectionRebindMove(
         if (slot && slot.copy_id === c.id) {
           reopenSlotId = slot.id;
           const line = await evolutionLineRepo.getByPk(db, slot.line_id);
-          if (line && line.status === "complete") demoteLineId = line.id;
+          if (line && lineReadsClosed(line.status)) demoteLineId = line.id;
         }
       }
       copies.push({ id: c.id, reopenSlotId, demoteLineId });

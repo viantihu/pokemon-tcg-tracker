@@ -249,15 +249,22 @@ export function leavesLineText(l: LeavesLine): string {
 export const IN_THE_HAUL = "Still in the haul";
 
 /**
- * A line's status from the slots it holds: `complete` only when every slot is filled (the Senior BA's rule, which
- * 0028 now enforces), `capped` when the engine capped it, else `open`. The one derivation every line writer uses.
+ * A line's status from the slots it holds (UIL-121, Karvi: "only 2 stages: open or closed"): CLOSED when every slot
+ * is filled, else OPEN. Nothing is capped for her any more; `_capped` is accepted and ignored until the engine stops
+ * reporting it. 0030's assert_line_slots enforces the same: every slot filled ⇒ closed. The one derivation every
+ * line writer uses.
  */
-export function lineStatusFor(
-  slotStates: readonly string[],
-  capped = false,
-): "open" | "capped" | "complete" {
-  if (slotStates.length > 0 && slotStates.every((s) => s === "filled")) return "complete";
-  return capped ? "capped" : "open";
+export function lineStatusFor(slotStates: readonly string[], _capped = false): "open" | "closed" {
+  void _capped;
+  return slotStates.length > 0 && slotStates.every((s) => s === "filled") ? "closed" : "open";
+}
+
+/**
+ * Whether a stored status reads CLOSED. 'complete' and 'terminated' are pre-0030 words for it, still written by the
+ * writers that have not moved yet; 'capped' reads open. Every reader asks this rather than comparing strings.
+ */
+export function lineReadsClosed(status: string | null | undefined): boolean {
+  return status === "closed" || status === "complete" || status === "terminated";
 }
 
 /** The choice a proposal opens on: nothing is ever pre-ticked, and Keep is the default for a replace. */

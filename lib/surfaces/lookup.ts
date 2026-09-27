@@ -36,7 +36,7 @@ export interface LookupLineRef {
   lineLabel: string;
   stage: string | null;
   /** Line lifecycle, for the "capped" / "terminated" caveat. */
-  status: "open" | "capped" | "complete" | "terminated";
+  status: "open" | "closed" | "capped" | "complete" | "terminated";
 }
 
 /** Whether the printing is chased on the wishlist right now. */
@@ -153,7 +153,13 @@ export function buildLookupAnswer(input: LookupInput): LookupAnswer {
   if (input.ownedInLine) {
     const l = input.ownedInLine;
     const statusTag =
-      l.status === "capped" ? " · CAPPED" : l.status === "complete" ? " · COMPLETE" : "";
+      l.status === "capped"
+        ? " · CAPPED"
+        : l.status === "complete"
+          ? " · COMPLETE"
+          : l.status === "closed"
+            ? " · CLOSED"
+            : "";
     facts.push({
       tone: "y",
       label: "IN A LINE",

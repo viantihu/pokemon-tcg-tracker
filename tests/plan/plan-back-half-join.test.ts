@@ -196,7 +196,7 @@ describe("UIL-070 part 1 · joining an EXISTING line's open slot from the Haul P
     });
     expect(await slot(SLOT_NEXT)).toEqual({ state: "filled", copy_id: copy.id });
     // Stage1 was the last open stage, so the line is complete — buildExistingLineJoinOps' rule.
-    expect((await lines())[0].status).toBe("complete");
+    expect((await lines())[0].status).toBe("closed"); // UIL-121: was "complete"
     // The audit row still names it as her override.
     const decision = (
       await db.query<{ decision: string }>(

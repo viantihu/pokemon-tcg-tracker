@@ -54,6 +54,7 @@ import {
 } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
 import type { LineChoice } from "@/lib/line/popup";
+import { lineReadsClosed } from "@/lib/line/popup";
 import { buildBackHalfLineOps } from "@/lib/line/write";
 import { isLineCard } from "./line-proposal";
 import { lineDoneFor } from "./line-done";
@@ -219,7 +220,7 @@ function slotReleaseFor(
     if (!slot) continue;
     if (slot.copy_id !== copy.id) return [null, null];
     const line = pc.ctx.lines.find((l) => l.id === lineId);
-    return [slotId, line?.status === "complete" ? lineId : null];
+    return [slotId, lineReadsClosed(line?.status) ? lineId : null];
   }
   return [null, null];
 }
