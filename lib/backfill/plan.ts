@@ -43,6 +43,9 @@ export interface PlanDeps {
   now: string;
 }
 
+/** The note on a placeholder slot she chose to leave empty: a slot, on no wishlist. */
+export const LEFT_EMPTY_NOTE = "left empty (not on the wishlist)";
+
 const cardName = (id: string | null | undefined, deps: PlanDeps) =>
   (id && deps.catalogById.get(id)?.name) || id || "card";
 const binderName = (id: string, deps: PlanDeps) => deps.binderNameById.get(id) ?? "binder";
@@ -98,8 +101,12 @@ export function planFrontHalf(input: FrontHalfCommit, deps: PlanDeps): BackfillW
 /**
  * Back half, entered line by line (system-design §7A). Builds the EvolutionLine, one LineSlot per
  * stage (filled / placeholder / block), a waiting copy placed for each filled stage, a WishlistItem for
- * each placeholder (sticky note → shopping list), and a BinderBlock for each block — recording WHICH
- * duplicate copy was repurposed when that is the material.
+ * each placeholder she marked a HUNT (sticky note → shopping list), and a BinderBlock for each block —
+ * recording WHICH duplicate copy was repurposed when that is the material.
+ *
+ * A placeholder she chose to "Leave empty" is a slot with NO wishlist row: a stage goes on her wishlist only
+ * when she adds it (UIL-119, Karvi's ruling). Only `hunt: true` wishes, so a placeholder that does not say
+ * fails safe; `validateBackLine` refuses one before it gets here.
  */
 export function planBackLine(input: BackLineCommit, deps: PlanDeps): BackfillWrites {
   const w = emptyWrites();
@@ -164,8 +171,10 @@ export function planBackLine(input: BackLineCommit, deps: PlanDeps): BackfillWri
         state: "placeholder",
         copy_id: null,
         target_catalog_card_id: s.targetCatalogCardId ?? null,
-        note: null,
+        // Say which, so the Lines screen can tell a stage she left empty from one she is hunting.
+        note: s.hunt === true ? null : LEFT_EMPTY_NOTE,
       });
+      if (s.hunt !== true) continue;
       w.wishlist.push({
         id: deps.newId(),
         owner_id: deps.ownerId,

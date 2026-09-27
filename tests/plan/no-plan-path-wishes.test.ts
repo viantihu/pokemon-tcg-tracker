@@ -68,25 +68,34 @@ function planModules(): string[] {
   return [...seen].sort();
 }
 
-/** True when the file BUILDS a wish op: an object literal `{ op: "insert_wishlist" }`. The op's type (a
- * property signature in lib/repo/write-ops.ts) and a count (`o.op === "insert_wishlist"`) are not. */
-function buildsAWish(file: string): boolean {
-  const sf = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+/**
+ * True when a source BUILDS a wish op: an object literal `{ op: "insert_wishlist" }`, however the value is wrapped
+ * (`as const`, `satisfies`, parentheses; QA's A2 mutant on #397) and whether the key is quoted or not. The op's type
+ * (a property signature in lib/repo/write-ops.ts) and a count (`o.op === "insert_wishlist"`) are not. Out of scope:
+ * a value held in a variable first (`const kind = "insert_wishlist"; ({ op: kind })`), which no writer here does.
+ */
+function buildsAWishIn(source: string, file = "x.ts"): boolean {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+  const unwrap = (e: ts.Expression): ts.Expression =>
+    ts.isAsExpression(e) || ts.isSatisfiesExpression(e) || ts.isParenthesizedExpression(e)
+      ? unwrap(e.expression)
+      : e;
   let found = false;
   const visit = (n: ts.Node) => {
     if (
       ts.isPropertyAssignment(n) &&
-      n.name.getText(sf) === "op" &&
-      ts.isStringLiteralLike(n.initializer) &&
-      n.initializer.text === "insert_wishlist"
+      (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name)) &&
+      n.name.text === "op"
     ) {
-      found = true;
+      const v = unwrap(n.initializer);
+      if (ts.isStringLiteralLike(v) && v.text === "insert_wishlist") found = true;
     }
     if (!found) ts.forEachChild(n, visit);
   };
   visit(sf);
   return found;
 }
+const buildsAWish = (file: string) => buildsAWishIn(readFileSync(file, "utf8"), file);
 
 describe("UIL-119 · no Haul Plan path writes a wish", () => {
   const modules = planModules();
@@ -105,5 +114,25 @@ describe("UIL-119 · no Haul Plan path writes a wish", () => {
     const offenders = modules.filter(buildsAWish);
     // PRE-FIX: lib/plan/commit.ts (writeNewLine's loop, one wish per empty stage of a line it started).
     expect(offenders).toEqual([]);
+  });
+
+  it("sees a wish op however its value is written, and not its type or a count (QA's A2 on #397)", () => {
+    for (const src of [
+      `ops.push({ op: "insert_wishlist", line_slot_id: null });`,
+      `ops.push({ op: "insert_wishlist" as const });`,
+      `ops.push({ op: "insert_wishlist" satisfies string });`,
+      `ops.push({ op: ("insert_wishlist") });`,
+      `ops.push({ "op": "insert_wishlist" });`,
+      "ops.push({ op: `insert_wishlist` });",
+    ]) {
+      expect(buildsAWishIn(src), src).toBe(true);
+    }
+    for (const src of [
+      `type W = { op: "insert_wishlist"; line_slot_id: string | null };`,
+      `const n = ops.filter((o) => o.op === "insert_wishlist").length;`,
+      `ops.push({ op: "insert_slot" as const });`,
+    ]) {
+      expect(buildsAWishIn(src), src).toBe(false);
+    }
   });
 });

@@ -122,6 +122,7 @@ const charmander = (dexVariantRaw = "Normal") => ({
 const charmanderLine = (filled = charmander()) => ({
   binderId: B1,
   bandKey: "red",
+  seedTcgdexId: CHARMANDER_SV03_026.tcgdexId,
   rootDexId: 4,
   requiredType: "Fire",
   terminated: false,
@@ -139,6 +140,7 @@ const charmanderLine = (filled = charmander()) => ({
       stage: "Stage1",
       dexId: 5,
       decision: "placeholder" as const,
+      hunt: true,
       targetCatalogCardId: CHARMELEON_SV03_027.tcgdexId,
       alternateCatalogCardIds: [],
       specialtyOnly: false,

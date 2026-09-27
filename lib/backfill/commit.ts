@@ -27,6 +27,7 @@
 import { applyWriteOps, type DbClient, type WriteOp, type WritePayload } from "@/lib/repo";
 import { loadBackfillContext, planDeps, type BackfillContext } from "./context";
 import { planBackLine, planFrontHalf, planSpecialty } from "./plan";
+import { validateBackLine } from "./validate";
 import { demandsOf, loadWaiting, NotWaitingError, shortagesOf, takerFor } from "./waiting";
 import {
   countWrites,
@@ -162,17 +163,21 @@ export async function applyWrites(db: DbClient, writes: BackfillWrites): Promise
 }
 
 /**
- * Load, refuse a card that is not waiting, then plan and apply (UIL-098). The refusal comes before any
- * write, so a refused save changes nothing — and, for a line, refuses only that line.
+ * Load, check, refuse a card that is not waiting, then plan and apply (UIL-098). `prepare` sees the loaded
+ * context first (a line is validated there, UIL-117 PR 5) and names the waiting copies the save takes. Every
+ * refusal comes before any write, so a refused save changes nothing — and, for a line, refuses only that line.
  */
 async function commitWaiting(
   db: DbClient,
   ownerId: string,
-  picks: { tcgdexId: string; dexVariantRaw: string }[],
   scope: "line" | "list",
-  plan: (deps: ReturnType<typeof planDeps>) => BackfillWrites,
+  prepare: (ctx: BackfillContext) => {
+    picks: { tcgdexId: string; dexVariantRaw: string }[];
+    plan: (deps: ReturnType<typeof planDeps>) => BackfillWrites;
+  },
 ): Promise<CommitCounts> {
   const [ctx, pool] = await Promise.all([loadBackfillContext(db), loadWaiting(db)]);
+  const { picks, plan } = prepare(ctx);
   const short = shortagesOf(demandsOf(picks), pool);
   if (short.length > 0) throw new NotWaitingError(short, nameIn(ctx), scope);
   return applyWrites(db, plan(planDeps(ctx, ownerId, takerFor(pool))));
@@ -205,16 +210,25 @@ export async function commitFrontHalf(
   ownerId: string,
   input: FrontHalfCommit,
 ): Promise<CommitCounts> {
-  return commitWaiting(db, ownerId, input.cards, "list", (deps) => planFrontHalf(input, deps));
+  return commitWaiting(db, ownerId, "list", () => ({
+    picks: input.cards,
+    plan: (deps) => planFrontHalf(input, deps),
+  }));
 }
 
-/** Commit a back-half line entry. Refuses THIS line when a card it names is not waiting. */
+/**
+ * Commit a back-half line entry. Refuses THIS line when it does not check out against the chain resolved again on
+ * the server (`validateBackLine`, UIL-117 PR 5), or when a card it names is not waiting.
+ */
 export async function commitBackLine(
   db: DbClient,
   ownerId: string,
   input: BackLineCommit,
 ): Promise<CommitCounts> {
-  return commitWaiting(db, ownerId, linePicks(input), "line", (deps) => planBackLine(input, deps));
+  return commitWaiting(db, ownerId, "line", (ctx) => {
+    const line = validateBackLine(ctx, input);
+    return { picks: linePicks(line), plan: (deps) => planBackLine(line, deps) };
+  });
 }
 
 /** Commit a specialty flat entry (with collection tags). */
@@ -223,5 +237,8 @@ export async function commitSpecialty(
   ownerId: string,
   input: SpecialtyCommit,
 ): Promise<CommitCounts> {
-  return commitWaiting(db, ownerId, input.cards, "list", (deps) => planSpecialty(input, deps));
+  return commitWaiting(db, ownerId, "list", () => ({
+    picks: input.cards,
+    plan: (deps) => planSpecialty(input, deps),
+  }));
 }

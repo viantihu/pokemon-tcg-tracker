@@ -6,9 +6,11 @@
  *
  * Three entry modes, matching the way the cards physically sit:
  *   • FRONT HALF — a flat, ordered sequence; band auto-computed from card type (never typed).
- *   • BACK HALF  — line by line: pick a species + colour, then mark each stage FILLED / a wishlist
- *                  placeholder / a block (a repurposed-duplicate block records WHICH card). A
- *                  terminated line offers no fillable slot.
+ *   • BACK HALF  — line by line: pick a species + colour, then decide each stage: FILLED / a wishlist
+ *                  hunt / left empty / a block (a repurposed-duplicate block records WHICH card). Every
+ *                  stage opens undecided and the line saves only once she has decided them all: a stage
+ *                  goes on her wishlist only when she adds it (UIL-119, UIL-117 PR 5). A terminated line
+ *                  hunts nothing.
  *   • SPECIALTY  — a flat list, each card optionally tagged into collections.
  *
  * All catalog access + writes are server-side via server actions; the client never touches TCGdex.
@@ -21,7 +23,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { band, type LineStatus, type SlotState } from "@/lib/engine";
+import { band, type LineStatus } from "@/lib/engine";
 import type { BackLineStageInfo, BackLineStageInput, ResolvedBackLine } from "@/lib/backfill";
 import { BandChip } from "../_components/BandChip";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
@@ -363,9 +365,15 @@ function FrontHalfPanel({
 
 /* -------------------------------- back half ------------------------------- */
 
+/**
+ * Her decision for a stage (UIL-117 PR 5): a card she owns, a wishlist hunt, left empty (a slot on no wishlist), or
+ * a block. Null until she decides; nothing is decided for her.
+ */
+type StageChoice = "filled" | "hunt" | "empty" | "block";
+
 interface StageEntry {
   info: BackLineStageInfo;
-  decision: SlotState;
+  choice: StageChoice | null;
   /** FILLED: the copy she owns, picked from her haul (UIL-098). */
   filledCard: WaitingCard | null;
   blockMaterial: "basicEnergy" | "repurposedDuplicate";
@@ -377,7 +385,7 @@ interface StageEntry {
 function defaultEntry(info: BackLineStageInfo): StageEntry {
   return {
     info,
-    decision: info.sameColorPrintingExists ? "placeholder" : "block",
+    choice: null,
     filledCard: null,
     blockMaterial: "basicEnergy",
     blockCard: null,
@@ -385,10 +393,12 @@ function defaultEntry(info: BackLineStageInfo): StageEntry {
   };
 }
 
+/** The status the server will derive (`deriveLineStatus`), previewed: a hunt or an empty stage is a placeholder. */
 function deriveStatus(entries: StageEntry[], terminated: boolean): LineStatus {
   if (terminated) return "terminated";
-  if (entries.some((e) => e.decision === "placeholder" && e.info.specialtyOnly)) return "capped";
-  if (entries.length > 0 && entries.every((e) => e.decision === "filled")) return "complete";
+  const placeholder = (e: StageEntry) => e.choice === "hunt" || e.choice === "empty";
+  if (entries.some((e) => placeholder(e) && e.info.specialtyOnly)) return "capped";
+  if (entries.length > 0 && entries.every((e) => e.choice === "filled")) return "complete";
   return "open";
 }
 
@@ -403,6 +413,8 @@ function BackHalfPanel({
 }) {
   const [bandKey, setBandKey] = useState<string>(ctx.bands[0]?.key ?? "red");
   const [resolved, setResolved] = useState<ResolvedBackLine | null>(null);
+  /** The card she picked the species by: the server resolves the same chain from it to check her line. */
+  const [seedId, setSeedId] = useState<string | null>(null);
   const [entries, setEntries] = useState<StageEntry[]>([]);
   const [terminated, setTerminated] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -423,16 +435,11 @@ function BackHalfPanel({
         return;
       }
       setResolved(r);
+      setSeedId(card.tcgdexId);
       setTerminated(false);
-      setEntries(
-        r.stages.map((info) => {
-          const e = defaultEntry(info);
-          // The stage she picked the species by is one she owns — but the species picker searches the
-          // catalog, so the COPY still comes from her haul, picked in the stage's own row (UIL-098).
-          if (info.stageIndex === r.seedStageIndex) e.decision = "filled";
-          return e;
-        }),
-      );
+      // Every stage opens undecided, the one she picked the species by too (UIL-117 PR 5): the species picker
+      // searches the catalog, so it says nothing about which card she owns (UIL-098).
+      setEntries(r.stages.map(defaultEntry));
     } finally {
       setResolving(false);
     }
@@ -444,26 +451,35 @@ function BackHalfPanel({
 
   function reset() {
     setResolved(null);
+    setSeedId(null);
     setEntries([]);
     setTerminated(false);
   }
 
+  /** A terminated line hunts nothing (the Senior BA's Q1), so a hunt goes back to undecided for her to redo. */
+  function markTerminated(on: boolean) {
+    setTerminated(on);
+    if (on) setEntries((es) => es.map((e) => (e.choice === "hunt" ? { ...e, choice: null } : e)));
+  }
+
   const status = deriveStatus(entries, terminated);
-  const hunts = entries.filter((e) => e.decision === "placeholder").length;
-  const blocks = entries.filter((e) => e.decision === "block").length;
+  const hunts = entries.filter((e) => e.choice === "hunt").length;
+  const empties = entries.filter((e) => e.choice === "empty").length;
+  const blocks = entries.filter((e) => e.choice === "block").length;
+  const undecided = entries.filter((e) => e.choice === null).length;
 
   async function save() {
-    if (!resolved) return;
+    if (!resolved || !seedId || undecided > 0) return;
     // Validate required selections.
     for (const e of entries) {
-      if (e.decision === "filled" && !e.filledCard) {
+      if (e.choice === "filled" && !e.filledCard) {
         onResult({
           kind: "err",
-          text: `Pick the ${e.info.stage} card you own, or mark it a hunt/block.`,
+          text: `Pick the ${e.info.stage} card you own, or choose another option for it.`,
         });
         return;
       }
-      if (e.decision === "block" && e.blockMaterial === "repurposedDuplicate" && !e.blockCard) {
+      if (e.choice === "block" && e.blockMaterial === "repurposedDuplicate" && !e.blockCard) {
         onResult({
           kind: "err",
           text: `Pick which duplicate was repurposed for the ${e.info.stage} block.`,
@@ -476,7 +492,7 @@ function BackHalfPanel({
     try {
       const stages: BackLineStageInput[] = entries.map((e) => {
         const base = { stageIndex: e.info.stageIndex, stage: e.info.stage, dexId: e.info.dexId };
-        if (e.decision === "filled") {
+        if (e.choice === "filled") {
           return {
             ...base,
             decision: "filled" as const,
@@ -484,10 +500,12 @@ function BackHalfPanel({
             filledDexVariantRaw: e.filledCard!.dexVariantRaw,
           };
         }
-        if (e.decision === "placeholder") {
+        if (e.choice === "hunt" || e.choice === "empty") {
           return {
             ...base,
             decision: "placeholder" as const,
+            // Her answer, said out loud: only a hunt goes on her wishlist (UIL-119).
+            hunt: e.choice === "hunt",
             targetCatalogCardId: e.info.suggestedTargetId,
             alternateCatalogCardIds: e.info.alternateTargetIds,
             specialtyOnly: e.info.specialtyOnly,
@@ -508,6 +526,7 @@ function BackHalfPanel({
           commitLineAction({
             binderId,
             bandKey: resolved.bandKey,
+            seedTcgdexId: seedId,
             rootDexId: resolved.rootDexId,
             requiredType: resolved.requiredType,
             terminated,
@@ -518,7 +537,7 @@ function BackHalfPanel({
       if (res.ok) {
         onResult({
           kind: "ok",
-          text: `Saved the ${bandMeta(resolved.bandKey).display} ${resolved.speciesName} line (${res.counts.slots} slots, ${res.counts.wishlist} hunts, ${res.counts.blocks} blocks).`,
+          text: `Saved the ${bandMeta(resolved.bandKey).display} ${resolved.speciesName} line (${res.counts.slots} slots, ${res.counts.wishlist} on your wishlist, ${empties} left empty, ${res.counts.blocks} blocks).`,
         });
         reset();
       } else onResult({ kind: "err", text: res.error });
@@ -562,7 +581,7 @@ function BackHalfPanel({
           <p style={{ marginTop: 14, fontSize: 11, color: "var(--ink-2)", lineHeight: 1.8 }}>
             {resolving
               ? "Resolving the chain…"
-              : "Choose the line colour, then pick any card of the species. The stages come from the catalog; you mark each one as owned, a wishlist hunt, or a block."}
+              : "Choose the line colour, then pick any card of the species. The stages come from the catalog; you decide each one: owned, a wishlist hunt, left empty, or a block."}
           </p>
         </>
       ) : (
@@ -574,6 +593,7 @@ function BackHalfPanel({
             <span>
               {String(status).toUpperCase()}
               {hunts ? ` · ${hunts} HUNT${hunts > 1 ? "S" : ""}` : ""}
+              {empties ? ` · ${empties} EMPTY` : ""}
               {blocks ? ` · ${blocks} BLOCK${blocks > 1 ? "S" : ""}` : ""}
             </span>
           </div>
@@ -584,7 +604,7 @@ function BackHalfPanel({
               entry={e}
               otherPicks={entries.filter((o) => o !== e).flatMap(stagePicks)}
               terminated={terminated}
-              onDecision={(d) => patch(e.info.stageIndex, { decision: d })}
+              onDecision={(d) => patch(e.info.stageIndex, { choice: d })}
               onFilled={(card) => patch(e.info.stageIndex, { filledCard: card })}
               onBlockMaterial={(m) => patch(e.info.stageIndex, { blockMaterial: m })}
               onBlockCard={(card) => patch(e.info.stageIndex, { blockCard: card })}
@@ -598,22 +618,29 @@ function BackHalfPanel({
               <input
                 type="checkbox"
                 checked={terminated}
-                onChange={(ev) => setTerminated(ev.target.checked)}
+                onChange={(ev) => markTerminated(ev.target.checked)}
               />
-              Line terminated (no same-colour evolution) — offers no fillable slot
+              Line terminated (no same-colour evolution) — nothing in it is hunted
             </label>
           </div>
 
           <div className="lf" style={{ gridTemplateColumns: "1fr auto auto", gap: 8 }}>
             <span className="st">
-              {terminated
-                ? "Terminated — the strip is read-only."
-                : "Mark each stage, then save the line."}
+              {undecided > 0
+                ? `Decide every stage (${undecided} left), then save the line.`
+                : terminated
+                  ? "Terminated — no stage is hunted."
+                  : "Every stage decided. Save the line."}
             </span>
             <button type="button" className="btn" onClick={reset} disabled={saving}>
               Discard
             </button>
-            <button type="button" className="btn btn-primary" onClick={save} disabled={saving}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={save}
+              disabled={saving || undecided > 0}
+            >
               {saving ? "Saving…" : "Save line"}
             </button>
           </div>
@@ -625,8 +652,8 @@ function BackHalfPanel({
 
 /** The waiting copies a stage takes as entered: its FILLED card, or its repurposed duplicate. */
 function stagePicks(e: StageEntry): WaitingCard[] {
-  if (e.decision === "filled" && e.filledCard) return [e.filledCard];
-  if (e.decision === "block" && e.blockMaterial === "repurposedDuplicate" && e.blockCard) {
+  if (e.choice === "filled" && e.filledCard) return [e.filledCard];
+  if (e.choice === "block" && e.blockMaterial === "repurposedDuplicate" && e.blockCard) {
     return [e.blockCard];
   }
   return [];
@@ -646,29 +673,40 @@ function StageRow({
   /** What the line's OTHER stages have picked, so this stage's picker counts what is really left. */
   otherPicks: WaitingCard[];
   terminated: boolean;
-  onDecision: (d: SlotState) => void;
+  onDecision: (d: StageChoice) => void;
   onFilled: (card: WaitingCard) => void;
   onBlockMaterial: (m: "basicEnergy" | "repurposedDuplicate") => void;
   onBlockCard: (card: WaitingCard) => void;
   onPocketCount: (n: number) => void;
 }) {
-  const { info, decision } = entry;
+  const { info, choice } = entry;
   const search = useWaitingSearch(otherPicks);
-  const faceClass = decision === "placeholder" ? "f ph" : decision === "block" ? "f blk" : "f";
+  const faceClass =
+    choice === "hunt"
+      ? "f ph"
+      : choice === "empty"
+        ? "f em"
+        : choice === "block"
+          ? "f blk"
+          : choice === null
+            ? "f und"
+            : "f";
+  // A terminated line hunts nothing (the Senior BA's Q1); a stage with no same-colour printing has nothing to hunt.
+  const huntOff = terminated || !info.sameColorPrintingExists;
 
   return (
     <div className="lf">
       <span className="st">{info.stage.toUpperCase()}</span>
       <span className={faceClass}>
-        {decision === "filled" && entry.filledCard ? (
+        {choice === "filled" && entry.filledCard ? (
           entry.filledCard.name
-        ) : decision === "placeholder" ? (
+        ) : choice === "hunt" || choice === "empty" ? (
           <>
-            HUNT · {info.name}
+            {choice === "hunt" ? "HUNT" : "EMPTY"} · {info.name}
             {info.specialtyOnly ? <br /> : null}
             {info.specialtyOnly ? "SPECIALTY · CAPS LINE" : ""}
           </>
-        ) : decision === "block" ? (
+        ) : choice === "block" ? (
           <>
             BLOCK · {info.name}
             {entry.blockMaterial === "repurposedDuplicate" && entry.blockCard ? (
@@ -684,8 +722,14 @@ function StageRow({
       </span>
 
       <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+        {choice === null && (
+          <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
+            Not decided yet: Filled, Hunt, Leave empty or Block.
+          </span>
+        )}
+
         {/* FILLED: which printing do you own */}
-        {!terminated && decision === "filled" && (
+        {choice === "filled" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {entry.filledCard ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -721,7 +765,7 @@ function StageRow({
         )}
 
         {/* BLOCK: material + (repurposed) which card + pocket count */}
-        {!terminated && decision === "block" && (
+        {choice === "block" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <div className="variants" role="group" aria-label="Block material">
               <button
@@ -769,45 +813,66 @@ function StageRow({
           </div>
         )}
 
-        {/* PLACEHOLDER: nothing to enter — the wishlist target + alternates come from the catalog */}
-        {!terminated && decision === "placeholder" && (
+        {/* HUNT: nothing to enter — the wishlist target + alternates come from the catalog */}
+        {choice === "hunt" && (
           <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
             {info.suggestedTargetId
-              ? `Wishlist target set · ${info.alternateTargetIds.length} alternate(s)`
+              ? `Goes on your wishlist · ${info.alternateTargetIds.length} alternate(s)`
               : "No same-colour printing found for the wishlist target."}
+          </span>
+        )}
+
+        {/* LEAVE EMPTY: the slot is kept, and nothing goes on her wishlist (UIL-119) */}
+        {choice === "empty" && (
+          <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
+            An empty slot · not on your wishlist
           </span>
         )}
       </div>
 
-      {terminated ? (
-        <span className="st">—</span>
-      ) : (
-        <span className="seg3" role="group" aria-label={`${info.stage} decision`}>
-          <button
-            type="button"
-            className={decision === "filled" ? "on" : ""}
-            onClick={() => onDecision("filled")}
-          >
-            Filled
-          </button>
-          <button
-            type="button"
-            className={decision === "placeholder" ? "on ph" : ""}
-            disabled={!info.sameColorPrintingExists}
-            title={info.sameColorPrintingExists ? undefined : "No same-colour printing to hunt"}
-            onClick={() => onDecision("placeholder")}
-          >
-            Hunt
-          </button>
-          <button
-            type="button"
-            className={decision === "block" ? "on blk" : ""}
-            onClick={() => onDecision("block")}
-          >
-            Block
-          </button>
-        </span>
-      )}
+      <span className="seg3" role="group" aria-label={`${info.stage} decision`}>
+        <button
+          type="button"
+          className={choice === "filled" ? "on" : ""}
+          aria-pressed={choice === "filled"}
+          onClick={() => onDecision("filled")}
+        >
+          Filled
+        </button>
+        <button
+          type="button"
+          className={choice === "hunt" ? "on ph" : ""}
+          aria-pressed={choice === "hunt"}
+          disabled={huntOff}
+          title={
+            terminated
+              ? "A terminated line hunts nothing"
+              : info.sameColorPrintingExists
+                ? "Goes on your wishlist"
+                : "No same-colour printing to hunt"
+          }
+          onClick={() => onDecision("hunt")}
+        >
+          Hunt
+        </button>
+        <button
+          type="button"
+          className={choice === "empty" ? "on em" : ""}
+          aria-pressed={choice === "empty"}
+          title="An empty slot, not on your wishlist"
+          onClick={() => onDecision("empty")}
+        >
+          Leave empty
+        </button>
+        <button
+          type="button"
+          className={choice === "block" ? "on blk" : ""}
+          aria-pressed={choice === "block"}
+          onClick={() => onDecision("block")}
+        >
+          Block
+        </button>
+      </span>
     </div>
   );
 }
