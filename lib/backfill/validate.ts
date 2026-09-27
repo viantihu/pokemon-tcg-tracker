@@ -1,6 +1,6 @@
 /**
  * The server's check of a Backfill line before anything is written (UIL-117 PR 5; the Tech Lead's outline, the
- * Senior BA's rulings).
+ * Senior BA's rulings; UIL-121's choices in C).
  *
  * A line arrives from the browser as her decisions, stage by stage. None of it is trusted: the chain is resolved
  * again here from the card she picked the species by, against the same mirror, and every stage is checked against
@@ -10,22 +10,25 @@
  *     allowed, since she may be transcribing a shelved binder (the Senior BA's Q2);
  *   - the band must be one that is set up;
  *   - the root and the stages must be the resolved chain's, exactly, in order;
- *   - every stage needs HER decision. A placeholder must say `hunt`: true is a wishlist hunt, false is "Leave
- *     empty". A stage goes on her wishlist only when she adds it (UIL-119, Karvi's ruling);
- *   - a hunt needs a same-colour printing to hunt, and a TERMINATED line hunts nothing (the Senior BA's Q1: a
- *     terminated line offers no slot to fill);
- *   - a filled stage's card, and a placeholder's wishlist target and alternates, must be that stage's species;
- *   - a block needs its material, its card when it is a repurposed duplicate, and at least one pocket.
+ *   - every stage needs HER choice: the card she has (waiting in her haul), or one of the shared choices (chase,
+ *     leave empty, a filler). The shared ones are checked by the shared rule (lib/line/stage-choice.ts) when the
+ *     line is planned, still before any write;
+ *   - a card she has must be that stage's species;
+ *   - a line whose cards are in more than one language needs her explicit OK, and reads as its lowest card's
+ *     language (UIL-090; the Senior BA's ruling).
  *
  * Whether a card is WAITING in her haul is checked next, by the executor (./waiting), as before. What the server
- * derives it does not take from the browser: `specialtyOnly` (and so a capped status) comes from the resolved
- * chain, and the wishlist's `requiredType` from the band.
+ * derives it does not take from the browser: the line's language, and the wishlist's `requiredType` from the band.
  *
  * Pure, over a loaded context.
  */
 
+import { localeOfId } from "@/lib/catalog/locale";
+import { STAGE_REFUSAL } from "@/lib/line/stage-choice";
+import type { Locale } from "@/lib/sync/types";
 import { NOT_A_LINE } from "@/lib/line/popup";
 import { resolveBackLineFromContext, type BackfillContext } from "./context";
+import { mixedLanguageNote } from "./language";
 import type { BackLineCommit, BackLineStageInfo, BackLineStageInput } from "./types";
 
 /** A Backfill line the server will not write. Its message is hers to read, and names the stage. */
@@ -47,11 +50,28 @@ export function stageLabel(stage: string): string {
   return stage.replace(/^Stage(\d)$/, "Stage $1");
 }
 
+/** A line as the server will write it: her input, plus what the server derived. */
+export interface ValidatedBackLine extends BackLineCommit {
+  /** The line colour's representative type: the wishlist's `required_type`, and a new placeholder card's type. */
+  requiredType: string | null;
+  /** The line's language: its lowest card's (UIL-090), else the card she picked the species by. */
+  lineLocale: Locale;
+  /** The resolved chain's stages, in order, for the shared rule's targets. */
+  chain: readonly BackLineStageInfo[];
+}
+
+/** The locale of each card she has, lowest stage first. */
+function haveLocales(stages: readonly BackLineStageInput[]): Locale[] {
+  return [...stages]
+    .sort((a, b) => a.stageIndex - b.stageIndex)
+    .flatMap((s) => (s.choice?.kind === "have" ? [localeOfId(s.choice.tcgdexId)] : []));
+}
+
 /**
- * The line as the server will write it, or a refusal. Returns her input with what the server derives put back:
- * the resolved root, `requiredType` from the band, and each placeholder's `specialtyOnly` from the chain.
+ * The line as the server will write it, or a refusal. The shared stage choices are checked again by the shared rule
+ * when the line is planned (lib/backfill/plan.ts), which needs the waiting copies a filler takes.
  */
-export function validateBackLine(ctx: BackfillContext, input: BackLineCommit): BackLineCommit {
+export function validateBackLine(ctx: BackfillContext, input: BackLineCommit): ValidatedBackLine {
   const binder = ctx.binders.find((b) => b.id === input.binderId);
   if (!binder) refuse(`That binder no longer exists — ${RELOAD}`);
   if (binder.type !== "general") {
@@ -82,75 +102,43 @@ export function validateBackLine(ctx: BackfillContext, input: BackLineCommit): B
     refuse(`That line's stages are not the ${resolved.speciesName} line's — ${RELOAD}`);
   }
 
-  const terminated = input.terminated === true;
-  const bandName = ctx.bandDisplayByKey.get(input.bandKey) ?? input.bandKey;
+  got.forEach((s, i) => checkStage(ctx, s, want[i]));
+
+  const locales = haveLocales(got);
+  const lineLocale = locales[0] ?? localeOfId(input.seedTcgdexId);
+  const mixed = mixedLanguageNote(locales, lineLocale);
+  if (mixed && input.mixedLanguageOk !== true) refuse(`${mixed} Confirm that to save it.`);
+
   return {
     ...input,
     rootDexId: resolved.rootDexId,
     requiredType: resolved.requiredType,
-    terminated,
-    stages: got.map((s, i) => checkStage(ctx, s, want[i], terminated, bandName)),
+    lineLocale,
+    chain: want,
   };
 }
 
-function checkStage(
-  ctx: BackfillContext,
-  s: BackLineStageInput,
-  info: BackLineStageInfo,
-  terminated: boolean,
-  bandName: string,
-): BackLineStageInput {
-  const where = `the ${stageLabel(info.stage)} stage (${info.name})`;
-  const nameOf = (id: string) => ctx.catalogById.get(id)?.name ?? "That card";
-  const isThisSpecies = (id: string) => (ctx.catalogById.get(id)?.dexId ?? []).includes(info.dexId);
-
-  switch (s.decision) {
-    case "filled": {
-      const id = s.filledTcgdexId;
-      if (!id || typeof s.filledDexVariantRaw !== "string") {
-        refuse(`Pick the card you own for ${where}, or choose another option for it.`);
+function checkStage(ctx: BackfillContext, s: BackLineStageInput, info: BackLineStageInfo): void {
+  const choice = s.choice;
+  switch (choice?.kind) {
+    case "have": {
+      const where = `the ${stageLabel(info.stage)} stage (${info.name})`;
+      if (!choice.tcgdexId || typeof choice.dexVariantRaw !== "string") {
+        refuse(`Pick the card you have for ${where}, or choose another option for it.`);
       }
-      if (!isThisSpecies(id)) {
-        refuse(`${nameOf(id)} is not a ${info.name}. Pick the ${info.name} you own for ${where}.`);
-      }
-      return s;
-    }
-    case "placeholder": {
-      if (typeof s.hunt !== "boolean") {
-        refuse(`Choose Wishlist hunt or Leave empty for ${where}.`);
-      }
-      if (s.hunt && terminated) {
-        refuse(`A terminated line has no stage to hunt. Choose Leave empty or Block for ${where}.`);
-      }
-      if (s.hunt && !info.sameColorPrintingExists) {
+      const card = ctx.catalogById.get(choice.tcgdexId);
+      if (!(card?.dexId ?? []).includes(info.dexId)) {
         refuse(
-          `There is no ${bandName} ${info.name} to hunt for ${where}. Choose Leave empty or Block.`,
+          `${card?.name ?? "That card"} is not a ${info.name}. Pick the ${info.name} you have for ${where}.`,
         );
       }
-      for (const id of [s.targetCatalogCardId, ...(s.alternateCatalogCardIds ?? [])]) {
-        if (id && !isThisSpecies(id)) {
-          refuse(`The wishlist card for ${where} is not a ${info.name} — ${RELOAD}`);
-        }
-      }
-      return { ...s, specialtyOnly: info.specialtyOnly };
+      return;
     }
-    case "block": {
-      if (s.blockMaterial !== "basicEnergy" && s.blockMaterial !== "repurposedDuplicate") {
-        refuse(`Choose what fills the block for ${where}: basic energy or a repurposed duplicate.`);
-      }
-      if (
-        s.blockMaterial === "repurposedDuplicate" &&
-        (!s.blockCopyTcgdexId || typeof s.blockCopyDexVariantRaw !== "string")
-      ) {
-        refuse(`Pick which duplicate was repurposed for ${where}.`);
-      }
-      const pockets = s.pocketCount;
-      if (typeof pockets !== "number" || !Number.isInteger(pockets) || pockets < 1) {
-        refuse(`The block for ${where} needs at least one pocket.`);
-      }
-      return s;
-    }
+    case "chase":
+    case "empty":
+    case "filler":
+      return; // the shared rule, when the line is planned
     default:
-      refuse(`Decide ${where} before saving: Filled, Wishlist hunt, Leave empty or Block.`);
+      refuse(STAGE_REFUSAL.missing(info.stage));
   }
 }

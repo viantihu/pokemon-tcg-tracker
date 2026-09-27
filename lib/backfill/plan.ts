@@ -17,12 +17,22 @@
  */
 
 import type { CatalogCard, TypeColorMap } from "@/lib/engine";
-import type { Insert } from "@/lib/repo";
-import { bandKeyForTypes, deriveLineStatus } from "./resolve";
+import { lineStatusOf, type StageDecision, type ThirdPocketChoice } from "@/lib/line/popup";
+import {
+  stageWriteOps,
+  thirdPocketWriteOps,
+  validateStageDecision,
+  validateThirdPocket,
+  type StageState,
+} from "@/lib/line/stage-choice";
+import type { Insert, WriteOp } from "@/lib/repo";
+import { bandKeyForTypes } from "./resolve";
+import type { ValidatedBackLine } from "./validate";
 import {
   emptyWrites,
+  type BackfillStageChoice,
+  type BackfillThirdPocket,
   type BackfillWrites,
-  type BackLineCommit,
   type FrontHalfCommit,
   type SpecialtyCommit,
 } from "./types";
@@ -41,10 +51,9 @@ export interface PlanDeps {
   takeCopy: (tcgdexId: string, dexVariantRaw: string) => string;
   /** Injected clock (ISO string). */
   now: string;
+  /** Fresh state for the shared stage-choice rule (UIL-121): the catalog, her waiting copies, her stand-ins. */
+  stageState: StageState;
 }
-
-/** The note on a placeholder slot she chose to leave empty: a slot, on no wishlist. */
-export const LEFT_EMPTY_NOTE = "left empty (not on the wishlist)";
 
 const cardName = (id: string | null | undefined, deps: PlanDeps) =>
   (id && deps.catalogById.get(id)?.name) || id || "card";
@@ -99,44 +108,40 @@ export function planFrontHalf(input: FrontHalfCommit, deps: PlanDeps): BackfillW
 }
 
 /**
- * Back half, entered line by line (system-design §7A). Builds the EvolutionLine, one LineSlot per
- * stage (filled / placeholder / block), a waiting copy placed for each filled stage, a WishlistItem for
- * each placeholder she marked a HUNT (sticky note → shopping list), and a BinderBlock for each block —
- * recording WHICH duplicate copy was repurposed when that is the material.
+ * Back half, entered line by line (system-design §7A; UIL-117 C; UIL-121). Builds the EvolutionLine and one
+ * LineSlot per stage:
  *
- * A placeholder she chose to "Leave empty" is a slot with NO wishlist row: a stage goes on her wishlist only
- * when she adds it (UIL-119, Karvi's ruling). Only `hunt: true` wishes, so a placeholder that does not say
- * fails safe; `validateBackLine` refuses one before it gets here.
+ *   - a card she HAS: a waiting copy placed there, the slot filled, both pointers, and its decision;
+ *   - every other stage: the slot, then her choice through the SHARED rule (lib/line/stage-choice.ts), which checks it
+ *     and says what to write: a chase (the slot's target and her wishlist add, or a placeholder card she made), left
+ *     empty (nothing on her wishlist), or a filler (a basic energy, or a spare card from her haul, which becomes a
+ *     block there). A stage goes on her wishlist only when she chases it (UIL-119);
+ *   - a complete line shorter than three pockets: her third-pocket choice, through the same rule.
+ *
+ * The line's status is her choices' (`lineStatusOf`): CLOSED when every stage is filled, empty or a filler, OPEN while
+ * one is chased. A refusal from the shared rule is thrown here, before anything is written.
  */
-export function planBackLine(input: BackLineCommit, deps: PlanDeps): BackfillWrites {
+export function planBackLine(line: ValidatedBackLine, deps: PlanDeps): BackfillWrites {
   const w = emptyWrites();
   const lineId = deps.newId();
-  const bd = bandDisplay(input.bandKey, deps);
-  const bn = binderName(input.binderId, deps);
-  const status = deriveLineStatus(input.stages, input.terminated);
+  const bd = bandDisplay(line.bandKey, deps);
+  const bn = binderName(line.binderId, deps);
+  const st = deps.stageState;
+  const fillerFrom = ["haul"] as const;
+  const finals: { state: string; stageChoice?: string | null }[] = [];
+  const choiceOps: WriteOp[] = [];
 
-  w.lines.push({
-    id: lineId,
-    owner_id: deps.ownerId,
-    root_dex_id: input.rootDexId,
-    color_band: input.bandKey,
-    binder_id: input.binderId,
-    half: "back",
-    status,
-    created_at: deps.now,
-  });
-
-  for (const s of input.stages) {
+  line.stages.forEach((s, i) => {
     const slotId = deps.newId();
-
-    if (s.decision === "filled") {
-      const copyId = deps.takeCopy(s.filledTcgdexId!, s.filledDexVariantRaw!);
+    const choice = s.choice;
+    if (choice?.kind === "have") {
+      const copyId = deps.takeCopy(choice.tcgdexId, choice.dexVariantRaw);
       w.placements.push({
         copyId, // linked to its slot below, once the slot exists (circular FK)
         role: "shelved",
-        binder_id: input.binderId,
+        binder_id: line.binderId,
         binder_half: "back",
-        color_band: input.bandKey,
+        color_band: line.bandKey,
       });
       w.slots.push({
         id: slotId,
@@ -146,7 +151,7 @@ export function planBackLine(input: BackLineCommit, deps: PlanDeps): BackfillWri
         stage: s.stage,
         state: "filled",
         copy_id: copyId,
-        target_catalog_card_id: s.filledTcgdexId ?? null,
+        target_catalog_card_id: choice.tcgdexId,
         note: null,
       });
       w.copyLineSlotLinks.push({ copyId, slotId });
@@ -155,88 +160,96 @@ export function planBackLine(input: BackLineCommit, deps: PlanDeps): BackfillWri
           deps,
           copyId,
           "backfill-line-filled",
-          `Backfilled ${cardName(s.filledTcgdexId, deps)} (${s.stage}) into ${bn} back half, ${bd} line.`,
+          `Backfilled ${cardName(choice.tcgdexId, deps)} (${s.stage}) into ${bn} back half, ${bd} line.`,
         ),
       );
-      continue;
+      finals.push({ state: "filled" });
+      return;
     }
 
-    if (s.decision === "placeholder") {
-      w.slots.push({
-        id: slotId,
-        owner_id: deps.ownerId,
-        line_id: lineId,
-        stage_index: s.stageIndex,
-        stage: s.stage,
-        state: "placeholder",
-        copy_id: null,
-        target_catalog_card_id: s.targetCatalogCardId ?? null,
-        // Say which, so the Lines screen can tell a stage she left empty from one she is hunting.
-        note: s.hunt === true ? null : LEFT_EMPTY_NOTE,
-      });
-      if (s.hunt !== true) continue;
-      w.wishlist.push({
-        id: deps.newId(),
-        owner_id: deps.ownerId,
-        line_slot_id: slotId,
-        required_dex_id: s.dexId,
-        required_type: input.requiredType,
-        required_stage: s.stage,
-        chosen_catalog_card_id: s.targetCatalogCardId ?? null,
-        alternate_catalog_card_ids: s.alternateCatalogCardIds ?? [],
-        held_for_binder_id: input.binderId,
-        will_live_in_specialty: s.specialtyOnly ?? false,
-        created_at: deps.now,
-      });
-      continue;
-    }
-
-    // block — a physically reserved pocket run (basic energy, or a repurposed duplicate).
-    let blockCopyId: string | null = null;
-    if (s.blockMaterial === "repurposedDuplicate" && s.blockCopyTcgdexId) {
-      blockCopyId = deps.takeCopy(s.blockCopyTcgdexId, s.blockCopyDexVariantRaw!);
-      w.placements.push({
-        copyId: blockCopyId,
-        role: "block",
-        binder_id: input.binderId,
-        binder_half: "back",
-        color_band: null,
-      });
-      w.decisions.push(
-        decision(
-          deps,
-          blockCopyId,
-          "backfill-block-repurposed",
-          `Repurposed duplicate ${cardName(s.blockCopyTcgdexId, deps)} as a binder block for the ${s.stage} slot of the ${bd} line in ${bn} back half.`,
-        ),
-      );
-    }
+    // Undecided until her choice patches it, in the same write (0030 checks only the final state).
     w.slots.push({
       id: slotId,
       owner_id: deps.ownerId,
       line_id: lineId,
       stage_index: s.stageIndex,
       stage: s.stage,
-      state: "block",
+      state: "placeholder",
       copy_id: null,
       target_catalog_card_id: null,
-      note: s.blockMaterial === "basicEnergy" ? "basic energy block" : "repurposed duplicate block",
+      note: null,
     });
-    w.blocks.push({
-      id: deps.newId(),
-      owner_id: deps.ownerId,
-      binder_id: input.binderId,
-      half: "back",
-      pocket_count: s.pocketCount ?? 1,
-      purpose: "line-terminated",
-      material: s.blockMaterial ?? "basicEnergy",
-      copy_id: blockCopyId,
-      line_id: lineId,
-      created_at: deps.now,
+    const info = line.chain[i];
+    const decided = validateStageDecision(
+      st,
+      {
+        lineId,
+        slotId,
+        stageIndex: s.stageIndex,
+        stage: s.stage,
+        dexId: s.dexId,
+        speciesName: info?.name ?? s.stage,
+        lineLocale: line.lineLocale,
+        binderId: line.binderId,
+        requiredType: line.requiredType,
+      },
+      sharedChoice(choice, deps),
+      { fillerFrom },
+    );
+    choiceOps.push(...stageWriteOps(slotId, decided));
+    finals.push({
+      state: decided.slotPatch.state ?? "placeholder",
+      stageChoice: decided.slotPatch.stage_choice,
     });
-  }
+  });
 
+  w.lines.push({
+    id: lineId,
+    owner_id: deps.ownerId,
+    root_dex_id: line.rootDexId,
+    color_band: line.bandKey,
+    binder_id: line.binderId,
+    half: "back",
+    status: lineStatusOf(finals),
+    created_at: deps.now,
+  });
+
+  // The third pocket: only a COMPLETE line shorter than three pockets has one (UIL-121 Q4).
+  const third = validateThirdPocket(
+    st,
+    {
+      lineId,
+      binderId: line.binderId,
+      slotCount: line.stages.length,
+      completeAfterWrite: finals.length > 0 && finals.every((f) => f.state === "filled"),
+    },
+    line.thirdPocket ? sharedFiller(line.thirdPocket, deps) : undefined,
+    { fillerFrom },
+  );
+  if (third) choiceOps.push(...thirdPocketWriteOps(lineId, third));
+
+  w.lineOps.push(...choiceOps);
   return w;
+}
+
+/** Her Backfill choice as the shared rule's, with a filler card resolved to the waiting copy it takes. */
+function sharedChoice(
+  choice: BackfillStageChoice | undefined,
+  deps: PlanDeps,
+): StageDecision | undefined {
+  if (!choice || choice.kind === "have") return undefined;
+  if (choice.kind === "filler") {
+    const filler = sharedFiller(choice.filler, deps);
+    return filler.material === "empty" ? undefined : { kind: "filler", filler };
+  }
+  return choice;
+}
+
+function sharedFiller<T extends BackfillThirdPocket>(f: T, deps: PlanDeps): ThirdPocketChoice {
+  if (f.material === "card") {
+    return { material: "card", copyId: deps.takeCopy(f.tcgdexId, f.dexVariantRaw) };
+  }
+  return f;
 }
 
 /**

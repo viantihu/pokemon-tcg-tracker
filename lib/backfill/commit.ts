@@ -97,6 +97,9 @@ export function buildBackfillPayload(writes: BackfillWrites): WritePayload {
     ops.push({ op: "update_copy", id: link.copyId, patch: { line_slot_id: link.slotId } });
   }
 
+  // Her stage choices and third pocket, as the shared rule wrote them, once the slots exist (UIL-121).
+  ops.push(...writes.lineOps);
+
   for (const b of writes.blocks) {
     ops.push({
       op: "insert_binder_block",
@@ -181,27 +184,27 @@ async function commitWaiting(
   const { picks, plan } = prepare(ctx);
   const short = shortagesOf(demandsOf(picks), pool);
   if (short.length > 0) throw new NotWaitingError(short, nameIn(ctx), scope);
-  return applyWrites(db, plan(planDeps(ctx, ownerId, takerFor(pool))));
+  return applyWrites(db, plan(planDeps(ctx, ownerId, takerFor(pool), pool)));
 }
 
 const nameIn = (ctx: BackfillContext) => (tcgdexId: string) =>
   ctx.catalogById.get(tcgdexId)?.name ?? tcgdexId;
 
-/** The waiting copies a line takes: each FILLED stage, and each repurposed duplicate. */
+/** The waiting copies a line takes: each card she has, each filler card, and a third-pocket card. */
 function linePicks(input: BackLineCommit): { tcgdexId: string; dexVariantRaw: string }[] {
   const picks: { tcgdexId: string; dexVariantRaw: string }[] = [];
+  const card = (f: { material: string; tcgdexId?: string; dexVariantRaw?: string } | undefined) => {
+    if (f?.material === "card" && f.tcgdexId) {
+      picks.push({ tcgdexId: f.tcgdexId, dexVariantRaw: f.dexVariantRaw ?? "" });
+    }
+  };
   for (const s of input.stages) {
-    if (s.decision === "filled" && s.filledTcgdexId) {
-      picks.push({ tcgdexId: s.filledTcgdexId, dexVariantRaw: s.filledDexVariantRaw ?? "" });
+    if (s.choice?.kind === "have") {
+      picks.push({ tcgdexId: s.choice.tcgdexId, dexVariantRaw: s.choice.dexVariantRaw });
     }
-    if (
-      s.decision === "block" &&
-      s.blockMaterial === "repurposedDuplicate" &&
-      s.blockCopyTcgdexId
-    ) {
-      picks.push({ tcgdexId: s.blockCopyTcgdexId, dexVariantRaw: s.blockCopyDexVariantRaw ?? "" });
-    }
+    if (s.choice?.kind === "filler") card(s.choice.filler);
   }
+  card(input.thirdPocket);
   return picks;
 }
 

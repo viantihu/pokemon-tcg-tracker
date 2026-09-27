@@ -174,11 +174,11 @@ describe("UIL-098 · a refused line keeps what she entered", () => {
     expect(m.lookupCatalog).toHaveBeenCalled();
     await user.click(tiles()[0]);
 
-    // …then mark the Basic Filled (every stage opens undecided, UIL-117 PR 5) and pick the one she owns from her
-    // HAUL, in the stage's own picker.
+    // …then mark the Basic "I have it" (every stage opens undecided, UIL-117 PR 5) and pick the one she has from
+    // her HAUL, in the stage's own picker.
     await user.click(
       within(await screen.findByRole("group", { name: "Basic decision" })).getByRole("button", {
-        name: "Filled",
+        name: "I have it",
       }),
     );
     const stageBox = await screen.findByLabelText("Card lookup");
@@ -186,6 +186,12 @@ describe("UIL-098 · a refused line keeps what she entered", () => {
     await waitFor(() => expect(tiles()).toHaveLength(2));
     expect(m.searchWaiting).toHaveBeenCalled();
     await user.click(tiles()[0]);
+    // A one-stage line she has complete is shorter than three pockets: she says what fills the third (UIL-121).
+    await user.click(
+      within(screen.getByRole("group", { name: "Third pocket" })).getByRole("button", {
+        name: "Leave empty",
+      }),
+    );
     await user.click(screen.getByRole("button", { name: "Save line" }));
 
     expect(await screen.findByText(REFUSAL)).toBeTruthy();
@@ -198,9 +204,7 @@ describe("UIL-098 · a refused line keeps what she entered", () => {
       expect.objectContaining({
         stages: [
           expect.objectContaining({
-            decision: "filled",
-            filledTcgdexId: "sv03-026",
-            filledDexVariantRaw: "Normal",
+            choice: { kind: "have", tcgdexId: "sv03-026", dexVariantRaw: "Normal" },
           }),
         ],
       }),

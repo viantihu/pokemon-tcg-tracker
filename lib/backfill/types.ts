@@ -10,8 +10,8 @@
  * (`resolve.ts`), the commit executors (`commit.ts`), the server actions, and the tests.
  */
 
-import type { SlotState } from "@/lib/engine";
-import type { Insert } from "@/lib/repo";
+import type { StandInDraft } from "@/lib/line/popup";
+import type { Insert, WriteOp } from "@/lib/repo";
 
 /* --------------------------------- context -------------------------------- */
 
@@ -88,34 +88,36 @@ export interface FrontHalfCommit {
 }
 
 /**
- * One stage's decision in the back-half line walk. Every stage is HER decision (UIL-117 PR 5): the screen opens each
- * one undecided and the server refuses a line with a stage she has not decided (`validateBackLine`).
+ * Her choice for one stage of a Backfill line (UIL-117 C; UIL-121, Karvi: "Functionally, there are only 2 stages:
+ * open or closed"). Every stage opens undecided and the server refuses a line with one she has not decided. The first
+ * is Backfill's own: the card she HAS, a copy waiting in her haul (UIL-098). The rest are the choices every screen
+ * shares (lib/line/stage-choice.ts), checked by the one shared rule: chase a card (a catalog card, or a placeholder
+ * card she makes), leave it empty, or record a filler in its pocket.
  */
+export type BackfillStageChoice =
+  | { kind: "have"; tcgdexId: string; dexVariantRaw: string }
+  | { kind: "chase"; catalogCardId: string }
+  | { kind: "chase"; newStandIn: StandInDraft }
+  | { kind: "empty" }
+  | { kind: "filler"; filler: BackfillFiller };
+
+/**
+ * What fills a pocket in Backfill: a basic energy, or a spare card that is still waiting in her haul (she is
+ * transcribing a binder, so the physical card has not been placed yet). The server picks WHICH copy of that printing
+ * and variant, oldest first, as it does for "have".
+ */
+export type BackfillFiller =
+  { material: "energy" } | { material: "card"; tcgdexId: string; dexVariantRaw: string };
+
+/** A complete line shorter than three pockets has a third pocket; she says what fills it (UIL-121 Q4). */
+export type BackfillThirdPocket = BackfillFiller | { material: "empty" };
+
+/** One stage of the line, and her choice for it (undefined until she decides). */
 export interface BackLineStageInput {
   stageIndex: number;
   stage: string;
   dexId: number;
-  decision: SlotState; // "filled" | "placeholder" | "block"
-  /** FILLED: the printing she owns + its Dex variant — a copy waiting in her haul (UIL-098). */
-  filledTcgdexId?: string | null;
-  filledDexVariantRaw?: string | null;
-  /**
-   * placeholder: REQUIRED. True is a wishlist hunt (the slot and a wishlist row); false is "Leave empty" (the slot,
-   * and NO wishlist row). A stage goes on her wishlist only when she adds it (UIL-119, Karvi's ruling), so a
-   * placeholder that does not say is refused, never read as a hunt.
-   */
-  hunt?: boolean;
-  /** placeholder: wishlist target + ranked alternates + specialty-only flag. */
-  targetCatalogCardId?: string | null;
-  alternateCatalogCardIds?: string[];
-  /** Derived again on the server from the resolved chain (`validateBackLine`); what the browser sends is not used. */
-  specialtyOnly?: boolean;
-  /** block: how the pocket run was filled, and — for a repurposed duplicate — WHICH card. */
-  blockMaterial?: "basicEnergy" | "repurposedDuplicate";
-  blockCopyTcgdexId?: string | null;
-  /** The repurposed duplicate's Dex variant — it too is a copy waiting in her haul (UIL-098). */
-  blockCopyDexVariantRaw?: string | null;
-  pocketCount?: number;
+  choice?: BackfillStageChoice;
 }
 
 export interface BackLineCommit {
@@ -127,11 +129,14 @@ export interface BackLineCommit {
    */
   seedTcgdexId: string;
   rootDexId: number;
-  /** Derived again on the server from the band (`validateBackLine`); what the browser sends is not used. */
-  requiredType: string | null;
-  /** When true the line is terminated: the strip is read-only and offers no fillable slot. */
-  terminated: boolean;
   stages: BackLineStageInput[];
+  /** Required when the line is complete and shorter than three pockets; refused otherwise. */
+  thirdPocket?: BackfillThirdPocket;
+  /**
+   * Her explicit OK for a line whose cards are in more than one language (the Senior BA's ruling): it reads as the
+   * language of its lowest card (UIL-090). Refused without it.
+   */
+  mixedLanguageOk?: true;
 }
 
 /** A specialty card being transcribed (a waiting copy, UIL-098), optionally tagged into collections. */
@@ -166,6 +171,11 @@ export interface BackfillWrites {
   decisions: Insert<"placement_decision">[];
   /** copy.id → line_slot.id, applied after both rows exist (circular FK). */
   copyLineSlotLinks: { copyId: string; slotId: string }[];
+  /**
+   * Her stage choices and third pocket, as the shared rule wrote them (lib/line/stage-choice.ts): each chosen slot's
+   * patch, its wish, its filler block and the filler card's placement and decision. Applied once the slots exist.
+   */
+  lineOps: WriteOp[];
   /** collection.id → catalog_card ids to union into its `target_catalog_card_ids`. */
   collectionTags: { collectionId: string; catalogCardId: string }[];
 }
@@ -199,6 +209,7 @@ export function emptyWrites(): BackfillWrites {
     wishlist: [],
     decisions: [],
     copyLineSlotLinks: [],
+    lineOps: [],
     collectionTags: [],
   };
 }
@@ -209,8 +220,9 @@ export function countWrites(w: BackfillWrites): CommitCounts {
     placed: w.placements.length,
     lines: w.lines.length,
     slots: w.slots.length,
-    blocks: w.blocks.length,
-    wishlist: w.wishlist.length,
+    blocks: w.blocks.length + w.lineOps.filter((o) => o.op === "insert_binder_block").length,
+    wishlist:
+      w.wishlist.length + w.lineOps.filter((o) => o.op === "upsert_wishlist_for_slot").length,
     decisions: w.decisions.length,
   };
 }

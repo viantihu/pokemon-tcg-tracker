@@ -28,6 +28,7 @@ import {
   type PlanDeps,
 } from "@/lib/backfill";
 import type { WriteOp, WritePayload } from "@/lib/repo";
+import { testStageState, validatedLine } from "../support/backfill-line";
 import {
   ARVEN_SV03_186,
   CHARIZARD_BASE1_4,
@@ -129,7 +130,9 @@ const TYPE_COLOR_MAP: TypeColorMap = {
 };
 
 function deps(): PlanDeps {
+  const newId = () => crypto.randomUUID(); // real uuids — every id column is uuid
   return {
+    stageState: testStageState(FIXTURES, newId),
     ownerId: OWNER,
     catalogById: new Map(FIXTURES.map((c) => [c.tcgdexId, c])),
     typeColorMap: TYPE_COLOR_MAP,
@@ -142,7 +145,7 @@ function deps(): PlanDeps {
       ["white", "White"],
     ]),
     collectionNameById: new Map([[COLL, "Charizard through the years"]]),
-    newId: () => crypto.randomUUID(), // real uuids — every id column is uuid
+    newId,
     takeCopy: haulTaker(),
     now: "2026-09-08T00:00:00.000Z",
   };
@@ -312,47 +315,49 @@ describe("backfill front-half commit atomicity (fresh Postgres via PGlite)", () 
 /* ------------------------------ back-half line ----------------------------- */
 
 describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () => {
-  /** A Charmander line: FILLED root, placeholder Stage1, 2-pocket repurposed-duplicate block Stage2. */
+  /** A Charmander line: the Basic she has, a chased Stage 1, and a spare card from her haul as the Stage 2 filler. */
   const writes = (): BackfillWrites =>
     planBackLine(
-      {
-        binderId: B1,
-        bandKey: "red",
-        seedTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-        rootDexId: 4,
-        requiredType: "Fire",
-        terminated: false,
-        stages: [
-          {
-            stageIndex: 0,
-            stage: "Basic",
-            dexId: 4,
-            decision: "filled",
-            filledTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-            filledDexVariantRaw: "Normal",
-          },
-          {
-            stageIndex: 1,
-            stage: "Stage1",
-            dexId: 5,
-            decision: "placeholder",
-            hunt: true,
-            targetCatalogCardId: CHARMELEON_SV03_027.tcgdexId,
-            alternateCatalogCardIds: [CHARIZARD_BASE1_4.tcgdexId],
-            specialtyOnly: false,
-          },
-          {
-            stageIndex: 2,
-            stage: "Stage2",
-            dexId: 6,
-            decision: "block",
-            blockMaterial: "repurposedDuplicate",
-            blockCopyTcgdexId: SCIZOR_SV03_141.tcgdexId,
-            blockCopyDexVariantRaw: "Holo",
-            pocketCount: 2,
-          },
-        ],
-      },
+      validatedLine(
+        {
+          binderId: B1,
+          bandKey: "red",
+          seedTcgdexId: CHARMANDER_SV03_026.tcgdexId,
+          rootDexId: 4,
+          stages: [
+            {
+              stageIndex: 0,
+              stage: "Basic",
+              dexId: 4,
+              choice: {
+                kind: "have",
+                tcgdexId: CHARMANDER_SV03_026.tcgdexId,
+                dexVariantRaw: "Normal",
+              },
+            },
+            {
+              stageIndex: 1,
+              stage: "Stage1",
+              dexId: 5,
+              choice: { kind: "chase", catalogCardId: CHARMELEON_SV03_027.tcgdexId },
+            },
+            {
+              stageIndex: 2,
+              stage: "Stage2",
+              dexId: 6,
+              choice: {
+                kind: "filler",
+                filler: {
+                  material: "card",
+                  tcgdexId: SCIZOR_SV03_141.tcgdexId,
+                  dexVariantRaw: "Holo",
+                },
+              },
+            },
+          ],
+        },
+        ["Charmander", "Charmeleon", "Charizard"],
+      ),
       deps(),
     );
 
@@ -370,6 +375,7 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
     expect(await waiting()).toBe(HAUL.length - 2); // the FILLED copy + the sacrificed duplicate placed
     expect(await count(db, "wishlist_item")).toBe(1);
     expect(await count(db, "binder_block")).toBe(1);
+    // The card she has (Backfill's decision) and the filler card (the shared rule's "line-filler").
     expect(await count(db, "placement_decision")).toBe(2);
 
     // The deferred circular link resolved: the copy points at its slot and the slot points back.
@@ -380,7 +386,7 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
     );
     expect(wired[0].n).toBe(1);
 
-    // The placeholder slot carries the wishlist target + ranked alternates.
+    // The chased slot carries her wishlist add for exactly that card.
     const wl = await q<{
       required_dex_id: number;
       required_type: string;
@@ -396,7 +402,7 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
       required_dex_id: 5,
       required_type: "Fire",
       chosen: CHARMELEON_SV03_027.tcgdexId,
-      alts: [CHARIZARD_BASE1_4.tcgdexId],
+      alts: [],
       state: "placeholder",
     });
 
@@ -419,8 +425,8 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
     );
     expect(block[0]).toEqual({
       half: "back",
-      pocket_count: 2,
-      purpose: "line-terminated",
+      pocket_count: 1,
+      purpose: "line-filler",
       material: "repurposedDuplicate",
       copy_role: "block",
       line_band: "red",

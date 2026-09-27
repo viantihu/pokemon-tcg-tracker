@@ -15,11 +15,10 @@ import {
   type Band,
   type CatalogCard,
   type IncomingCard,
-  type LineStatus,
   type PriceOf,
   type TypeColorMap,
 } from "@/lib/engine";
-import type { BackLineStageInfo, BackLineStageInput, ResolvedBackLine } from "./types";
+import type { BackLineStageInfo, ResolvedBackLine } from "./types";
 
 /**
  * The colour band for a card, from its energy type, in DB-key space (`red`, `dark_blue`). White is
@@ -78,29 +77,4 @@ export function resolveBackLine(
     seedStageIndex: chain.findIndex((n) => n.dexId === picked.dexId[0]),
     stages,
   };
-}
-
-/**
- * Derive a line's lifecycle status from its entered stages (system-design §4, §6).
- *   • terminated when the collector marks it so (a stage with no same-colour next stage dies) —
- *   • capped when a placeholder can only be filled by a specialty-class printing,
- *   • complete when every stage is filled,
- *   • open otherwise.
- * Terminated wins: a terminated line is dead regardless of the other stages.
- */
-export function deriveLineStatus(stages: BackLineStageInput[], terminated: boolean): LineStatus {
-  if (terminated) return "terminated";
-  if (stages.some((s) => s.decision === "placeholder" && s.specialtyOnly === true)) return "capped";
-  if (stages.length > 0 && stages.every((s) => s.decision === "filled")) return "complete";
-  return "open";
-}
-
-/**
- * The stages that still offer a back-half slot to fill. A TERMINATED line offers NONE — this is the
- * M5 acceptance invariant ("a terminated line never offers a back-half slot"). The UI renders fill
- * controls only for the stages this returns.
- */
-export function fillableStages<T>(stages: readonly T[], status: LineStatus): T[] {
-  if (status === "terminated") return [];
-  return [...stages];
 }

@@ -27,6 +27,7 @@ import {
   CHARMELEON_SV03_027,
   SCIZOR_SV03_141,
 } from "../engine/fixtures";
+import { testStageState, validatedLine } from "../support/backfill-line";
 
 // Every migration on disk, not a list frozen at 0004 — the view under test must hold on the schema that
 // actually ships (see tests/support/pglite-rpc.ts for the longer why).
@@ -73,7 +74,9 @@ const FIXTURES = [
 const TAKEN: { id: string; tcgdexId: string; dexVariantRaw: string }[] = [];
 
 function makeDeps(): PlanDeps {
+  const newId = () => crypto.randomUUID();
   return {
+    stageState: testStageState(FIXTURES, newId),
     ownerId: OWNER,
     catalogById: new Map(FIXTURES.map((c) => [c.tcgdexId, c])),
     typeColorMap: MAP,
@@ -84,7 +87,7 @@ function makeDeps(): PlanDeps {
     ]),
     collectionNameById: new Map(),
     // Real uuids — the id columns are uuid in the schema.
-    newId: () => crypto.randomUUID(),
+    newId,
     takeCopy: (tcgdexId, dexVariantRaw) => {
       const id = crypto.randomUUID();
       TAKEN.push({ id, tcgdexId, dexVariantRaw });
@@ -109,44 +112,46 @@ function buildWrites(): BackfillWrites {
     deps,
   );
   const back = planBackLine(
-    {
-      binderId: BINDER,
-      bandKey: "red",
-      seedTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-      rootDexId: 4,
-      requiredType: "Fire",
-      terminated: false,
-      stages: [
-        {
-          stageIndex: 0,
-          stage: "Basic",
-          dexId: 4,
-          decision: "filled",
-          filledTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-          filledDexVariantRaw: "Normal",
-        },
-        {
-          stageIndex: 1,
-          stage: "Stage1",
-          dexId: 5,
-          decision: "placeholder",
-          hunt: true,
-          targetCatalogCardId: CHARMELEON_SV03_027.tcgdexId,
-          alternateCatalogCardIds: [],
-          specialtyOnly: false,
-        },
-        {
-          stageIndex: 2,
-          stage: "Stage2",
-          dexId: 6,
-          decision: "block",
-          blockMaterial: "repurposedDuplicate",
-          blockCopyTcgdexId: SCIZOR_SV03_141.tcgdexId,
-          blockCopyDexVariantRaw: "Holo",
-          pocketCount: 2,
-        },
-      ],
-    },
+    validatedLine(
+      {
+        binderId: BINDER,
+        bandKey: "red",
+        seedTcgdexId: CHARMANDER_SV03_026.tcgdexId,
+        rootDexId: 4,
+        stages: [
+          {
+            stageIndex: 0,
+            stage: "Basic",
+            dexId: 4,
+            choice: {
+              kind: "have",
+              tcgdexId: CHARMANDER_SV03_026.tcgdexId,
+              dexVariantRaw: "Normal",
+            },
+          },
+          {
+            stageIndex: 1,
+            stage: "Stage1",
+            dexId: 5,
+            choice: { kind: "chase", catalogCardId: CHARMELEON_SV03_027.tcgdexId },
+          },
+          {
+            stageIndex: 2,
+            stage: "Stage2",
+            dexId: 6,
+            choice: {
+              kind: "filler",
+              filler: {
+                material: "card",
+                tcgdexId: SCIZOR_SV03_141.tcgdexId,
+                dexVariantRaw: "Holo",
+              },
+            },
+          },
+        ],
+      },
+      ["Charmander", "Charmeleon", "Charizard"],
+    ),
     deps,
   );
   // Merge the two write sets (front has no lines/slots/blocks/wishlist).
@@ -158,6 +163,7 @@ function buildWrites(): BackfillWrites {
     wishlist: [...front.wishlist, ...back.wishlist],
     decisions: [...front.decisions, ...back.decisions],
     copyLineSlotLinks: [...front.copyLineSlotLinks, ...back.copyLineSlotLinks],
+    lineOps: [...front.lineOps, ...back.lineOps],
     collectionTags: [...front.collectionTags, ...back.collectionTags],
   };
 }
@@ -168,6 +174,11 @@ async function applyWrites(db: PGlite, w: BackfillWrites) {
   const catalogIds = new Set<string>();
   for (const c of TAKEN) catalogIds.add(c.tcgdexId);
   for (const s of w.slots) if (s.target_catalog_card_id) catalogIds.add(s.target_catalog_card_id);
+  for (const o of w.lineOps) {
+    if (o.op === "update_slot" && o.patch.target_catalog_card_id) {
+      catalogIds.add(o.patch.target_catalog_card_id);
+    }
+  }
   for (const id of catalogIds) {
     await db.query(
       `insert into catalog_card (tcgdex_id, name) values ($1, $2) on conflict do nothing`,
@@ -223,6 +234,37 @@ async function applyWrites(db: PGlite, w: BackfillWrites) {
   }
   for (const link of w.copyLineSlotLinks) {
     await db.query(`update copy set line_slot_id = $1 where id = $2`, [link.slotId, link.copyId]);
+  }
+  // Her stage choices (UIL-121), as the shared rule wrote them: the parts this view reads.
+  for (const o of w.lineOps) {
+    if (o.op === "update_slot") {
+      await db.query(
+        `update line_slot set state = $2, target_catalog_card_id = $3, stage_choice = $4 where id = $1`,
+        [o.id, o.patch.state, o.patch.target_catalog_card_id ?? null, o.patch.stage_choice ?? null],
+      );
+    } else if (o.op === "update_copy") {
+      await db.query(
+        `update copy set role = $2, binder_id = $3, binder_half = $4, color_band = $5 where id = $1`,
+        [o.id, o.patch.role, o.patch.binder_id, o.patch.binder_half, o.patch.color_band],
+      );
+    } else if (o.op === "insert_binder_block") {
+      await db.query(
+        `insert into binder_block (id, owner_id, binder_id, half, pocket_count, purpose, material, copy_id, line_id, line_slot_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          o.id,
+          OWNER,
+          o.binder_id,
+          o.half,
+          o.pocket_count,
+          o.purpose,
+          o.material,
+          o.copy_id,
+          o.line_id,
+          o.line_slot_id ?? null,
+        ],
+      );
+    }
   }
   for (const b of w.blocks) {
     await db.query(
@@ -292,8 +334,8 @@ describe("binder_section after a full backfill (PGlite)", () => {
     expect(back.capacity).toBe(90);
     // Only the FILLED copy is shelved; the repurposed-duplicate block copy is role='block'.
     expect(back.shelved_count).toBe(1);
-    expect(back.block_pockets).toBe(2); // the 2-pocket repurposed-duplicate block
-    expect(back.open_placeholders).toBe(1); // the Charmeleon placeholder slot
-    expect(back.free_pockets).toBe(86); // 90 − 1 − 2 − 1
+    expect(back.block_pockets).toBe(1); // the filler card's pocket (one per stage since UIL-121)
+    expect(back.open_placeholders).toBe(1); // the chased Charmeleon slot
+    expect(back.free_pockets).toBe(87); // 90 − 1 − 1 − 1
   });
 });

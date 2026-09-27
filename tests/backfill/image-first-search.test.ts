@@ -36,12 +36,13 @@ describe("UIL-071 · every Backfill type-ahead is the image-first grid", () => {
     expect(src).toContain('import { CardResultsGrid } from "../_components/CardResultsGrid";');
   });
 
-  it("all five sites, by placeholder — none silently dropped, none left on the old tag", () => {
+  it("all six sites, by placeholder — none silently dropped, none left on the old tag", () => {
     expect(sites.map(placeholderOf)).toEqual([
       "Set + number or name…", // front half · in order
       "Pick a species in this line (any stage)…", // back half · start a line
-      "Which card?", // stage row · the owned card
-      "Which duplicate was repurposed?", // stage row · a repurposed-dup block
+      "Which card?", // stage row · the card she has
+      "Which spare card fills it?", // stage row · a filler card (UIL-121)
+      "Which spare card fills it?", // the third pocket · a filler card (UIL-121 Q4)
       "Set + number or name…", // specialty · flat list
     ]);
   });
@@ -56,9 +57,9 @@ describe("UIL-071 · every Backfill type-ahead is the image-first grid", () => {
     expect(names).toEqual(["onPick", "placeholder", "search"]);
   });
 
-  it("the four card-she-owns pickers search her haul and say to import first (UIL-098)", () => {
+  it("the five card-she-owns pickers search her haul and say to import first (UIL-098)", () => {
     const owned = sites.filter((p) => placeholderOf(p) !== SPECIES);
-    expect(owned).toHaveLength(4);
+    expect(owned).toHaveLength(5);
     for (const props of owned) {
       expect(props).toMatch(/\bsearch=\{search\}/);
       expect(props).not.toMatch(/lookupCatalog/);
@@ -68,7 +69,7 @@ describe("UIL-071 · every Backfill type-ahead is the image-first grid", () => {
       expect(names).toEqual(["emptyText", "onPick", "placeholder", "search"]);
     }
     // Every `search` on the screen is the waiting search.
-    expect(src.match(/const search = useWaitingSearch\(/g)).toHaveLength(3);
+    expect(src.match(/const search = useWaitingSearch\(/g)).toHaveLength(4);
   });
 });
 

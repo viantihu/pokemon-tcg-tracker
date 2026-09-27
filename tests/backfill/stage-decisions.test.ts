@@ -1,17 +1,12 @@
 /**
- * UIL-117 PR 5 (5a) — every stage of a Backfill line is HER decision, and the server checks the line before it
- * writes anything.
+ * UIL-117 C (C1) — every stage of a Backfill line is HER choice, checked on the server by the one shared rule, before
+ * anything is written. Karvi (UIL-121): "Functionally, there are only 2 stages: open or closed", and nothing is written
+ * for her. A stage is the card she has (waiting in her haul), a card she chases (her wishlist add), left empty (on no
+ * wishlist), or a filler in its pocket (a basic energy, or a spare card from her haul). A complete line shorter than
+ * three pockets asks what fills the third. A line mixing languages needs her OK and reads as its lowest card's.
  *
- * UIL-119, on Backfill's side: the screen pre-set every stage with a same-colour printing to a hunt, and the planner
- * wished every placeholder, so saving a line put stages on her wishlist she never chose. Karvi's ruling is that a
- * stage goes on her wishlist only when she adds it. Now a placeholder says `hunt`: true is a wishlist hunt, false is
- * "Leave empty" (a slot on no wishlist), and one that does not say is refused.
- *
- * The Tech Lead's outline and the Senior BA's rulings, pinned below: the chain is resolved again on the server from
- * the card she picked the species by, and a line that does not match it, a stage she has not decided, a hunt on a
- * terminated line or with nothing to hunt, a card of the wrong species, or a malformed block is refused with NOTHING
- * written. What the server derives (a capped status, the wishlist's type) it does not take from the browser. Every
- * shape she can save passes 0028's slot check.
+ * Pinned: each choice's writes; the line's status is her choices' (CLOSED unless one is chased); every refusal writes
+ * NOTHING; the chain is resolved again on the server; and every shape she can save passes 0030's slot check.
  *
  * The REAL executor (`commitBackLine`) against real Postgres (PGlite) and the real `apply_write_ops`, as the owner.
  */
@@ -20,10 +15,11 @@ import type { PGlite } from "@electric-sql/pglite";
 import {
   BackLineRefused,
   commitBackLine,
-  LEFT_EMPTY_NOTE,
   type BackLineCommit,
   type BackLineStageInput,
+  type BackfillStageChoice,
 } from "@/lib/backfill";
+import { STAGE_REFUSAL, StageChoiceRefusal } from "@/lib/line/stage-choice";
 import { clearCatalogCache } from "@/lib/plan";
 import { CHARMANDER_SV03_026, CHARMELEON_SV03_027, SCIZOR_SV03_141 } from "../engine/fixtures";
 import {
@@ -43,11 +39,19 @@ const SPEC = "1c000000-0000-0000-0000-00000000c5ec";
 const CMD = "a0000000-0000-4000-8000-000000000001";
 const CML = "a0000000-0000-4000-8000-000000000002";
 const SCZ = "a0000000-0000-4000-8000-000000000003";
+const CML_JA = "a0000000-0000-4000-8000-000000000004";
+const JA_CHARMELEON = "ja:sv03-027";
 
 let db: PGlite;
 beforeEach(async () => {
   db = await freshRpcDb();
+  // Without a Charizard printing, the Charmander chain here is two stages: a complete line has a third pocket.
   await seedCatalogCardsFull(db, [CHARMANDER_SV03_026, CHARMELEON_SV03_027, SCIZOR_SV03_141]);
+  await db.query(
+    `insert into catalog_card (tcgdex_id, name, dex_id, set_id, local_id, types, stage, card_class, locale)
+     values ($1, 'Charmeleon', '{5}', 'ja:sv3', '027', '{Fire}', 'Stage1', 'standard', 'ja')`,
+    [JA_CHARMELEON],
+  );
   await seedBinders(db, [
     { id: B1, type: "general", name: "KB-001" },
     { id: SPEC, type: "specialty", name: "Specialty A" },
@@ -56,6 +60,7 @@ beforeEach(async () => {
     { id: CMD, catalogCardId: CHARMANDER_SV03_026.tcgdexId },
     { id: CML, catalogCardId: CHARMELEON_SV03_027.tcgdexId },
     { id: SCZ, catalogCardId: SCIZOR_SV03_141.tcgdexId, variant: "holo", dexVariantRaw: "Holo" },
+    { id: CML_JA, catalogCardId: JA_CHARMELEON },
   ]);
   clearCatalogCache();
   await asOwner(db);
@@ -79,33 +84,35 @@ async function tallies(): Promise<Record<string, number>> {
   return out;
 }
 const NOTHING = Object.fromEntries(TABLES.map((t) => [t, 0]));
-async function rolesOf(): Promise<string[]> {
+async function roles(): Promise<string[]> {
   await asSuperuser(db);
   const r = await db.query<{ role: string }>(`select role from copy order by id`);
   await asOwner(db);
   return r.rows.map((x) => x.role);
 }
+async function read<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+  await asSuperuser(db);
+  const r = await db.query<T>(sql, params);
+  await asOwner(db);
+  return r.rows;
+}
 
-/** Her Basic Charmander, filled from her haul. */
-const BASIC: BackLineStageInput = {
+const HAVE_CMD: BackfillStageChoice = {
+  kind: "have",
+  tcgdexId: CHARMANDER_SV03_026.tcgdexId,
+  dexVariantRaw: "Normal",
+};
+const basic = (choice: BackfillStageChoice | undefined = HAVE_CMD): BackLineStageInput => ({
   stageIndex: 0,
   stage: "Basic",
   dexId: 4,
-  decision: "filled",
-  filledTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-  filledDexVariantRaw: "Normal",
-};
-/** The Stage 1 Charmeleon as a placeholder, hunted or left empty. */
-const stage1 = (extra: Partial<BackLineStageInput> = {}): BackLineStageInput => ({
+  choice,
+});
+const stage1 = (choice: BackfillStageChoice | undefined): BackLineStageInput => ({
   stageIndex: 1,
   stage: "Stage1",
   dexId: 5,
-  decision: "placeholder",
-  hunt: true,
-  targetCatalogCardId: CHARMELEON_SV03_027.tcgdexId,
-  alternateCatalogCardIds: [],
-  specialtyOnly: false,
-  ...extra,
+  choice,
 });
 const line = (
   stages: BackLineStageInput[],
@@ -115,266 +122,270 @@ const line = (
   bandKey: "red",
   seedTcgdexId: CHARMANDER_SV03_026.tcgdexId,
   rootDexId: 4,
-  requiredType: "Fire",
-  terminated: false,
   stages,
   ...extra,
 });
 const save = (input: BackLineCommit) => commitBackLine(pgliteClient(db), OWNER, input);
 
-async function refusedWithNothingWritten(input: BackLineCommit, message: RegExp | string) {
+async function refusedWithNothingWritten(
+  input: BackLineCommit,
+  message: RegExp | string,
+  kind: typeof BackLineRefused | typeof StageChoiceRefusal = BackLineRefused,
+) {
   const err = await save(input).then(
     () => null,
     (e: unknown) => e,
   );
-  expect(err).toBeInstanceOf(BackLineRefused);
+  expect(err).toBeInstanceOf(kind);
   expect((err as Error).message).toMatch(message);
   expect(await tallies()).toEqual(NOTHING);
-  expect(await rolesOf()).toEqual(["haul", "haul", "haul"]);
+  expect(await roles()).toEqual(["haul", "haul", "haul", "haul"]);
 }
 
-describe("UIL-119 · a Backfill stage goes on her wishlist only when she adds it", () => {
-  it("Leave empty writes the slot, with NO wishlist row", async () => {
-    // PRE-FIX: a placeholder always wished (and the screen pre-set every stage to one).
-    await save(line([BASIC, stage1({ hunt: false })]));
-    expect(await tallies()).toMatchObject({ line_slot: 2, wishlist_item: 0 });
-    await asSuperuser(db);
-    const slot = (
-      await db.query<{ state: string; note: string | null; target: string | null }>(
-        `select state, note, target_catalog_card_id target from line_slot where stage_index = 1`,
-      )
-    ).rows[0];
-    expect(slot).toEqual({
+const statusOfLine = async () =>
+  (await read<{ status: string }>(`select status from evolution_line`))[0]?.status;
+const stage1Slot = async () =>
+  (
+    await read<{ state: string; stage_choice: string | null; target: string | null }>(
+      `select state, stage_choice, target_catalog_card_id target from line_slot where stage_index = 1`,
+    )
+  )[0];
+
+describe("UIL-117 C · each stage choice writes what the shared rule says", () => {
+  it("Chase: the slot targets that card, and it goes on her wishlist; the line stays OPEN", async () => {
+    await save(
+      line([basic(), stage1({ kind: "chase", catalogCardId: CHARMELEON_SV03_027.tcgdexId })]),
+    );
+    expect(await stage1Slot()).toEqual({
       state: "placeholder",
-      note: LEFT_EMPTY_NOTE,
+      stage_choice: "chase",
       target: CHARMELEON_SV03_027.tcgdexId,
     });
+    expect(
+      await read(`select chosen_catalog_card_id c, required_type t from wishlist_item`),
+    ).toEqual([{ c: CHARMELEON_SV03_027.tcgdexId, t: "Fire" }]);
+    expect(await statusOfLine()).toBe("open");
   });
 
-  it("a Wishlist hunt writes one wishlist row, on its slot", async () => {
-    await save(line([BASIC, stage1({ hunt: true })]));
-    await asSuperuser(db);
-    const rows = (
-      await db.query<{ chosen: string; on_slot: boolean }>(
-        `select w.chosen_catalog_card_id chosen, s.stage_index = 1 on_slot
-           from wishlist_item w join line_slot s on s.id = w.line_slot_id`,
-      )
-    ).rows;
-    expect(rows).toEqual([{ chosen: CHARMELEON_SV03_027.tcgdexId, on_slot: true }]);
+  it("Leave empty: on NO wishlist, and a line with nothing chased reads CLOSED", async () => {
+    await save(line([basic(), stage1({ kind: "empty" })]));
+    expect(await stage1Slot()).toEqual({
+      state: "placeholder",
+      stage_choice: "empty",
+      target: null,
+    });
+    expect(await tallies()).toMatchObject({ wishlist_item: 0 });
+    expect(await statusOfLine()).toBe("closed");
   });
 
-  it("a placeholder that does not say is refused, never read as a hunt, and nothing is written", async () => {
-    await refusedWithNothingWritten(
-      line([BASIC, stage1({ hunt: undefined })]),
-      "Choose Wishlist hunt or Leave empty for the Stage 1 stage (Charmeleon).",
-    );
+  it("Filler, a basic energy: a filler block in that pocket, no copy placed", async () => {
+    await save(line([basic(), stage1({ kind: "filler", filler: { material: "energy" } })]));
+    expect(await stage1Slot()).toEqual({ state: "block", stage_choice: "filler", target: null });
+    expect(
+      await read(
+        `select purpose, material, copy_id from binder_block where line_slot_id is not null`,
+      ),
+    ).toEqual([{ purpose: "line-filler", material: "basicEnergy", copy_id: null }]);
+    expect(await statusOfLine()).toBe("closed");
   });
 
-  it("a stage she has not decided is refused, and nothing is written", async () => {
-    const undecided = { ...stage1(), decision: undefined } as unknown as BackLineStageInput;
-    await refusedWithNothingWritten(
-      line([BASIC, undecided]),
-      "Decide the Stage 1 stage (Charmeleon) before saving: Filled, Wishlist hunt, Leave empty or Block.",
-    );
-  });
-});
-
-describe("UIL-117 PR 5 · a block is hers to choose, never the system's", () => {
-  it("a stage no card can fill, left undecided, is refused: no block is written for her", async () => {
-    // No Light blue Charmeleon exists, so this stage used to open as a Block (the Senior BA / Tech Lead condition).
-    const undecided = {
-      ...stage1({ targetCatalogCardId: null }),
-      decision: undefined,
-    } as unknown as BackLineStageInput;
-    await refusedWithNothingWritten(
-      line([BASIC, undecided], { bandKey: "light_blue" }),
-      "Decide the Stage 1 stage (Charmeleon) before saving: Filled, Wishlist hunt, Leave empty or Block.",
-    );
-  });
-
-  it("a block with no material is refused, not given one", async () => {
-    await refusedWithNothingWritten(
+  it("Filler, a spare card from her haul: THAT copy becomes the block, with its line-filler decision", async () => {
+    await save(
       line([
-        BASIC,
-        { stageIndex: 1, stage: "Stage1", dexId: 5, decision: "block", pocketCount: 1 },
+        basic(),
+        stage1({
+          kind: "filler",
+          filler: { material: "card", tcgdexId: SCIZOR_SV03_141.tcgdexId, dexVariantRaw: "Holo" },
+        }),
       ]),
-      /Choose what fills the block for the Stage 1 stage/,
     );
+    expect(
+      await read(`select role, binder_half, line_slot_id from copy where id = $1`, [SCZ]),
+    ).toEqual([{ role: "block", binder_half: "back", line_slot_id: null }]);
+    expect(await read(`select copy_id, purpose from binder_block`)).toEqual([
+      { copy_id: SCZ, purpose: "line-filler" },
+    ]);
+    expect(await read(`select decision from placement_decision where copy_id = $1`, [SCZ])).toEqual(
+      [{ decision: "line-filler" }],
+    );
+  });
+
+  it("Chase a placeholder card she makes: a catalog-only stand-in, and her wish for it", async () => {
+    await save(
+      line([
+        basic(),
+        stage1({
+          kind: "chase",
+          newStandIn: { name: "Charmeleon", setName: "Trainer Kit", localId: "7", language: "en" },
+        }),
+      ]),
+    );
+    const [slot] = await read<{ target: string }>(
+      `select target_catalog_card_id target from line_slot where stage_index = 1`,
+    );
+    expect(slot.target).toMatch(/^user:/);
+    expect(
+      await read(`select name, dex_id, stage, source from catalog_card where tcgdex_id = $1`, [
+        slot.target,
+      ]),
+    ).toEqual([{ name: "Charmeleon", dex_id: [5], stage: "Stage1", source: "user" }]);
+    expect(await tallies()).toMatchObject({ wishlist_item: 1 });
   });
 });
 
-describe("UIL-117 PR 5 · the server checks the line against the chain it resolves again", () => {
-  it("a missing binder, a specialty binder and a band that is not set up are refused", async () => {
+describe("UIL-117 C · every stage is her choice, and a refusal writes nothing", () => {
+  it("a stage she has not decided is refused (the shared rule's words)", async () => {
     await refusedWithNothingWritten(
-      line([BASIC, stage1()], { binderId: "1c000000-0000-0000-0000-00000000dead" }),
+      line([basic(), stage1(undefined)]),
+      STAGE_REFUSAL.missing("Stage1"),
+    );
+  });
+
+  it("a chase of another species is refused by the shared rule, with nothing written", async () => {
+    await refusedWithNothingWritten(
+      line([basic(), stage1({ kind: "chase", catalogCardId: CHARMANDER_SV03_026.tcgdexId })]),
+      STAGE_REFUSAL.wrongSpecies("Charmeleon"),
+      StageChoiceRefusal,
+    );
+  });
+
+  it("a chase of a card in another language than the line is refused", async () => {
+    await refusedWithNothingWritten(
+      line([basic(), stage1({ kind: "chase", catalogCardId: JA_CHARMELEON })]),
+      STAGE_REFUSAL.otherLanguage,
+      StageChoiceRefusal,
+    );
+  });
+
+  it("a card she has must be that stage's species", async () => {
+    await refusedWithNothingWritten(
+      line([basic(), stage1({ ...HAVE_CMD })]),
+      "Charmander is not a Charmeleon. Pick the Charmeleon you have for the Stage 1 stage (Charmeleon).",
+    );
+  });
+
+  it("a missing binder, a specialty binder, an unset band, a wrong root, and stages off the chain", async () => {
+    const ok = [basic(), stage1({ kind: "empty" })];
+    await refusedWithNothingWritten(
+      line(ok, { binderId: "1c000000-0000-0000-0000-00000000dead" }),
       /That binder no longer exists/,
     );
+    await refusedWithNothingWritten(line(ok, { binderId: SPEC }), /specialty binder/);
     await refusedWithNothingWritten(
-      line([BASIC, stage1()], { binderId: SPEC }),
-      "Specialty A is a specialty binder, which has no back half. Pick a general binder.",
+      line(ok, { bandKey: "ultraviolet" }),
+      /colour band is not set up/,
     );
-    await refusedWithNothingWritten(
-      line([BASIC, stage1()], { bandKey: "ultraviolet" }),
-      /That colour band is not set up/,
-    );
-  });
-
-  it("an inactive general binder is allowed: she may be transcribing a shelved one (Q2)", async () => {
-    await asSuperuser(db);
-    await db.query(`update binder set is_active = false where id = $1`, [B1]);
-    await asOwner(db);
-    await save(line([BASIC, stage1({ hunt: false })]));
-    expect(await tallies()).toMatchObject({ evolution_line: 1, line_slot: 2 });
-  });
-
-  it("a seed card not in the catalog, or a root that is not the chain's, is refused", async () => {
-    await refusedWithNothingWritten(
-      line([BASIC, stage1()], { seedTcgdexId: "zz-000" }),
-      /The card this line was started from is not in the catalog/,
-    );
-    await refusedWithNothingWritten(
-      line([BASIC, stage1()], { rootDexId: 6 }),
-      /That line is not the Charmander line it was started as/,
-    );
-  });
-
-  it("stages that are not the chain's, exactly and in order, are refused", async () => {
-    const wrong = /That line's stages are not the Charmander line's/;
-    await refusedWithNothingWritten(line([BASIC]), wrong); // one missing
-    await refusedWithNothingWritten(
-      line([stage1({ stageIndex: 0 }), { ...BASIC, stageIndex: 1 }]),
-      wrong,
-    ); // swapped
-    await refusedWithNothingWritten(line([BASIC, stage1({ dexId: 6 })]), wrong); // another species
-    await refusedWithNothingWritten(line([BASIC, stage1(), { ...stage1(), stageIndex: 2 }]), wrong); // one extra
-  });
-
-  it("a filled stage's card must be that stage's species", async () => {
-    await refusedWithNothingWritten(
-      line([
-        BASIC,
-        {
-          ...stage1(),
-          decision: "filled",
-          filledTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-          filledDexVariantRaw: "Normal",
-        },
-      ]),
-      "Charmander is not a Charmeleon. Pick the Charmeleon you own for the Stage 1 stage (Charmeleon).",
-    );
-  });
-
-  it("a placeholder's wishlist target, and each alternate, must be that stage's species", async () => {
-    const wrong = /The wishlist card for the Stage 1 stage \(Charmeleon\) is not a Charmeleon/;
-    await refusedWithNothingWritten(
-      line([BASIC, stage1({ targetCatalogCardId: CHARMANDER_SV03_026.tcgdexId })]),
-      wrong,
-    );
-    await refusedWithNothingWritten(
-      line([BASIC, stage1({ alternateCatalogCardIds: [SCIZOR_SV03_141.tcgdexId] })]),
-      wrong,
-    );
-  });
-
-  it("a terminated line hunts nothing (Q1); Leave empty is still hers to choose there", async () => {
-    await refusedWithNothingWritten(
-      line([BASIC, stage1({ hunt: true })], { terminated: true }),
-      "A terminated line has no stage to hunt. Choose Leave empty or Block for the Stage 1 stage (Charmeleon).",
-    );
-    await save(line([BASIC, stage1({ hunt: false })], { terminated: true }));
-    expect(await tallies()).toMatchObject({ evolution_line: 1, wishlist_item: 0 });
-  });
-
-  it("a hunt with no same-colour printing to hunt is refused", async () => {
-    // No Light blue Charmeleon exists, so there is nothing to put on the wishlist.
-    await refusedWithNothingWritten(
-      line([BASIC, stage1({ hunt: true, targetCatalogCardId: null })], {
-        bandKey: "light_blue",
-      }),
-      "There is no Light blue Charmeleon to hunt for the Stage 1 stage (Charmeleon). Choose Leave empty or Block.",
-    );
-  });
-
-  it("a block needs its material, its card when repurposed, and at least one pocket", async () => {
-    const block = (extra: Partial<BackLineStageInput>): BackLineStageInput => ({
-      stageIndex: 1,
-      stage: "Stage1",
-      dexId: 5,
-      decision: "block",
-      blockMaterial: "basicEnergy",
-      pocketCount: 1,
-      ...extra,
-    });
-    await refusedWithNothingWritten(
-      line([BASIC, block({ blockMaterial: "glue" as never })]),
-      /Choose what fills the block for the Stage 1 stage/,
-    );
-    await refusedWithNothingWritten(
-      line([BASIC, block({ blockMaterial: "repurposedDuplicate", blockCopyTcgdexId: null })]),
-      "Pick which duplicate was repurposed for the Stage 1 stage (Charmeleon).",
-    );
-    for (const pocketCount of [0, 1.5, undefined]) {
-      await refusedWithNothingWritten(
-        line([BASIC, block({ pocketCount })]),
-        "The block for the Stage 1 stage (Charmeleon) needs at least one pocket.",
-      );
-    }
-  });
-
-  it("what the server derives it does not take from the browser: capped status and the wishlist's type", async () => {
-    // The browser claims a specialty-only stage (a capped line) and a Water wish; the chain says neither.
-    await save(
-      line([BASIC, stage1({ hunt: true, specialtyOnly: true })], { requiredType: "Water" }),
-    );
-    await asSuperuser(db);
-    expect((await db.query(`select status from evolution_line`)).rows).toEqual([
-      { status: "open" },
-    ]);
-    expect(
-      (await db.query(`select required_type, will_live_in_specialty from wishlist_item`)).rows,
-    ).toEqual([{ required_type: "Fire", will_live_in_specialty: false }]);
+    await refusedWithNothingWritten(line(ok, { rootDexId: 6 }), /not the Charmander line/);
+    await refusedWithNothingWritten(line([basic()]), /stages are not the Charmander line's/);
   });
 });
 
-describe("UIL-117 PR 5 · every line she can save passes 0028's slot check", () => {
-  const energyBlock: BackLineStageInput = {
-    stageIndex: 1,
-    stage: "Stage1",
-    dexId: 5,
-    decision: "block",
-    blockMaterial: "basicEnergy",
-    pocketCount: 2,
-  };
-  const dupBlock: BackLineStageInput = {
-    ...energyBlock,
-    blockMaterial: "repurposedDuplicate",
-    blockCopyTcgdexId: SCIZOR_SV03_141.tcgdexId,
-    blockCopyDexVariantRaw: "Holo",
-    pocketCount: 1,
-  };
-  const filledStage1: BackLineStageInput = {
-    ...stage1(),
-    decision: "filled",
-    filledTcgdexId: CHARMELEON_SV03_027.tcgdexId,
-    filledDexVariantRaw: "Normal",
-  };
+describe("UIL-121 Q4 · a complete line shorter than three pockets: the third pocket", () => {
+  const complete = [
+    basic(),
+    stage1({ kind: "have", tcgdexId: CHARMELEON_SV03_027.tcgdexId, dexVariantRaw: "Normal" }),
+  ];
 
-  it.each([
-    ["complete", [BASIC, filledStage1], false, "complete"],
-    ["open, with a hunt", [BASIC, stage1({ hunt: true })], false, "open"],
-    ["open, with a stage left empty", [BASIC, stage1({ hunt: false })], false, "open"],
-    ["a basic-energy block", [BASIC, energyBlock], false, "open"],
-    ["a repurposed-duplicate block", [BASIC, dupBlock], false, "open"],
-    ["terminated", [BASIC, energyBlock], true, "terminated"],
-  ] as const)("%s", async (_name, stages, terminated, status) => {
-    await save(line([...stages], { terminated }));
-    await asSuperuser(db);
-    expect((await db.query(`select status from evolution_line`)).rows).toEqual([{ status }]);
-    // Both pointers of every filled slot agree: the rule 0028 enforces, read back here as well.
-    const bad = await db.query(
-      `select s.id from line_slot s left join copy c on c.id = s.copy_id
-        where s.state = 'filled' and (c.line_slot_id is distinct from s.id or c.binder_half <> 'back')`,
+  it("is required, and refused without a choice", async () => {
+    await refusedWithNothingWritten(
+      line(complete),
+      STAGE_REFUSAL.thirdPocketMissing,
+      StageChoiceRefusal,
     );
-    expect(bad.rows).toEqual([]);
+  });
+
+  it("a basic energy: recorded on the line, with its filler block; the line reads CLOSED", async () => {
+    await save(line(complete, { thirdPocket: { material: "energy" } }));
+    expect(await read(`select status, extra_pocket from evolution_line`)).toEqual([
+      { status: "closed", extra_pocket: "energy" },
+    ]);
+    expect(
+      await read(`select material, line_slot_id from binder_block where purpose = 'line-filler'`),
+    ).toEqual([{ material: "basicEnergy", line_slot_id: null }]);
+  });
+
+  it("left empty: recorded, with no block", async () => {
+    await save(line(complete, { thirdPocket: { material: "empty" } }));
+    expect(await read(`select extra_pocket from evolution_line`)).toEqual([
+      { extra_pocket: "empty" },
+    ]);
+    expect(await tallies()).toMatchObject({ binder_block: 0 });
+  });
+
+  it("is refused on a line that is not complete (nothing to fill)", async () => {
+    await refusedWithNothingWritten(
+      line([basic(), stage1({ kind: "empty" })], { thirdPocket: { material: "energy" } }),
+      STAGE_REFUSAL.noThirdPocket,
+      StageChoiceRefusal,
+    );
+  });
+});
+
+describe("the Senior BA's ruling · a line mixing languages needs her OK", () => {
+  const mixed = [
+    basic(),
+    stage1({ kind: "have", tcgdexId: JA_CHARMELEON, dexVariantRaw: "Normal" }),
+  ];
+
+  it("is refused without it, naming the languages and what it will read as", async () => {
+    await refusedWithNothingWritten(
+      line(mixed, { thirdPocket: { material: "empty" } }),
+      "This line mixes English and Japanese cards; it will read as English. Confirm that to save it.",
+    );
+  });
+
+  it("is written with it", async () => {
+    await save(line(mixed, { thirdPocket: { material: "empty" }, mixedLanguageOk: true }));
+    expect(await tallies()).toMatchObject({ evolution_line: 1, line_slot: 2 });
+    // By copy id: her Charmander and the Japanese Charmeleon are shelved; the other two still wait.
+    expect(await roles()).toEqual(["shelved", "haul", "haul", "shelved"]);
+  });
+});
+
+describe("UIL-117 C · every line she can save passes 0030's slot check", () => {
+  it.each([
+    [
+      "a chase",
+      [basic(), stage1({ kind: "chase", catalogCardId: CHARMELEON_SV03_027.tcgdexId })],
+      {},
+    ],
+    ["left empty", [basic(), stage1({ kind: "empty" })], {}],
+    ["an energy filler", [basic(), stage1({ kind: "filler", filler: { material: "energy" } })], {}],
+    [
+      "a card filler",
+      [
+        basic(),
+        stage1({
+          kind: "filler",
+          filler: { material: "card", tcgdexId: SCIZOR_SV03_141.tcgdexId, dexVariantRaw: "Holo" },
+        }),
+      ],
+      {},
+    ],
+    [
+      "complete, with a card in the third pocket",
+      [
+        basic(),
+        stage1({ kind: "have", tcgdexId: CHARMELEON_SV03_027.tcgdexId, dexVariantRaw: "Normal" }),
+      ],
+      {
+        thirdPocket: {
+          material: "card" as const,
+          tcgdexId: SCIZOR_SV03_141.tcgdexId,
+          dexVariantRaw: "Holo",
+        },
+      },
+    ],
+    ["every stage empty but the one she has", [basic(), stage1({ kind: "empty" })], {}],
+  ] as const)("%s", async (_name, stages, extra) => {
+    await save(line([...stages], extra as Partial<BackLineCommit>));
+    // Both pointers of every filled slot agree: the rule 0030's assert_line_slots enforces, read back here as well.
+    expect(
+      await read(
+        `select s.id from line_slot s left join copy c on c.id = s.copy_id
+          where s.state = 'filled' and (c.line_slot_id is distinct from s.id or c.binder_half <> 'back')`,
+      ),
+    ).toEqual([]);
+    expect(await tallies()).toMatchObject({ evolution_line: 1 });
   });
 });

@@ -3,8 +3,8 @@
  *
  * No DB, no mocks: the resolver + planners run over the verified engine fixtures, the same way the
  * `tests/plan/plan-run.test.ts` suite exercises the M6 cascade. Covers band auto-computation, the
- * back-half chain resolution (placeholder / cap / block evidence), the terminated-line invariant
- * ("a terminated line never offers a back-half slot"), and the exact rows each step writes.
+ * back-half chain resolution (placeholder / cap / block evidence), and the exact rows each step writes. A back-half
+ * line's stages go through the shared stage-choice rule (UIL-121); its status is her choices'.
  *
  * Every card is a copy waiting in her haul (UIL-098): the planners take copy ids from `takeCopy` and emit
  * PLACEMENTS, never new copies. `makeDeps`' taker hands out ids that name the key they came from, so a
@@ -15,8 +15,6 @@ import { describe, expect, it } from "vitest";
 import type { CatalogCard, TypeColorMap } from "@/lib/engine";
 import {
   bandKeyForTypes,
-  deriveLineStatus,
-  fillableStages,
   planBackLine,
   planFrontHalf,
   planSpecialty,
@@ -25,6 +23,7 @@ import {
   type BackLineStageInput,
   type PlanDeps,
 } from "@/lib/backfill";
+import { testStageState, validatedLine } from "../support/backfill-line";
 import {
   ARVEN_SV03_186,
   CHARIZARD_BASE1_4,
@@ -66,7 +65,9 @@ const SPEC = "binder-spec";
 
 function makeDeps(catalog: CatalogCard[]): PlanDeps {
   let n = 0;
+  const newId = () => `id-${++n}`;
   return {
+    stageState: testStageState(catalog, newId),
     ownerId: OWNER,
     catalogById: new Map(catalog.map((c) => [c.tcgdexId, c])),
     typeColorMap: MAP,
@@ -76,7 +77,7 @@ function makeDeps(catalog: CatalogCard[]): PlanDeps {
     ]),
     bandDisplayByKey: BAND_DISPLAY,
     collectionNameById: new Map([["coll-okubo", "OKUBO cards"]]),
-    newId: () => `id-${++n}`,
+    newId,
     takeCopy: (tcgdexId, dexVariantRaw) => `waiting:${tcgdexId}:${dexVariantRaw}:${++n}`,
     now: "2026-09-08T00:00:00.000Z",
   };
@@ -147,34 +148,6 @@ describe("resolveBackLine", () => {
 
 /* ------------------------------ line invariants --------------------------- */
 
-describe("deriveLineStatus + fillableStages", () => {
-  const stage = (
-    decision: BackLineStageInput["decision"],
-    extra: Partial<BackLineStageInput> = {},
-  ) => ({ stageIndex: 0, stage: "Basic", dexId: 1, decision, ...extra }) as BackLineStageInput;
-
-  it("terminated wins over everything", () => {
-    expect(deriveLineStatus([stage("filled")], true)).toBe("terminated");
-  });
-
-  it("caps when a placeholder can only be a specialty printing", () => {
-    expect(
-      deriveLineStatus([stage("filled"), stage("placeholder", { specialtyOnly: true })], false),
-    ).toBe("capped");
-  });
-
-  it("completes when every stage is filled, else stays open", () => {
-    expect(deriveLineStatus([stage("filled"), stage("filled")], false)).toBe("complete");
-    expect(deriveLineStatus([stage("filled"), stage("placeholder")], false)).toBe("open");
-  });
-
-  it("a terminated line offers NO fillable slot (M5 acceptance invariant)", () => {
-    const stages = [stage("filled"), stage("block")];
-    expect(fillableStages(stages, "terminated")).toEqual([]);
-    expect(fillableStages(stages, "open")).toHaveLength(2);
-  });
-});
-
 /* --------------------------------- planners ------------------------------- */
 
 describe("planFrontHalf", () => {
@@ -207,109 +180,103 @@ describe("planFrontHalf", () => {
 
 describe("planBackLine", () => {
   const catalog = [CHARMANDER_SV03_026, CHARMELEON_SV03_027, CHARIZARD_BASE1_4, SCIZOR_SV03_141];
-  const deps = makeDeps(catalog);
 
-  const line = (terminated: boolean, stages: BackLineStageInput[]) =>
-    planBackLine(
-      {
-        binderId: B1,
-        bandKey: "red",
-        seedTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-        rootDexId: 4,
-        requiredType: "Fire",
-        terminated,
-        stages,
-      },
+  const line = (stages: BackLineStageInput[]) => {
+    const deps = makeDeps(catalog);
+    return planBackLine(
+      validatedLine(
+        {
+          binderId: B1,
+          bandKey: "red",
+          seedTcgdexId: CHARMANDER_SV03_026.tcgdexId,
+          rootDexId: 4,
+          stages,
+        },
+        ["Charmander", "Charmeleon", "Charizard"],
+      ),
       deps,
     );
+  };
+  const have = (tcgdexId: string, dexVariantRaw = "Normal") => ({
+    kind: "have" as const,
+    tcgdexId,
+    dexVariantRaw,
+  });
+  const at = (i: number, choice: BackLineStageInput["choice"]): BackLineStageInput => ({
+    stageIndex: i,
+    stage: ["Basic", "Stage1", "Stage2"][i],
+    dexId: [4, 5, 6][i],
+    choice,
+  });
+  const opsOf = (w: ReturnType<typeof line>, op: string) => w.lineOps.filter((o) => o.op === op);
 
-  it("writes the line, slots, a filled copy, a placeholder wishlist, and a repurposed-dup block", () => {
-    const w = line(false, [
-      {
-        stageIndex: 0,
-        stage: "Basic",
-        dexId: 4,
-        decision: "filled",
-        filledTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-        filledDexVariantRaw: "Normal",
-      },
-      {
-        stageIndex: 1,
-        stage: "Stage1",
-        dexId: 5,
-        decision: "placeholder",
-        hunt: true,
-        targetCatalogCardId: CHARMELEON_SV03_027.tcgdexId,
-        alternateCatalogCardIds: [],
-        specialtyOnly: false,
-      },
-      {
-        stageIndex: 2,
-        stage: "Stage2",
-        dexId: 6,
-        decision: "block",
-        blockMaterial: "repurposedDuplicate",
-        blockCopyTcgdexId: SCIZOR_SV03_141.tcgdexId,
-        blockCopyDexVariantRaw: "Holo",
-        pocketCount: 2,
-      },
+  it("writes the line, a card she has, her chase, and a filler card from her haul (the shared rule's writes)", () => {
+    const w = line([
+      at(0, have(CHARMANDER_SV03_026.tcgdexId)),
+      at(1, { kind: "chase", catalogCardId: CHARMELEON_SV03_027.tcgdexId }),
+      at(2, {
+        kind: "filler",
+        filler: { material: "card", tcgdexId: SCIZOR_SV03_141.tcgdexId, dexVariantRaw: "Holo" },
+      }),
     ]);
 
     expect(w.lines).toHaveLength(1);
-    expect(w.lines[0].status).toBe("open");
-    expect(w.slots.map((s) => s.state)).toEqual(["filled", "placeholder", "block"]);
+    expect(w.lines[0].status).toBe("open"); // a chased stage keeps it open
+    // Slots are inserted undecided, then her choice patches them in the same write (0030 checks the end state).
+    expect(w.slots.map((s) => s.state)).toEqual(["filled", "placeholder", "placeholder"]);
 
-    // Filled stage → a waiting copy placed in the back half, wired to its slot.
-    const filledCopy = w.placements.find((c) => c.role === "shelved")!;
-    expect(filledCopy.binder_half).toBe("back");
-    expect(filledCopy.color_band).toBe("red");
-    expect(filledCopy.copyId).toMatch(`waiting:${CHARMANDER_SV03_026.tcgdexId}:Normal:`);
-    expect(w.copyLineSlotLinks).toHaveLength(1);
-    expect(w.copyLineSlotLinks[0].copyId).toBe(filledCopy.copyId);
-    expect(w.slots[0].copy_id).toBe(filledCopy.copyId);
+    // The card she has → a waiting copy placed in the back half, wired to its slot.
+    const shelved = w.placements.find((c) => c.role === "shelved")!;
+    expect(shelved).toMatchObject({ binder_half: "back", color_band: "red" });
+    expect(shelved.copyId).toMatch(`waiting:${CHARMANDER_SV03_026.tcgdexId}:Normal:`);
+    expect(w.copyLineSlotLinks).toEqual([{ copyId: shelved.copyId, slotId: w.slots[0].id }]);
 
-    // Placeholder → a wishlist item on its slot.
-    expect(w.wishlist).toHaveLength(1);
-    expect(w.wishlist[0].chosen_catalog_card_id).toBe(CHARMELEON_SV03_027.tcgdexId);
-    expect(w.wishlist[0].required_type).toBe("Fire");
-
-    // Repurposed-duplicate block → the waiting copy of THAT card placed as role=block, and a sized block.
-    const blockCopy = w.placements.find((c) => c.role === "block")!;
-    expect(blockCopy.copyId).toMatch(`waiting:${SCIZOR_SV03_141.tcgdexId}:Holo:`);
-    expect(w.blocks).toHaveLength(1);
-    expect(w.blocks[0].pocket_count).toBe(2);
-    expect(w.blocks[0].material).toBe("repurposedDuplicate");
-    expect(w.blocks[0].copy_id).toBe(blockCopy.copyId);
-
-    // A decision per physical copy (filled + repurposed block), never for the placeholder.
-    expect(w.decisions).toHaveLength(2);
-    expect(w.decisions.every((d) => d.resolved_by === "user")).toBe(true);
-  });
-
-  it("stamps status terminated when the line is terminated", () => {
-    const w = line(true, [
+    // The chase → the slot's target and her wishlist add, through the shared rule.
+    expect(opsOf(w, "upsert_wishlist_for_slot")).toMatchObject([
       {
-        stageIndex: 0,
-        stage: "Basic",
-        dexId: 4,
-        decision: "filled",
-        filledTcgdexId: CHARMANDER_SV03_026.tcgdexId,
-        filledDexVariantRaw: "Normal",
-      },
-      {
-        stageIndex: 1,
-        stage: "Stage1",
-        dexId: 5,
-        decision: "block",
-        blockMaterial: "basicEnergy",
-        pocketCount: 1,
+        line_slot_id: w.slots[1].id,
+        chosen_catalog_card_id: CHARMELEON_SV03_027.tcgdexId,
+        required_type: "Fire",
       },
     ]);
-    expect(w.lines[0].status).toBe("terminated");
-    // A basic-energy block still reserves pockets but places no copy.
-    expect(w.blocks[0].material).toBe("basicEnergy");
-    expect(w.blocks[0].copy_id).toBeNull();
-    expect(w.placements.filter((c) => c.role === "block")).toHaveLength(0);
+
+    // The filler card → THAT waiting copy becomes a block in the line's binder, and its line-filler block row.
+    expect(opsOf(w, "update_copy")).toMatchObject([
+      {
+        id: expect.stringMatching(`waiting:${SCIZOR_SV03_141.tcgdexId}:Holo:`),
+        patch: { role: "block", binder_half: "back" },
+      },
+    ]);
+    expect(opsOf(w, "insert_binder_block")).toMatchObject([
+      { purpose: "line-filler", material: "repurposedDuplicate", line_slot_id: w.slots[2].id },
+    ]);
+    // Her own decisions: the card she has (Backfill's), and the filler (the shared rule's "line-filler").
+    expect(w.decisions).toHaveLength(1);
+    expect(opsOf(w, "insert_decision")).toMatchObject([{ decision: "line-filler" }]);
+    // No old-style rows at all.
+    expect(w.wishlist).toEqual([]);
+    expect(w.blocks).toEqual([]);
+  });
+
+  it("left empty is on NO wishlist, and a line with no chase reads CLOSED (UIL-121)", () => {
+    const w = line([
+      at(0, have(CHARMANDER_SV03_026.tcgdexId)),
+      at(1, { kind: "empty" }),
+      at(2, { kind: "filler", filler: { material: "energy" } }),
+    ]);
+    expect(w.lines[0].status).toBe("closed");
+    expect(opsOf(w, "upsert_wishlist_for_slot")).toEqual([]);
+    // A basic energy fills the pocket but places no copy.
+    expect(opsOf(w, "insert_binder_block")).toMatchObject([
+      { material: "basicEnergy", copy_id: null },
+    ]);
+    expect(opsOf(w, "update_copy")).toEqual([]);
+  });
+
+  it("a stage she has not decided is refused by the shared rule, before anything is written", () => {
+    expect(() => line([at(0, have(CHARMANDER_SV03_026.tcgdexId)), at(1, undefined)])).toThrow(
+      "Choose what goes in the Stage 1 slot.",
+    );
   });
 });
 
