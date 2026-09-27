@@ -52,8 +52,10 @@ export function newLineKey(
 }
 
 /** A card still waiting in this haul, as the step-through reads it: its species, and the line it is proposed into. */
-export interface WaitingHaulCard {
+export interface WaitingHaulCard extends LineOrdered {
   id: string;
+  /** Its haul copy, for the line popup's "In this haul" stages (UIL-121: `comingCopyIds`). */
+  copyId?: string;
   dexIds: readonly number[];
   /** `lineKeyOf` its current proposal. */
   lineKey: string | null;
@@ -75,11 +77,21 @@ export function sameLineWaiting(
   openDexIds: readonly number[],
   waiting: readonly WaitingHaulCard[],
 ): string[] {
-  if (!lineKey) return [];
   const open = new Set(openDexIds);
-  return waiting
-    .filter((c) => c.lineKey === lineKey && c.dexIds.some((d) => open.has(d)))
+  return routedToLine(lineKey, waiting)
+    .filter((c) => c.dexIds.some((d) => open.has(d)))
     .map((c) => c.id);
+}
+
+/**
+ * The waiting cards whose proposal names this line, whatever stage they fill: the positive half of `sameLineWaiting`,
+ * on its own for the line popup's "In this haul" stages (UIL-121), where the server matches each to its stage.
+ */
+export function routedToLine(
+  lineKey: string | null,
+  waiting: readonly WaitingHaulCard[],
+): WaitingHaulCard[] {
+  return lineKey ? waiting.filter((c) => c.lineKey === lineKey) : [];
 }
 
 /** The one rule: the line reads closed, or it has slots and none is a placeholder still waiting for a card. */
@@ -88,4 +100,27 @@ export function lineDoneFor(slotStates: readonly string[], status?: string | nul
     lineReadsClosed(status) ||
     (slotStates.length > 0 && slotStates.every((s) => s !== "placeholder"))
   );
+}
+
+/** A haul card's place in its line's row: the stage it goes into, and its name. */
+export interface LineOrdered {
+  name: string;
+  /** The line stage it goes into (0 = the Basic); absent, its printed stage stands in. */
+  lineStage?: number | null;
+  stage?: string | null;
+}
+
+const PRINTED_STAGES = ["Basic", "Stage1", "Stage2"];
+const stageRank = (c: LineOrdered): number => {
+  if (c.lineStage != null) return c.lineStage;
+  const i = PRINTED_STAGES.indexOf(c.stage ?? "");
+  return i >= 0 ? i : PRINTED_STAGES.length;
+};
+
+/**
+ * The order the step-through takes one line's cards in (Karvi, 2026-09-27): EVOLUTION order, Basic then Stage 1 then
+ * Stage 2, "the way the row reads in your binder"; two cards for one stage by name. "Line card k of N" counts in it too.
+ */
+export function inLineOrder(a: LineOrdered, b: LineOrdered): number {
+  return stageRank(a) - stageRank(b) || a.name.localeCompare(b.name);
 }

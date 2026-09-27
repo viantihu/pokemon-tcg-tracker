@@ -152,18 +152,29 @@ describe("sameLineWaiting, the one next-card rule (UIL-120): a POSITIVE match on
   const B = lineKeyFor("B");
   const STARTS = newLineKey("kb1", 4, "red", "en");
   const waiting = [
-    { id: "czd-a", dexIds: [6], lineKey: lineKeyOf({ kind: "add", lineId: "A", slotId: "S2" }) },
+    {
+      id: "czd-a",
+      name: "czd-a",
+      dexIds: [6],
+      lineKey: lineKeyOf({ kind: "add", lineId: "A", slotId: "S2" }),
+    },
     // QA's case: the same species, in the same colour, proposed into ANOTHER line.
-    { id: "czd-b", dexIds: [6], lineKey: lineKeyOf({ kind: "add", lineId: "B", slotId: "S9" }) },
+    {
+      id: "czd-b",
+      name: "czd-b",
+      dexIds: [6],
+      lineKey: lineKeyOf({ kind: "add", lineId: "B", slotId: "S9" }),
+    },
     // The same species proposed "start a new line", a front half, and a collection: none is this line's card.
     {
       id: "czd-new",
+      name: "czd-new",
       dexIds: [6],
       lineKey: lineKeyOf({ kind: "start", binderId: "kb1", band: "red" }, STARTS),
     },
-    { id: "czd-front", dexIds: [6], lineKey: lineKeyOf(null) },
+    { id: "czd-front", name: "czd-front", dexIds: [6], lineKey: lineKeyOf(null) },
     // Proposed into A, of a species none of its open stages wants.
-    { id: "machop-a", dexIds: [66], lineKey: A },
+    { id: "machop-a", name: "machop-a", dexIds: [66], lineKey: A },
   ];
 
   it("only a card whose proposal names THIS line, of a species an open stage wants", () => {
@@ -300,8 +311,13 @@ describe("UIL-120 (a) · a join or a start that leaves the line done", () => {
     expect(add.lineId).toBe(first.line!.lineId);
     expect(
       sameLineWaiting(lineKeyFor(first.line!.lineId), first.line!.openDexIds, [
-        { id: CZD.id, dexIds: CHARIZARD_BASE1_4.dexId, lineKey: lineKeyOf(add) },
-        { id: "another-line", dexIds: CHARIZARD_BASE1_4.dexId, lineKey: lineKeyFor("L-other") },
+        { id: CZD.id, name: "Charizard", dexIds: CHARIZARD_BASE1_4.dexId, lineKey: lineKeyOf(add) },
+        {
+          id: "another-line",
+          name: "another-line",
+          dexIds: CHARIZARD_BASE1_4.dexId,
+          lineKey: lineKeyFor("L-other"),
+        },
       ]),
     ).toEqual([CZD.id]);
     const last = await commit({

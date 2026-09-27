@@ -165,6 +165,7 @@ export function toPlanItem(
     lineName: l.lines ? lineNameFor(result, l.lines) : null,
     extraCopyOf: l.lines ? extraCopyOfFor(result, l.lines) : null,
     dexIds: [...incoming.card.dexId],
+    lineStage: result.target.kind === "back-half-line" ? result.target.stageIndex : null,
     startsLine:
       result.step === "line-new" && result.newLine
         ? newLineKey(

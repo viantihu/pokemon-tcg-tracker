@@ -69,7 +69,14 @@ import {
 import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
 import { lineModelAction } from "../_components/line-popup-actions";
 import { PlanLinePopup } from "./PlanLinePopup";
-import { lineKeyFor, lineKeyOf, sameLineWaiting, type WaitingHaulCard } from "@/lib/plan/line-done";
+import {
+  inLineOrder,
+  lineKeyFor,
+  lineKeyOf,
+  routedToLine,
+  sameLineWaiting,
+  type WaitingHaulCard,
+} from "@/lib/plan/line-done";
 
 /* ------------------------- resuming a plan in progress (UIL-006) ------------------------- */
 
@@ -348,6 +355,8 @@ export function PlanScreen({
   const [shelving, setShelving] = useState<string | null>(null);
   /** The line card just confirmed, while the rest re-route to find the next card for its line (UIL-120). */
   const [stepping, setStepping] = useState<string | null>(null);
+  /** The line each card she confirmed this sitting went into (`lineKeyFor`), for "Line card k of N" (UIL-120). */
+  const [wentInto, setWentInto] = useState<Record<string, string>>({});
   /**
    * The spotlight card, RE-DERIVED against current state (UIL-045).
    *
@@ -877,20 +886,39 @@ export function PlanScreen({
     return m;
   }, [flatItems]);
 
-  // UIL-117: the line card whose popup is open, its place among the haul's line cards, and its model loader.
-  const lineCards = flatItems.filter((it) => it.lineProposal);
+  // UIL-117: the line card whose popup is open, its place among its line's cards, and its model loader.
   const popItem = linePop ? (flatItems.find((it) => it.incomingId === linePop) ?? null) : null;
   // The card's FRESH derivation once it is in (UIL-045): the popup opens on its proposal, never the forecast's.
   // A refresh that failed leaves `item` null, and the forecast stands in.
   const popFresh = popItem && fresh?.id === popItem.incomingId ? fresh : null;
   const popLive = popFresh ? (popFresh.item ?? popItem) : null;
   const popProposal = popLive ? (swapInto ?? popLive.lineProposal ?? null) : null;
+  // "Line card k of N" (UIL-120, Karvi 2026-09-27): this card's place among THIS line's cards in the haul, in evolution
+  // order: the ones she has confirmed into it this sitting, and the ones still waiting that are routed to it.
+  const popKey = popLive && popProposal ? lineKeyOf(popProposal, popLive.startsLine) : null;
+  const popRow = popLive
+    ? [
+        popLive,
+        ...flatItems.filter(
+          (it) =>
+            it.incomingId !== popLive.incomingId &&
+            done.has(it.incomingId) &&
+            popKey !== null &&
+            (wentInto[it.incomingId] ?? lineKeyOf(it.lineProposal, it.startsLine)) === popKey,
+        ),
+        ...routedToLine(popKey, waitingHaulCards(popLive.incomingId)),
+      ].sort(inLineOrder)
+    : [];
   const popCopyId = popItem
     ? (draft.find((d) => d.id === popItem.incomingId)?.existingCopyId ?? null)
     : null;
   const loadLineModelFor = useCallback(
-    async (copyId: string, proposal: LineProposal): Promise<LinePopupModel> => {
-      const res = await reach(() => lineModelAction(copyId, proposal), LOST.action);
+    async (
+      copyId: string,
+      proposal: LineProposal,
+      comingCopyIds?: string[],
+    ): Promise<LinePopupModel> => {
+      const res = await reach(() => lineModelAction(copyId, proposal, comingCopyIds), LOST.action);
       if (!res.ok) throw new Error(res.error);
       return res.model;
     },
@@ -1047,19 +1075,25 @@ export function PlanScreen({
    * line its proposal names. `items`: the plan to read, this render's unless a re-route has just answered.
    */
   function waitingHaulCards(exceptId: string, items: PlanItem[] = flatItems): WaitingHaulCard[] {
+    const copyOf = new Map(draft.map((d) => [d.id, d.existingCopyId]));
     return items
       .filter((it) => it.incomingId !== exceptId && !done.has(it.incomingId))
       .map((it) => ({
         id: it.incomingId,
+        copyId: copyOf.get(it.incomingId) ?? undefined,
         dexIds: it.dexIds ?? [],
         lineKey: lineKeyOf(it.lineProposal, it.startsLine),
+        name: it.name,
+        lineStage: it.lineStage,
+        stage: it.stage,
       }));
   }
 
   /**
-   * The next card for THIS line, after this one in the plan, wrapping round, and where it sits (UIL-120, Karvi
-   * 2026-09-27: "Confirm & next" never opens another line's card by itself). The line is the server's read of it after
-   * her write; `items` the plan as it was routed again after it, so the proposals are the ones her write left.
+   * The next card for THIS line, and where it sits in the plan (UIL-120, Karvi 2026-09-27: "Confirm & next" never
+   * opens another line's card by itself): the lowest stage still waiting, in evolution order (`inLineOrder`, her ruling:
+   * "the way the row reads in your binder"). The line is the server's read of it after her write; `items` the plan as
+   * it was routed again after it, so the proposals are the ones her write left.
    */
   function nextSameLineCard(
     afterId: string,
@@ -1069,10 +1103,8 @@ export function PlanScreen({
     const same = new Set(
       sameLineWaiting(lineKeyFor(line.lineId), line.openDexIds, waitingHaulCards(afterId, items)),
     );
-    const from = items.findIndex((it) => it.incomingId === afterId) + 1;
-    const order = [...items.keys()].map((k) => (from + k) % items.length);
-    const index = order.find((i) => same.has(items[i].incomingId));
-    return index === undefined ? undefined : { item: items[index], index };
+    const next = items.filter((it) => same.has(it.incomingId)).sort(inLineOrder)[0];
+    return next ? { item: next, index: items.indexOf(next) } : undefined;
   }
 
   /**
@@ -1138,6 +1170,8 @@ export function PlanScreen({
   ) {
     const shelved = await shelveCard(item, extra);
     if (!shelved) return;
+    const wrote = shelved.line;
+    if (wrote) setWentInto((m) => ({ ...m, [item.incomingId]: lineKeyFor(wrote.lineId) }));
     if (opts.stepOn === false) {
       if (extra.lineChoice) scheduleReroute();
       closeLinePopup();
@@ -1295,12 +1329,7 @@ export function PlanScreen({
           loadModelFor={loadLineModelFor}
           bandMismatch={popFresh?.bandMismatch ?? null}
           position={
-            swapInto
-              ? undefined
-              : {
-                  index: lineCards.findIndex((it) => it.incomingId === popLive.incomingId) + 1,
-                  total: lineCards.length,
-                }
+            swapInto ? undefined : { index: popRow.indexOf(popLive) + 1, total: popRow.length }
           }
           // " · next ▶" only when confirming really opens another card for this line (UIL-120; UX review of #392).
           waiting={waitingHaulCards(popLive.incomingId)}

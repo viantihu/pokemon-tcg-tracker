@@ -74,6 +74,8 @@ export interface PlanItem {
    * the step-through can tell two cards that would start the SAME line before it has an id (UIL-120). Null otherwise.
    */
   startsLine?: string | null;
+  /** The line stage a card headed into a line goes into (0 = the Basic), for the step-through's order (UIL-120). */
+  lineStage?: number | null;
 }
 
 /** The line a plain extra copy duplicates, in her words (UIL-126). */

@@ -6,7 +6,8 @@
  *   - the popup opens from the badge, from the row's box and from the spotlight's Done, and nothing is written, and
  *     the box is not ticked, until she confirms (the UX Dev's guard);
  *   - a pull she owns is shown unticked, and only a pull she ticks is sent;
- *   - "Confirm & next": confirming one line card opens the next ("Line card 2 of 2");
+ *   - "Confirm & next": confirming one line card opens the next card for THE SAME line, in evolution order ("Line card
+ *     2 of 2"), and never another line's; the haul cards routed to the line are "In this haul" (UIL-120, UIL-121);
  *   - the holo upgrade opens pre-set to Swap, the old copy to the bulk box;
  *   - a colour mismatch asks which wins, neither picked, and "own colour" files it in the front half;
  *   - a refusal keeps the popup open with the reason in it;
@@ -53,7 +54,11 @@ vi.mock("@/app/(ui)/plan/actions", () => ({
 vi.mock("@/app/(ui)/look/actions", () => ({ removeCopy: vi.fn() }));
 const lineModelAction = vi.fn();
 vi.mock("@/app/(ui)/_components/line-popup-actions", () => ({
-  lineModelAction: (...a: unknown[]) => lineModelAction(...a),
+  // As the server does (#429): the stages of the haul copies the screen routes to this line read "In this haul".
+  lineModelAction: async (...a: unknown[]) => {
+    const r = await lineModelAction(...a);
+    return r?.ok ? { ...r, model: markComing(r.model, a[2] as string[] | undefined) } : r;
+  },
 }));
 
 const identity = (name: string) => ({
@@ -110,6 +115,15 @@ const DEX: Record<string, number> = {
   Kadabra: 64,
   Machop: 66,
 };
+/** The line stage each goes into, for the step-through's evolution order (Karvi 2026-09-27). */
+const STAGE_AT: Record<string, number> = {
+  Abra: 0,
+  Charmander: 0,
+  Charmeleon: 1,
+  Charizard: 2,
+  Kadabra: 1,
+  Machop: 0,
+};
 const WANTED = {
   stageIndex: 2,
   stage: "Stage2",
@@ -121,6 +135,18 @@ const WANTED = {
 const LINE_AFTER = { lineId: "L1", openDexIds: [DEX.Kadabra] };
 /** The new Charmander line a START proposal would write, by the identity the commit gives it (UIL-120). */
 const STARTS_CHARMANDER = "kb1:4:red:en";
+/** A wanted stage whose species a routed haul copy is, as coming (UIL-121): the server's `coming` state. */
+function markComing(m: LinePopupModel, coming: string[] | undefined): LinePopupModel {
+  const byDex = new Map((coming ?? []).map((id) => [DEX[id.replace(/^id-/, "")], id]));
+  return {
+    ...m,
+    stages: m.stages.map((st) =>
+      st.state === "wanted" && st.dexId !== undefined && byDex.has(st.dexId)
+        ? { ...st, state: "coming" as const, coming: { copyId: byDex.get(st.dexId)! } }
+        : st,
+    ),
+  };
+}
 /** The same popup model with nothing left to chase: the confirm leaves its line done. */
 const withNothingLeft = (m: LinePopupModel): LinePopupModel => ({
   ...m,
@@ -143,7 +169,6 @@ function modelFor(name: string, proposal: LineProposal): LinePopupModel {
           card: identity("Charmander"),
           pull: { copyId: "own-charmander", fromLabel: "KB-001 · Front · Red" },
           // UIL-121: left unticked, the stage is hers to decide, with this printing suggested (never chosen).
-          dexId: 4,
           suggestion: { card: identity("Charmander"), special: false },
         },
         { stageIndex: 1, stage: "Stage1", state: "incoming", card: me },
@@ -230,6 +255,7 @@ function itemsFor(
       lineProposal: proposal,
       lineName: lineNames[it.name] ?? null,
       dexIds: DEX[it.name] !== undefined ? [DEX[it.name]] : [],
+      lineStage: proposal ? (STAGE_AT[it.name] ?? null) : null,
       startsLine:
         proposal?.kind === "start"
           ? row && "startsLine" in row
@@ -392,12 +418,12 @@ describe("UIL-126 · a PLAIN extra copy is not a line card", () => {
     const user = await mountExtra(["Charmeleon"], [{ name: "Kadabra", proposal: ADD }]);
     await user.click(await screen.findByRole("button", { name: "⇄ Swap this one into the line…" }));
     const pop = await screen.findByRole("dialog", { name: "A copy for a filled slot" });
-    expect(lineModelAction).toHaveBeenLastCalledWith("id-Charmeleon", {
-      kind: "replace",
-      lineId: "L1",
-      slotId: "S1",
-      defaultKeep: false,
-    });
+    // The Kadabra waiting for the same line is "In this haul" (UIL-121).
+    expect(lineModelAction).toHaveBeenLastCalledWith(
+      "id-Charmeleon",
+      { kind: "replace", lineId: "L1", slotId: "S1", defaultKeep: false },
+      ["id-Kadabra"],
+    );
     expect(
       within(pop)
         .getByRole("radio", { name: /Swap in/ })
@@ -415,6 +441,7 @@ describe("UIL-126 · a PLAIN extra copy is not a line card", () => {
         slotId: "S1",
         keep: false,
         outgoing: { kind: "bulk" },
+        comingCopyIds: ["id-Kadabra"],
       }),
     );
     // Nothing opens after it, though a line card (Kadabra) is still waiting.
@@ -572,10 +599,11 @@ describe("UIL-120 · 'Confirm & next' opens only a card proposed into THIS line"
     await openCharmeleon(user, /Adds to/);
     expect(confirmIn().textContent).toContain("· next ▶");
     await user.click(confirmIn());
-    // The Charizard's own popup, on its proposal into A. (The plan is A to Z, so it is the haul's line card 1 of 2.)
+    // The Charizard's own popup, on its proposal into A.
     await waitFor(() => expect(lineModelAction).toHaveBeenCalledTimes(2));
-    expect(lineModelAction.mock.calls.at(-1)).toEqual(["id-Charizard", INTO_A]);
-    await waitFor(() => expect(within(popup()).getByText(/Line card 1 of 2/)).toBeTruthy());
+    expect(lineModelAction.mock.calls.at(-1)).toEqual(["id-Charizard", INTO_A, undefined]);
+    // In evolution order (Karvi 2026-09-27): the Charmeleon's Stage 1, then the Charizard's Stage 2.
+    await waitFor(() => expect(within(popup()).getByText(/Line card 2 of 2/)).toBeTruthy());
   });
 
   it("her sequence: the Charmeleon STARTS the line, and the waiting Charizard opens next, re-routed to 'Adds to' it", async () => {
@@ -602,14 +630,14 @@ describe("UIL-120 · 'Confirm & next' opens only a card proposed into THIS line"
     expect(confirmIn().textContent).toContain("· next ▶");
     await user.click(confirmIn());
     // Before the write the Charizard names no line (a start); routed again after it, it names the line just written,
-    // and its popup opens on that "Adds to" (A to Z, it is the haul's line card 1 of 2).
+    // and its popup opens on that "Adds to", as the line's card 2 of 2.
     await waitFor(() => expect(lineModelAction).toHaveBeenCalledTimes(2));
     // Only the cards still waiting are routed again: not the Charmeleon she has just shelved.
     expect((runHaulPlan.mock.calls.at(-1)![0] as DraftPayloadItem[]).map((d) => d.id)).toEqual([
       "id-Charizard",
     ]);
-    expect(lineModelAction.mock.calls.at(-1)).toEqual(["id-Charizard", INTO_NEW]);
-    await waitFor(() => expect(within(popup()).getByText(/Line card 1 of 2/)).toBeTruthy());
+    expect(lineModelAction.mock.calls.at(-1)).toEqual(["id-Charizard", INTO_NEW, undefined]);
+    await waitFor(() => expect(within(popup()).getByText(/Line card 2 of 2/)).toBeTruthy());
     expect(screen.getByRole("dialog", { name: "Add to a line" })).toBeTruthy();
   });
 
@@ -618,9 +646,165 @@ describe("UIL-120 · 'Confirm & next' opens only a card proposed into THIS line"
       { name: "Charmeleon", proposal: START },
       { name: "Charizard", proposal: START, startsLine: "kb2:4:red:en", after: START },
     ]);
-    await openCharmeleon(user, /Starts a line/);
-    await user.click(within(popup()).getByRole("checkbox"));
+    await user.click(
+      within(document.getElementById("plan-row-id-Charmeleon")!).getByRole("button", {
+        name: /Starts a line/,
+      }),
+    );
+    await screen.findByRole("dialog", { name: "Start a line" });
+    await user.click(within(popup()).getByRole("checkbox")); // her Charmander
+    // Its Charizard is not coming, so the Stage 2 is hers to decide.
+    await user.click(within(popup()).getByRole("button", { name: "Decide later" }));
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
     expect(confirmIn().textContent).not.toContain("next");
+  });
+
+  /** Her Charmander line, stage by stage, as the server reads it: a card she has confirmed into it is "here". */
+  const CHAIN = ["Charmander", "Charmeleon", "Charizard"];
+  function charmanderLine(placed: Set<string>) {
+    lineModelAction.mockImplementation(async (copyId: string, proposal: LineProposal) => {
+      const name = copyId.replace(/^id-/, "");
+      const base = modelFor(name, proposal);
+      const stages = CHAIN.map((n, i) => ({
+        stageIndex: i,
+        stage: ["Basic", "Stage1", "Stage2"][i],
+        card: identity(n),
+        dexId: DEX[n],
+        ...(n === name
+          ? { state: "incoming" as const }
+          : placed.has(n)
+            ? { state: "here" as const, copyId: `id-${n}` }
+            : { state: "wanted" as const, choice: null }),
+      }));
+      return {
+        ok: true,
+        model: {
+          ...base,
+          line: {
+            ...base.line,
+            lineId: proposal.kind === "start" ? null : proposal.lineId,
+            filledBefore: placed.size,
+            filledAfter: placed.size + 1,
+          },
+          stages,
+        },
+      };
+    });
+    shelveCardAction.mockImplementation(async ({ card: c }: { card: { id: string } }) => {
+      placed.add(c.id.replace(/^id-/, ""));
+      const open = CHAIN.filter((n) => !placed.has(n)).map((n) => DEX[n]);
+      return {
+        ok: true,
+        counts: { routed: 1, lines: 1, slots: 3, decisions: 1, wishlist: 0 },
+        stamp: "s2",
+        lineDone: open.length === 0,
+        line: { lineId: "L-new", openDexIds: open },
+      };
+    });
+  }
+  const intoNew = (slotId: string): LineProposal => ({ kind: "add", lineId: "L-new", slotId });
+  const choiceSent = (i: number) => shelveCardAction.mock.calls[i]?.[0].lineChoice;
+
+  it("Karvi's ruling: one line's cards step in EVOLUTION order from the one she taps, counted 1/3, 2/3, 3/3", async () => {
+    charmanderLine(new Set());
+    const user = await mount(
+      [
+        // A to Z the plan lists the Charizard first; the step-through does not.
+        { name: "Charizard", proposal: START, after: intoNew("S2") },
+        { name: "Charmeleon", proposal: START, after: intoNew("S1") },
+        { name: "Charmander", proposal: START },
+      ],
+      null,
+      { Charmander: "Charizard", Charmeleon: "Charizard", Charizard: "Charizard" },
+    );
+    await user.click(
+      within(document.getElementById("plan-row-id-Charmander")!).getByRole("button", {
+        name: /Starts Charizard line/,
+      }),
+    );
+    await waitFor(() => expect(within(popup()).getByText(/Line card 1 of 3/)).toBeTruthy());
+    // Both others wait in this haul for this line: they are "In this haul", and nothing is asked yet (#429).
+    expect(lineModelAction.mock.calls[0][2]).toEqual(
+      expect.arrayContaining(["id-Charmeleon", "id-Charizard"]),
+    );
+    expect(within(popup()).getAllByText("In this haul")).toHaveLength(2);
+    expect(within(popup()).queryByRole("button", { name: "Decide later" })).toBeNull();
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    expect(confirmIn().textContent).toContain("· next ▶");
+    await user.click(confirmIn());
+
+    // PRE-FIX (A to Z): the Charizard opened next.
+    await waitFor(() => expect(within(popup()).getByText(/Line card 2 of 3/)).toBeTruthy());
+    expect(lineModelAction.mock.calls.at(-1)).toEqual([
+      "id-Charmeleon",
+      intoNew("S1"),
+      ["id-Charizard"],
+    ]);
+    expect(within(popup()).queryByRole("button", { name: "Decide later" })).toBeNull();
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    await user.click(confirmIn());
+
+    await waitFor(() => expect(within(popup()).getByText(/Line card 3 of 3/)).toBeTruthy());
+    expect(lineModelAction.mock.calls.at(-1)).toEqual(["id-Charizard", intoNew("S2"), undefined]);
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    expect(confirmIn().textContent).not.toContain("next");
+    await user.click(confirmIn());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(await screen.findByText("Line closed · Charizard line")).toBeTruthy();
+    // Each confirm told the server which haul copies are coming, so it asked about none of their stages.
+    expect(choiceSent(0).comingCopyIds).toEqual(
+      expect.arrayContaining(["id-Charmeleon", "id-Charizard"]),
+    );
+    expect(choiceSent(1).comingCopyIds).toEqual(["id-Charizard"]);
+    expect(choiceSent(2)).not.toHaveProperty("comingCopyIds");
+  });
+
+  it("the Senior BA's case: Basic and Stage 1 in the haul, no Stage 2. The Basic asks nothing; the Stage 1 asks about the Stage 2 only, and Decide later closes the popup", async () => {
+    charmanderLine(new Set());
+    const user = await mount(
+      [
+        { name: "Charmander", proposal: START },
+        { name: "Charmeleon", proposal: START, after: intoNew("S1") },
+      ],
+      null,
+      { Charmander: "Charizard", Charmeleon: "Charizard" },
+    );
+    await user.click(
+      within(document.getElementById("plan-row-id-Charmander")!).getByRole("button", {
+        name: /Starts Charizard line/,
+      }),
+    );
+    await waitFor(() => expect(within(popup()).getByText(/Line card 1 of 2/)).toBeTruthy());
+    // Its Charmeleon is coming, so nothing is asked on the Basic's confirm, the missing Stage 2 included.
+    expect(within(popup()).queryByRole("button", { name: "Decide later" })).toBeNull();
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    await user.click(confirmIn());
+    expect(choiceSent(0)).toMatchObject({
+      mode: "start",
+      stages: {},
+      comingCopyIds: ["id-Charmeleon"],
+    });
+
+    // The Stage 1 is her last card for the line: it asks about the Stage 2, and only it.
+    await waitFor(() => expect(within(popup()).getByText(/Line card 2 of 2/)).toBeTruthy());
+    const later = await within(popup()).findAllByRole("button", { name: "Decide later" });
+    expect(later).toHaveLength(1);
+    expect(confirmIn().disabled).toBe(true);
+    await user.click(later[0]);
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    await user.click(confirmIn());
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(2));
+    expect(choiceSent(1)).toEqual({
+      mode: "join",
+      lineId: "L-new",
+      slotId: "S1",
+      stages: { 2: { kind: "later" } },
+    });
+    // Her answer closes the popup: nothing else for the line waits, so it stops, and says why.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(
+      await screen.findByText("That's every card you have for the Charizard line"),
+    ).toBeTruthy();
   });
 
   it("a re-route that cannot reach the server opens nothing, and claims nothing about the line", async () => {
@@ -932,6 +1116,8 @@ describe("UIL-117 4b · the popup", () => {
     );
     await screen.findByRole("dialog", { name: "Start a line" });
     await user.click(within(popup()).getByRole("checkbox")); // her Charmander: the 2nd card placed
+    // No card for the Stage 2 is coming, so it is hers to decide (#429): later.
+    await user.click(within(popup()).getByRole("button", { name: "Decide later" }));
     await waitFor(() => expect(confirmIn().disabled).toBe(false));
     // Nothing else in this haul goes into this line: no next is promised.
     expect(confirmIn().textContent).not.toContain("next");
@@ -1014,6 +1200,7 @@ describe("UIL-117 4b · the popup", () => {
     expect(lineModelAction).toHaveBeenLastCalledWith(
       "own-normal",
       expect.objectContaining({ kind: "start" }),
+      undefined,
     );
     // UIL-121: the new line's unticked Basic is hers to decide; she leaves it empty.
     await user.click(within(start).getByRole("button", { name: "Leave empty" }));
@@ -1115,7 +1302,7 @@ describe("UIL-117 4b · the popup", () => {
     await user.click(screen.getByRole("button", { name: "＋ Starts a line" }));
     // PRE-FIX (UX review): the popup opened on the forecast's START, which would have started a second line.
     expect(await screen.findByRole("dialog", { name: "Add to a line" })).toBeTruthy();
-    expect(lineModelAction).toHaveBeenLastCalledWith("id-Charmeleon", ADD);
+    expect(lineModelAction).toHaveBeenLastCalledWith("id-Charmeleon", ADD, undefined);
   });
 
   it("closes when the fresh derivation says the card no longer goes into a line", async () => {
