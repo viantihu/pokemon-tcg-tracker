@@ -64,6 +64,7 @@ export function LinePopup({
   onBand,
   moveOptions,
   keepLabel,
+  keepTo,
   keepDestination,
   outgoingLineModel,
   colourChoice,
@@ -185,7 +186,11 @@ export function LinePopup({
             onChange={onChange}
             stageLabel={stageName(model.stages.find((s) => s.stageIndex === rep.stageIndex)?.stage)}
             moveOptions={moveOptions}
-            keepLabel={keepLabel}
+            keepLabel={
+              keepTo
+                ? `The new ${rep.incoming.card.name} goes to ${keepTo}. Nothing in the line moves.`
+                : keepLabel
+            }
             keepDestination={keepDestination}
             outgoingLineModel={outgoingLineModel}
             busy={busy}
@@ -200,6 +205,7 @@ export function LinePopup({
             value={value}
             where={where}
             keepLabel={keepLabel}
+            keepTo={keepTo}
             moveOptions={moveOptions}
           />
         ) : cc && cc.picked === null ? (
@@ -392,7 +398,7 @@ export function LinePopup({
           >
             {label}
             {/* "· next" only when another line card follows: the last one of N just confirms. */}
-            {position && position.index < position.total ? " · next ▶" : " ▶"}
+            {position && (position.next ?? position.index < position.total) ? " · next ▶" : " ▶"}
           </button>
         </div>
       </div>
@@ -518,12 +524,14 @@ function ReplaceMoves({
   value,
   where,
   keepLabel,
+  keepTo,
   moveOptions,
 }: {
   replace: LinePopupReplace;
   value: Extract<LineChoice, { mode: "replace" }>;
   where: string;
   keepLabel?: string;
+  keepTo?: string;
   moveOptions?: LinePopupProps["moveOptions"];
 }) {
   const { current, incoming } = replace;
@@ -547,7 +555,19 @@ function ReplaceMoves({
             {current.card.name} {no(current)} <span className="lp-where">stays in the line</span>
           </span>
         </div>
-        {value.incoming ? (
+        {keepTo && !value.incoming ? (
+          // A place the screen already decided (the Haul Plan's extra copy): it moves there, no picker.
+          <div className="lp-mrow">
+            <span className="lp-verb u">Shelve</span>
+            {face(incoming)}
+            <span>
+              {incoming.card.name} {no(incoming)}{" "}
+              <span className="lp-where">
+                from {fromWhere(incoming.where)} → {keepTo}
+              </span>
+            </span>
+          </div>
+        ) : value.incoming ? (
           <div className="lp-mrow">
             <span className="lp-verb u">
               {value.incoming.kind === "bulk" ? "To bulk" : "Shelve"}

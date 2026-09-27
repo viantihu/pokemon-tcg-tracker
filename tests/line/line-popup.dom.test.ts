@@ -126,6 +126,24 @@ describe("UIL-117 · the step-through label", () => {
     expect(screen.getByRole("button", { name: /Start line/ }).textContent).toBe("Start line ▶");
     expect(screen.getByText(/Line card 2 of 2/)).toBeTruthy();
   });
+
+  it("the screen's own word wins: Confirm & next wraps to a skipped card, so 2 of 2 can still have a next", () => {
+    const props = {
+      model: START,
+      value: { mode: "start", binderId: "b1", band: "red", pulls: [] } as LineChoice,
+      onChange: () => {},
+      onConfirm: () => {},
+      onCancel: () => {},
+    };
+    const { rerender } = render(
+      createElement(LinePopup, { ...props, position: { index: 2, total: 2, next: true } }),
+    );
+    expect(screen.getByRole("button", { name: /Start line/ }).textContent).toBe(
+      "Start line · next ▶",
+    );
+    rerender(createElement(LinePopup, { ...props, position: { index: 1, total: 2, next: false } }));
+    expect(screen.getByRole("button", { name: /Start line/ }).textContent).toBe("Start line ▶");
+  });
 });
 
 describe("UIL-117 · the line popup", () => {

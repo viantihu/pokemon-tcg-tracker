@@ -157,7 +157,15 @@ export interface LinePopupProps {
   onConfirm(choice: LineChoice): void;
   onCancel(): void;
   /** "Line card k of N in this haul" (v3). Absent outside a step-through. */
-  position?: { index: number; total: number };
+  position?: {
+    index: number;
+    total: number;
+    /**
+     * Another line card is still waiting after this one. The SCREEN knows (Confirm & next wraps back to cards she
+     * skipped, so "last" is not index === total); absent, it falls back to index < total.
+     */
+    next?: boolean;
+  };
   /** Defaults per mode ("Start line", "Add to line", "Swap them"); a step-through appends "· next ▶". */
   confirmLabel?: string;
   busy?: boolean;
@@ -181,6 +189,11 @@ export interface LinePopupProps {
   keepDestination?: MoveDestination;
   /** A replace, on Keep: the screen's words for where the incoming card goes ("… KB-003 · Front · Red, same as today"). */
   keepLabel?: string;
+  /**
+   * A replace, on Keep, when the incoming card goes to a place the screen has already decided (the Haul Plan's extra
+   * copy: today's front half), with no picker: "Shelve · <card> from this haul → <keepTo>" (v3 section 5's Keep).
+   */
+  keepTo?: string;
   /** A replace: "Another line…" for the card coming out; absent, that choice is greyed. */
   outgoingLineModel?(proposal: LineProposal): Promise<LinePopupModel>;
   /**
