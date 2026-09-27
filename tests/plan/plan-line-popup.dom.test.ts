@@ -93,7 +93,8 @@ const LINE = {
   bandKey: "red",
   bandDisplay: "Red",
   locale: "en" as const,
-  total: 2,
+  // Three stages, so one card going in does not complete the line (UIL-120 has its own, completing, model).
+  total: 3,
 };
 function modelFor(name: string, proposal: LineProposal): LinePopupModel {
   const me = identity(name);
@@ -209,6 +210,7 @@ beforeEach(() => {
     ok: true,
     counts: { routed: 1, lines: 1, slots: 1, decisions: 1, wishlist: 0 },
     stamp: "s2",
+    completedLine: false,
   });
   runHaulPlan.mockImplementation(async (p: DraftPayloadItem[]) => routedPlan(p));
   lineModelAction.mockImplementation(async (copyId: string, proposal: LineProposal) => ({
@@ -336,6 +338,57 @@ describe("UIL-117 4b · the popup", () => {
     expect(lineModelAction.mock.calls.at(-1)?.[0]).toBe("id-Kadabra");
     // The last one confirms plainly: nothing opens after it (UX review of #392).
     await waitFor(() => expect(confirmIn().textContent).not.toContain("next"));
+  });
+
+  it("UIL-120: a confirm that COMPLETES its line closes the popup, and the next line card waits for her tap", async () => {
+    // Karvi: "Once the line is complete, it should not open the popup again for the next card automatically."
+    shelveCardAction.mockResolvedValue({
+      ok: true,
+      counts: { routed: 1, lines: 0, slots: 0, decisions: 1, wishlist: 0 },
+      stamp: "s2",
+      completedLine: true,
+    });
+    // Her Charmander line has one open slot left, so this Add fills it: the line completes.
+    lineModelAction.mockImplementation(async (copyId: string, proposal: LineProposal) => {
+      const m = modelFor(copyId.replace(/^id-/, ""), proposal);
+      return { ok: true, model: { ...m, line: { ...m.line, total: m.line.filledAfter } } };
+    });
+    const user = await mount([
+      { name: "Charmeleon", proposal: ADD },
+      { name: "Kadabra", proposal: ADD },
+    ]);
+    await user.click(screen.getAllByRole("button", { name: "◆ Adds to a line" })[0]);
+    await screen.findByRole("dialog", { name: "Add to a line" });
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    // It does not promise a next one it will not open.
+    expect(confirmIn().textContent).not.toContain("next");
+    await user.click(confirmIn());
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
+    // PRE-FIX: "Line card 2 of 2" opened by itself.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(lineModelAction.mock.calls.map((c) => c[0])).toEqual(["id-Charmeleon"]);
+    // She is still on the plan, and the next line card opens when SHE taps it.
+    await user.click(screen.getByRole("button", { name: "◆ Adds to a line" }));
+    await waitFor(() => expect(within(popup()).getByText(/Line card 2 of 2/)).toBeTruthy());
+  });
+
+  it("UIL-120: a confirm that does NOT complete its line still opens the next one, as today", async () => {
+    shelveCardAction.mockResolvedValue({
+      ok: true,
+      counts: { routed: 1, lines: 0, slots: 0, decisions: 1, wishlist: 0 },
+      stamp: "s2",
+      completedLine: false,
+    });
+    const user = await mount([
+      { name: "Charmeleon", proposal: ADD },
+      { name: "Kadabra", proposal: ADD },
+    ]);
+    await user.click(screen.getAllByRole("button", { name: "◆ Adds to a line" })[0]);
+    await screen.findByRole("dialog", { name: "Add to a line" });
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    await user.click(confirmIn());
+    await waitFor(() => expect(within(popup()).getByText(/Line card 2 of 2/)).toBeTruthy());
+    expect(lineModelAction.mock.calls.at(-1)?.[0]).toBe("id-Kadabra");
   });
 
   it("the holo upgrade opens pre-set to Swap, the old copy to the bulk box", async () => {

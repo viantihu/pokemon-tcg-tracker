@@ -194,7 +194,8 @@ export async function shelveCardAction(input: {
   /** Her choice in the line popup, for a card headed into a line (UIL-117). */
   lineChoice?: LineChoice | null;
 }): Promise<
-  | { ok: true; counts: CommitCounts; stamp: string }
+  /** `completedLine`: this write completed a line, so the step-through stops (UIL-120). */
+  | { ok: true; counts: CommitCounts; stamp: string; completedLine: boolean }
   /**
    * Not a failure: the placement moved under her, nothing was written, and the screen should show
    * `fresh` and let her look again. Distinguished from `ok: false` so the UI does not offer "retry"
@@ -220,7 +221,7 @@ export async function shelveCardAction(input: {
       lineChoice: input.lineChoice ?? null,
     });
     const stamp = await loadPlanFingerprint(db, input.pendingCopyIds ?? []);
-    return { ok: true, counts: res.counts, stamp };
+    return { ok: true, counts: res.counts, stamp, completedLine: res.completedLine === true };
   } catch (err) {
     if (err instanceof PlacementChangedError) {
       // `actualDigest` is what the server just derived, so the next Done is still guarded rather than

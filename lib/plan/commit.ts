@@ -168,6 +168,21 @@ export interface CommitResult {
    * and reporting the second as a failure is the failure mode UIL-092 fixed.
    */
   alreadyCommitted?: boolean;
+  /**
+   * True when this write COMPLETED a line: it inserted a line that reads `complete`, or set one to `complete`
+   * (UIL-120). Read off the write set the server built from fresh state, never from the browser. The Haul Plan's
+   * step-through stops there: once her confirm completes a line, the next line card's popup does not open by itself.
+   */
+  completedLine?: boolean;
+}
+
+/** Whether a write set completes a line (UIL-120): a line inserted as `complete`, or one set to `complete`. */
+export function completesALine(ops: readonly WriteOp[]): boolean {
+  return ops.some(
+    (o) =>
+      (o.op === "insert_line" && o.status === "complete") ||
+      (o.op === "update_line" && o.patch.status === "complete"),
+  );
 }
 
 /**
@@ -423,7 +438,7 @@ export async function commitCardPlacement(
   });
   assertPlacementBandsConfigured(payload, pc);
   await applyWriteOps(db, payload);
-  return { counts };
+  return { counts, completedLine: completesALine(payload.ops) };
 }
 
 /** How her line-popup choice is named in the decision history (UIL-117). */
@@ -510,7 +525,7 @@ async function commitLineChoice(
   const payload: WritePayload = { ops };
   assertPlacementBandsConfigured(payload, pc);
   await applyWriteOps(db, payload);
-  return { counts };
+  return { counts, completedLine: completesALine(ops) };
 }
 
 /**
