@@ -62,8 +62,15 @@ export type StageDecision =
   | { kind: "empty" }
   | { kind: "filler"; filler: FillerChoice };
 
-/** A pocket's filler: a basic energy (untracked), or one of her copies, which becomes a block there. */
-export type FillerChoice = { material: "energy" } | { material: "card"; copyId: string };
+/**
+ * A pocket's filler: a basic energy (untracked), or one of her copies, which becomes a block there. `from` is where
+ * she picked the card from (default her bulk box; Backfill also offers her haul): the server holds the card to it.
+ */
+export type FillerChoice =
+  { material: "energy" } | { material: "card"; copyId: string; from?: FillerSource };
+
+/** Where a filler card can come from: her bulk box (every screen), or her haul (Backfill, after the bulk box). */
+export type FillerSource = "bulk" | "haul";
 
 /** What fills a complete short line's third pocket (UIL-121 Q4): a filler, or nothing. */
 export type ThirdPocketChoice = FillerChoice | { material: "empty" };
@@ -88,11 +95,13 @@ export interface StageOption {
   priceMarket: number | null;
 }
 
-/** One of her spare copies that could fill a pocket, and where it is now ("Bulk box"). */
+/** One of her spare copies that could fill a pocket, and where it is now ("Bulk box", "This haul"). */
 export interface FillerCardOption {
   copyId: string;
   card: CardIdentity;
   where: string;
+  /** Its source, sent back with her pick. Absent: the bulk box. */
+  from?: FillerSource;
 }
 
 /** Pockets in one row of her binder page (3x3). A complete line with fewer cards has a third pocket to fill. */

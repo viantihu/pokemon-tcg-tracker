@@ -274,11 +274,45 @@ describe("a FILLER: what physically fills the stage's pocket", () => {
       STAGE_REFUSAL.fillerNotInBulk,
     );
     expect(
-      decide({ kind: "filler", filler: { material: "card", copyId: "c-haul" } }, ["haul"]).copyPatch
-        ?.id,
+      decide({ kind: "filler", filler: { material: "card", copyId: "c-haul", from: "haul" } }, [
+        "haul",
+      ]).copyPatch?.id,
     ).toBe("c-haul");
     refusedWith(
-      () => decide({ kind: "filler", filler: { material: "card", copyId: "c-bulk" } }, ["haul"]),
+      // A haul pick whose card is no longer waiting there.
+      () =>
+        decide({ kind: "filler", filler: { material: "card", copyId: "c-bulk", from: "haul" } }, [
+          "haul",
+        ]),
+      STAGE_REFUSAL.fillerNotInHaul,
+    );
+    // Backfill offers both (the Senior BA's ruling): each pick is held to where she picked it from, and a stale pick
+    // is refused in that place's words.
+    const both = ["bulk", "haul"] as ("bulk" | "haul")[];
+    expect(
+      decide({ kind: "filler", filler: { material: "card", copyId: "c-bulk" } }, both).copyPatch
+        ?.id,
+    ).toBe("c-bulk");
+    expect(
+      decide({ kind: "filler", filler: { material: "card", copyId: "c-haul", from: "haul" } }, both)
+        .copyPatch?.id,
+    ).toBe("c-haul");
+    refusedWith(
+      () =>
+        decide(
+          { kind: "filler", filler: { material: "card", copyId: "c-bulk", from: "haul" } },
+          both,
+        ),
+      STAGE_REFUSAL.fillerNotInHaul,
+    );
+    refusedWith(
+      () => decide({ kind: "filler", filler: { material: "card", copyId: "c-haul" } }, both),
+      STAGE_REFUSAL.fillerNotInBulk,
+    );
+    // A screen that offers only the bulk box refuses a haul pick.
+    refusedWith(
+      () =>
+        decide({ kind: "filler", filler: { material: "card", copyId: "c-haul", from: "haul" } }),
       STAGE_REFUSAL.fillerNotInHaul,
     );
   });
