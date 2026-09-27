@@ -488,6 +488,8 @@ function replaceInLine(
     if (choice.outgoingLine.mode === "start" && choice.outgoingLine.pulls.includes(state.copy.id)) {
       throw new Error("The card going into this line can't also be pulled into the other one.");
     }
+    // ONE write, two lines: they share one claim set, so a spare card can't fill a pocket in each (QA on #435).
+    shareClaims(state, state.outgoing);
     const nested = buildLineChoiceOps(state.outgoing, outgoingId, choice.outgoingLine);
     outOps.push(...nested.ops);
     outPatch = { role: "shelved", ...nested.placement, line_slot_id: nested.slotId };
@@ -557,7 +559,9 @@ function describePatch(p: ReturnType<typeof placementForMove>): string {
 
 /**
  * Fresh state as her stage choices are checked against (lib/line/stage-choice): ONE per write, so every stage and the
- * third pocket share the set of filler copies already named (one card fills one pocket).
+ * third pocket share the set of filler copies already named (one card fills one pocket). Keyed to the write's
+ * LineWriteState, which loadLineWriteState builds afresh for every request, so a claim never outlives its write: a
+ * second save naming the same card is refused by the card's own place (it has left the bulk box), not by this set.
  */
 const stageStates = new WeakMap<LineWriteState, StageState>();
 function stageStateOf(state: LineWriteState): StageState {
@@ -567,6 +571,13 @@ function stageStateOf(state: LineWriteState): StageState {
     stageStates.set(state, st);
   }
   return st;
+}
+/** A replace's card coming out into another line is the same write: its line checks against the same claims. */
+function shareClaims(from: LineWriteState, to: LineWriteState): void {
+  const claims = stageStateOf(from).claimedFillers!;
+  const theirs = stageStateOf(to);
+  for (const id of theirs.claimedFillers ?? []) claims.add(id);
+  theirs.claimedFillers = claims;
 }
 
 /** The shared rule's view of the catalog and her copies, for any line writer (the popup's builder, Lines' Choose). */
