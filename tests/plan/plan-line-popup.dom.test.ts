@@ -559,6 +559,38 @@ describe("UIL-117 4b · the popup", () => {
     expect(confirmIn().textContent).not.toContain("next");
   });
 
+  it("UIL-120: a replace on a line that already reads CLOSED, with a stage she left empty, does not say '· next'", async () => {
+    // Case (e) of #423: the empty stage is still a placeholder, so only the line's status says it is done.
+    lineModelAction.mockImplementation(async (copyId: string, proposal: LineProposal) => {
+      const m = modelFor(copyId.replace(/^id-/, ""), proposal);
+      return { ok: true, model: { ...m, line: { ...m.line, status: "closed" } } };
+    });
+    const user = await mount([
+      { name: "Charmeleon", proposal: HOLO },
+      { name: "Kadabra", proposal: HOLO },
+    ]);
+    await user.click(screen.getAllByRole("button", { name: "⇄ Could replace a card" })[0]);
+    await screen.findByRole("dialog", { name: "A copy for a filled slot" });
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    // PRE-FIX (#423): "· next ▶", though the server stops there and says "Line closed".
+    expect(confirmIn().textContent).not.toContain("next");
+  });
+
+  it("UIL-120: …and the same line still OPEN says '· next', as its stage is still to fill", async () => {
+    lineModelAction.mockImplementation(async (copyId: string, proposal: LineProposal) => {
+      const m = modelFor(copyId.replace(/^id-/, ""), proposal);
+      return { ok: true, model: { ...m, line: { ...m.line, status: "open" } } };
+    });
+    const user = await mount([
+      { name: "Charmeleon", proposal: HOLO },
+      { name: "Kadabra", proposal: HOLO },
+    ]);
+    await user.click(screen.getAllByRole("button", { name: "⇄ Could replace a card" })[0]);
+    await screen.findByRole("dialog", { name: "A copy for a filled slot" });
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    expect(confirmIn().textContent).toContain("· next ▶");
+  });
+
   it("UIL-120: a Keep on a line that is ALREADY complete stops too (she tested past #402 here)", async () => {
     shelveCardAction.mockResolvedValue({
       ok: true,

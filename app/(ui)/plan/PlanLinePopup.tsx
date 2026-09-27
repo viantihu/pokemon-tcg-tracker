@@ -149,6 +149,9 @@ export function PlanLinePopup({
               ? "filled"
               : "placeholder",
       ),
+      // The line's status as it stands (null for a start): a line that already reads CLOSED is done, a stage she
+      // left empty with it (QA on #423; the same rule the server answers with).
+      model.line.status,
     );
 
   return (
