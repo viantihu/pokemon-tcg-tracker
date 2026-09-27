@@ -560,4 +560,15 @@ jobs:
       - name: Action check (the sign-in action loads, runs, and refuses a malformed address)
         env:
           APP_URL: ${{ vars.APP_URL }}
+          PROBE: malformed
+        run: node scripts/deploy-smoke-sign-in.mjs
+      # While sign-up is closed here (the single-owner allow-list, or invite-only), this is the only LIVE
+      # per-deploy check that strangers are kept out (QA on #405). It stops running the moment this GitHub
+      # environment's SIGNUP_MODE var is "open" (set together with the app's own SIGNUP_MODE): with sign-up
+      # open, a well-formed stranger address would get a real email and a new account on every deploy.
+      - name: Closed sign-up check (a stranger's address is refused)
+        if: ${{ vars.SIGNUP_MODE != 'open' }}
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          PROBE: stranger
         run: node scripts/deploy-smoke-sign-in.mjs

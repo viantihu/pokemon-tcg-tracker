@@ -13,6 +13,8 @@ import {
   actionIdIn,
   chunkPaths,
   PROBE_EMAIL,
+  PROBES,
+  probeFrom,
   REFUSAL,
   verdict,
 } from "@/scripts/deploy-smoke-sign-in.mjs";
@@ -112,5 +114,25 @@ describe("deploy.yml runs both, in order, in the smoke job", () => {
 
   it("can read deployment records and nothing more", () => {
     expect(smoke).toMatch(/permissions:\n\s+contents: read\n\s+deployments: read\n/);
+  });
+});
+
+describe("the two probes (QA on #405: keep the live closed-sign-up check)", () => {
+  it("stranger: the allow-list's refusal passes; the malformed refusal does not count for it", () => {
+    const s = PROBES.stranger;
+    expect(s.email).toMatch(/@example\.com$/);
+    expect(verdict(200, `1:{"status":"error","message":"${s.refusal}"}`, s).ok).toBe(true);
+    expect(verdict(200, `1:{"status":"error","message":"${PROBES.malformed.refusal}"}`, s).ok).toBe(
+      false,
+    );
+    const sent = verdict(200, `1:{"status":"sent","email":"${s.email}"}`, s);
+    expect(sent.ok).toBe(false);
+    expect(sent.why).toMatch(/allow-list is not refusing strangers/);
+  });
+  it("PROBE picks one; the default is the malformed address; anything else is refused", () => {
+    expect(probeFrom({})).toBe(PROBES.malformed);
+    expect(probeFrom({ PROBE: "stranger" })).toBe(PROBES.stranger);
+    expect(() => probeFrom({ PROBE: "owner" })).toThrow(/unknown PROBE/);
+    expect(() => probeFrom({ PROBE: "toString" })).toThrow(/unknown PROBE/);
   });
 });

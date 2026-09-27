@@ -5,11 +5,14 @@
  * string, and Next throws when it loads such a file), while the build, the tests and both page checks in
  * deploy.yml's smoke job stayed green: a page renders without loading its actions. Only calling one shows it.
  *
- * The call: POST /login's `signIn` action with a MALFORMED address. `signIn` validates the address first and
- * refuses it before any network call ("Enter a valid email address."), so no email is sent, no auth user is
- * created, and nothing is written, whether or not sign-up is open to new users (the multi-user work removes the
- * single-owner allow-list; a well-formed stranger's address would then get a real email and a new account on
- * every deploy). The action's id is build-specific, and since #364 /login's HTML no longer carries it (its form
+ * The call: POST /login's `signIn` action with one of two probes, chosen by `PROBE`:
+ *   - `malformed` (the default): not an address at all. `signIn` validates first and refuses it before any
+ *     network call ("Enter a valid email address."): no email, no account, nothing written, allow-list or not.
+ *   - `stranger`: a well-formed address that is not the owner's. While sign-up is closed (the single-owner
+ *     allow-list, or an invite-only environment) it is refused before any network call ("That email is not
+ *     authorised for this binder."): the LIVE, per-deploy proof that strangers are kept out (QA on #405).
+ *     deploy.yml runs it only while that environment's `SIGNUP_MODE` is not "open": with sign-up open, this
+ *     address would get a real email and a new account on every deploy. The action's id is build-specific, and since #364 /login's HTML no longer carries it (its form
  * action is a client wrapper), so it is read from the page's client chunk, where the bundler emits
  * `createServerReference("<id>", …, "signIn")`.
  *
@@ -18,9 +21,36 @@
  *   APP_URL=https://… node scripts/deploy-smoke-sign-in.mjs
  */
 
-/** Not an address at all (no "@"), so `signIn`'s own validation refuses it before Supabase is ever called. */
-export const PROBE_EMAIL = "deploy-smoke-not-an-address";
-export const REFUSAL = "Enter a valid email address.";
+/** The two probes; each is refused before Supabase is called, so neither sends anything. */
+export const PROBES = {
+  /** Not an address at all (no "@"): `signIn`'s own validation refuses it. */
+  malformed: {
+    email: "deploy-smoke-not-an-address",
+    refusal: "Enter a valid email address.",
+    ok: "the sign-in action loaded, ran, and refused the malformed probe address",
+    accepted:
+      "the MALFORMED probe address was ACCEPTED and a sign-in was attempted: signIn's address check is not running.",
+  },
+  /** Never the owner's address: a reserved example domain, so a closed sign-up can only refuse it. */
+  stranger: {
+    email: "deploy-smoke@example.com",
+    refusal: "That email is not authorised for this binder.",
+    ok: "the sign-in action loaded, ran, and refused a stranger's address",
+    accepted:
+      "the probe address was ACCEPTED and a sign-in email was sent: the allow-list is not refusing strangers.",
+  },
+};
+/** The default probe, under the names older callers used. */
+export const PROBE_EMAIL = PROBES.malformed.email;
+export const REFUSAL = PROBES.malformed.refusal;
+
+/** `PROBE` from the environment, defaulting to the malformed address; anything else is an error. */
+export function probeFrom(env) {
+  const name = (env.PROBE ?? "malformed").trim();
+  if (!Object.hasOwn(PROBES, name))
+    throw new Error(`unknown PROBE "${name}" (malformed | stranger)`);
+  return PROBES[name];
+}
 
 /**
  * Every client chunk a page names, in its script tags or in its flight data (where quotes are escaped). Vercel
@@ -45,12 +75,9 @@ export function actionIdIn(js, name) {
 }
 
 /** What the action's answer means. `ok` only for the refusal itself. */
-export function verdict(status, body) {
-  if (status === 200 && body.includes('"status":"error"') && body.includes(REFUSAL)) {
-    return {
-      ok: true,
-      why: "the sign-in action loaded, ran, and refused the malformed probe address",
-    };
+export function verdict(status, body, probe = PROBES.malformed) {
+  if (status === 200 && body.includes('"status":"error"') && body.includes(probe.refusal)) {
+    return { ok: true, why: probe.ok };
   }
   if (status >= 500) {
     return {
@@ -64,7 +91,7 @@ export function verdict(status, body) {
   if (status === 200 && body.includes('"status":"sent"')) {
     return {
       ok: false,
-      why: `the MALFORMED probe address was ACCEPTED and a sign-in was attempted: signIn's address check is not running.`,
+      why: probe.accepted,
     };
   }
   return { ok: false, why: `unexpected answer from the sign-in action: HTTP ${status}` };
@@ -111,7 +138,8 @@ async function main() {
   // React encodes (prevState, formData) as a root part "0" naming the FormData as "$K1", whose fields are
   // "_1_<name>". The root part goes LAST, as React sends it: the server resolves it on arrival.
   const body = new FormData();
-  body.append("_1_email", PROBE_EMAIL);
+  const probe = probeFrom(process.env);
+  body.append("_1_email", probe.email);
   body.append("0", JSON.stringify([{ status: "idle" }, "$K1"]));
   const res = await fetchRetrying(`${base}/login`, {
     method: "POST",
@@ -120,7 +148,7 @@ async function main() {
     redirect: "manual",
   });
   console.log(`HTTP ${res.status}`);
-  const v = verdict(res.status, await res.text());
+  const v = verdict(res.status, await res.text(), probe);
   if (!v.ok) throw new Error(v.why);
   console.log(`Action check OK: ${v.why}.`);
 }
