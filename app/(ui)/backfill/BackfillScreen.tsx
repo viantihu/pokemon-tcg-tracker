@@ -41,9 +41,9 @@ import { CardResultsGrid } from "../_components/CardResultsGrid";
 import { bandMeta } from "../_components/plan-meta";
 import { isUnreached, LOST, reach } from "../_components/reach";
 import { NoBinderNotice } from "../_components/NoBinderNotice";
+import { bulkFillerAction } from "../_components/line-popup-actions";
 import type { LookupCard } from "../plan/plan-types";
 import {
-  bulkSpares,
   commitFrontAction,
   commitLineAction,
   commitSpecialtyAction,
@@ -749,14 +749,13 @@ function SparePicker({
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    bulkSpares().then(
-      (options) => {
-        if (live) setBulk(options);
-      },
-      (e: unknown) => {
-        if (live) setError(e instanceof Error ? e.message : LOST.read);
-      },
-    );
+    // The popups' own bulk box read (it returns its refusal, so her words survive a production build); a call that
+    // never answers is `reach`'s.
+    void reach(() => bulkFillerAction(), LOST.read).then((res) => {
+      if (!live) return;
+      if (res.ok) setBulk(res.options);
+      else setError(res.error);
+    });
     return () => {
       live = false;
     };
@@ -777,7 +776,13 @@ function SparePicker({
       ) : left.length === 0 ? (
         <div className="hint u">No spare card in your bulk box.</div>
       ) : (
-        <div className="cgrid" role="group" aria-label="Spare cards in your bulk box">
+        // Capped and scrollable: a big bulk box must not push the rest of the line off the page (UX review of #422).
+        <div
+          className="cgrid"
+          role="group"
+          aria-label="Spare cards in your bulk box"
+          style={{ maxHeight: 360, overflowY: "auto" }}
+        >
           {left.map((o) => {
             const number = formatCollectorNumber(
               o.card.localId,
@@ -799,7 +804,6 @@ function SparePicker({
                 />
                 <div className="cn u">{o.card.name}</div>
                 {number ? <div className="cno">{number}</div> : null}
-                <div className="cno">{o.where}</div>
               </button>
             );
           })}

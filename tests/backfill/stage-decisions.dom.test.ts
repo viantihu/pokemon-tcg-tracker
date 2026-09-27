@@ -11,6 +11,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BackfillScreen } from "@/app/(ui)/backfill/BackfillScreen";
+import { LOST } from "@/app/(ui)/_components/reach";
 import type { ResolvedBackLine } from "@/lib/backfill";
 
 const card = (tcgdexId: string, name: string) => ({
@@ -52,7 +53,11 @@ vi.mock("@/app/(ui)/_components/CardResultsGrid", async () => {
 });
 
 const resolveLine = vi.fn();
-const bulkSpares = vi.fn();
+/** Her bulk box, as the popups' own action answers it (a refusal comes back as a value). */
+const bulkFillerAction = vi.fn();
+vi.mock("@/app/(ui)/_components/line-popup-actions", () => ({
+  bulkFillerAction: (...a: unknown[]) => bulkFillerAction(...a),
+}));
 const commitLineAction = vi.fn();
 vi.mock("@/app/(ui)/backfill/actions", () => ({
   loadContext: vi.fn(async () => ({
@@ -67,7 +72,6 @@ vi.mock("@/app/(ui)/backfill/actions", () => ({
   commitSpecialtyAction: vi.fn(),
   lookupCatalog: vi.fn(async () => []),
   lookupLineSpecies: vi.fn(async () => []),
-  bulkSpares: (...a: unknown[]) => bulkSpares(...a),
   searchWaiting: vi.fn(async () => []),
 }));
 
@@ -103,7 +107,7 @@ beforeEach(() => {
     ["Which spare card fills it?", card("sv03-141", "Scizor")],
   ]);
   resolveLine.mockReset().mockResolvedValue(THREE);
-  bulkSpares.mockReset().mockResolvedValue([]);
+  bulkFillerAction.mockReset().mockResolvedValue({ ok: true, options: [] });
   commitLineAction.mockReset().mockResolvedValue({
     ok: true,
     counts: { placed: 1, lines: 1, slots: 3, blocks: 1, wishlist: 1, decisions: 1 },
@@ -228,7 +232,7 @@ describe("the Senior BA's ruling · a spare card comes from her bulk box first, 
   };
 
   it("her bulk box is listed first, then this haul; a bulk pick is sent as that copy", async () => {
-    bulkSpares.mockResolvedValue([BULK]);
+    bulkFillerAction.mockResolvedValue({ ok: true, options: [BULK] });
     const user = await openLine();
     await user.click(choice("Basic", "Leave empty"));
     await user.click(choice("Stage1", "Leave empty"));
@@ -252,7 +256,7 @@ describe("the Senior BA's ruling · a spare card comes from her bulk box first, 
   });
 
   it("one bulk box copy fills one pocket: another pocket no longer offers it, until she changes the pick", async () => {
-    bulkSpares.mockResolvedValue([BULK]);
+    bulkFillerAction.mockResolvedValue({ ok: true, options: [BULK] });
     const user = await openLine();
     await user.click(choice("Basic", "Leave empty"));
     await spareOf(user, "Stage1");
@@ -266,12 +270,21 @@ describe("the Senior BA's ruling · a spare card comes from her bulk box first, 
   });
 
   it("a bulk box that cannot be read says so, and this haul is still offered", async () => {
-    bulkSpares.mockRejectedValue(new Error("Could not read your bulk box: timeout"));
+    bulkFillerAction.mockResolvedValue({ ok: false, error: "Could not read your bulk box." });
     const user = await openLine();
     await spareOf(user, "Stage2");
+    expect(await within(row("Stage2")).findByText("Could not read your bulk box.")).toBeTruthy();
     expect(
-      await within(row("Stage2")).findByText("Could not read your bulk box: timeout"),
+      within(row("Stage2")).getByRole("button", { name: "Pick · Which spare card fills it?" }),
     ).toBeTruthy();
+  });
+
+  it("a bulk box read that never answers says the app could not be reached, and this haul is still offered", async () => {
+    bulkFillerAction.mockRejectedValue(new TypeError("Failed to fetch"));
+    const user = await openLine();
+    await spareOf(user, "Stage2");
+    expect(await within(row("Stage2")).findByText(LOST.read)).toBeTruthy();
+    expect(within(row("Stage2")).queryByText("Failed to fetch")).toBeNull();
     expect(
       within(row("Stage2")).getByRole("button", { name: "Pick · Which spare card fills it?" }),
     ).toBeTruthy();

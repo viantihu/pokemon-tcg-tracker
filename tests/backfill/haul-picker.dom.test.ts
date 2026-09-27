@@ -25,7 +25,6 @@ vi.mock("@/app/(ui)/backfill/actions", () => ({
   loadContext: vi.fn(),
   lookupCatalog: vi.fn(),
   lookupLineSpecies: vi.fn(),
-  bulkSpares: vi.fn(async () => []),
   resolveLine: vi.fn(),
   searchWaiting: vi.fn(),
 }));

@@ -58,7 +58,6 @@ vi.mock("@/app/(ui)/backfill/actions", () => ({
   commitSpecialtyAction: (...a: unknown[]) => commitSpecialtyAction(...a),
   lookupCatalog: vi.fn(async () => []),
   lookupLineSpecies: vi.fn(async () => []),
-  bulkSpares: vi.fn(async () => []),
   searchWaiting: vi.fn(async () => []),
 }));
 

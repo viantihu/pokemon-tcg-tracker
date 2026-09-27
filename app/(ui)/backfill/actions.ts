@@ -31,8 +31,6 @@ import {
 } from "@/lib/backfill";
 import { formsALine } from "@/lib/engine";
 import { catalogCardRepo, type Row } from "@/lib/repo";
-import { loadBulkFillers } from "@/lib/line/stage-options-load";
-import type { FillerCardOption } from "@/lib/line/popup";
 import { errorMessage } from "@/lib/errors";
 import type { LookupCard } from "../plan/plan-types";
 import type { BackfillContextPayload, CommitResult, WaitingCard } from "./backfill-types";
@@ -76,19 +74,6 @@ export async function searchWaiting(query: string): Promise<WaitingCard[]> {
     }));
   } catch (err) {
     throw new Error(`Could not search your haul: ${errorMessage(err)}`);
-  }
-}
-
-/**
- * The spare copies in her bulk box that could fill a pocket, image first (the Senior BA's ruling: Backfill offers her
- * bulk box first, then her haul). Throws on failure, so the picker says so rather than showing an empty bulk box.
- */
-export async function bulkSpares(): Promise<FillerCardOption[]> {
-  try {
-    const { db } = await getOwnerContext();
-    return await loadBulkFillers(db);
-  } catch (err) {
-    throw new Error(`Could not read your bulk box: ${errorMessage(err)}`);
   }
 }
 
