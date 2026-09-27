@@ -27,6 +27,7 @@ export { binderBlockRepo } from "./binder-block";
 export { haulRepo } from "./haul";
 export { placementDecisionRepo } from "./placement-decision";
 export { colorBandRepo, typeColorMapRepo } from "./config";
+export { onboardingRepo } from "./onboarding";
 export {
   presenceGroupRepo,
   unresolvedEntryRepo,

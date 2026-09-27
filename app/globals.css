@@ -3823,4 +3823,74 @@ button.subhead.folded:hover {
   font-weight: 700;
   letter-spacing: 0.18em;
   text-align: center;
+
+/* ---------- first-run tutorial (UIL-128) ----------
+   A step card, not a modal: the page stays usable under it. Bottom-right on a wide screen; on a phone it spans
+   the width and sits above Sign out (fixed bottom-left, z 20) so neither covers the other. Under every veil,
+   popup and lightbox (z 50+), so anything opened over the tour sits on top of it. */
+.tour {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 30;
+  width: min(380px, calc(100vw - 28px));
+  padding: 14px 16px;
+}
+.tour:focus {
+  outline: none;
+}
+.tour:focus-visible {
+  outline: 3px solid var(--note);
+  outline-offset: 2px;
+}
+.tour-count {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+.tour-title {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+}
+.tour-body {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  margin-bottom: 12px;
+}
+.tour-lead {
+  color: var(--ink);
+  font-weight: 700;
+}
+.tour-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.tab.tour-target {
+  outline: 3px solid var(--note);
+  outline-offset: 2px;
+  animation: tour-pulse 1.4s ease-in-out infinite;
+}
+@keyframes tour-pulse {
+  50% {
+    outline-color: var(--ink);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tab.tour-target {
+    animation: none;
+  }
+}
+@media (max-width: 640px) {
+  .tour {
+    left: 10px;
+    right: 10px;
+    bottom: 64px;
+    width: auto;
+  }
 }

@@ -107,6 +107,9 @@ export const EXCLUDED = {
   last_sync_snapshot:
     "one sync's undo state; carrying it over would let production's first undo roll back a Testing sync",
   binder_section: "a view, created by migration 0002",
+  onboarding:
+    "0031's tutorial-seen flag, kept per environment: her Production sign-in (which the remap needs) may already " +
+    "have written one, and as an owner table that row would fail the empty-target check",
 };
 
 /** The circular reference: held back on insert, patched after line_slot lands. */
