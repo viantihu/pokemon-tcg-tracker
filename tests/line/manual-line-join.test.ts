@@ -28,6 +28,7 @@ import {
   OWNER,
   seedBinders,
 } from "../support/pglite-rpc";
+import { NOT_A_LINE } from "@/lib/line/popup";
 import { pgliteClient } from "../support/pglite-client";
 
 const GEN = "b0000000-0000-0000-0000-0000000000e1";
@@ -44,7 +45,8 @@ const SLOT_NEXT = "50000000-0000-0000-0000-0000000000e2";
 // real seeded "red" band (migration 0003), so this exercises production config, not a fixture map.
 const EMBERLING_DEX = 9101;
 const EMBERDRAKE_DEX = 9102;
-const ONLYMON_DEX = 9201; // single-stage: nothing evolves from it, nothing it evolves from
+const ONLYMON_DEX = 9201; // a Basic; single-stage unless a test seeds Onlyvolve
+const ONLYVOLVE_DEX = 9202; // Onlymon's evolution, where a test needs Onlymon to form a line
 
 /**
  * UIL-121: her choice when she starts a line. Every stage the line leaves unfilled is hers to decide, and a complete
@@ -147,6 +149,14 @@ describe("CONTROL — the pre-fix back-half move (no line resolved)", () => {
       stage: "Basic",
       evolveFrom: null,
     });
+    // It evolves, so it forms a line (a Basic with no evolutions never does: Karvi, 2026-09-27).
+    await seedCard({
+      id: "onlyvolve",
+      name: "Onlyvolve",
+      dexId: ONLYVOLVE_DEX,
+      stage: "Stage1",
+      evolveFrom: "Onlymon",
+    });
     await seedShelvedFront(CARD, "onlymon");
 
     // EXACTLY what a back-half shelf destination did before this fix.
@@ -166,9 +176,9 @@ describe("CONTROL — the pre-fix back-half move (no line resolved)", () => {
 /* ==================== starting a new line (manual, below viability) ==================== */
 
 describe("applyMove: shelf → back half → start a new line (real Postgres, real RPC)", () => {
-  it("a single-stage Basic never starts a line (Karvi, 2026-09-27): refused, and nothing is written", async () => {
-    // "A basic with no evolution should not be allowed to get put in the 'lines' area." The database refuses a new
-    // line of one stage (0032), whichever writer asks.
+  it("a single-stage Basic never starts a line (Karvi, 2026-09-27): refused in her words, and nothing is written", async () => {
+    // "A basic with no evolution should not be allowed to get put in the 'lines' area." The app refuses it before any
+    // write, and the database refuses a new line of one stage too (0032), whichever writer asks.
     await seedCard({
       id: "onlymon",
       name: "Onlymon",
@@ -189,10 +199,45 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
         },
         names,
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow(NOT_A_LINE);
     await asSuperuser(db);
     expect(await q(`select id from evolution_line`)).toEqual([]);
     expect((await copyRow(CARD)).binder_half).toBe("front");
+  });
+
+  it("…and the Move sheet's '+ Start a new line' is refused the same way", async () => {
+    await seedCard({
+      id: "onlymon",
+      name: "Onlymon",
+      dexId: ONLYMON_DEX,
+      stage: "Basic",
+      evolveFrom: null,
+    });
+    await seedShelvedFront(CARD, "onlymon");
+    await asOwner(db);
+
+    await expect(
+      applyMove(
+        pgliteClient(db),
+        {
+          copyId: CARD,
+          destination: {
+            kind: "shelf",
+            binderId: GEN,
+            half: "back",
+            band: "red",
+            lineJoin: { mode: "new" },
+          },
+        },
+        names,
+      ),
+    ).rejects.toThrow(NOT_A_LINE);
+
+    await asSuperuser(db);
+    expect(await q(`select id from evolution_line`)).toEqual([]);
+    expect(await q(`select id from line_slot`)).toEqual([]);
+    const row = await copyRow(CARD);
+    expect(row).toMatchObject({ binder_half: "front", line_slot_id: null });
   });
 
   it("a two-stage family gets a placeholder for the sibling stage it does not own", async () => {
@@ -267,7 +312,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     await seedCard({
       id: "onlyvolve",
       name: "Onlyvolve",
-      dexId: ONLYMON_DEX + 1,
+      dexId: ONLYVOLVE_DEX,
       stage: "Stage1",
       evolveFrom: "Onlymon",
     });
@@ -319,7 +364,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     await seedCard({
       id: "onlyvolve",
       name: "Onlyvolve",
-      dexId: ONLYMON_DEX + 1,
+      dexId: ONLYVOLVE_DEX,
       stage: "Stage1",
       evolveFrom: "Onlymon",
     });
@@ -447,7 +492,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     await seedCard({
       id: "onlyvolve",
       name: "Onlyvolve",
-      dexId: ONLYMON_DEX + 1,
+      dexId: ONLYVOLVE_DEX,
       stage: "Stage1",
       evolveFrom: "Onlymon",
     });
@@ -687,6 +732,14 @@ describe("a line-join move cannot half-apply", () => {
       stage: "Basic",
       evolveFrom: null,
     });
+    // It evolves, so it forms a line (a Basic with no evolutions never does: Karvi, 2026-09-27).
+    await seedCard({
+      id: "onlyvolve",
+      name: "Onlyvolve",
+      dexId: ONLYVOLVE_DEX,
+      stage: "Stage1",
+      evolveFrom: "Onlymon",
+    });
     await seedShelvedFront(CARD, "onlymon");
     await asOwner(db);
 
@@ -833,6 +886,14 @@ describe("applyMove REFUSES a back-half shelf with no lineJoin, server-side", ()
       dexId: ONLYMON_DEX,
       stage: "Basic",
       evolveFrom: null,
+    });
+    // It evolves, so it forms a line (a Basic with no evolutions never does: Karvi, 2026-09-27).
+    await seedCard({
+      id: "onlyvolve",
+      name: "Onlyvolve",
+      dexId: ONLYVOLVE_DEX,
+      stage: "Stage1",
+      evolveFrom: "Onlymon",
     });
     await seedShelvedFront(CARD, "onlymon");
     await asOwner(db);

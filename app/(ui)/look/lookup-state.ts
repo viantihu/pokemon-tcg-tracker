@@ -14,9 +14,17 @@ export interface LookupView {
   notFound: boolean;
   /** The lookup itself did not complete; the message to show. Never set on a real miss. */
   failed: string | null;
+  /** False for a species with no evolutions: never a line (Karvi, 2026-09-27). Absent on an older answer. */
+  formsALine?: boolean;
 }
 
 export function lookupViewFrom(res: LookupResult): LookupView {
   if (!res.ok) return { answer: null, copies: [], notFound: false, failed: res.error };
-  return { answer: res.answer, copies: res.copies, notFound: res.answer === null, failed: null };
+  return {
+    answer: res.answer,
+    copies: res.copies,
+    notFound: res.answer === null,
+    failed: null,
+    ...(res.formsALine === false ? { formsALine: false } : {}),
+  };
 }

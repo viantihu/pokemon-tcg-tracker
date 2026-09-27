@@ -12,6 +12,7 @@
 
 import {
   buildChain,
+  formsALine,
   generateSlots,
   lineLocaleOf,
   testViability,
@@ -38,6 +39,7 @@ import {
 import { buildLineJoinIndex, joinOptionsFor } from "./join-options";
 import {
   IN_THE_HAUL,
+  NOT_A_LINE,
   stageLabel,
   type LinePopupExistingLine,
   type LinePopupModel,
@@ -168,6 +170,8 @@ export async function loadLinePopupModel(
     );
 
   if (proposal.kind === "start") {
+    // A species with no evolutions is never a line (Karvi, 2026-09-27): no line to lay out.
+    if (!formsALine(card, catalog)) throw new Error(NOT_A_LINE);
     const general = binders.filter((b) => b.type === "general");
     hereBinder = proposal.binderId ?? general[0]?.id ?? null;
     hereBand = proposal.band;

@@ -40,7 +40,13 @@ import {
   placementForMove,
   releaseSlotOps,
 } from "./move";
-import { lineReadsClosed, lineStatusOf, type LineChoice, type StageDecision } from "./popup";
+import {
+  lineReadsClosed,
+  lineStatusOf,
+  NOT_A_LINE,
+  type LineChoice,
+  type StageDecision,
+} from "./popup";
 import {
   stageWriteOps,
   thirdPocketWriteOps,
@@ -128,6 +134,8 @@ function startLine(
   // The engine's own chain walk and slot generation, as the cascade's new line uses, with the band SHE chose and
   // viability forced: starting a line from one card is her call, not a proposal the engine must be sure of.
   const chainViability = testViability(state.incoming, owned, state.catalog, state.typeColorMap);
+  // A species with no evolutions is never a line (Karvi's ruling, 2026-09-27), however she asks.
+  if (chainViability.chain.length < 2) throw new Error(NOT_A_LINE);
   const viability = { ...chainViability, band: choice.band as Band, viable: true };
   const gen = generateSlots(state.incoming, viability, owned, state.catalog, state.typeColorMap);
 

@@ -1485,6 +1485,8 @@ export function moveTargetFor(
     existingLines: join?.existingLines,
     naturalBandKey: join?.naturalBandKey,
     initial,
+    // A species with no evolutions is never a line: no back half offered (Karvi, 2026-09-27).
+    ...(item.formsALine === false ? { formsALine: false } : {}),
   };
 }
 

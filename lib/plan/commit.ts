@@ -54,7 +54,7 @@ import {
   releaseSlotOps,
 } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
-import type { LineChoice } from "@/lib/line/popup";
+import { NOT_A_LINE, type LineChoice } from "@/lib/line/popup";
 import { lineReadsClosed } from "@/lib/line/popup";
 import { buildBackHalfLineOps } from "@/lib/line/write";
 import { isLineCard } from "./line-proposal";
@@ -1146,6 +1146,8 @@ function writeNewLine(
   );
   const status = plan.status === "complete" && declinedAnyPull ? "open" : plan.status;
 
+  // A species with no evolutions is never a line (Karvi's ruling, 2026-09-27).
+  if (plan.slots.length < 2) throw new Error(NOT_A_LINE);
   const lineId = crypto.randomUUID();
   ops.push({
     op: "insert_line",

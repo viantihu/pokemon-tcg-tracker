@@ -45,6 +45,7 @@ import { defaultMoveHalf, isMoveDestinationComplete } from "@/lib/line/move";
 import type { Locale } from "@/lib/sync/types";
 import { bandMeta } from "./plan-meta";
 import {
+  NOT_A_LINE,
   defaultChoiceFor,
   type LineChoice,
   type LinePopupModel,
@@ -64,6 +65,7 @@ export function MovePanel({
   naturalBandKey,
   cardLocale,
   blockNeeds,
+  formsALine = true,
   lineModel,
   openLineOnMount = false,
   onConfirm,
@@ -94,6 +96,11 @@ export function MovePanel({
    * sheet.
    */
   blockNeeds?: BlockNeedCandidate[];
+  /**
+   * False for a card whose species has no evolutions (Karvi, 2026-09-27): it is never a line, so the back half is not
+   * offered. Absent: offered, and the server still refuses one (`NOT_A_LINE`).
+   */
+  formsALine?: boolean;
   /**
    * UIL-117: the line popup's model loader. When a screen passes it, picking BACK HALF opens the ONE line popup
    * (mockup v3) instead of the inline line chips, and her confirm there is the move, sent with her `LineChoice`.
@@ -405,7 +412,7 @@ export function MovePanel({
             <div className="ol">HALF</div>
             <div className="ochips">
               {(["front", "back"] as const).map((h) => {
-                const dead = h === "back" && backHalfNeedsLine;
+                const dead = h === "back" && (backHalfNeedsLine || !formsALine);
                 return (
                   <button
                     key={h}
@@ -413,7 +420,7 @@ export function MovePanel({
                     className={"ochip" + (half === h ? " on" : "")}
                     aria-pressed={half === h}
                     disabled={dead}
-                    title={dead ? backHalfReason : undefined}
+                    title={dead ? (formsALine ? backHalfReason : NOT_A_LINE) : undefined}
                     onClick={() => {
                       if (h === "back" && lineModel) {
                         void openLinePopup();
@@ -427,7 +434,11 @@ export function MovePanel({
                   </button>
                 );
               })}
-              {backHalfNeedsLine ? <span className="oskip">{backHalfReason}</span> : null}
+              {!formsALine ? (
+                <span className="oskip">{NOT_A_LINE}</span>
+              ) : backHalfNeedsLine ? (
+                <span className="oskip">{backHalfReason}</span>
+              ) : null}
             </div>
           </div>
           <div className="orow">

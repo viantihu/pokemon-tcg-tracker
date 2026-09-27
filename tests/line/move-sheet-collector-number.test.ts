@@ -13,6 +13,7 @@ import type { LookupAnswer } from "@/lib/surfaces";
 import { MoveOverlay, type MoveTargetCard } from "@/app/(ui)/_components/MoveOverlay";
 import { slotMoveTarget, unlinedMoveTarget } from "@/app/(ui)/line/LineScreen";
 import { lookupMoveTarget } from "@/app/(ui)/look/LookupScreen";
+import { lookupViewFrom } from "@/app/(ui)/look/lookup-state";
 
 const OPTIONS: MoveOptions = {
   binders: [{ id: "b1", name: "Binder 1", type: "general" }],
@@ -164,5 +165,25 @@ describe("UIL-061 · the Move sheet says which line a move leaves one short (QA 
       }),
     );
     expect(html).not.toContain("leaves the");
+  });
+});
+
+describe("a Basic with no evolutions is never a line (Karvi, 2026-09-27): both sheets' card carries it", () => {
+  const WHY = /A Basic with no evolutions can(?:&#x27;|')t start a line\./;
+  const backHalf = (html: string) => /<button[^>]*>BACK HALF<\/button>/.exec(html)?.[0] ?? "";
+  const copy = { copyId: "c3", role: "shelved" as const, currentLabel: "Binder 1 · Front · Red" };
+
+  it("Lookup: the answer's flag reaches the sheet, whose back half is off and says why", () => {
+    const html = sheet(lookupMoveTarget(answer(182), copy, false));
+    expect(backHalf(html)).toContain("disabled");
+    expect(html).toMatch(WHY);
+    // A card that forms a line keeps it.
+    expect(sheet(lookupMoveTarget(answer(182), copy))).not.toMatch(WHY);
+  });
+
+  it("Lookup's view keeps the server's false, and only a false", () => {
+    const res = { ok: true as const, answer: answer(182), copies: [] };
+    expect(lookupViewFrom({ ...res, formsALine: false }).formsALine).toBe(false);
+    expect(lookupViewFrom(res)).not.toHaveProperty("formsALine");
   });
 });

@@ -24,6 +24,7 @@
  * Pure, over a loaded context.
  */
 
+import { NOT_A_LINE } from "@/lib/line/popup";
 import { resolveBackLineFromContext, type BackfillContext } from "./context";
 import type { BackLineCommit, BackLineStageInfo, BackLineStageInput } from "./types";
 
@@ -62,6 +63,8 @@ export function validateBackLine(ctx: BackfillContext, input: BackLineCommit): B
 
   const resolved = resolveBackLineFromContext(ctx, input.seedTcgdexId, input.bandKey);
   if (!resolved) refuse(`The card this line was started from is not in the catalog — ${RELOAD}`);
+  // A species with no evolutions is never a line (Karvi's ruling, 2026-09-27).
+  if (resolved.stages.length < 2) refuse(NOT_A_LINE);
   if (input.rootDexId !== resolved.rootDexId) {
     refuse(`That line is not the ${resolved.speciesName} line it was started as — ${RELOAD}`);
   }

@@ -54,6 +54,8 @@ export interface MoveTargetCard {
   /** UIL-030: open binder-block needs this card could fill — present only when the engine offered the
    *  card as a repurposed block (Plan spotlight). The panel shows its block section only then. */
   blockNeeds?: BlockNeedCandidate[];
+  /** False for a card whose species has no evolutions: never a line, so no back half (Karvi, 2026-09-27). */
+  formsALine?: boolean;
 }
 
 export function MoveOverlay({
@@ -82,7 +84,8 @@ export function MoveOverlay({
   onConfirm: (dest: MoveDestination, lineChoice?: LineChoice) => void;
   onClose: () => void;
 }) {
-  const lineJoinOn = allowLineJoin ?? Boolean(card.joinCandidates);
+  // A card whose species forms no line has no line to pick (Karvi, 2026-09-27): the plain move, back half off.
+  const lineJoinOn = card.formsALine !== false && (allowLineJoin ?? Boolean(card.joinCandidates));
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -162,6 +165,7 @@ export function MoveOverlay({
             existingLines={card.existingLines}
             naturalBandKey={card.naturalBandKey}
             blockNeeds={card.blockNeeds}
+            formsALine={card.formsALine}
             lineModel={lineModel}
             openLineOnMount={openLineOnMount}
             onConfirm={onConfirm}

@@ -215,6 +215,15 @@ export interface Viability {
 }
 
 /**
+ * Whether a card's species forms a LINE at all (Karvi, 2026-09-27: "A basic with no evolution should not be allowed
+ * to get put in the 'lines' area"): its family has at least two stages in the catalog, in the card's own language
+ * (`buildChain`). A single-stage species lives in a front half, a collection or the bulk box, never in a line.
+ */
+export function formsALine(card: CatalogCard, catalog: CatalogCard[]): boolean {
+  return buildChain({ id: "forms-a-line", card, variant: "normal" }, catalog).length >= 2;
+}
+
+/**
  * The viability test (system-design §6). Counts chain stages that have at least one prospective
  * same-colour member — an owned copy OR a catalog-confirmed printing that could be a placeholder.
  * `< 2` ⇒ not viable ⇒ the caller routes the card to the front half.

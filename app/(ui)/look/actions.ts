@@ -15,11 +15,11 @@
  * that means "the mirror was asked and does not have this card".
  */
 
-import { band } from "@/lib/engine";
+import { band, formsALine } from "@/lib/engine";
 import { applyMove, loadMoveOptions, moveNameLookups } from "@/lib/line";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
 import type { LineChoice } from "@/lib/line/popup";
-import { getOwnerContext, loadPlanContext, type PlanContext } from "@/lib/plan";
+import { getOwnerContext, loadPlanContext, toCatalogCard, type PlanContext } from "@/lib/plan";
 import { catalogCardRepo, wishlistItemRepo, type DbClient } from "@/lib/repo";
 import {
   buildLookupAnswer,
@@ -48,7 +48,13 @@ export async function searchCatalog(query: string): Promise<LookupCard[]> {
  * `ok: false` = the lookup itself failed, and the card may well exist.
  */
 export type LookupResult =
-  | { ok: true; answer: LookupAnswer | null; copies: LookupMovableCopy[] }
+  | {
+      ok: true;
+      answer: LookupAnswer | null;
+      copies: LookupMovableCopy[];
+      /** False for a species with no evolutions: never a line, so her Move offers no back half (2026-09-27). */
+      formsALine?: boolean;
+    }
   | { ok: false; error: string };
 
 export async function lookupAnswer(tcgdexId: string): Promise<LookupResult> {
@@ -264,5 +270,10 @@ async function assembleLookup(
     wishlist,
     collections,
   });
-  return { ok: true, answer, copies: movable };
+  return {
+    ok: true,
+    answer,
+    copies: movable,
+    formsALine: formsALine(toCatalogCard(row), pc.ctx.catalog),
+  };
 }

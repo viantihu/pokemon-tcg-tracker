@@ -7,7 +7,7 @@
  */
 
 import { extraCopyOfFor, lineNameFor, lineProposalFor, type LineLookups } from "./line-proposal";
-import type { CascadeResult, IncomingCard, PlacementTarget } from "@/lib/engine";
+import type { CascadeResult, CatalogCard, IncomingCard, PlacementTarget } from "@/lib/engine";
 import { actionForResult, resultNeedsDecision } from "./action";
 import type { PlanItem } from "./types";
 import { localeOfId } from "@/lib/catalog/locale";
@@ -33,6 +33,8 @@ export interface AssembleLookups {
   lines?: LineLookups;
   /** A copy as she would name it, "Charmeleon 027/197", and its variant, for an upgrade's reason (UIL-126). */
   copyLabel?(copyId: string): { label: string; variant: string } | null;
+  /** Whether a card's species forms a line at all (Karvi, 2026-09-27). Optional for hand-built lookups. */
+  formsALine?(card: CatalogCard): boolean;
 }
 
 const binderName = (id: string | null, l: AssembleLookups) =>
@@ -175,5 +177,6 @@ export function toPlanItem(
             localeOfId(incoming.card.tcgdexId),
           )
         : null,
+    formsALine: l.formsALine ? l.formsALine(incoming.card) : true,
   };
 }

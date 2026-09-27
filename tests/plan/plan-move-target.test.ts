@@ -4,7 +4,10 @@
  * closes the chain the render tests could not reach — `openMove` runs after two awaited server actions,
  * so the component's own state is not renderable statically.
  */
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { MoveOverlay } from "@/app/(ui)/_components/MoveOverlay";
 import type { PlanItem } from "@/lib/plan";
 import type { LineJoinOptions } from "@/lib/line/join-options";
 import { moveTargetFor } from "@/app/(ui)/plan/PlanScreen";
@@ -111,5 +114,36 @@ describe("UIL-030 · moveTargetFor attaches the open block needs ONLY for a card
     expect(
       moveTargetFor({ ...ITEM, offerBlockRepurpose: true }, null, INITIAL).blockNeeds,
     ).toBeUndefined();
+  });
+});
+
+describe("a Basic with no evolutions is never a line (Karvi, 2026-09-27): the Plan's Move sheet card carries it", () => {
+  it("a card whose species forms no line: formsALine false on the card, so its back half is off", () => {
+    expect(moveTargetFor({ ...ITEM, formsALine: false }, JOIN, INITIAL).formsALine).toBe(false);
+  });
+
+  it("the real Move sheet then offers no line to pick at all, and her words say why", () => {
+    const html = renderToStaticMarkup(
+      createElement(MoveOverlay, {
+        card: moveTargetFor({ ...ITEM, formsALine: false }, JOIN, INITIAL),
+        options: {
+          binders: [{ id: "b1", name: "Binder 1", type: "general" }],
+          collectionsByBinder: {},
+          bands: [{ key: "red", display: "Red" }],
+        },
+        onConfirm: () => {},
+        onClose: () => {},
+      }),
+    );
+    expect(html).not.toContain("Start a new line");
+    expect(html).toMatch(/A Basic with no evolutions can(?:&#x27;|')t start a line\./);
+    expect(/<button[^>]*>BACK HALF<\/button>/.exec(html)?.[0]).toContain("disabled");
+  });
+
+  it("a card that forms a line, or an older plan with no flag: nothing added, the back half as before", () => {
+    expect(moveTargetFor({ ...ITEM, formsALine: true }, JOIN, INITIAL)).not.toHaveProperty(
+      "formsALine",
+    );
+    expect(moveTargetFor(ITEM, JOIN, INITIAL)).not.toHaveProperty("formsALine");
   });
 });
