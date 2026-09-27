@@ -79,6 +79,22 @@ export interface StandInDraft {
   language: Language;
 }
 
+/** A printing she can chase for a stage: the species in the line's language, same colour first (UIL-121 Q2). */
+export interface StageOption {
+  card: CardIdentity;
+  sameColour: boolean;
+  /** A specialty-class printing: it lives in the specialty binder. */
+  special: boolean;
+  priceMarket: number | null;
+}
+
+/** One of her spare copies that could fill a pocket, and where it is now ("Bulk box"). */
+export interface FillerCardOption {
+  copyId: string;
+  card: CardIdentity;
+  where: string;
+}
+
 /** Pockets in one row of her binder page (3x3). A complete line with fewer cards has a third pocket to fill. */
 export const LINE_ROW_POCKETS = 3;
 
@@ -127,6 +143,13 @@ export interface LinePopupStage {
      */
     leaves?: { lineName: string; stage: string };
   };
+  /** The stage's species (UIL-121): what her choice for an unfilled stage is checked against. */
+  dexId?: number;
+  /**
+   * An unfilled stage's suggestion (UIL-121): the cheapest same-colour printing in the line's language, else the
+   * special one when that is all there is (`special`). SHOWN, never selected: she chooses.
+   */
+  suggestion?: { card: CardIdentity; special: boolean } | null;
 }
 
 /** The line the popup is about: a new one being started, or the existing one being added to or replaced in. */

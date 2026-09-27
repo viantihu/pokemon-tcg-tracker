@@ -28,6 +28,16 @@ export const copyRepo = {
     return data ?? [];
   },
 
+  /**
+   * Every copy in her bulk box (UIL-121): the spare cards she can pick to fill a line's pocket. Paged past the row
+   * cap, like the haul queue.
+   */
+  async listBulk(db: DbClient): Promise<Row<"copy">[]> {
+    return pageFiltered<Row<"copy">>("copy", (from, to) =>
+      db.from("copy").select("*").eq("role", "bulk").order("id").range(from, to),
+    );
+  },
+
   /** Every physical copy of a printing (lookup "where is my card" — all roles, all binders). */
   async listByCatalogCard(db: DbClient, catalogCardId: string): Promise<Row<"copy">[]> {
     const { data, error } = await db.from("copy").select("*").eq("catalog_card_id", catalogCardId);

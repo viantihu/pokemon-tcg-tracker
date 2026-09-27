@@ -3717,6 +3717,42 @@ button.subhead.folded:hover {
   letter-spacing: 0.04em;
   text-transform: none;
 }
+/* UIL-121: her choice for each unfilled stage and a short line's third pocket (StageChoice.tsx). */
+.lp-stagechoice {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 3px solid var(--ink);
+  background: var(--panel);
+}
+.lp-stagechoice .lp-choice .btn.on {
+  background: var(--note);
+}
+.lp-suggested {
+  margin-top: 6px;
+}
+.lp-suggested .btn {
+  margin-left: auto;
+}
+.lp-pick {
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lp-pick.on {
+  background: var(--note);
+}
+.lp-tag {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 0 4px;
+  border: 2px solid var(--ink);
+  font-size: 9px;
+}
+.lp-standin {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
 .lp-sugg {
   margin-left: 6px;
   padding: 0 5px;
