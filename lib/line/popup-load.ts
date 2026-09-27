@@ -11,6 +11,7 @@
  */
 
 import {
+  buildChain,
   generateSlots,
   lineLocaleOf,
   testViability,
@@ -372,7 +373,15 @@ export async function loadLinePopupModel(
     { binderId: hereBinder, band: hereBand, locale: cardLocale },
     model.line.lineId,
   );
-  return { ...model, existingLines };
+  // Every stage names its species (the family's chain, by stage), so a screen can tell which of its waiting cards
+  // this line could still take: the Haul Plan's "· next" and step-through (UIL-120; one predicate, sameLineWaiting).
+  const chain = buildChain(incoming, catalog);
+  const stages = model.stages.map((st) =>
+    st.dexId === undefined && chain[st.stageIndex]
+      ? { ...st, dexId: chain[st.stageIndex].dexId }
+      : st,
+  );
+  return { ...model, stages, existingLines };
 }
 
 /**

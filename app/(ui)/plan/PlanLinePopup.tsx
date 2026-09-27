@@ -29,7 +29,13 @@ import {
 } from "@/lib/line/popup";
 import { LinePopup } from "../_components/LinePopup";
 import { useEscapeLayer } from "../_components/escape-layer";
-import { lineDoneFor } from "@/lib/plan/line-done";
+import {
+  lineDoneFor,
+  lineKeyOf,
+  routedToLine,
+  sameLineWaiting,
+  type WaitingHaulCard,
+} from "@/lib/plan/line-done";
 
 export function PlanLinePopup({
   item,
@@ -38,6 +44,7 @@ export function PlanLinePopup({
   loadModelFor,
   bandMismatch,
   position,
+  waiting,
   extraCopy = false,
   busy,
   error,
@@ -51,16 +58,26 @@ export function PlanLinePopup({
   moveOptions: MoveOptions | null;
   /**
    * The popup's model for a copy and a proposal, from the server; a refusal throws its message. For this card, and
-   * for the card coming OUT of a swap when she sends it to "Another line…" (answer 3: anywhere).
+   * for the card coming OUT of a swap when she sends it to "Another line…" (answer 3: anywhere). `comingCopyIds`: the
+   * haul copies routed to the same line, whose stages it shows as "In this haul" and does not ask about (UIL-121).
    */
-  loadModelFor(copyId: string, proposal: LineProposal): Promise<LinePopupModel>;
+  loadModelFor(
+    copyId: string,
+    proposal: LineProposal,
+    comingCopyIds?: string[],
+  ): Promise<LinePopupModel>;
   /** The card's colour question, when its line is another colour (UIL-069); null when there is none. */
   bandMismatch: BandMismatchChoice | null;
   /**
-   * "Line card k of N" in this haul, and whether another unshelved line card remains after this one. Absent for the
-   * swap on a plain extra copy (UIL-126), which is not in the step-through.
+   * "Line card k of N": this card's place among its line's cards in this haul, in evolution order (Karvi 2026-09-27).
+   * Absent for the swap on a plain extra copy (UIL-126), which is not in the step-through.
    */
-  position?: { index: number; total: number; next: boolean };
+  position?: { index: number; total: number };
+  /**
+   * The other cards still waiting in this haul, with the line each is proposed into. "· next" only when one of them
+   * goes into THIS line, by the same predicate the step-through opens the next card with (`sameLineWaiting`, UIL-120).
+   */
+  waiting: WaitingHaulCard[];
   /**
    * UIL-126: opened from a plain extra copy's "⇄ Swap this one into the line…". Swap is picked, the card coming out to
    * bulk; Keep is her normal Done, this card to where an extra copy goes (the front half), named in the popup.
@@ -80,10 +97,17 @@ export function PlanLinePopup({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [colour, setColour] = useState<"line" | "own" | null>(null);
   useEscapeLayer(true, onCancel);
+  // UIL-121: the haul cards routed to THIS line (`routedToLine`, the step-through's own predicate) are "In this haul",
+  // so their stages are not asked about now: their own confirm asks. Read as the popup opened, so the stages it shows
+  // and the choice it sends agree, whatever the rest of the plan does meanwhile.
+  const [waitingAtOpen] = useState(waiting);
+  const comingKey = routedToLine(lineKeyOf(proposal, item.startsLine), waitingAtOpen)
+    .flatMap((c) => (c.copyId ? [c.copyId] : []))
+    .join(",");
 
   useEffect(() => {
     let live = true;
-    loadModelFor(copyId, proposal).then(
+    loadModelFor(copyId, proposal, comingKey ? comingKey.split(",") : undefined).then(
       (m) => {
         if (!live) return;
         setModel(m);
@@ -97,7 +121,7 @@ export function PlanLinePopup({
     return () => {
       live = false;
     };
-  }, [proposal, copyId, loadModelFor]);
+  }, [proposal, copyId, loadModelFor, comingKey]);
 
   if (!model) {
     return (
@@ -154,6 +178,21 @@ export function PlanLinePopup({
       model.line.status,
     );
 
+  // Whether confirming leads on to another card for THIS line: a waiting card proposed into it (this line's id, or for
+  // a start the same new line), of a species one of its stages will still want after this confirm (a wanted stage, or
+  // a pull she did not tick).
+  const openAfter = model.stages
+    .filter(
+      (st) =>
+        st.state === "wanted" ||
+        st.state === "coming" ||
+        (st.state === "pullable" && !(st.pull && ticked.includes(st.pull.copyId))),
+    )
+    .map((st) => st.dexId)
+    .filter((d): d is number => d !== undefined);
+  const thisLine = lineKeyOf(proposal, item.startsLine);
+  const nextHere = colour !== "own" && sameLineWaiting(thisLine, openAfter, waiting).length > 0;
+
   return (
     <div className="lp-overlay">
       <LinePopup
@@ -161,9 +200,11 @@ export function PlanLinePopup({
         value={value}
         onChange={setValue}
         onCancel={onCancel}
-        onConfirm={(choice) => onConfirm(choice, model.stages.at(-1)?.card?.name ?? null)}
+        onConfirm={(choice) =>
+          onConfirm(withComing(choice, comingKey), model.stages.at(-1)?.card?.name ?? null)
+        }
         onSwitch={(p) => setProposal(p)}
-        position={position ? { ...position, next: position.next && !completes } : undefined}
+        position={position ? { ...position, next: !completes && nextHere } : undefined}
         busy={busy}
         error={error ?? loadError}
         incomingLabel="New · this haul"
@@ -202,4 +243,13 @@ export function PlanLinePopup({
       />
     </div>
   );
+}
+
+/** Her choice, with the haul copies routed to its line (UIL-121), so the server does not ask about their stages either. */
+function withComing(choice: LineChoice, comingKey: string): LineChoice {
+  if (!comingKey) return choice;
+  const comingCopyIds = comingKey.split(",");
+  if (choice.mode === "start" || choice.mode === "join") return { ...choice, comingCopyIds };
+  if (choice.mode === "replace" && !choice.keep) return { ...choice, comingCopyIds };
+  return choice;
 }

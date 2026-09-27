@@ -67,6 +67,15 @@ export interface PlanItem {
    * front-half Done), so the spotlight names the line and offers "⇄ Swap this one into the line…". Null otherwise.
    */
   extraCopyOf?: ExtraCopyOf | null;
+  /** The card's species (dex ids): which of a line's open stages a waiting card could fill (UIL-120). */
+  dexIds?: number[];
+  /**
+   * A start's new line, by the identity the commit gives it (`newLineKey`: binder, root species, band, language), so
+   * the step-through can tell two cards that would start the SAME line before it has an id (UIL-120). Null otherwise.
+   */
+  startsLine?: string | null;
+  /** The line stage a card headed into a line goes into (0 = the Basic), for the step-through's order (UIL-120). */
+  lineStage?: number | null;
 }
 
 /** The line a plain extra copy duplicates, in her words (UIL-126). */

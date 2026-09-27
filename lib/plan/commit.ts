@@ -32,7 +32,7 @@
 
 import { localeOfId } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
-import { lineLocaleOf, effectiveType, isPlaced, type Role } from "@/lib/engine";
+import { buildChain, lineLocaleOf, effectiveType, isPlaced, type Role } from "@/lib/engine";
 import {
   applyWriteOps,
   evolutionLineRepo,
@@ -58,7 +58,7 @@ import type { LineChoice } from "@/lib/line/popup";
 import { lineReadsClosed } from "@/lib/line/popup";
 import { buildBackHalfLineOps } from "@/lib/line/write";
 import { isLineCard } from "./line-proposal";
-import { lineDoneFor } from "./line-done";
+import { lineDoneFor, newLineKey } from "./line-done";
 
 /**
  * `applyMove`'s exact wording (lib/line/write.ts) for the same refusals on this path (UIL-070 part 1).
@@ -180,18 +180,50 @@ export interface CommitResult {
    * write, never from the browser. The Haul Plan's step-through stops there. False for a card with no line choice.
    */
   lineDone?: boolean;
+  /**
+   * The line her confirm concerned, as it reads after the write (UIL-120, Karvi 2026-09-27: "Confirm & next" never
+   * opens another line's card): its id, and the species its open stages still want, so the step-through opens the next
+   * card only when its re-routed proposal names THIS line (`sameLineWaiting`). A stage she left empty wants none.
+   */
+  line?: LineAfterWrite;
 }
 
-/** The one rule (./line-done) over the line as it is now: read AFTER her confirm's write. */
-async function lineDoneAfterWrite(db: DbClient, lineId: string): Promise<boolean> {
+/** Her confirm's line after the write (UIL-120). */
+export interface LineAfterWrite {
+  lineId: string;
+  /** Species (dex ids) its open stages still want: a placeholder that is not a stage she left empty. */
+  openDexIds: number[];
+}
+
+/** The one rule (./line-done) over the line as it is now, and what it still wants: read AFTER her confirm's write. */
+async function lineAfterWrite(
+  db: DbClient,
+  pc: PlanContext,
+  lineId: string,
+  incoming: PlannedCard,
+): Promise<{ lineDone: boolean; line: LineAfterWrite }> {
   const [slots, line] = await Promise.all([
     lineSlotRepo.listByLine(db, lineId),
     evolutionLineRepo.getByPk(db, lineId),
   ]);
-  return lineDoneFor(
-    slots.map((s) => s.state),
-    line?.status,
-  );
+  const card = pc.catalogById.get(incoming.tcgdexId);
+  // The family's chain, by stage: the species each stage wants, whether or not it names a target yet.
+  const chain = card
+    ? buildChain({ id: incoming.incomingId, card, variant: incoming.variant }, pc.ctx.catalog)
+    : [];
+  const open = slots.filter((s) => s.state === "placeholder" && s.stage_choice !== "empty");
+  return {
+    lineDone: lineDoneFor(
+      slots.map((s) => s.state),
+      line?.status,
+    ),
+    line: {
+      lineId,
+      openDexIds: open
+        .map((s) => chain[s.stage_index]?.dexId)
+        .filter((d): d is number => d !== undefined),
+    },
+  };
 }
 
 /**
@@ -466,7 +498,8 @@ export async function commitCardPlacement(
   assertPlacementBandsConfigured(payload, pc);
   assertPlacementBindersConfigured(payload, pc);
   await applyWriteOps(db, payload);
-  return { counts, lineDone: keptLineId ? await lineDoneAfterWrite(db, keptLineId) : false };
+  if (!keptLineId || !lead) return { counts, lineDone: false };
+  return { counts, ...(await lineAfterWrite(db, pc, keptLineId, lead)) };
 }
 
 /** How her line-popup choice is named in the decision history (UIL-117). */
@@ -558,7 +591,8 @@ async function commitLineChoice(
   await applyWriteOps(db, payload);
   const lineId =
     choice.mode === "start" ? (started?.op === "insert_line" ? started.id : null) : choice.lineId;
-  return { counts, lineDone: lineId ? await lineDoneAfterWrite(db, lineId) : false };
+  if (!lineId) return { counts, lineDone: false };
+  return { counts, ...(await lineAfterWrite(db, pc, lineId, p)) };
 }
 
 /**
@@ -1288,12 +1322,15 @@ function findLineInBinder(
   return null;
 }
 
-/** The in-pass key for a line created earlier in THIS payload — the same (binder, species, band). */
+/**
+ * The in-pass key for a line created earlier in THIS payload — the same (binder, species, band). The same identity the
+ * Haul Plan's step-through gives a line a start would write (`newLineKey`, UIL-120).
+ */
 function passLineKey(
   binderId: string | null,
   rootDexId: number,
   colorBand: string,
   locale: Locale,
 ): string {
-  return `${binderId ?? ""}:${rootDexId}:${colorBand}:${locale}`;
+  return newLineKey(binderId, rootDexId, colorBand, locale);
 }
