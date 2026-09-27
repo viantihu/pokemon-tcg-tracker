@@ -207,6 +207,8 @@ describe("UIL-128 · never in the way (the UX Dev's review of #414)", () => {
     const pill = screen.getByRole("button", {
       name: `Tour · Step 2 of ${TUTORIAL_STEPS.length} ▸`,
     });
+    // Inside the click-through dock (tests/ui/tutorial-dock-css.test.ts pins its pointer-events rule).
+    expect(pill.parentElement?.classList.contains("tour-dock")).toBe(true);
     expect(document.activeElement).toBe(pill);
     expect(pointed()).toEqual(["/settings"]);
     expect(finishTutorial).not.toHaveBeenCalled();
