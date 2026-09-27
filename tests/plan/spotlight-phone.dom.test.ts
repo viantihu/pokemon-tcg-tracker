@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanItem } from "@/lib/plan";
 import type { DraftCard, RunPlanResult } from "@/app/(ui)/plan/plan-types";
 import { PlanScreen } from "@/app/(ui)/plan/PlanScreen";
+import { shelveCardAction } from "@/app/(ui)/plan/actions";
 
 vi.mock("@/app/(ui)/plan/actions", () => ({
   shelveCardAction: vi.fn(),
@@ -79,13 +80,14 @@ const PLAN: RunPlanResult = {
 };
 
 const realMatchMedia = window.matchMedia;
-beforeEach(() => {
+/** A parked sitting on this plan, so the screen resumes it. */
+function park(plan: RunPlanResult) {
   window.sessionStorage.setItem(
     "binderops.plan.v1",
     JSON.stringify({
       stamp: STAMP,
       draft: DRAFT,
-      plan: PLAN,
+      plan,
       done: [],
       cur: 0,
       overrides: {},
@@ -93,7 +95,8 @@ beforeEach(() => {
       collapsedSubgroups: [],
     }),
   );
-});
+}
+beforeEach(() => park(PLAN));
 afterEach(() => {
   cleanup();
   window.sessionStorage.clear();
@@ -169,5 +172,44 @@ describe("UIL-125 · the spotlight on a phone", () => {
     await user.click(document.getElementById("plan-row-d2") as HTMLElement);
     expect(inHand(spot)).toBe("Toedscool");
     expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it("a card that needs a collection pick: its row box brings the spotlight back too, and shelves nothing", async () => {
+    // Its box does not shelve it unseen (UIL-053): it puts the card in her hand, where she picks the collection.
+    // On a phone that hand has scrolled away, so the box brings it back, the same as tapping the row (QA on #409).
+    const [first, second] = DRAFT.map(item);
+    park({
+      ...PLAN,
+      groups: [
+        {
+          ...PLAN.groups[0],
+          subgroups: [
+            {
+              ...PLAN.groups[0].subgroups[0],
+              rows: [
+                first,
+                {
+                  ...second,
+                  action: "SPEC",
+                  destination: "Specialty A",
+                  collectionPick: {
+                    binderId: "sp",
+                    collections: [
+                      { id: "c1", name: "Starters" },
+                      { id: "c2", name: "Grass" },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const { user, scroll, spot } = await mountAt({ phone: true, spotTop: -300 });
+    await user.click(screen.getByRole("button", { name: "Shelve Toedscool" }));
+    expect(inHand(spot)).toBe("Toedscool");
+    expect(scroll).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(shelveCardAction)).not.toHaveBeenCalled();
   });
 });
