@@ -1457,3 +1457,67 @@ jobs:
           }));
           JS
           node uil121.mjs
+
+      # UIL-121 A1 AFTER (migration 0030, #412): the stage choices and pockets 0030 adds, and the rules it converts to.
+      # READ-ONLY, COUNTS ONLY. Before 0030 is live the new columns do not exist; the step says so and does not fail.
+      - name: "UIL-121 A1 (0030): stage choices, pockets and rule counts (counts only)"
+        if: always()
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          cat > uil121a1.mjs <<'JS'
+          import { createClient } from "@supabase/supabase-js";
+          const db = createClient(`https://${process.env.PROJECT_REF}.supabase.co`, process.env.SERVICE_KEY, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+          const all = async (table, cols) => {
+            const out = [];
+            for (let from = 0; ; from += 1000) {
+              const { data, error } = await db.from(table).select(cols).order("id").range(from, from + 999);
+              if (error) throw Object.assign(new Error(`${table}: ${error.message}`), { code: error.code });
+              out.push(...data);
+              if (data.length < 1000) return out;
+            }
+          };
+          let lines, slots, blocks, wishes;
+          try {
+            [lines, slots, blocks, wishes] = await Promise.all([
+              all("evolution_line", "id,status,extra_pocket"),
+              all("line_slot", "id,line_id,state,stage_choice,target_catalog_card_id"),
+              all("binder_block", "id,line_id,line_slot_id,purpose,copy_id"),
+              all("wishlist_item", "id,line_slot_id,resolved_at"),
+            ]);
+          } catch (e) {
+            if (/column .* does not exist/.test(e.message) || e.code === "42703") {
+              console.log(JSON.stringify({ migration_0030: "not applied yet (its columns are absent)" }));
+              process.exit(0);
+            }
+            throw e;
+          }
+          const tally = (xs, f) => xs.reduce((m, x) => ((m[f(x)] = (m[f(x)] ?? 0) + 1), m), {});
+          const byLine = new Map();
+          for (const s of slots) byLine.set(s.line_id, [...(byLine.get(s.line_id) ?? []), s]);
+          const openWishes = (slotId) => wishes.filter((w) => w.line_slot_id === slotId && !w.resolved_at).length;
+          const reads = (st) => (["closed", "complete", "terminated"].includes(st) ? "closed" : "open");
+          const lineOf = new Map(lines.map((l) => [l.id, l]));
+          console.log(JSON.stringify({
+            lines_by_status_and_pocket: tally(lines, (l) => `${l.status}/${l.extra_pocket ?? "no-pocket-choice"}`),
+            slots_by_state_and_choice: tally(slots, (s) => `${s.state}/${s.stage_choice ?? "undecided"}`),
+            binder_blocks_by_purpose_and_slot: tally(blocks, (b) => `${b.purpose}/${b.line_slot_id ? "on-a-slot" : "line-level"}/${b.copy_id ? "copy" : "no-copy"}`),
+            // Each must be 0: the rules assert_line_slots applies on the next write to that line.
+            rule_breaks: {
+              all_filled_but_open: lines.filter((l) => reads(l.status) === "open" && (byLine.get(l.id) ?? []).length > 0 && (byLine.get(l.id) ?? []).every((s) => s.state === "filled")).length,
+              closed_but_chasing: lines.filter((l) => reads(l.status) === "closed" && (byLine.get(l.id) ?? []).some((s) => s.stage_choice === "chase")).length,
+              chase_without_one_open_wish_or_card: slots.filter((s) => s.stage_choice === "chase" && (s.state !== "placeholder" || !s.target_catalog_card_id || openWishes(s.id) !== 1)).length,
+              empty_with_a_wish: slots.filter((s) => s.stage_choice === "empty" && openWishes(s.id) > 0).length,
+              filler_without_exactly_one_block: slots.filter((s) => s.stage_choice === "filler" && (s.state !== "block" || blocks.filter((b) => b.line_slot_id === s.id).length !== 1)).length,
+              filled_with_a_choice: slots.filter((s) => s.state === "filled" && s.stage_choice).length,
+              block_on_a_slot_of_another_line: blocks.filter((b) => b.line_slot_id && slots.find((s) => s.id === b.line_slot_id)?.line_id !== b.line_id).length,
+            },
+            legacy_words_still_stored: tally(lines.filter((l) => ["capped", "complete", "terminated"].includes(l.status)), (l) => l.status),
+            lines_with_a_status_row_missing: [...byLine.keys()].filter((id) => !lineOf.has(id)).length,
+          }));
+          JS
+          node uil121a1.mjs
