@@ -1521,3 +1521,49 @@ jobs:
           }));
           JS
           node uil121a1.mjs
+
+      # UIL-121 / Karvi's ruling 2026-09-27: a Basic with no evolution never goes in a line. How many copies would that
+      # ruling strand today: shelved in a BACK half with no line, whose species has no other stage. COUNTS ONLY.
+      - name: "UIL-121: single-stage Basics in a back half with no line (counts only)"
+        if: always()
+        env:
+          SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          set -euo pipefail
+          cat > singlestage.mjs <<'JS'
+          import { createClient } from "@supabase/supabase-js";
+          const db = createClient(`https://${process.env.PROJECT_REF}.supabase.co`, process.env.SERVICE_KEY, {
+            auth: { persistSession: false, autoRefreshToken: false },
+          });
+          const all = async (table, cols, filter = (q) => q) => {
+            const out = [];
+            for (let from = 0; ; from += 1000) {
+              const { data, error } = await filter(db.from(table).select(cols)).order(cols.split(",")[0]).range(from, from + 999);
+              if (error) throw new Error(`${table}: ${error.message}`);
+              out.push(...data);
+              if (data.length < 1000) return out;
+            }
+          };
+          const [copies, cards, lines, slots] = await Promise.all([
+            all("copy", "id,catalog_card_id,role,binder_half,line_slot_id"),
+            all("catalog_card", "tcgdex_id,name,stage,evolve_from,locale"),
+            all("evolution_line", "id"),
+            all("line_slot", "id,line_id"),
+          ]);
+          const norm = (v) => (v ?? "").trim().toLowerCase();
+          // A family has another stage when some card (same locale) evolves FROM this name, or this card evolves from one.
+          const evolvesFrom = new Set(cards.filter((c) => c.evolve_from).map((c) => `${c.locale}|${norm(c.evolve_from)}`));
+          const byId = new Map(cards.map((c) => [c.tcgdex_id, c]));
+          const singleStage = (c) => !!c && c.stage === "Basic" && !c.evolve_from && !evolvesFrom.has(`${c.locale}|${norm(c.name)}`);
+          const backNoLine = copies.filter((c) => c.role === "shelved" && c.binder_half === "back" && !c.line_slot_id);
+          const inLine = copies.filter((c) => c.line_slot_id);
+          const slotsPerLine = slots.reduce((m, s) => ((m[s.line_id] = (m[s.line_id] ?? 0) + 1), m), {});
+          console.log(JSON.stringify({
+            back_half_shelved_with_no_line: backNoLine.length,
+            of_those_single_stage_basics: backNoLine.filter((c) => singleStage(byId.get(c.catalog_card_id))).length,
+            single_stage_basics_in_a_line_slot: inLine.filter((c) => singleStage(byId.get(c.catalog_card_id))).length,
+            lines_with_fewer_than_two_slots: lines.filter((l) => (slotsPerLine[l.id] ?? 0) < 2).length,
+          }));
+          JS
+          node singlestage.mjs
