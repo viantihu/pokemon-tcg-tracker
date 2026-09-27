@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { deploymentLabel, rootTitle } from "@/lib/deployment";
+import { DeploymentBanner } from "./_components/DeploymentBanner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,8 +14,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Which deployment this is (UIL-129): a banner and a tab-title prefix everywhere but Production.
+const deployment = deploymentLabel(process.env.VERCEL_ENV);
+
 export const metadata: Metadata = {
-  title: "Binder Ops · Pokémon TCG Binder",
+  title: rootTitle(deployment, "Binder Ops · Pokémon TCG Binder"),
   description: "Routes each card to a binder and half, and tracks evolution line state.",
   applicationName: "TCG Binder",
   manifest: "/manifest.webmanifest",
@@ -39,7 +44,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <DeploymentBanner label={deployment} />
+        {children}
+      </body>
     </html>
   );
 }
