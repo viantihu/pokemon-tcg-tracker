@@ -12,6 +12,7 @@
  * Pure: types and small helpers only, no I/O.
  */
 
+import type { Language } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
 import type { CardIdentity, ExistingLineBlock, MoveDestination, MoveOptions } from "./types";
 
@@ -47,6 +48,39 @@ export type LineChoice =
 
 /** Where a card coming out of a line goes when that is another back half: a line it starts or joins. */
 export type OutgoingLineChoice = Extract<LineChoice, { mode: "start" } | { mode: "join" }>;
+
+/* --------------------------------------- her choice for each stage --------------------------------------- */
+
+/**
+ * What she chose for one unfilled stage of a line (UIL-121, Karvi 2026-09-27: nothing is written for her). Chase a card
+ * (one in the catalog, or a placeholder card she makes because the catalog lacks it), leave the stage empty, or record
+ * what physically fills its pocket. Checked on the server by `validateStageDecision` (./stage-choice).
+ */
+export type StageDecision =
+  | { kind: "chase"; catalogCardId: string }
+  | { kind: "chase"; newStandIn: StandInDraft }
+  | { kind: "empty" }
+  | { kind: "filler"; filler: FillerChoice };
+
+/** A pocket's filler: a basic energy (untracked), or one of her copies, which becomes a block there. */
+export type FillerChoice = { material: "energy" } | { material: "card"; copyId: string };
+
+/** What fills a complete short line's third pocket (UIL-121 Q4): a filler, or nothing. */
+export type ThirdPocketChoice = FillerChoice | { material: "empty" };
+
+/**
+ * A placeholder card she makes from the popup: a CATALOG-ONLY stand-in (no copy; UIL-108's form). Its dex id, stage,
+ * types and card class are the stage's, set on the server; only what she typed travels.
+ */
+export interface StandInDraft {
+  name: string;
+  setName: string | null;
+  localId: string | null;
+  language: Language;
+}
+
+/** Pockets in one row of her binder page (3x3). A complete line with fewer cards has a third pocket to fill. */
+export const LINE_ROW_POCKETS = 3;
 
 /* --------------------------------------- what a screen proposes --------------------------------------- */
 
