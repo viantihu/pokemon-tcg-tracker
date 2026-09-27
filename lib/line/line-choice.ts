@@ -309,6 +309,79 @@ function pullInto(
 
 /* ----------------------------------------------- join ----------------------------------------------- */
 
+/**
+ * Whether this card is the slot's own stage of this line (the Senior BA's ruling on #434, and the TL's review). Any
+ * card can bring a line choice (the Haul Plan's Move sheet), so this is what holds a join to its line.
+ *
+ *   - A slot she CHASES names its card: the same species. Only a chase: an undecided slot can still carry an old
+ *     engine target (until D), and a leftover Armarouge target must not refuse her Ceruledge.
+ *   - Otherwise THIS card's own chain decides, which follows its branch (Charcadet's Stage 1 is Armarouge OR
+ *     Ceruledge; a chain seeded from the line's root has no one species past a branch): its family's root is the
+ *     line's root, and its depth is the slot's stage. Where its own language's catalog cannot walk back to that root
+ *     (a Japanese card whose earlier stages are not mirrored), the line's own chain stands in, seeded from its
+ *     highest card.
+ *   - Its neighbours agree, where they are known (a card in the slot, or her chase target): the stage before is this
+ *     card's parent, and the stage after is a card whose own chain has this species at this stage. A branching family
+ *     (Wurmple, Applin) otherwise lets the other branch's card in beside a card that is not its own.
+ */
+function isOwnStageOfLine(
+  state: LineWriteState,
+  line: Row<"evolution_line">,
+  slots: Row<"line_slot">[],
+  slot: Row<"line_slot">,
+): boolean {
+  const catalogById = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
+  const dex = state.incoming.card.dexId;
+  const chainOf = (card: CatalogCard) =>
+    testViability(
+      { id: "line-check", card, variant: "normal" },
+      [],
+      state.catalog,
+      state.typeColorMap,
+    ).chain;
+  /** The card a slot is known to hold: the card in it, or the one she chases there. */
+  const knownAt = (s: Row<"line_slot"> | undefined) => {
+    const id = s?.copy_id
+      ? state.copiesById.get(s.copy_id)?.catalog_card_id
+      : s?.stage_choice === "chase"
+        ? s.target_catalog_card_id
+        : null;
+    return id ? catalogById.get(id) : undefined;
+  };
+
+  const own = testViability(state.incoming, [], state.catalog, state.typeColorMap).chain;
+  const reachesRoot = own[0]?.dexId === line.root_dex_id;
+  const chased = slot.stage_choice === "chase" ? knownAt(slot) : undefined;
+  if (chased) {
+    if (!dex.some((d) => chased.dexId.includes(d))) return false;
+  } else if (reachesRoot) {
+    if (!dex.includes(own[slot.stage_index]?.dexId ?? -1)) return false;
+  } else {
+    const seed = [...slots]
+      .filter((s) => s.id !== slot.id)
+      .sort((a, b) => b.stage_index - a.stage_index)
+      .map(knownAt)
+      .find((c) => c !== undefined);
+    const lineChain = seed ? chainOf(seed) : [];
+    if (lineChain[0]?.dexId !== line.root_dex_id) return false;
+    if (!dex.includes(lineChain[slot.stage_index]?.dexId ?? -1)) return false;
+  }
+
+  const before = knownAt(slots.find((s) => s.stage_index === slot.stage_index - 1));
+  const parent = reachesRoot ? own[slot.stage_index - 1] : undefined;
+  if (before && parent && !before.dexId.includes(parent.dexId)) return false;
+  const after = knownAt(slots.find((s) => s.stage_index === slot.stage_index + 1));
+  // Its own chain names its parent only where its language's catalog walks back to the line's root.
+  const afterChain = after ? chainOf(after) : [];
+  if (
+    afterChain[0]?.dexId === line.root_dex_id &&
+    !dex.includes(afterChain[slot.stage_index]?.dexId ?? -1)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function joinLine(
   state: LineWriteState,
   choice: Extract<LineChoice, { mode: "join" }>,
@@ -323,19 +396,7 @@ function joinLine(
     throw new Error("That slot has already been filled — reload the screen and pick again.");
   }
 
-  const catalogById = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
-  // The slot must be this card's own stage of this line. A slot with a target names its card; an undecided one (no
-  // target since UIL-121) is read off the family's chain: the line's root, and this card at the slot's stage. Any
-  // card can bring a line choice (the Haul Plan's Move sheet, #434), so this is what holds a join to its line.
-  const chain = testViability(state.incoming, [], state.catalog, state.typeColorMap).chain;
-  const target = slot.target_catalog_card_id
-    ? catalogById.get(slot.target_catalog_card_id)
-    : undefined;
-  const same = slot.target_catalog_card_id
-    ? !!target && state.incoming.card.dexId.some((d) => target.dexId.includes(d))
-    : chain[0]?.dexId === line.root_dex_id &&
-      state.incoming.card.dexId.includes(chain[slot.stage_index]?.dexId ?? -1);
-  if (!same) {
+  if (!isOwnStageOfLine(state, line, slots, slot)) {
     throw new Error("That slot is for a different card — pick the slot for this card's own stage.");
   }
 

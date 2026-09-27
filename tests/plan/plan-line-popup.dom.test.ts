@@ -33,6 +33,7 @@ import { routedPlan } from "../support/plan-route";
 const shelveCardAction = vi.fn();
 const refreshSpotlightAction = vi.fn();
 const runHaulPlan = vi.fn();
+const getLineJoinOptions = vi.fn();
 vi.mock("@/app/(ui)/plan/actions", () => ({
   shelveCardAction: (...a: unknown[]) => shelveCardAction(...a),
   getMoveOptions: vi.fn(async () => ({
@@ -43,7 +44,7 @@ vi.mock("@/app/(ui)/plan/actions", () => ({
       { key: "green", display: "Green" },
     ],
   })),
-  getLineJoinOptions: vi.fn(async () => null),
+  getLineJoinOptions: (...a: unknown[]) => getLineJoinOptions(...a),
   loadPendingPlacementDraft: vi.fn(async () => []),
   loadArrivals: vi.fn(async () => []),
   lookupCatalog: vi.fn(async () => []),
@@ -228,6 +229,8 @@ interface Row {
   proposal: LineProposal | null;
   startsLine?: string | null;
   after?: LineProposal | null;
+  /** Her haul copy, when it is not the row's own id (the Move sheet must load the model for THIS). */
+  copyId?: string;
 }
 /** Each card's plan item as the server routes it now; the re-route and the spotlight refresh both answer from it. */
 const routedNow = new Map<string, PlanItem>();
@@ -266,7 +269,10 @@ function itemsFor(
   });
 }
 function park(rows: Row[], lineNames: Record<string, string> = {}) {
-  const draft = rows.map((r) => waiting(r.name));
+  const draft = rows.map((r) => ({
+    ...waiting(r.name),
+    ...(r.copyId ? { existingCopyId: r.copyId } : {}),
+  }));
   const base = routedPlan(draft.map((d) => ({ ...d, tcgdexId: d.card.tcgdexId })));
   const items = itemsFor(base, rows, lineNames, false);
   for (const it of items) routedNow.set(it.incomingId, it);
@@ -306,6 +312,7 @@ beforeEach(() => {
   routedNow.clear();
   for (const f of [shelveCardAction, refreshSpotlightAction, runHaulPlan, lineModelAction])
     f.mockReset();
+  getLineJoinOptions.mockReset().mockResolvedValue(null);
   shelveCardAction.mockResolvedValue({
     ok: true,
     counts: { routed: 1, lines: 1, slots: 1, decisions: 1, wishlist: 0 },
@@ -392,15 +399,20 @@ async function mountExtra(
 
 describe("UIL-117 · the Plan's own Move sheet: BACK HALF opens the one line popup (the Senior BA's follow-up to #422)", () => {
   it("BACK HALF opens the line popup for this card; her confirm there writes it into the line, now", async () => {
-    // Abra, a front-half card: the plan proposes no line, so only her Move puts it in one.
-    const user = await mount([{ name: "Abra", proposal: null }]);
+    // Abra, a front-half card: the plan proposes no line, so only her Move puts it in one. Its haul copy's id is not
+    // the row's: the popup must load the model for HER COPY (QA's M10).
+    lineModelAction.mockImplementation(async (_copyId: string, proposal: LineProposal) => ({
+      ok: true,
+      model: modelFor("Abra", proposal),
+    }));
+    const user = await mount([{ name: "Abra", proposal: null, copyId: "copy-abra" }]);
     await user.click(screen.getByRole("button", { name: "↔ Change position" }));
     const sheet = await screen.findByRole("dialog", { name: "Move Abra" });
     // PRE-FIX: the sheet had no line popup; BACK HALF was the older inline line picker, and never asked her anything.
     await user.click(within(sheet).getByRole("button", { name: "BACK HALF" }));
     await screen.findByRole("dialog", { name: "Start a line" });
     expect(lineModelAction.mock.calls.at(-1)?.slice(0, 2)).toEqual([
-      "id-Abra",
+      "copy-abra",
       expect.objectContaining({ kind: "start", binderId: "kb1" }),
     ]);
     // Her pull, ticked: nothing left undecided, so she can confirm.
@@ -411,7 +423,7 @@ describe("UIL-117 · the Plan's own Move sheet: BACK HALF opens the one line pop
 
     await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
     const sent = shelveCardAction.mock.calls[0][0];
-    expect(sent.card.id).toBe("id-Abra");
+    expect(sent.card).toMatchObject({ id: "id-Abra", existingCopyId: "copy-abra" });
     expect(sent.override).toMatchObject({ kind: "shelf", binderId: "kb1", half: "back" });
     expect(sent.lineChoice).toMatchObject({
       mode: "start",
@@ -419,7 +431,8 @@ describe("UIL-117 · the Plan's own Move sheet: BACK HALF opens the one line pop
       pulls: ["own-charmander"],
       stages: {},
     });
-    expect(await screen.findByText("Moved · Abra → its line")).toBeTruthy();
+    // Named as the popup names the line: its top stage (UX review of #434).
+    expect(await screen.findByText("Moved · Abra → the Abra line")).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
@@ -448,6 +461,70 @@ describe("UIL-117 · the Plan's own Move sheet: BACK HALF opens the one line pop
         name: "◆ Adds to a line",
       }),
     ).toBeTruthy();
+  });
+
+  it("a refusal keeps the sheet and its popup open with the reason inside, and her choices kept (UX review of #434)", async () => {
+    shelveCardAction.mockResolvedValueOnce({
+      ok: false,
+      error: "That line slot no longer exists — reload the screen and pick again.",
+    });
+    const user = await mount([{ name: "Abra", proposal: null }]);
+    await user.click(screen.getByRole("button", { name: "↔ Change position" }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Move Abra" })).getByRole("button", {
+        name: "BACK HALF",
+      }),
+    );
+    await screen.findByRole("dialog", { name: "Start a line" });
+    await user.click(within(popup()).getByRole("checkbox"));
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    await user.click(confirmIn());
+    // PRE-FIX: the sheet closed before the write; the reason landed on the page, and her pull was lost.
+    expect(
+      await within(popup()).findByText(
+        "That line slot no longer exists — reload the screen and pick again.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Move Abra" })).toBeTruthy();
+    expect((within(popup()).getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+    // Her second confirm lands, and closes both.
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    await user.click(confirmIn());
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("a card with lines it could join gets NO inline line picker: BACK HALF is the popup, on the line here (QA's M2)", async () => {
+    getLineJoinOptions.mockResolvedValue({
+      dexId: DEX.Abra,
+      locale: "en",
+      naturalBandKey: "orange",
+      joinCandidates: [
+        {
+          lineId: "L7",
+          slotId: "S7",
+          binderId: "kb1",
+          bandKey: "orange",
+          speciesLabel: "ABRA LINE",
+          stage: "Basic",
+          filledCount: 1,
+          totalCount: 3,
+        },
+      ],
+      existingLines: [],
+    });
+    const user = await mount([{ name: "Abra", proposal: null }]);
+    await user.click(screen.getByRole("button", { name: "↔ Change position" }));
+    const sheet = await screen.findByRole("dialog", { name: "Move Abra" });
+    // PRE-FIX of this pin: the older inline picker, lines to join and "+ Start a new line", with no stage choices.
+    expect(within(sheet).queryByRole("button", { name: /ABRA LINE/ })).toBeNull();
+    expect(within(sheet).queryByRole("button", { name: /Start a new line/ })).toBeNull();
+    await user.click(within(sheet).getByRole("button", { name: "BACK HALF" }));
+    await screen.findByRole("dialog", { name: "Add to a line" });
+    expect(lineModelAction.mock.calls.at(-1)?.slice(0, 2)).toEqual([
+      "id-Abra",
+      { kind: "add", lineId: "L7", slotId: "S7" },
+    ]);
   });
 
   it("a Move anywhere else is still an override, written with her Done", async () => {

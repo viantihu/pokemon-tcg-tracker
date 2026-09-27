@@ -55,6 +55,16 @@ import { LinePopup } from "./LinePopup";
 
 const BULK = "__bulk__";
 
+/**
+ * A Move's confirm: the destination, and from the line popup her line choice and the line's name. A promise that
+ * settles to a string is a refusal in her words, shown in the popup; anything else closes it.
+ */
+export type MoveConfirm = (
+  dest: MoveDestination,
+  lineChoice?: LineChoice,
+  lineName?: string | null,
+) => void | Promise<string | null | void>;
+
 export function MovePanel({
   options,
   initial,
@@ -112,7 +122,12 @@ export function MovePanel({
    * card coming out of a line (UIL-117 PR 3, UX review of #391), where the back half IS the choice she made.
    */
   openLineOnMount?: boolean;
-  onConfirm: (dest: MoveDestination, lineChoice?: LineChoice) => void;
+  /**
+   * Her confirm. From the line popup it carries her line choice and the line's name as the popup shows it. A host that
+   * writes it there and then may answer with a promise: the popup stays open and busy until it settles, and a refusal
+   * (a string, in her words) is shown inside it with her choices kept (UX review of #434).
+   */
+  onConfirm: MoveConfirm;
 }) {
   const firstGeneral = options.binders.find((b) => b.type === "general");
   const [binderId, setBinderId] = useState<string>(() => {
@@ -275,7 +290,7 @@ export function MovePanel({
     );
   }
 
-  function confirmLine(choice: LineChoice) {
+  async function confirmLine(choice: LineChoice) {
     if (!linePop) return;
     const { line } = linePop.model;
     const dest: MoveDestination = {
@@ -284,8 +299,22 @@ export function MovePanel({
       half: "back",
       band: choice.mode === "start" ? choice.band : line.bandKey,
     };
-    setLinePop(null);
-    onConfirm(dest, choice);
+    setLinePopBusy(true);
+    setLinePopError(null);
+    try {
+      const refused = await onConfirm(
+        dest,
+        choice,
+        linePop.model.stages.at(-1)?.card?.name ?? null,
+      );
+      if (typeof refused === "string") {
+        setLinePopError(refused);
+        return;
+      }
+      setLinePop(null);
+    } finally {
+      setLinePopBusy(false);
+    }
   }
 
   function summary(): string {
@@ -642,7 +671,7 @@ export function MovePanel({
           type="button"
           className="oconfirm"
           disabled={!canConfirm}
-          onClick={() => canConfirm && onConfirm(destination)}
+          onClick={() => canConfirm && void onConfirm(destination)}
         >
           {/* UIL-096: with the warning showing, Confirm IS the "start a new line anyway" choice — so it
               says so, rather than a neutral "Place it here" that reads as if nothing was said. */}

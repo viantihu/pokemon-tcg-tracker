@@ -9,7 +9,6 @@
 import {
   leavesLineText,
   type LeavesLine,
-  type LineChoice,
   type LinePopupModel,
   type LineProposal,
 } from "@/lib/line/popup";
@@ -23,7 +22,7 @@ import type {
 } from "@/lib/line/types";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "./CardFace";
-import { MovePanel } from "./MovePanel";
+import { MovePanel, type MoveConfirm } from "./MovePanel";
 
 export interface MoveTargetCard {
   copyId: string;
@@ -81,7 +80,8 @@ export function MoveOverlay({
   lineModel?: (proposal: LineProposal) => Promise<LinePopupModel>;
   /** Open the line popup with the sheet (see MovePanel). */
   openLineOnMount?: boolean;
-  onConfirm: (dest: MoveDestination, lineChoice?: LineChoice) => void;
+  /** Her confirm (see MovePanel's `MoveConfirm`: a promise keeps the line popup open until the write settles). */
+  onConfirm: MoveConfirm;
   onClose: () => void;
 }) {
   // A card whose species forms no line has no line to pick (Karvi, 2026-09-27): the plain move, back half off.

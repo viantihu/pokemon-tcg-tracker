@@ -106,11 +106,44 @@ describe("UIL-117 · BACK HALF opens the line popup", () => {
     await user.click(backHalf());
     await screen.findByRole("dialog", { name: "Add to a line" });
     await user.click(screen.getByRole("button", { name: /Add to line/ }));
-    expect(onConfirm).toHaveBeenCalledWith(
+    // The popup names its line as a third argument (UX review of #434).
+    expect(onConfirm.mock.calls[0].slice(0, 2)).toEqual([
       { kind: "shelf", binderId: "b1", half: "back", band: "red" },
       { mode: "join", lineId: "L1", slotId: "S1" },
-    );
+    ]);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("a host that writes on confirm keeps the popup open and busy until it answers, and a refusal is shown in it (UX review of #434)", async () => {
+    let answer: (v: string | void) => void = () => {};
+    const onConfirm = vi.fn(
+      () =>
+        new Promise<string | void>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const { user } = mount({ joinCandidates: [CANDIDATE_HERE], onConfirm });
+    await user.click(backHalf());
+    await screen.findByRole("dialog", { name: "Add to a line" });
+    const confirm = screen.getByRole("button", { name: /Add to line/ }) as HTMLButtonElement;
+    await user.click(confirm);
+    // Busy while the write is in flight: still open, and her confirm cannot be pressed twice.
+    expect(screen.getByRole("dialog", { name: "Add to a line" })).toBeTruthy();
+    await waitFor(() => expect(confirm.disabled).toBe(true));
+    answer("That slot has already been filled — reload the screen and pick again.");
+    // PRE-FIX: the popup closed before the write, and the refusal had nowhere to be said.
+    expect(
+      await screen.findByText(
+        "That slot has already been filled — reload the screen and pick again.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Add to a line" })).toBeTruthy();
+    await waitFor(() => expect(confirm.disabled).toBe(false));
+    // A second try that lands closes it.
+    await user.click(confirm);
+    answer();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(onConfirm).toHaveBeenCalledTimes(2);
   });
 
   it("opens with the card she already owns UNTICKED, so an untouched confirm pulls nothing (UIL-061)", async () => {
@@ -136,10 +169,11 @@ describe("UIL-117 · BACK HALF opens the line popup", () => {
     // UIL-121: that unticked stage is hers to decide; she leaves it empty.
     await user.click(screen.getByRole("button", { name: "Leave empty" }));
     await user.click(screen.getByRole("button", { name: /Start line/ }));
-    expect(onConfirm).toHaveBeenCalledWith(
+    // The popup names its line as a third argument (UX review of #434).
+    expect(onConfirm.mock.calls[0].slice(0, 2)).toEqual([
       { kind: "shelf", binderId: "b1", half: "back", band: "red" },
       { mode: "start", binderId: "b1", band: "red", pulls: [], stages: { 0: { kind: "empty" } } },
-    );
+    ]);
   });
 
   it("the band is picked IN the popup: another band reloads it there, and her confirm moves it into that band", async () => {
@@ -157,10 +191,11 @@ describe("UIL-117 · BACK HALF opens the line popup", () => {
       ).toBe("true"),
     );
     await user.click(screen.getByRole("button", { name: /Start line/ }));
-    expect(onConfirm).toHaveBeenCalledWith(
+    // The popup names its line as a third argument (UX review of #434).
+    expect(onConfirm.mock.calls[0].slice(0, 2)).toEqual([
       { kind: "shelf", binderId: "b1", half: "back", band: "green" },
       { mode: "start", binderId: "b1", band: "green", pulls: [], stages: {} },
-    );
+    ]);
   });
 
   it("a band where this card has an open slot in this binder reloads it as ADD to that line", async () => {
@@ -211,10 +246,11 @@ describe("UIL-117 · BACK HALF opens the line popup", () => {
     await screen.findByRole("dialog", { name: "Add to a line" });
     await user.click(screen.getByRole("button", { name: /Add to line/ }));
     // The sheet still says KB-001 · red; the line is in KB-002 · green, and that is where the card goes.
-    expect(onConfirm).toHaveBeenCalledWith(
+    // The popup names its line as a third argument (UX review of #434).
+    expect(onConfirm.mock.calls[0].slice(0, 2)).toEqual([
       { kind: "shelf", binderId: "b2", half: "back", band: "green" },
       { mode: "join", lineId: "L9", slotId: "S9" },
-    );
+    ]);
   });
 
   it("Escape closes the popup, not the Move sheet behind it; a second Escape closes the sheet", async () => {

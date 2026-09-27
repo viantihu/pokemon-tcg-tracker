@@ -750,8 +750,15 @@ export function PlanScreen({
    */
   async function shelveCard(
     item: PlanItem,
-    /** From the line popup (UIL-117): her line choice, or her "file by its own colour" destination. */
-    extra?: { lineChoice?: LineChoice; override?: MoveDestination },
+    /**
+     * From the line popup (UIL-117): her line choice, or her "file by its own colour" destination. `report`: say a
+     * refusal there instead of on the page (the Move sheet's line popup, which stays open with it: UX review of #434).
+     */
+    extra?: {
+      lineChoice?: LineChoice;
+      override?: MoveDestination;
+      report?: (message: string) => void;
+    },
   ): Promise<false | { lineDone: boolean; line?: LineAfterWrite }> {
     if (done.has(item.incomingId) || shelving) return false;
     const entry = draft.find((d) => d.id === item.incomingId);
@@ -796,9 +803,10 @@ export function PlanScreen({
         LOST.action,
       );
       if (!res.ok) {
+        const say = extra?.report ?? setError;
         // Never reached the server (UIL-106): not a refusal, so her override is KEPT (UIL-084 below).
         if ("unreached" in res) {
-          setError(res.error);
+          say(res.error);
           return false;
         }
         // The placement moved under her. Nothing was written; show the new one and let her look
@@ -814,7 +822,12 @@ export function PlanScreen({
             proposedPulls: [],
             bandMismatch: null,
           });
-          setError(res.error);
+          say(res.error);
+          return false;
+        }
+        // A destination sent with this confirm (her Move sheet's line popup) is what was refused, not one set before.
+        if (extra?.override && extra.report) {
+          extra.report(res.error);
           return false;
         }
         /**
@@ -890,23 +903,37 @@ export function PlanScreen({
    * sheet's line popup (UIL-117: the one popup on every screen, her stage choices included), and her confirm there is
    * the write, now, as the plan's own line popup's is.
    */
-  async function onMoveConfirm(dest: MoveDestination, lineChoice?: LineChoice) {
+  async function onMoveConfirm(
+    dest: MoveDestination,
+    lineChoice?: LineChoice,
+    lineName?: string | null,
+  ): Promise<string | void> {
     if (!moveTarget) return;
     const target = moveTarget;
-    setMoveTarget(null);
     if (!lineChoice) {
+      setMoveTarget(null);
       setOverrides((prev) => ({ ...prev, [target.copyId]: dest }));
       flashToast(`Placement override set · ${target.name}`);
       return;
     }
     const item = flatItems.find((it) => it.incomingId === target.copyId);
     if (!item) return;
-    // Whether the line is done is not asked: a Move is not the step-through, so nothing opens after it (UIL-120).
-    const shelved = await shelveCard(item, { override: dest, lineChoice });
-    if (!shelved) return;
+    // The sheet and its popup stay open, busy, until the write lands; a refusal is said inside the popup with her
+    // choices kept, as the plan's own line popup does (UX review of #434). Whether the line is done is not asked: a
+    // Move is not the step-through, so nothing opens after it (UIL-120).
+    let refusal: string | null = null;
+    const shelved = await shelveCard(item, {
+      override: dest,
+      lineChoice,
+      report: (m) => {
+        refusal = m;
+      },
+    });
+    if (!shelved) return refusal ?? LOST.action;
+    setMoveTarget(null);
     // A line write can change what the other cards would do, so the rest re-route, as after any line write.
     scheduleReroute();
-    flashToast(`Moved · ${target.name} → its line`);
+    flashToast(`Moved · ${target.name} → ${lineName ? `the ${lineName} line` : "its line"}`);
     if (flatItems[cur]?.incomingId === item.incomingId) advance();
   }
 
@@ -1388,7 +1415,7 @@ export function PlanScreen({
               proposal,
             )
           }
-          onConfirm={(dest, lineChoice) => void onMoveConfirm(dest, lineChoice)}
+          onConfirm={onMoveConfirm}
           onClose={() => setMoveTarget(null)}
         />
       ) : null}

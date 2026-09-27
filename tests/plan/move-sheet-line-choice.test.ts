@@ -210,3 +210,173 @@ describe("…and a JOIN through the Move sheet is held to the line's own slot (T
     expect(await read(`select role from copy where id = $1`, [CML.id])).toEqual([{ role: "haul" }]);
   });
 });
+
+/**
+ * Branching families (the Senior BA's ruling and the TL's review of #434). A join is held to THIS card's own chain,
+ * which follows its branch, and to its neighbours in the line: never to one species per stage seeded from the root.
+ * Her live Charcadet line (root 935) has a Stage 1 of Armarouge (936) OR Ceruledge (937). The Twig family is the
+ * Wurmple / Applin shape: Twigling → Twigleaf → Twigtree, and Twigling → Twigthorn → Thornking.
+ */
+describe("a join into a BRANCHING family's line is held to its own branch and its neighbours", () => {
+  const mk = (tcgdexId: string, name: string, dex: number, stage: string, from: string | null) => ({
+    ...CHARMANDER_SV03_026,
+    tcgdexId,
+    name,
+    dexId: [dex],
+    localId: tcgdexId.split("-")[1],
+    stage,
+    evolveFrom: from,
+    artworkGroupId: `art-${name}`,
+  });
+  const CHARCADET = mk("sv04-9350", "Charcadet", 935, "Basic", null);
+  const ARMAROUGE = mk("sv04-9360", "Armarouge", 936, "Stage1", "Charcadet");
+  const CERULEDGE = mk("sv04-9370", "Ceruledge", 937, "Stage1", "Charcadet");
+  const TWIGLING = mk("sv05-9500", "Twigling", 950, "Basic", null);
+  const TWIGLEAF = mk("sv05-9510", "Twigleaf", 951, "Stage1", "Twigling");
+  const TWIGTREE = mk("sv05-9520", "Twigtree", 952, "Stage2", "Twigleaf");
+  const TWIGTHORN = mk("sv05-9530", "Twigthorn", 953, "Stage1", "Twigling");
+  const THORNKING = mk("sv05-9540", "Thornking", 954, "Stage2", "Twigthorn");
+  const haul = (name: string, tcgdexId: string, n: number) =>
+    haulRow(`d0000000-0000-4000-8000-00000000f${String(n).padStart(3, "0")}`, tcgdexId);
+  const H = {
+    armarouge: haul("Armarouge", ARMAROUGE.tcgdexId, 1),
+    ceruledge: haul("Ceruledge", CERULEDGE.tcgdexId, 2),
+    charcadet: haul("Charcadet", CHARCADET.tcgdexId, 3),
+    twigleaf: haul("Twigleaf", TWIGLEAF.tcgdexId, 4),
+    twigthorn: haul("Twigthorn", TWIGTHORN.tcgdexId, 5),
+    thornking: haul("Thornking", THORNKING.tcgdexId, 6),
+  };
+  const LINE = "10000000-0000-0000-0000-0000000000f1";
+  const slotId = (i: number) => `50000000-0000-0000-0000-0000000000f${i}`;
+  const ownedId = (i: number) => `c0000000-0000-0000-0000-0000000000f${i}`;
+
+  beforeEach(async () => {
+    await asSuperuser(db);
+    await seedCatalogCardsFull(db, [
+      CHARCADET,
+      ARMAROUGE,
+      CERULEDGE,
+      TWIGLING,
+      TWIGLEAF,
+      TWIGTREE,
+      TWIGTHORN,
+      THORNKING,
+    ]);
+    await seedHaulRows(db, Object.values(H));
+    clearCatalogCache();
+    await asOwner(db);
+  });
+
+  /**
+   * A red line in KB-001's back half, one slot per stage: a card's id fills it, `open` leaves it undecided (with an
+   * optional leftover engine target), `chase` is her chase of that card.
+   */
+  async function seedLine(
+    root: number,
+    stages: ({ card: string } | { open: true; leftoverTarget?: string } | { chase: string })[],
+  ) {
+    await asSuperuser(db);
+    await db.query(
+      `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+         values ($1, $2, $3, 'red', $4, 'back', 'open')`,
+      [LINE, OWNER, root, KB1],
+    );
+    for (const [i, st] of stages.entries()) {
+      const stage = ["Basic", "Stage1", "Stage2"][i];
+      if ("card" in st) {
+        await db.query(
+          `insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band)
+             values ($1, $2, $3, 'normal', 'shelved', $4, 'back', 'red')`,
+          [ownedId(i), OWNER, st.card, KB1],
+        );
+      }
+      await db.query(
+        `insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id, target_catalog_card_id, stage_choice)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          slotId(i),
+          OWNER,
+          LINE,
+          i,
+          stage,
+          "card" in st ? "filled" : "placeholder",
+          "card" in st ? ownedId(i) : null,
+          "card" in st ? null : "chase" in st ? st.chase : (st.leftoverTarget ?? null),
+          "chase" in st ? "chase" : null,
+        ],
+      );
+      if ("card" in st) {
+        await db.query(`update copy set line_slot_id = $1 where id = $2`, [slotId(i), ownedId(i)]);
+      }
+    }
+    await asOwner(db);
+  }
+  const joinAt = (card: DraftItem, i: number, twoStage = false) =>
+    commitCardPlacement(pgliteClient(db), {
+      card,
+      override: BACK,
+      lineChoice: {
+        mode: "join",
+        lineId: LINE,
+        slotId: slotId(i),
+        ...(twoStage ? { thirdPocket: { material: "empty" as const } } : {}),
+      },
+    });
+  const WRONG = "That slot is for a different card — pick the slot for this card's own stage.";
+  async function refusedAt(card: DraftItem, i: number) {
+    await expect(joinAt(card, i)).rejects.toThrow(WRONG);
+    expect(await read(`select state, copy_id from line_slot where id = $1`, [slotId(i)])).toEqual([
+      { state: "placeholder", copy_id: null },
+    ]);
+    expect(await read(`select role from copy where id = $1`, [card.id])).toEqual([
+      { role: "haul" },
+    ]);
+  }
+  const filledBy = async (i: number) =>
+    (await read<{ copy_id: string }>(`select copy_id from line_slot where id = $1`, [slotId(i)]))[0]
+      ?.copy_id;
+
+  it("Charcadet's Stage 1 takes Armarouge", async () => {
+    await seedLine(935, [{ card: CHARCADET.tcgdexId }, { open: true }]);
+    await joinAt(H.armarouge, 1, true);
+    expect(await filledBy(1)).toBe(H.armarouge.id);
+  });
+
+  it("…and Ceruledge, even with a leftover engine target naming Armarouge on the undecided slot", async () => {
+    // PRE-FIX of the TL's point: any target was trusted, so the old Armarouge target refused her Ceruledge.
+    await seedLine(935, [
+      { card: CHARCADET.tcgdexId },
+      { open: true, leftoverTarget: ARMAROUGE.tcgdexId },
+    ]);
+    await joinAt(H.ceruledge, 1, true);
+    expect(await filledBy(1)).toBe(H.ceruledge.id);
+  });
+
+  it("a stage she CHASES is held to her chase: Ceruledge is refused where she chases Armarouge", async () => {
+    await seedLine(935, [{ card: CHARCADET.tcgdexId }, { chase: ARMAROUGE.tcgdexId }]);
+    await refusedAt(H.ceruledge, 1);
+  });
+
+  it("with the Basic not filled yet, the root and the depth still refuse a wrong card", async () => {
+    await seedLine(935, [{ open: true }, { open: true }]);
+    // Another family's Stage 1, and this family's Basic at the Stage 1 slot.
+    await refusedAt(H.twigleaf, 1);
+    await refusedAt(H.charcadet, 1);
+  });
+
+  it("Twigleaf joins between Twigling and Twigtree: its own branch, and its neighbours agree", async () => {
+    await seedLine(950, [{ card: TWIGLING.tcgdexId }, { open: true }, { card: TWIGTREE.tcgdexId }]);
+    await joinAt(H.twigleaf, 1);
+    expect(await filledBy(1)).toBe(H.twigleaf.id);
+  });
+
+  it("the TL's case 1: Twigthorn is refused between Twigling and Twigtree (the stage after is not its own)", async () => {
+    await seedLine(950, [{ card: TWIGLING.tcgdexId }, { open: true }, { card: TWIGTREE.tcgdexId }]);
+    await refusedAt(H.twigthorn, 1);
+  });
+
+  it("the TL's case 2: Thornking is refused after Twigleaf (the stage before is not its parent)", async () => {
+    await seedLine(950, [{ card: TWIGLING.tcgdexId }, { card: TWIGLEAF.tcgdexId }, { open: true }]);
+    await refusedAt(H.thornking, 2);
+  });
+});
