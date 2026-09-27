@@ -1667,13 +1667,14 @@ nav.menu .tab .n {
     display: flex;
     flex-direction: column;
   }
+  /* UIL-125: on a phone the spotlight is NOT pinned. Sticky at up to 56vh it covered 456 of 812px at 375 (the list
+     kept about 3 rows), slid over the sticky haul bar, and cut "Confirm its line" off inside its own scroll. It sits
+     above the list and scrolls with the page, as it already does at 721-1080px; picking a card from the list brings
+     it back into view (PlanView's `selectFromList`), below the pinned haul bar. */
   .spot {
     order: -1;
-    position: sticky;
-    top: 0;
-    z-index: 8;
-    max-height: 56vh;
-    overflow: auto;
+    position: static;
+    scroll-margin-top: calc(var(--haulbar-h, 0px) + 8px);
   }
 }
 

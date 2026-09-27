@@ -1465,6 +1465,22 @@ function PlanView(props: {
    * setState, so it cannot cascade renders.
    */
   const haulbarRef = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * UIL-125: on a phone the spotlight is not pinned (pinned, it covered more than half the screen), so it scrolls
+   * away while she works the list. Picking a card from the list puts it in her hand, so it brings the spotlight back
+   * into view when its top has scrolled under the pinned haul bar. The row's own box and badge still act in place.
+   */
+  const spotRef = useRef<HTMLElement | null>(null);
+  function selectFromList(i: number) {
+    setCur(i);
+    const spot = spotRef.current;
+    if (!spot || !window.matchMedia?.("(max-width: 720px)").matches) return;
+    const barBottom = haulbarRef.current?.getBoundingClientRect().bottom ?? 0;
+    if (spot.getBoundingClientRect().top < barBottom) {
+      spot.scrollIntoView?.({ block: "start", behavior: "smooth" });
+    }
+  }
   useEffect(() => {
     const el = haulbarRef.current;
     if (!el) return;
@@ -1705,14 +1721,14 @@ function PlanView(props: {
               cur={cur}
               flatIndex={flatIndex}
               done={done}
-              onSelect={setCur}
+              onSelect={selectFromList}
               // UIL-053 / UIL-117: a card that joins a collection, or goes into a line, is shelved from the
               // spotlight, where she can see which; its row box brings it there instead of shelving it unseen.
               onShelve={(it) =>
                 it.lineProposal && !overrides[it.incomingId]
                   ? onOpenLine(it) // ticked only when she confirms in the popup (the UX Dev's guard)
                   : it.collectionPick && !overrides[it.incomingId]
-                    ? setCur(flatIndex.get(it.incomingId) ?? cur)
+                    ? selectFromList(flatIndex.get(it.incomingId) ?? cur)
                     : void shelveCard(it)
               }
               onOpenLine={onOpenLine}
@@ -1727,7 +1743,7 @@ function PlanView(props: {
           ))}
         </div>
 
-        <aside className="spot panel">
+        <aside className="spot panel" ref={spotRef}>
           <div className="cap">
             <span>NOW HANDLING</span>
             <span>{total ? `${Math.min(cur + 1, total)} / ${total}` : "—"}</span>
