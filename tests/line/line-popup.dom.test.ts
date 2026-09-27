@@ -247,6 +247,38 @@ describe("UIL-117 · the line popup", () => {
     });
   });
 
+  it("a pull out of another line says that line is left one short, on its tag and in 'What moves' (UIL-061)", async () => {
+    const user = userEvent.setup();
+    const fromLine: LinePopupModel = {
+      ...START,
+      stages: [
+        {
+          ...START.stages[0],
+          pull: {
+            copyId: "owned-cmd",
+            fromLabel: "KB-002 · Back · Red",
+            leaves: { lineName: "CHARMANDER LINE", stage: "Basic" },
+          },
+        },
+        START.stages[1],
+      ],
+    };
+    render(
+      createElement(Harness, {
+        model: fromLine,
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+        onConfirm: vi.fn(),
+      }),
+    );
+    expect((document.querySelector(".lp-src.lp-binder") as HTMLElement).textContent).toContain(
+      "· leaves the CHARMANDER LINE one short",
+    );
+    await user.click(screen.getByRole("checkbox", { name: /Pull it into this line/ }));
+    expect((document.querySelector(".lp-moves") as HTMLElement).textContent).toMatch(
+      /Take out.*from KB-002 · Back · Red → into this line · leaves the CHARMANDER LINE one short \(its Basic goes empty\)/,
+    );
+  });
+
   it("names the line the family already has, in its language, and 'Add to that line' switches to it", async () => {
     const onSwitch = vi.fn();
     const user = userEvent.setup();

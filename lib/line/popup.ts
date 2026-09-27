@@ -84,7 +84,15 @@ export interface LinePopupStage {
   /** `here`: the copy filling the slot. */
   copyId?: string;
   /** `pullable`: the owned copy, and where it is now ("KB-001 · Front · Red"). */
-  pull?: { copyId: string; fromLabel: string };
+  pull?: {
+    copyId: string;
+    fromLabel: string;
+    /**
+     * The line this card fills now, which a pull leaves one short (UIL-061's "in another line", restored for every
+     * screen). Absent for a card in a front half, the bulk box or the haul.
+     */
+    leaves?: { lineName: string; stage: string };
+  };
 }
 
 /** The line the popup is about: a new one being started, or the existing one being added to or replaced in. */

@@ -319,6 +319,7 @@ describe("the popup's model (loadLinePopupModel), built from fresh state", () =>
       ["Basic", "pullable", "Emberling"],
       ["Stage1", "incoming", "Emberdrake"],
     ]);
+    // In a front half, so it leaves no line short: no `leaves`.
     expect(m.stages[0].pull).toEqual({
       copyId: OWNED,
       fromLabel: expect.stringContaining("KB-001 · Front"),
@@ -365,6 +366,39 @@ describe("the popup's model (loadLinePopupModel), built from fresh state", () =>
       ["Basic", "here"],
       ["Stage1", "incoming"],
     ]);
+  });
+
+  it("START names the line a pull would leave one short, and only when the card really fills it (UIL-061)", async () => {
+    await shelvedFront(OWNED, "emberling");
+    await shelvedFront(MOVING, "emberdrake");
+    await asSuperuser(db);
+    const OTHER_LINE = "10000000-0000-4000-8000-0000000117e1";
+    const OTHER_SLOT = "20000000-0000-4000-8000-0000000117e1";
+    await db.query(
+      `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+         values ($1, $2, $3, 'red', $4, 'back', 'complete')`,
+      [OTHER_LINE, OWNER, EMBERLING, GEN],
+    );
+    await db.query(
+      `insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+         values ($1, $2, $3, 0, 'Basic', 'filled', $4)`,
+      [OTHER_SLOT, OWNER, OTHER_LINE, OWNED],
+    );
+    await db.query(`update copy set binder_half = 'back', line_slot_id = $1 where id = $2`, [
+      OTHER_SLOT,
+      OWNED,
+    ]);
+    await asOwner(db);
+    const m = await loadLinePopupModel(pgliteClient(db), MOVING, {
+      kind: "start",
+      binderId: GEN,
+      band: "red",
+    });
+    expect(m.stages[0].pull).toEqual({
+      copyId: OWNED,
+      fromLabel: expect.stringContaining("KB-001 · Back"),
+      leaves: { lineName: "EMBERLING LINE", stage: "Basic" },
+    });
   });
 
   it("START names every line the family already has, with the slot this card could take there", async () => {

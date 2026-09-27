@@ -101,6 +101,26 @@ export async function loadLinePopupModel(
       .join(" · ");
   };
 
+  /**
+   * The line a card fills now, named as the Lines page names it ("CHARMANDER LINE"), and the stage it would leave
+   * empty. Only when the slot really holds this copy (the pointer and the slot agree, UIL-087).
+   */
+  const leavesOf = (c: Row<"copy">): { lineName: string; stage: string } | null => {
+    if (!c.line_slot_id) return null;
+    const slot = slots.find((s) => s.id === c.line_slot_id);
+    if (!slot || slot.copy_id !== c.id) return null;
+    const named = (slotsByLine.get(slot.line_id) ?? [])
+      .map((s) => {
+        const id = s.copy_id ? cardOfCopy(s.copy_id) : s.target_catalog_card_id;
+        return id ? catalogById.get(id)?.name : undefined;
+      })
+      .find((n): n is string => !!n);
+    return {
+      lineName: named ? `${named.toUpperCase()} LINE` : "EVOLUTION LINE",
+      stage: slot.stage === "Stage1" ? "Stage 1" : slot.stage === "Stage2" ? "Stage 2" : slot.stage,
+    };
+  };
+
   const cardLocale = localeOfId(card.tcgdexId);
   const incoming: IncomingCard = {
     id: copy.id,
@@ -173,13 +193,18 @@ export async function loadLinePopupModel(
       }
       const pullRow = s.copyId ? copyById.get(s.copyId) : undefined;
       const pullCard = pullRow ? catalogById.get(pullRow.catalog_card_id) : undefined;
+      const leaves = pullRow ? leavesOf(pullRow) : null;
       if (pullRow && pullCard) {
         return {
           stageIndex: s.stageIndex,
           stage: s.stage,
           state: "pullable",
           card: identity(pullCard, hereBand),
-          pull: { copyId: pullRow.id, fromLabel: whereIs(pullRow) },
+          pull: {
+            copyId: pullRow.id,
+            fromLabel: whereIs(pullRow),
+            ...(leaves ? { leaves } : {}),
+          },
         };
       }
       const target = s.targetCatalogCardId ? catalogById.get(s.targetCatalogCardId) : undefined;
