@@ -37,6 +37,7 @@ import {
 import { buildLineJoinIndex, joinOptionsFor } from "./join-options";
 import {
   IN_THE_HAUL,
+  stageLabel,
   type LinePopupExistingLine,
   type LinePopupModel,
   type LinePopupStage,
@@ -117,7 +118,7 @@ export async function loadLinePopupModel(
       .find((n): n is string => !!n);
     return {
       lineName: named ? `${named.toUpperCase()} LINE` : "EVOLUTION LINE",
-      stage: slot.stage === "Stage1" ? "Stage 1" : slot.stage === "Stage2" ? "Stage 2" : slot.stage,
+      stage: stageLabel(slot.stage),
     };
   };
 

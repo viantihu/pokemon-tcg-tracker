@@ -140,3 +140,29 @@ describe("UIL-077 · Lookup's Move sheet shows the full printed number", () => {
     expect(numberOn(sheet(lookupMoveTarget(answer(null), copy)))).toBe("099");
   });
 });
+
+describe("UIL-061 · the Move sheet says which line a move leaves one short (QA on #394)", () => {
+  it("Lookup: a copy in a line carries it onto the sheet", () => {
+    const html = sheet(
+      lookupMoveTarget(answer(182), {
+        copyId: "c3",
+        role: "shelved",
+        currentLabel: "Binder 1 · Back · Red · in a line",
+        leaves: { lineName: "CHARMANDER LINE", stage: "Stage 1" },
+      }),
+    );
+    expect(html).toContain(
+      "Moving it leaves the CHARMANDER LINE one short (its Stage 1 goes empty)",
+    );
+  });
+  it("a card in no line says nothing", () => {
+    const html = sheet(
+      lookupMoveTarget(answer(182), {
+        copyId: "c3",
+        role: "shelved",
+        currentLabel: "Binder 1 · Front · Red",
+      }),
+    );
+    expect(html).not.toContain("leaves the");
+  });
+});

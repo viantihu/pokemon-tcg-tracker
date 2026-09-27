@@ -229,6 +229,22 @@ export interface LinePopupColourChoice {
 
 /* --------------------------------------- small shared rules --------------------------------------- */
 
+/** "Stage 1" for the engine's "Stage1"; "Basic" stays "Basic". */
+export function stageLabel(stage: string): string {
+  return stage === "Stage1" ? "Stage 1" : stage === "Stage2" ? "Stage 2" : stage;
+}
+
+/** A line and the stage a card would leave empty, for "· leaves the CHARMANDER LINE one short (its Basic goes empty)". */
+export interface LeavesLine {
+  lineName: string;
+  stage: string;
+}
+
+/** The warning, in one place, for the line popup's pulls and the Move sheet (UIL-061). */
+export function leavesLineText(l: LeavesLine): string {
+  return `leaves the ${l.lineName} one short (its ${l.stage} goes empty)`;
+}
+
 /** Where a card still in her haul is, in her words: produced by the popup's loaders, read by the popup itself. */
 export const IN_THE_HAUL = "Still in the haul";
 

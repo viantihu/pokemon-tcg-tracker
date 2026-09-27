@@ -31,7 +31,12 @@ import { applyCopyRemoval } from "@/lib/copy";
 import { errorMessage } from "@/lib/errors";
 import { lookupCatalog } from "../plan/actions";
 import type { LookupCard } from "../plan/plan-types";
-import { toMovableCopy, type HomeNames, type LookupMovableCopy } from "./lookup-copies";
+import {
+  leavesFromSlots,
+  toMovableCopy,
+  type HomeNames,
+  type LookupMovableCopy,
+} from "./lookup-copies";
 
 /** Type-ahead against the local mirror — the same server search the plan intake uses. */
 export async function searchCatalog(query: string): Promise<LookupCard[]> {
@@ -126,6 +131,15 @@ function homeNames(pc: PlanContext, tcgdexId: string): HomeNames {
       pc.ctx.collections.find(
         (c) => c.currentBinderIds.includes(binderId) && c.targetCatalogCardIds.includes(tcgdexId),
       )?.id ?? null,
+    // UIL-061: the line a copy fills, named as the Lines page names it, and the stage it would leave empty.
+    leavesOf: (slotId, copyId) =>
+      leavesFromSlots(
+        pc.slotRowsByLine.values(),
+        (id) => pc.copyRowById.get(id)?.catalog_card_id,
+        (id) => pc.catalogById.get(id)?.name,
+        slotId,
+        copyId,
+      ),
   };
 }
 
