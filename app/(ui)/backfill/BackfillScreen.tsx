@@ -384,13 +384,14 @@ interface StageEntry {
   choice: StageChoice | null;
   /** HAVE: the copy she has, picked from her haul (UIL-098). */
   haveCard: WaitingCard | null;
-  fillerMaterial: "energy" | "card";
+  /** Null until she picks: a filler is her choice too (UX review of #422). */
+  fillerMaterial: "energy" | "card" | null;
   /** A filler card is a spare she has too, so it is picked from her haul as well. */
   fillerCard: WaitingCard | null;
 }
 
 function defaultEntry(info: BackLineStageInfo): StageEntry {
-  return { info, choice: null, haveCard: null, fillerMaterial: "energy", fillerCard: null };
+  return { info, choice: null, haveCard: null, fillerMaterial: null, fillerCard: null };
 }
 
 /** The status the server will write (`lineStatusOf`), previewed: CLOSED unless a stage is chased or undecided. */
@@ -489,6 +490,8 @@ function BackHalfPanel({
   const blocker = (() => {
     const undecided = entries.filter((e) => e.choice === null).length;
     if (undecided > 0) return `Decide every stage (${undecided} left), then save the line.`;
+    const noFiller = entries.find((e) => e.choice === "filler" && e.fillerMaterial === null);
+    if (noFiller) return `Pick the filler for ${stageLabel(noFiller.info.stage)}.`;
     const noCard = entries.find(
       (e) =>
         (e.choice === "have" && !e.haveCard) ||

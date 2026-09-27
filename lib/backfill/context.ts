@@ -122,10 +122,8 @@ export function planDeps(
   takeCopy: PlanDeps["takeCopy"],
   pool: WaitingPool = new Map(),
 ): PlanDeps {
-  const newId = () =>
-    typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `bf-${Math.random().toString(36).slice(2)}`;
+  // A real uuid: every id column it names is uuid-typed (TL review of #422).
+  const newId = () => crypto.randomUUID();
   return {
     stageState: stageStateFor(ctx, pool, newId),
     takeCopy,

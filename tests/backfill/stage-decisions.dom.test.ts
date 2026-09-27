@@ -176,7 +176,11 @@ describe("UIL-117 C · every Backfill stage is her choice", () => {
     const user = await openLine();
     await user.click(choice("Basic", "Leave empty"));
     await user.click(choice("Stage1", "Leave empty"));
-    await user.click(choice("Stage2", "Filler")); // a basic energy is the filler's default
+    await user.click(choice("Stage2", "Filler"));
+    // Nothing is picked for her, not even the filler's material (UX review of #422).
+    expect(saveButton().disabled).toBe(true);
+    expect(screen.getByText("Pick the filler for Stage 2.")).toBeTruthy();
+    await user.click(within(group("Filler")).getByRole("button", { name: "Basic energy" }));
     expect(screen.getByText("Every stage decided. This line will read as closed.")).toBeTruthy();
     await user.click(saveButton());
     await waitFor(() => expect(commitLineAction).toHaveBeenCalledTimes(1));
