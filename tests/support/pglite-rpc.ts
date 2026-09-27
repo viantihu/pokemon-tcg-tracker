@@ -74,6 +74,12 @@ export async function freshRpcDb(options: { before?: string } = {}): Promise<PGl
     grant all on all tables in schema public to authenticated, service_role;
   `);
   await db.exec(FIXTURE_AUTOGROUP);
+  // Only once the owner columns exist (a `before` database may stop short of 0033).
+  const owned = await db.query<{ n: number }>(
+    `select count(*)::int as n from information_schema.columns
+      where table_schema = 'public' and column_name = 'owner_id' and table_name in ('catalog_card', 'set_alias')`,
+  );
+  if (owned.rows[0].n === 2) await db.exec(FIXTURE_OWNER);
   return db;
 }
 
@@ -104,6 +110,33 @@ const FIXTURE_AUTOGROUP = `
   end $$;
   create trigger test_fixture_autogroup before insert on copy
     for each row execute function test_fixture_autogroup();
+`;
+
+/**
+ * FIXTURE SEEDING ONLY: a stand-in or a learned set alias the bootstrap SUPERUSER inserts with no owner gets the
+ * fixed test `OWNER` (UIL-127b, 0033). The same shape as FIXTURE_AUTOGROUP above, for the same reason.
+ *
+ * Why: 0033 gives stand-ins and aliases an owner from `default auth.uid()`, which is null for the superuser that
+ * seeds fixtures (and that some fixtures use to drive apply_write_ops). Fixtures written before 0033 seed "her
+ * stand-in" / "her alias" without one; this gives them the owner their real counterpart would have.
+ *
+ * Why it cannot hide an app bug: it fires ONLY for a superuser. App code runs as `authenticated` (via `asOwner`),
+ * exactly as in production, and gets no help; tests/db/owner-scoped-shared-data.test.ts pins both halves.
+ */
+const FIXTURE_OWNER = `
+  create or replace function test_fixture_owner() returns trigger language plpgsql as $$
+  begin
+    if new.owner_id is null
+       and (tg_table_name = 'set_alias' or new.source = 'user')
+       and (select rolsuper from pg_roles where rolname = current_user) then
+      new.owner_id := '${OWNER}';
+    end if;
+    return new;
+  end $$;
+  create trigger test_fixture_owner before insert on catalog_card
+    for each row execute function test_fixture_owner();
+  create trigger test_fixture_owner before insert on set_alias
+    for each row execute function test_fixture_owner();
 `;
 
 /** Apply one migration file by name, as `freshRpcDb` does (for a `before`-built database). */

@@ -26,9 +26,11 @@
  * targets. A newly mirrored set is invisible for at most the TTL. `clearCatalogCache` exists for tests
  * and for any caller that needs to force a re-read.
  *
- * Not owner-scoped, deliberately: `catalog_card` is global read-only reference data under RLS
- * (0002_domain.sql), not per-owner, so one cache serves every request on the instance without leaking
- * anything between owners.
+ * MIRROR ROWS ONLY, since 0033 (UIL-127b). The mirror (`source = 'tcgdex'`) is the one part of the catalog every
+ * account shares, so one cache serves every request on the instance. A stand-in is its owner's alone, so the
+ * caller's own are read fresh on every call, through the caller's RLS client, and merged in. Caching the whole
+ * catalog would hand one account's stand-ins to the next caller on the instance, and would hide a stand-in she has
+ * just created for up to the TTL.
  */
 
 import { catalogCardRepo, type DbClient, type Row } from "@/lib/repo";
@@ -52,8 +54,9 @@ export interface CatalogCacheOptions {
 }
 
 /**
- * The whole catalog, from cache when fresh. Paged on a miss (`listAll`), because a truncated catalog
- * would quietly break chain-building, viability and alternate ranking.
+ * The whole catalog as the caller sees it: the mirror, from cache when fresh, plus her own stand-ins, read fresh.
+ * Paged on a miss (`listAllMirror`), because a truncated catalog would quietly break chain-building, viability and
+ * alternate ranking.
  */
 export async function loadCatalogCached(
   db: DbClient,
@@ -62,6 +65,14 @@ export async function loadCatalogCached(
   const ttl = options.ttlMs ?? CATALOG_CACHE_TTL_MS;
   const now = options.now ?? Date.now();
 
+  const [mirror, mine] = await Promise.all([
+    loadMirror(db, ttl, now),
+    catalogCardRepo.listStandIns(db),
+  ]);
+  return mine.length === 0 ? mirror : [...mirror, ...mine];
+}
+
+async function loadMirror(db: DbClient, ttl: number, now: number): Promise<Row<"catalog_card">[]> {
   if (entry && now - entry.loadedAt < ttl) return entry.rows;
 
   // A second caller arriving mid-load waits for the first rather than doubling the work — the case
@@ -69,7 +80,7 @@ export async function loadCatalogCached(
   if (inFlight) return inFlight;
 
   inFlight = catalogCardRepo
-    .listAll(db)
+    .listAllMirror(db)
     .then((rows) => {
       entry = { rows, loadedAt: now };
       return rows;

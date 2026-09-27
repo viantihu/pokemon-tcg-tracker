@@ -63,14 +63,14 @@
  */
 
 /**
- * Shared, non-owner tables. Testing is authoritative: its catalog is what the copies
- * were reconciled against, and its learned set aliases are what its syncs produced.
+ * Shared tables. Testing is authoritative: its catalog is what the copies were reconciled against.
  * Upserted rather than inserted so a partially-mirrored production catalog is fine.
+ *
+ * `ownedRows` (0033, UIL-127b): the table also holds rows that belong to an owner — a stand-in card she created. Only
+ * the ownerless rows (the mirror) and HER rows are read, never another Testing account's, and hers are remapped to
+ * the Production owner like any owner row, or they would land under a uuid Production's RLS never matches.
  */
-export const SHARED_TABLES = [
-  { table: "catalog_card", conflict: ["tcgdex_id"] },
-  { table: "set_alias", conflict: ["locale", "dex_code"] },
-];
+export const SHARED_TABLES = [{ table: "catalog_card", conflict: ["tcgdex_id"], ownedRows: true }];
 
 /**
  * Owner-scoped tables, in foreign-key-safe insert order. `copy` lands before
@@ -91,6 +91,12 @@ export const OWNER_TABLES = [
   // both anyway. FKs are to catalog_card only (SHARED_TABLES land first); dex_import's key is owner_id.
   "dex_presence",
   "dex_import",
+  // 0033 (UIL-127b): her learned set aliases, now hers (primary key owner_id, locale, dex_code).
+  "set_alias",
+  // 0033 (UIL-127b): her rainbow order and type-to-band map. FKs are to color_band only, which 0003 ships to
+  // Production; they land before evolution_line and copy, whose bands they describe.
+  "owner_band_order",
+  "owner_type_band",
   "evolution_line",
   "copy",
   "line_slot",
@@ -434,8 +440,15 @@ export async function promoteCollection({
   log("\nReading from Testing");
   const payload = new Map();
 
-  for (const { table } of SHARED_TABLES) {
-    const { rows } = await source.query(`select * from public."${table}"`);
+  for (const { table, ownedRows } of SHARED_TABLES) {
+    const { rows } = ownedRows
+      ? await source.query(
+          `select * from public."${table}" where owner_id is null or owner_id = $1`,
+          [resolvedSource],
+        )
+      : await source.query(`select * from public."${table}"`);
+    // Her own rows (stand-ins) take the Production owner, exactly as the owner tables below do.
+    if (ownedRows) for (const row of rows) if (row.owner_id !== null) row.owner_id = resolvedTarget;
     payload.set(table, rows);
     log(`  ${table.padEnd(20)} ${String(rows.length).padStart(6)} rows`);
   }

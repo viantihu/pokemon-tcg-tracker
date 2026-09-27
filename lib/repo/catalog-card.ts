@@ -1,6 +1,13 @@
 /** CatalogCard: a TCGdex printing mirrored into the DB (read-only to the app). system-design §4. */
 import { parseCardQuery } from "@/lib/catalog/collector-number";
-import { assertReadComplete, createRepo, type DbClient, type Insert, type Row } from "./base";
+import {
+  assertReadComplete,
+  createRepo,
+  pageFiltered,
+  type DbClient,
+  type Insert,
+  type Row,
+} from "./base";
 
 /**
  * Upper bound on how many exact `local_id` matches one candidate can produce — a number exists in at
@@ -73,8 +80,28 @@ export const catalogCardRepo = {
   },
 
   /**
+   * Every MIRROR row (TCGdex, no owner), paged past the server cap. What the process-wide catalog cache holds
+   * (lib/plan/catalog-cache.ts): the one part of the catalog every account shares. Ordered by the primary key, a
+   * total order, so the pages tile.
+   */
+  async listAllMirror(db: DbClient, pageSize = 1000): Promise<Row<"catalog_card">[]> {
+    return pageFiltered<Row<"catalog_card">>(
+      "catalog_card",
+      (from, to) =>
+        db
+          .from("catalog_card")
+          .select("*")
+          .eq("source", "tcgdex")
+          .order("tcgdex_id", { ascending: true })
+          .range(from, to),
+      pageSize,
+    );
+  },
+
+  /**
    * Every stand-in she has created (UIL-060: `source = 'user'`, ids in the `user:` namespace). Used to
-   * refuse a twin before creating another; complete-read guarded like every "all of them" read.
+   * refuse a twin before creating another, and merged into the cached mirror per request; complete-read guarded
+   * like every "all of them" read. Hers only: 0033's read policy scopes a stand-in to its owner (UIL-127b).
    */
   async listStandIns(db: DbClient): Promise<Row<"catalog_card">[]> {
     const { data, error, count } = await db

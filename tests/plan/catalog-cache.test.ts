@@ -23,7 +23,7 @@ import {
 } from "@/lib/plan";
 import type { DbClient } from "@/lib/repo";
 
-/** A fake honouring `listAll`'s chain: select → order → range, paged, counting requests. */
+/** A fake honouring `listAllMirror`'s chain: select → eq → order → range, paged, counting requests. */
 function pagingDb(rowCount: number, pageSize = 1000) {
   let requests = 0;
   const rows = Array.from({ length: rowCount }, (_, i) => ({
@@ -35,7 +35,10 @@ function pagingDb(rowCount: number, pageSize = 1000) {
     from: () => {
       const q: Record<string, unknown> = {
         select: () => q,
+        eq: () => q,
         order: () => q,
+        // `listStandIns` awaits the query itself (no range): her own stand-ins, none in this fake (0033).
+        then: (resolve: (v: unknown) => void) => resolve({ data: [], error: null, count: 0 }),
         range: (from: number, to: number) => {
           requests += 1;
           return Promise.resolve({
@@ -146,7 +149,9 @@ describe("concurrent commits share one load", () => {
       from: () => {
         const q: Record<string, unknown> = {
           select: () => q,
+          eq: () => q,
           order: () => q,
+          then: (resolve: (v: unknown) => void) => resolve({ data: [], error: null, count: 0 }),
           range: () => {
             attempt += 1;
             return attempt === 1

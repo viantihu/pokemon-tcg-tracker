@@ -60,6 +60,8 @@ export type Database = {
           price_low: number | null;
           price_market: number | null;
           source: string;
+          /** 0033 (UIL-127b): the stand-in's owner; null for a mirror row. */
+          owner_id: string | null;
           locale: string;
           set_card_count_official: number | null;
           set_release_date: string | null;
@@ -88,6 +90,7 @@ export type Database = {
           price_low?: number | null;
           price_market?: number | null;
           source?: string;
+          owner_id?: string | null;
           locale?: string;
           set_card_count_official?: number | null;
           set_release_date?: string | null;
@@ -116,6 +119,7 @@ export type Database = {
           price_low?: number | null;
           price_market?: number | null;
           source?: string;
+          owner_id?: string | null;
           locale?: string;
           set_card_count_official?: number | null;
           set_release_date?: string | null;
@@ -837,6 +841,8 @@ export type Database = {
       };
       set_alias: {
         Row: {
+          /** 0033 (UIL-127b): whose alias this is; defaults to auth.uid(). */
+          owner_id: string;
           locale: string;
           dex_code: string;
           tcgdex_set_id: string;
@@ -844,6 +850,7 @@ export type Database = {
           created_at: string;
         };
         Insert: {
+          owner_id?: string;
           locale: string;
           dex_code: string;
           tcgdex_set_id: string;
@@ -851,6 +858,7 @@ export type Database = {
           created_at?: string;
         };
         Update: {
+          owner_id?: string;
           locale?: string;
           dex_code?: string;
           tcgdex_set_id?: string;
@@ -863,6 +871,18 @@ export type Database = {
         Row: { id: string; owner_id: string; snapshot: Json; created_at: string };
         Insert: { id?: string; owner_id?: string; snapshot: Json; created_at?: string };
         Update: { id?: string; owner_id?: string; snapshot?: Json; created_at?: string };
+        Relationships: [];
+      };
+      owner_band_order: {
+        Row: { owner_id: string; band: string; position: number };
+        Insert: { owner_id?: string; band: string; position: number };
+        Update: { owner_id?: string; band?: string; position?: number };
+        Relationships: [];
+      };
+      owner_type_band: {
+        Row: { owner_id: string; card_type: string; band: string };
+        Insert: { owner_id?: string; card_type: string; band: string };
+        Update: { owner_id?: string; card_type?: string; band?: string };
         Relationships: [];
       };
     };
