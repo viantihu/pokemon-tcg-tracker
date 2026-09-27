@@ -52,6 +52,12 @@ export async function loadLinePopupModel(
   db: DbClient,
   copyId: string,
   proposal: LineProposal,
+  /**
+   * UIL-121: the haul copies the SCREEN routes to this same line (the Haul Plan's proposals: an add to this line, or a
+   * start of the same new line). Only those count as "coming" (the Senior BA: species and language cannot say which
+   * line a card is for). Absent: nothing is coming, so every open stage is asked.
+   */
+  opts: { comingCopyIds?: readonly string[] } = {},
 ): Promise<LinePopupModel> {
   const [copy, catalogRows, typeMapRows, copies, lines, slots, binders, bands] = await Promise.all([
     copyRepo.getByPk(db, copyId),
@@ -148,11 +154,13 @@ export async function loadLinePopupModel(
       ),
     ),
   });
-  /** A copy of that species still waiting in this haul, in that language (its stage is not asked yet). */
+  /** A haul copy the screen routes to this line, of that species and language (its stage is not asked yet). */
+  const routedHere = new Set(opts.comingCopyIds ?? []);
   const waitingFor = (dexId: number, locale: string) =>
     copies.find(
       (c) =>
         c.id !== copy.id &&
+        routedHere.has(c.id) &&
         c.role === "haul" &&
         (catalogById.get(c.catalog_card_id)?.dexId ?? []).includes(dexId) &&
         localeOfId(c.catalog_card_id) === locale,

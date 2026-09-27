@@ -144,6 +144,17 @@ describe("START · every stage the line leaves unfilled is hers to decide", () =
     ).toEqual([{ n: 0 }]);
   });
 
+  it("'Decide later' on a START writes nothing for that stage: open, not decided, and the line reads open (QA's Z3)", async () => {
+    await move(start({ stages: { 0: { kind: "later" }, 2: { kind: "empty" } } }));
+    expect(await slotRows()).toEqual([
+      { stage_index: 0, state: "placeholder", stage_choice: null, target: null },
+      { stage_index: 1, state: "filled", stage_choice: null, target: "emberdrake" },
+      { stage_index: 2, state: "placeholder", stage_choice: "empty", target: null },
+    ]);
+    expect(await q(`select status from evolution_line`)).toEqual([{ status: "open" }]);
+    expect(await q(`select count(*)::int n from wishlist_item`)).toEqual([{ n: 0 }]);
+  });
+
   it("a stage with no choice is refused, the stage named, and nothing is written", async () => {
     await expect(move(start({ stages: { 0: { kind: "empty" } } }))).rejects.toThrow(
       "Choose what goes in the Stage 2 slot.",
@@ -163,11 +174,13 @@ describe("START · a stage whose card is still in her haul is not asked about ye
 
   it("the popup shows it as coming in this haul, and asks only about the Stage 2", async () => {
     await asOwner(db);
-    const m = await loadLinePopupModel(pgliteClient(db), MOVING, {
-      kind: "start",
-      binderId: GEN,
-      band: "red",
-    });
+    // The screen (the Haul Plan) names the haul copies it routes to this same line; only those are coming.
+    const m = await loadLinePopupModel(
+      pgliteClient(db),
+      MOVING,
+      { kind: "start", binderId: GEN, band: "red" },
+      { comingCopyIds: [SPARE] },
+    );
     expect(m.stages.map((st) => [st.stage, st.state])).toEqual([
       ["Basic", "coming"],
       ["Stage1", "incoming"],
@@ -177,7 +190,7 @@ describe("START · a stage whose card is still in her haul is not asked about ye
   });
 
   it("a start that decides only the Stage 2 is accepted; the Basic stays open and undecided for its card", async () => {
-    await move(start({ stages: { 2: { kind: "empty" } } }));
+    await move(start({ stages: { 2: { kind: "empty" } }, comingCopyIds: [SPARE] }));
     expect((await slotRows())[0]).toEqual({
       stage_index: 0,
       state: "placeholder",
@@ -217,6 +230,14 @@ describe("START · a complete two-card line asks what fills its third pocket", (
     await q(`delete from catalog_card where tcgdex_id = 'emberlord'`); // a two-stage family
     await copy(SPARE, "emberling"); // she owns the Basic, and ticks it
     await copy(MOVING, "emberdrake");
+  });
+
+  it("'Decide later' for the pocket leaves it undecided: nothing recorded, no filler", async () => {
+    await move(start({ pulls: [SPARE], thirdPocket: { material: "later" } }));
+    expect(await q(`select status, extra_pocket from evolution_line`)).toEqual([
+      { status: "closed", extra_pocket: null },
+    ]);
+    expect(await q(`select count(*)::int n from binder_block`)).toEqual([{ n: 0 }]);
   });
 
   it("without her answer it is refused; with it, the pocket is recorded and its filler written", async () => {
@@ -356,8 +377,8 @@ describe("JOIN / SWAP · the last card she has for a line asks about its other o
   });
 
   it("with another card for the line still in the haul, this one asks nothing: the last one asks (condition 1)", async () => {
-    await copy(SPARE, "emberlord", "haul"); // her Stage 2 is waiting too
-    await move({ mode: "join", lineId: LINE, slotId: SL1 });
+    await copy(SPARE, "emberlord", "haul"); // her Stage 2 is waiting too, and the screen routes it to this line
+    await move({ mode: "join", lineId: LINE, slotId: SL1, comingCopyIds: [SPARE] });
     expect(await q(`select state, stage_choice from line_slot where id = $1`, [S2])).toEqual([
       { state: "placeholder", stage_choice: null },
     ]);
@@ -392,11 +413,27 @@ describe("JOIN / SWAP · the last card she has for a line asks about its other o
   });
 });
 
+describe("a haul card counts as coming only when the screen routes it to THIS line (QA's hold on #430)", () => {
+  it("the same species waiting for ANOTHER line does not suppress this line's ask", async () => {
+    await copy(MOVING, "emberdrake");
+    await copy(SPARE, "emberling", "haul"); // an Emberling in the haul, routed elsewhere (not named)
+    await expect(move(start())).rejects.toThrow("Choose what goes in the Basic slot.");
+    await asOwner(db);
+    const m = await loadLinePopupModel(pgliteClient(db), MOVING, {
+      kind: "start",
+      binderId: GEN,
+      band: "red",
+    });
+    expect(m.stages[0].state).toBe("wanted");
+  });
+});
+
 describe("the Senior BA's case: Basic + Stage 1 in the haul, Stage 2 missing", () => {
   it("the Basic's start asks nothing; the Stage 1's join, the last card, asks about the Stage 2 only", async () => {
     await copy(MOVING, "emberling", "haul");
     await copy(SPARE, "emberdrake", "haul");
-    await move(start()); // the Basic: another card for the line (the Stage 1) waits, so nothing is asked
+    // The Basic: another card for the line (the Stage 1, which the screen routes here) waits, so nothing is asked.
+    await move(start({ comingCopyIds: [SPARE] }));
     const [line] = await q<{ id: string }>(`select id from evolution_line`);
     const slots = await q<{ id: string; stage_index: number; stage_choice: string | null }>(
       `select id, stage_index, stage_choice from line_slot order by stage_index`,

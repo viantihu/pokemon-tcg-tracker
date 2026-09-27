@@ -492,7 +492,9 @@ describe("UIL-121 · a join of her last card for a line asks about its other ope
     const rows = Array.from(document.querySelectorAll(".lp-moves .lp-mrow")).map(
       (r) => r.textContent,
     );
-    expect(rows.some((t) => /Wishlist.*Charizard.*for the Stage 2/.test(t ?? ""))).toBe(true);
+    expect(rows.some((t) => /Wishlist.*Charizard 026\/197 · for the Stage 2/.test(t ?? ""))).toBe(
+      true,
+    );
   });
 
   it("with another card for the line still in the haul, nothing is asked: that card's confirm asks", () => {

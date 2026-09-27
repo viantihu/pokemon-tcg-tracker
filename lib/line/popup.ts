@@ -32,6 +32,8 @@ export type LineChoice =
       pulls: string[];
       stages: Record<number, StageDecision>;
       thirdPocket?: ThirdPocketChoice;
+      /** UIL-121: haul copies the screen routes to this same line: their stages are not asked on this confirm. */
+      comingCopyIds?: string[];
     }
   /**
    * Join an existing line's open slot. `foreignLocale` is her second confirm for a line in another language;
@@ -48,6 +50,8 @@ export type LineChoice =
        * the last card she has for a line, she is asked about the stages still missing). By stage index.
        */
       stages?: Record<number, StageDecision>;
+      /** As a start's: haul copies the screen routes to this same line. */
+      comingCopyIds?: string[];
     }
   /**
    * A copy for a filled slot: keep the one that's there (nothing in the line moves). NOT a line write: the builder
@@ -71,6 +75,7 @@ export type LineChoice =
       foreignLocale?: true;
       /** As a join's: her choice for the line's other open stages she has not decided yet (UIL-121). */
       stages?: Record<number, StageDecision>;
+      comingCopyIds?: string[];
     };
 
 /** Where a card coming out of a line goes when that is another back half: a line it starts or joins. */

@@ -16,10 +16,12 @@ import type { Locale } from "@/lib/sync/types";
 export async function lineModelAction(
   copyId: string,
   proposal: LineProposal,
+  /** UIL-121: the haul copies the screen routes to this same line (the Haul Plan); they are shown as coming. */
+  comingCopyIds?: string[],
 ): Promise<{ ok: true; model: LinePopupModel } | { ok: false; error: string }> {
   try {
     const { db } = await getOwnerContext();
-    return { ok: true, model: await loadLinePopupModel(db, copyId, proposal) };
+    return { ok: true, model: await loadLinePopupModel(db, copyId, proposal, { comingCopyIds }) };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }

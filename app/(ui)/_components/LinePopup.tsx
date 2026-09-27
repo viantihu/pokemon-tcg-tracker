@@ -126,7 +126,8 @@ export function LinePopup({
     stagesDecided &&
     (!pocketAsked || pocketValue !== undefined);
   /** What she physically does besides moving cards, for "What moves": fillers she puts in, and what she now chases. */
-  const fillerMoves: { key: string; verb: string; what: string; where: string }[] = [];
+  const fillerMoves: { key: string; verb: string; what: string; where: string; into?: false }[] =
+    [];
   const fillerMove = (key: string, f: { material: string }, where: string) => {
     if (f.material === "energy")
       fillerMoves.push({ key, verb: "Put in", what: "A basic energy", where });
@@ -138,10 +139,11 @@ export function LinePopup({
     if (d?.kind === "filler")
       fillerMove(`s${st.stageIndex}`, d.filler, `the ${stageName(st.stage)} pocket`);
     if (d?.kind === "chase") {
+      const sugg = st.suggestion?.card;
       const named =
         "catalogCardId" in d
-          ? d.catalogCardId === st.suggestion?.card.tcgdexId
-            ? st.suggestion.card.name
+          ? sugg && d.catalogCardId === sugg.tcgdexId
+            ? `${sugg.name} ${formatCollectorNumber(sugg.localId, sugg.setCardCountOfficial ?? null) ?? ""}`.trim()
             : "The card you picked"
           : `Your placeholder card (${d.newStandIn.name.trim()})`;
       fillerMoves.push({
@@ -149,6 +151,7 @@ export function LinePopup({
         verb: "Wishlist",
         what: named,
         where: `for the ${stageName(st.stage)}`,
+        into: false,
       });
     }
   }
@@ -439,7 +442,11 @@ export function LinePopup({
               <div className="lp-mrow" key={m.key}>
                 <span className="lp-verb u">{m.verb}</span>
                 <span>
-                  {m.what} <span className="lp-where">→ {m.where}</span>
+                  {m.what}{" "}
+                  <span className="lp-where">
+                    {m.into === false ? "· " : "→ "}
+                    {m.where}
+                  </span>
                 </span>
               </div>
             ))}

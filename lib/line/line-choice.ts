@@ -154,7 +154,7 @@ function startLine(
     (sl) =>
       sl.stageIndex !== gen.incomingStageIndex &&
       !(sl.copyId && ticked.has(sl.copyId)) &&
-      waitingInHaul(state, sl.dexId),
+      waitingInHaul(state, sl.dexId, choice.comingCopyIds),
   );
   // UIL-121: every stage the line leaves unfilled is HER choice (chase a card, leave it empty, or a filler), checked
   // here on fresh state. Nothing is blocked, capped or wishlisted for her: an unfilled stage is inserted as an open
@@ -331,7 +331,15 @@ function joinLine(
   // UIL-121: her choice for the line's other open stages she has not decided (Karvi's ruling: with the last card she
   // has placed, she is asked about what is still missing); then the line reads closed once no stage waits, and a card
   // that completes a short line asks what fills its third pocket, unless she has already said.
-  const others = decideOtherStages(state, line, slots, slot.id, choice.stages, undecidedOk);
+  const others = decideOtherStages(
+    state,
+    line,
+    slots,
+    slot.id,
+    choice.stages,
+    undecidedOk,
+    choice.comingCopyIds,
+  );
   const after = others.after;
   const nowClosed = lineStatusOf(after) === "closed";
   const closes = nowClosed && !lineReadsClosed(line.status);
@@ -507,7 +515,15 @@ function replaceInLine(
     resolved_by: "user",
   });
   // UIL-121: a swap places her card in the line too, so the line's other open stages she has not decided are asked.
-  const others = decideOtherStages(state, line, slots, slot.id, choice.stages, false);
+  const others = decideOtherStages(
+    state,
+    line,
+    slots,
+    slot.id,
+    choice.stages,
+    false,
+    choice.comingCopyIds,
+  );
   ops.push(...others.ops);
   const nowClosed = lineStatusOf(others.after) === "closed";
   if (nowClosed !== lineReadsClosed(line.status)) {
@@ -592,16 +608,24 @@ function fillerOutOps(state: LineWriteState, lineId: string, slot: Row<"line_slo
   return ops;
 }
 
-/** A copy of this stage's species still waiting in her haul, in the line's language: its stage is not asked yet. */
+/**
+ * A haul copy the screen routes to this same line (`coming`), of this stage's species in the line's language: its stage
+ * is not asked on this confirm. Only the copies the screen names count: species and language alone cannot say which
+ * line a card is for (the Senior BA, QA's hold on #430).
+ */
 function waitingInHaul(
   state: LineWriteState,
   dexId: number,
+  coming: readonly string[] | undefined,
   locale = localeOfId(state.incoming.card.tcgdexId),
 ): boolean {
+  if (!coming || coming.length === 0) return false;
+  const routed = new Set(coming);
   const cardOf = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
   return [...state.copiesById.values()].some(
     (c) =>
       c.id !== state.copy.id &&
+      routed.has(c.id) &&
       c.role === "haul" &&
       (cardOf.get(c.catalog_card_id)?.dexId ?? []).includes(dexId) &&
       localeOfId(c.catalog_card_id) === locale,
@@ -622,6 +646,7 @@ function decideOtherStages(
   placedSlotId: string,
   decisions: Record<number, StageDecision> | undefined,
   undecidedOk: boolean,
+  coming?: readonly string[],
 ): { ops: WriteOp[]; after: { state: string; stageChoice?: string | null }[] } {
   const chain = testViability(state.incoming, [], state.catalog, state.typeColorMap).chain;
   const cardOf = (id: string) => state.copiesById.get(id)?.catalog_card_id ?? null;
@@ -636,7 +661,7 @@ function decideOtherStages(
       s.id !== placedSlotId &&
       isOpen(s) &&
       !!chain[s.stage_index] &&
-      waitingInHaul(state, chain[s.stage_index].dexId, lineLocale),
+      waitingInHaul(state, chain[s.stage_index].dexId, coming, lineLocale),
   );
   for (const s of slots) {
     if (s.id === placedSlotId) {
