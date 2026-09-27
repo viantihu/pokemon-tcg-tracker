@@ -64,6 +64,8 @@ export interface RunPlanResult {
    * order the plan shows.
    */
   orderedBandKeys?: string[];
+  /** The account has no binder yet (UIL-127a): nothing in the plan can be placed until one exists. */
+  noBinders?: boolean;
 }
 
 /** One draft entry as it crosses the client → server boundary. */

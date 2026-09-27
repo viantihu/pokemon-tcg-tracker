@@ -106,6 +106,7 @@ export const NOT_A_HAUL_COPY = {
   copyGone: "That card is no longer in your collection. Reload the plan to see what is waiting.",
 } as const;
 import { copyPlacementFromTarget } from "./placement";
+import { NO_BINDER } from "./no-binder";
 import { loadPlanContext, planFromDraft, type DraftItem, type PlanContext } from "./context";
 import { derivePlacementFrom, placementDigest } from "./spotlight";
 import type { PlanItem, PlannedCard } from "./types";
@@ -456,6 +457,7 @@ export async function commitCardPlacement(
         : undefined,
   });
   assertPlacementBandsConfigured(payload, pc);
+  assertPlacementBindersConfigured(payload, pc);
   await applyWriteOps(db, payload);
   return { counts, lineDone: keptLineId ? await lineDoneAfterWrite(db, keptLineId) : false };
 }
@@ -496,7 +498,9 @@ async function commitLineChoice(
   } else {
     const line = pc.ctx.lines.find((l) => l.id === choice.lineId);
     if (!line) throw new Error(LINE_CHOICE.lineGone);
-    dest = { kind: "shelf", binderId: line.binderId ?? "", half: "back", band: line.colorBand };
+    // UIL-127a: a line whose binder was deleted has nowhere to take the card; say so, not "another binder".
+    if (!line.binderId) throw new Error(NO_BINDER.refusal(cardName(pc, p.tcgdexId)));
+    dest = { kind: "shelf", binderId: line.binderId, half: "back", band: line.colorBand };
   }
   const built = await buildBackHalfLineOps(db, copy, dest, choice);
   const ops: WriteOp[] = [...built.ops];
@@ -543,6 +547,7 @@ async function commitLineChoice(
   counts.decisions += 1;
   const payload: WritePayload = { ops };
   assertPlacementBandsConfigured(payload, pc);
+  assertPlacementBindersConfigured(payload, pc);
   await applyWriteOps(db, payload);
   const lineId =
     choice.mode === "start" ? (started?.op === "insert_line" ? started.id : null) : choice.lineId;
@@ -588,6 +593,45 @@ export function assertPlacementBandsConfigured(payload: WritePayload, pc: PlanCo
           `in Settings — a display name such as "White" where the key "white" is expected is the ` +
           `usual cause.`,
       );
+    }
+  }
+}
+
+/** A card's name for her words, or "This card" when the catalog does not hold it. */
+function cardName(pc: PlanContext, catalogCardId: string | null | undefined): string {
+  const card = catalogCardId ? pc.catalogById.get(catalogCardId) : undefined;
+  return card?.name ?? "This card";
+}
+
+/**
+ * Guard the write set against shelving a card in NO binder, or in one that is not hers (UIL-127a). A new account
+ * has no binder until she adds one, and the cascade then routes every shelf target to `binderId: null`; that used to
+ * commit as a shelved card with no binder, which no screen could find. Pure (no I/O), like the band guard above.
+ *
+ * Only what the payload SETS is checked (the Tech Lead's C3): a copy left binderless by a binder being deleted is
+ * never refused for being touched, so a card stays movable. `pc.ctx.binders` is read through RLS, so a binder id
+ * that is not hers is "unknown" here too.
+ */
+export function assertPlacementBindersConfigured(payload: WritePayload, pc: PlanContext): void {
+  const known = new Set(pc.ctx.binders.map((b) => b.id));
+  const nameOf = (catalogCardId: string | null | undefined) => cardName(pc, catalogCardId);
+  const shelves = (role: string | undefined) => role === "shelved" || role === "block";
+  for (const op of payload.ops) {
+    if (op.op === "insert_copy") {
+      if (shelves(op.role) && (op.binder_id == null || !known.has(op.binder_id))) {
+        throw new Error(NO_BINDER.refusal(nameOf(op.catalog_card_id)));
+      }
+    } else if (op.op === "update_copy") {
+      if (!("binder_id" in op.patch)) continue;
+      const role = op.patch.role ?? pc.copyRowById.get(op.id)?.role;
+      const binderId = op.patch.binder_id;
+      if (shelves(role) && (binderId == null || !known.has(binderId))) {
+        throw new Error(NO_BINDER.refusal(nameOf(pc.copyRowById.get(op.id)?.catalog_card_id)));
+      }
+    } else if (op.op === "insert_line") {
+      if (op.binder_id == null || !known.has(op.binder_id)) {
+        throw new Error(NO_BINDER.refusal(`The evolution line for dex #${op.root_dex_id}`));
+      }
     }
   }
 }

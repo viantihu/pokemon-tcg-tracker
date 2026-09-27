@@ -28,6 +28,7 @@ import { applyWriteOps, type DbClient, type WriteOp, type WritePayload } from "@
 import { loadBackfillContext, planDeps, type BackfillContext } from "./context";
 import { planBackLine, planFrontHalf, planSpecialty } from "./plan";
 import { validateBackLine } from "./validate";
+import { NO_BINDER } from "@/lib/plan/no-binder";
 import { demandsOf, loadWaiting, NotWaitingError, shortagesOf, takerFor } from "./waiting";
 import {
   countWrites,
@@ -204,16 +205,25 @@ function linePicks(input: BackLineCommit): { tcgdexId: string; dexVariantRaw: st
   return picks;
 }
 
+/**
+ * A flat entry's binder must be one of HER binders as they are now (UIL-127a): an account with none, a stale tab
+ * naming a deleted one, or an id that is not hers (the context is read through RLS) is refused before any write.
+ * A line checks its own binder in `validateBackLine`.
+ */
+function assertBinderKnown(ctx: BackfillContext, binderId: string): void {
+  if (!ctx.binders.some((b) => b.id === binderId)) throw new Error(NO_BINDER.refusal("This card"));
+}
+
 /** Commit a front-half flat entry. */
 export async function commitFrontHalf(
   db: DbClient,
   ownerId: string,
   input: FrontHalfCommit,
 ): Promise<CommitCounts> {
-  return commitWaiting(db, ownerId, "list", () => ({
-    picks: input.cards,
-    plan: (deps) => planFrontHalf(input, deps),
-  }));
+  return commitWaiting(db, ownerId, "list", (ctx) => {
+    assertBinderKnown(ctx, input.binderId);
+    return { picks: input.cards, plan: (deps) => planFrontHalf(input, deps) };
+  });
 }
 
 /**
@@ -237,8 +247,8 @@ export async function commitSpecialty(
   ownerId: string,
   input: SpecialtyCommit,
 ): Promise<CommitCounts> {
-  return commitWaiting(db, ownerId, "list", () => ({
-    picks: input.cards,
-    plan: (deps) => planSpecialty(input, deps),
-  }));
+  return commitWaiting(db, ownerId, "list", (ctx) => {
+    assertBinderKnown(ctx, input.binderId);
+    return { picks: input.cards, plan: (deps) => planSpecialty(input, deps) };
+  });
 }

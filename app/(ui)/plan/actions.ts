@@ -154,6 +154,7 @@ export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
       byAction,
     },
     orderedBandKeys: pc.orderedBandKeys,
+    noBinders: pc.ctx.binders.length === 0,
   };
 }
 
