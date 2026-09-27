@@ -86,6 +86,41 @@ describe("apply_write_ops · each re-issue keeps the one before it", () => {
     },
   );
 
+  /** The newest body, as lines, with the index of each line's normalised form counted. */
+  const newest = () => {
+    const lines = REISSUES[REISSUES.length - 1].body.split("\n");
+    const count = new Map<string, number>();
+    for (const l of lines) count.set(norm(l), (count.get(norm(l)) ?? 0) + 1);
+    const unique = (i: number) =>
+      !!norm(lines[i]) && !norm(lines[i]).startsWith("--") && count.get(norm(lines[i])) === 1;
+    return { lines, unique };
+  };
+
+  it("ORDER is kept too: two adjacent lines swapped is caught (QA on #418)", () => {
+    const { lines, unique } = newest();
+    const i = lines.findIndex((_, k) => k + 1 < lines.length && unique(k) && unique(k + 1));
+    expect(i).toBeGreaterThan(0);
+    const swapped = [...lines];
+    [swapped[i], swapped[i + 1]] = [swapped[i + 1], swapped[i]];
+    expect(dropped(lines.join("\n"), swapped.join("\n"))).not.toEqual([]);
+  });
+
+  it("ORDER is kept too: a branch moved below the next one is caught (QA on #418)", () => {
+    // The branch order carries meaning: a branch ahead of the unknown-op raise, a check appended last.
+    const { lines } = newest();
+    const whens = lines.flatMap((l, k) => (/^\s*when '\w+' then\s*$/.test(l) ? [k] : []));
+    expect(whens.length).toBeGreaterThanOrEqual(3);
+    const [a, b, c] = whens.slice(-3); // move the last-but-two branch below the last-but-one
+    const moved = [
+      ...lines.slice(0, a),
+      ...lines.slice(b, c),
+      ...lines.slice(a, b),
+      ...lines.slice(c),
+    ];
+    expect(moved.length).toBe(lines.length);
+    expect(dropped(lines.join("\n"), moved.join("\n"))).not.toEqual([]);
+  });
+
   it("a re-issue written on an OLDER body is caught: it drops the newer lines", () => {
     // The shape the check exists for: the next migration composed on the body before the newest one.
     const [older, newest] = REISSUES.slice(-2);
