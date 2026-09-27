@@ -8821,3 +8821,59 @@ UIL-117's line-popup work (PR 2, in flight) already touches in this area so the 
 **Cross-reference UIL-117** (the line-popup rework already restructuring how lines are created and
 moved into; this entry is the missing inverse operation) and **UIL-087** (the slot-fill invariant,
 now enforced database-side by migration 0028, which a delete path has to satisfy).
+
+## UIL-119 — An empty line stage should never wishlist itself automatically; today two paths already do
+
+- **Reported:** 2026-09-27 (Karvi). Asked "Should an empty line stage go on your wishlist
+  automatically?" (whether a new line's missing cards, or a stage left empty when a card is pulled
+  away), she ruled: "No, only when I add it."
+- **Status:** Open, unassigned, scoping first.
+- **Priority:** Medium (Senior BA's read; wrong wishlist contents, not lost data).
+- **Area:** Lines / Haul Plan / Backfill / Wishlist
+- **Env:** Testing, `develop` `f5d4234`
+
+**Confirmed, path by path, which of today's line-writers already match her rule and which don't —
+checked directly, not assumed from the relay.**
+
+- **New-line creation — already compliant.** `buildNewLineJoinOps`
+  ([`lib/line/move.ts:314-361`](../lib/line/move.ts:314)) inserts the line and every one of its slots
+  (`insert_line`, `insert_slot` per stage) and creates no `insert_wishlist` op at all for any of them,
+  filled or placeholder.
+- **A pull that empties a slot — already compliant.** `releaseSlotOps`
+  ([`lib/line/move.ts:184-210`](../lib/line/move.ts:184)) sets the vacated slot back to `placeholder`
+  and clears its resolved-decision markers, with no wishlist write either.
+- **The Haul Plan's commit — violates the rule, unconditionally.** `lib/plan/commit.ts:993`'s own
+  comment states the behavior plainly: "Wishlist every placeholder slot." The loop right below it
+  ([`:994-1000`](../lib/plan/commit.ts:994)) pushes one `insert_wishlist` op for every placeholder the
+  cascade's own routing produced — nothing here is a choice she made stage by stage; it is the
+  automatic output of the plan committing.
+- **Backfill's placeholder stages — also violates the rule as written, but with a real distinction the
+  Haul Plan doesn't have.** `lib/backfill/plan.ts:157-176` pushes a matching `insert_slot` +
+  `insert_wishlist` pair whenever a resolved stage's `decision === "placeholder"`
+  ([`lib/backfill/types.ts:95`](../lib/backfill/types.ts:95): `SlotState` is only
+  `"filled" | "placeholder" | "block"` — there is no separate "wanted" value in the type at all).
+  **But** Backfill's own UI text
+  ([`app/(ui)/backfill/BackfillScreen.tsx:565`](<../app/(ui)/backfill/BackfillScreen.tsx>:565)) says "you
+  mark each one as owned, a wishlist hunt, or a block" — a per-stage choice she makes during the
+  Backfill flow, unlike the Haul Plan's fully automatic cascade output. The explicitness her rule asks
+  for lives in that marking step, not in the data model, which is exactly why the type alone can't answer
+  whether this path already complies.
+
+**Confirmed the Tech Lead's #385 note matches source exactly.** Its own text: "A new line's 'wanted'
+stages get no wishlist row. That matches today's Move path. The Haul Plan path is unchanged." — the
+"unchanged" is `lib/plan/commit.ts:993`'s loop above, confirmed still present and unconditional.
+
+**One open question for whoever scopes this, not decided here, with the evidence above leaning one
+way.** Does Backfill's explicit "mark as wishlist hunt" step count as "she added it"? The UI flow
+requiring a per-stage choice suggests yes — this is closer to a deliberate add than the Haul Plan's
+silent cascade output — but it is her call, not a code reading, since "added it" is about her intent,
+not about which screen happened to ask for a click.
+
+**Suggested fix, scoped by the finding above.** The Haul Plan's commit (`lib/plan/commit.ts:993-1000`)
+should stop auto-wishing every placeholder; only her own explicit add (however that ends up being
+expressed on that screen) should create the row. Backfill's path likely needs no change if her answer to
+the open question is yes — the mark-as-wishlist-hunt step already is her adding it.
+
+**Cross-reference UIL-117** (the line-popup rework already touching how lines get created and joined;
+worth checking this doesn't collide with it) and **UIL-118** (the delete-line entry whose cleanup counts
+these same wishlist rows, so a narrower auto-wish rule changes what a future delete has to account for).
