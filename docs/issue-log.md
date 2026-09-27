@@ -9161,3 +9161,95 @@ repurposing of the existing popup.
 of this fix; the step-through gap that currently traps her applies to both line-card kinds this entry
 splits apart), and **UIL-049** (a different specialty-routing exception to the same duplicate-detection
 system, for context on how many special cases it already carries).
+
+## UIL-127 — Multi-user sign-up: any email creates an account, removing the single-owner allow-list
+
+- **Reported:** 2026-09-27 (Karvi, approved via the "Multi-user app onboarding" session, its owner; all
+  three rulings also confirmed directly to the Senior BA the same day — "Yes, all three": Testing
+  invite-only until go-live, per-user colour settings, and the banner on every non-production
+  environment). Feature entry (like UIL-039/071/110), not a bug.
+- **Status:** Open, design approved, building (banner → tutorial → ownership → sign-up).
+- **Priority:** Go-live feature (Karvi: opens at launch).
+- **Area:** Auth, Ownership, App-wide
+- **Env:** n/a — design approved, nothing built yet.
+
+**What changes.** The first time an email is entered on `/login`, an account is created — no more
+single allow-listed address. Her rulings, verbatim scope: sign-up on Testing is "Yes, invite only" until
+go-live; Production "opens to sign ups when it launches"; per-user colour settings (rainbow band order
+and the type-to-band map) are "Yes, per user."
+
+**Confirmed every ownership gap named at intake, directly against schema, not assumed.** None of the
+following tables carry an `owner_id` today — all four are global, shared by every signed-in user
+regardless of who created the row:
+
+- `catalog_card` ([`supabase/migrations/0002_domain.sql:45-58`](../supabase/migrations/0002_domain.sql:45))
+  — the mirror AND every user-created stand-in (UIL-060) live in this one table with no owner column, so
+  today any signed-in user could edit another's stand-in.
+- `set_alias` ([`:263-269`](../supabase/migrations/0002_domain.sql:263)) — primary key is `(locale,
+  dex_code)` only, entirely global.
+- `color_band` and `type_color_map` ([`:28-39`](../supabase/migrations/0002_domain.sql:28)) — primary
+  keys `band` and `card_type`, no owner column on either; the rainbow order and type map she's asking to
+  make per-user are both global settings today.
+
+**Confirmed the zero-binder gap is real, not a crash but a silent stall.** A fresh account has no
+binder. Backfill's own load
+([`app/(ui)/backfill/BackfillScreen.tsx:108-111`](<../app/(ui)/backfill/BackfillScreen.tsx>:108)) already
+guards `c.binders[0]` being undefined with `if (first) { ... }` — so it does not throw, but nothing
+inside that guard runs either: no binder gets selected, nothing populates, and the screen goes nowhere.
+This is the "`/backfill` hangs" at intake — a silent no-op, not an infinite loop, but indistinguishable
+from one to her. The Haul Plan has the same shape: nothing stops a shelve into a binder that doesn't
+exist.
+
+**Confirmed the promotion prerequisite exactly.** `scripts/promote-collection.mjs:400-406` refuses to
+run once Testing holds rows for more than one owner (`sourceOwners.length > 1`), demanding an explicit
+`--source-owner`/`--source-owner-email` flag to disambiguate — so promotion has to happen before Testing
+carries more than one real account, or every future promotion needs that flag by hand.
+
+**Confirmed the SMTP prerequisite.** `supabase/config.toml:198`'s `email_sent = 2` (UIL-097) caps the
+built-in sender at two emails an hour project-wide — multi-user sign-up multiplies how often that limit
+is hit, so custom SMTP is a real prerequisite, not a nice-to-have.
+
+**Migration(s) allocated at PR-open, not reserved here.**
+
+**Cross-reference UIL-024** (Production readiness, this feature's launch target), **UIL-097** (sign-in
+and the SMTP prerequisite), **UIL-110** (the feedback widget, explicitly sequenced to follow multi-user),
+and **UIL-121** (the Tech Lead's catalog-only stand-in path, which must follow this entry's ownership
+change rather than precede it).
+
+## UIL-128 — First-run tutorial for new users
+
+- **Reported:** 2026-09-27 (Karvi, approved via the "Multi-user app onboarding" session). Feature entry.
+- **Status:** Open, design approved (part of UIL-127's build sequence).
+- **Priority:** Go-live feature (tied to UIL-127's launch).
+- **Area:** App-wide, Onboarding
+- **Env:** n/a — design approved, nothing built yet.
+
+**Steps, as approved, Karvi: "That is sufficient."** Welcome → Settings: add your binder → Sync: import
+CSV → Haul Plan → Lookup → Lines → Collections and Binders → Finish, where Finish goes to whichever step
+she reached, not a fixed screen.
+
+**Per-user onboarding state, a migration** — which step a given account has reached, so Finish and any
+resume behavior read from her own progress, not a shared or session-only flag. No further scoping
+decided here.
+
+**Migration 0031 allocated** (the onboarding-state table). **She will not see the tutorial pop up on
+Testing** — she already has data there, and the tutorial is for a fresh account with none — **but she
+can replay it from Settings** whenever she wants to see it.
+
+**Cross-reference UIL-127** (this entry is one stage of that build sequence — banner → tutorial →
+ownership → sign-up — and depends on accounts existing at all).
+
+## UIL-129 — Environment banner: which environment she's looking at, always visible
+
+- **Reported:** 2026-09-27 (Karvi, approved via the "Multi-user app onboarding" session). Feature entry.
+- **Status:** Open, design approved (part of UIL-127's build sequence).
+- **Priority:** Go-live feature (tied to UIL-127's launch).
+- **Area:** App-wide
+- **Env:** n/a — design approved, nothing built yet.
+
+**Scope, as approved, Karvi: "Go with your recommendation."** "TESTING ENVIRONMENT" on Testing and every
+preview deployment, "LOCAL" when run locally, a "TEST ·" tab-title prefix on all three, and nothing at
+all on Production — the absence of a banner is itself the Production signal, not a fourth label.
+
+**Cross-reference UIL-127** (the first of the four build stages — banner → tutorial → ownership →
+sign-up — this entry is the "banner" stage specifically).
