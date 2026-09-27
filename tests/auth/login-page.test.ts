@@ -32,6 +32,7 @@ describe("UIL-097 · the pages a magic link lands on", () => {
   });
 
   it("/auth/confirm mounts it failing closed: no fragment is a failed link", () => {
-    expect(src("app/auth/confirm/page.tsx")).toContain('<FragmentSignIn onEmpty="fail" />');
+    // Since UIL-127c it also hands over the "Signing you in…" it shows meanwhile (`pending`).
+    expect(src("app/auth/confirm/page.tsx")).toMatch(/<FragmentSignIn\s+onEmpty="fail"/);
   });
 });

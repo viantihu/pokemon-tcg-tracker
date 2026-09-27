@@ -18,3 +18,21 @@ export function sessionIdOf(accessToken: string | null | undefined): string | nu
     return null;
   }
 }
+
+/**
+ * The `sub` claim (the account id) of a Supabase access token, or null (UIL-127c). Decoded, NOT verified, and used
+ * for one thing only: telling her a link she opened while signed in was for ANOTHER account, so it does not look as
+ * though the link did nothing. It grants nothing and revokes nothing. Pure.
+ */
+export function userIdOf(accessToken: string | null | undefined): string | null {
+  if (!accessToken) return null;
+  const payload = accessToken.split(".")[1];
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as unknown;
+    const sub = (claims as { sub?: unknown } | null)?.sub;
+    return typeof sub === "string" && sub !== "" ? sub : null;
+  } catch {
+    return null;
+  }
+}

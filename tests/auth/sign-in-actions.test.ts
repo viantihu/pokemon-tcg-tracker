@@ -79,7 +79,8 @@ const form = (email: string) => {
 const AT = "SECRET-ACCESS";
 const RT = "SECRET-REFRESH";
 
-const OWNER_USER = { data: { user: { email: "owner@example.com" } } };
+// `id` matches the fixture tokens' `sub`: a link for her own account (UIL-127c tells the two apart).
+const OWNER_USER = { data: { user: { id: "u", email: "owner@example.com" } } };
 /** A JWT-shaped access token carrying `session_id` (the payload is all R2b reads). */
 const jwt = (sessionId: string) =>
   `h.${Buffer.from(JSON.stringify({ session_id: sessionId, sub: "u" })).toString("base64url")}.sig`;
@@ -188,6 +189,17 @@ describe("UIL-097 · completeSignIn validates, enforces the owner, and echoes no
     expect(calls).toEqual(["getUser", "getSession"]);
     expect(setSession).not.toHaveBeenCalled();
     expect(refreshSession).not.toHaveBeenCalled();
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("UIL-127c: a link for ANOTHER account, opened while she is signed in, keeps her session and names her account", async () => {
+    getUser.mockReset().mockResolvedValue(OWNER_USER);
+    const otherAccount = `h.${Buffer.from(JSON.stringify({ session_id: "s-other", sub: "someone-else" })).toString("base64url")}.sig`;
+    expect(await completeSignIn(otherAccount, RT)).toEqual({
+      ok: true,
+      signedInAs: "owner@example.com",
+    });
+    expect(setSession).not.toHaveBeenCalled();
     expect(signOut).not.toHaveBeenCalled();
   });
 

@@ -14,10 +14,13 @@ const serverSchema = z.object({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   TCGDEX_BASE_URL: z.string().min(1).default("https://api.tcgdex.net/v2"),
-  // Single allow-listed owner email (dev-spec §3 decision 4). Magic-link sign-in is offered
-  // ONLY to this address; every other email is rejected before a link is sent and again after
-  // the link is verified.
-  ALLOWED_OWNER_EMAIL: z.string().min(1),
+  // Who may sign in (UIL-127c, lib/auth/signup-mode.ts + lib/auth/allowlist.ts). SIGNUP_MODE is "open" or
+  // anything else, which means invite (fails closed). In invite mode an address must be in ALLOWED_EMAILS
+  // (comma-separated) or be ALLOWED_OWNER_EMAIL, the original single owner (dev-spec §3 decision 4), which is
+  // why existing environments keep working with no change. All three are optional.
+  SIGNUP_MODE: z.string().optional(),
+  ALLOWED_EMAILS: z.string().optional(),
+  ALLOWED_OWNER_EMAIL: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverSchema>;
@@ -42,4 +45,7 @@ export function getServerEnv(): ServerEnv {
 export const publicEnv = {
   supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
   supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+  // Cloudflare Turnstile's public site key (UIL-127c, the Tech Lead's D1). Set only where open sign-up is
+  // protected by Supabase Auth's CAPTCHA; empty means no check is shown or sent.
+  turnstileSiteKey: process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "",
 };

@@ -39,10 +39,15 @@ import { after } from "next/server";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { isAllowedEmail } from "@/lib/auth/allowlist";
-import { sessionIdOf } from "@/lib/auth/session-id";
+import { sessionIdOf, userIdOf } from "@/lib/auth/session-id";
 import { publicEnv } from "@/lib/env";
 
-export type CompleteSignInResult = { ok: true } | { ok: false; error: "auth" | "forbidden" };
+/**
+ * `signedInAs` (UIL-127c): she was already signed in, and the link was for a DIFFERENT account. Her session is kept
+ * (R2) and the page names the account she is in, so the link does not look as though it did nothing.
+ */
+export type CompleteSignInResult =
+  { ok: true; signedInAs?: string } | { ok: false; error: "auth" | "forbidden" };
 
 export async function completeSignIn(
   accessToken: unknown,
@@ -55,7 +60,8 @@ export async function completeSignIn(
 
   const supabase = await createClient();
 
-  // R2: already the owner — leave her session exactly as it is; R2b: retire the link's own, if different.
+  // R2: already signed in (as any account that may use the app, UIL-127c) — leave that session exactly as it is;
+  // R2b: retire the link's own, if different. When the link was for another account, say which one she is in.
   const {
     data: { user: current },
   } = await supabase.auth.getUser();
@@ -65,7 +71,10 @@ export async function completeSignIn(
     } = await supabase.auth.getSession();
     const mineId = sessionIdOf(mine?.access_token);
     after(() => revokeIfAnotherSession(mineId, accessToken, refreshToken));
-    return { ok: true };
+    const linkUser = userIdOf(accessToken);
+    return linkUser && linkUser !== current.id && current.email
+      ? { ok: true, signedInAs: current.email }
+      : { ok: true };
   }
 
   const { error } = await supabase.auth.setSession({
