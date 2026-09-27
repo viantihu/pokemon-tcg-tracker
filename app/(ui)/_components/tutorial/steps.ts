@@ -17,7 +17,8 @@ export const TUTORIAL_STEPS: readonly TutorialStep[] = [
     title: "Welcome to Binder Ops",
     body:
       "This app tells you where every card goes: which binder, which half, and which evolution line. " +
-      "This tour shows you each part of the app.",
+      "This tour shows you each part of the app. Hide it while you work, or skip it and replay it any " +
+      "time from Settings.",
     targets: [],
   },
   {
@@ -86,6 +87,7 @@ export const TUTORIAL_BUTTONS = {
   back: "Back",
   next: "Next",
   skip: "Skip tour",
+  hide: "Hide",
   /** The finish button before her next step is known (or when it could not be read). */
   done: "Done",
   replay: "Replay tutorial",
@@ -94,4 +96,9 @@ export const TUTORIAL_BUTTONS = {
 /** "Step 2 of 8". */
 export function tutorialCounter(step: number, total: number): string {
   return `Step ${step + 1} of ${total}`;
+}
+
+/** The hidden tour's one line: "Tour · Step 3 of 8 ▸". */
+export function tutorialPill(step: number, total: number): string {
+  return `Tour · ${tutorialCounter(step, total)} ▸`;
 }

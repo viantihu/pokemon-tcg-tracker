@@ -196,3 +196,43 @@ describe("UIL-128 · a call that never reaches the server", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+describe("UIL-128 · never in the way (the UX Dev's review of #414)", () => {
+  it("Hide folds the tour to one line that opens the same step again, and records nothing", async () => {
+    const user = userEvent.setup();
+    app(true);
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Hide" }));
+    expect(card()).toBeNull();
+    const pill = screen.getByRole("button", {
+      name: `Tour · Step 2 of ${TUTORIAL_STEPS.length} ▸`,
+    });
+    expect(document.activeElement).toBe(pill);
+    expect(pointed()).toEqual(["/settings"]);
+    expect(finishTutorial).not.toHaveBeenCalled();
+
+    await user.click(pill);
+    expect(card()!.textContent).toContain(TUTORIAL_STEPS[1].title);
+  });
+
+  it("while it is open the page is told its height, so its bottom padding clears it; closing takes both away", async () => {
+    const user = userEvent.setup();
+    const root = document.documentElement;
+    app(true);
+    expect(root.classList.contains("tour-open")).toBe(true);
+    expect(root.style.getPropertyValue("--tour-h")).toMatch(/^\d+px$/);
+
+    await user.click(screen.getByRole("button", { name: "Hide" }));
+    expect(root.classList.contains("tour-open")).toBe(true);
+
+    await user.keyboard("{Escape}");
+    expect(root.classList.contains("tour-open")).toBe(false);
+    expect(root.style.getPropertyValue("--tour-h")).toBe("");
+  });
+
+  it("the welcome says it can be hidden, and replayed from Settings after a skip", () => {
+    app(true);
+    expect(card()!.textContent).toMatch(/Hide it while you work/);
+    expect(card()!.textContent).toMatch(/replay it any time from Settings/);
+  });
+});

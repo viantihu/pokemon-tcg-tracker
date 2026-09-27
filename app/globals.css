@@ -3823,23 +3823,36 @@ button.subhead.folded:hover {
   font-weight: 700;
   letter-spacing: 0.18em;
   text-align: center;
+}
 
 /* ---------- first-run tutorial (UIL-128) ----------
    A step card, not a modal: the page stays usable under it. Bottom-right on a wide screen; on a phone it spans
    the width and sits above Sign out (fixed bottom-left, z 20) so neither covers the other. Under every veil,
-   popup and lightbox (z 50+), so anything opened over the tour sits on top of it. */
-.tour {
+   popup and lightbox (z 50+), so anything opened over the tour sits on top of it.
+   While it is open the root carries `tour-open` and `--tour-h` (the dock's measured height, Tutorial.tsx), and
+   `.app`'s bottom padding grows to clear it, so every page's last control can scroll out from under the card
+   (the UX Dev's review: Sync's Apply at 375). Never less than the frame's own padding. */
+.tour-dock {
   position: fixed;
   right: 14px;
   bottom: 14px;
   z-index: 30;
   width: min(380px, calc(100vw - 28px));
+  display: flex;
+  justify-content: flex-end;
+}
+html.tour-open .app {
+  padding-bottom: max(90px, calc(var(--tour-h, 0px) + 14px + 24px));
+}
+.tour {
+  width: 100%;
   padding: 14px 16px;
 }
 .tour:focus {
   outline: none;
 }
-.tour:focus-visible {
+.tour:focus-visible,
+.tour-pill:focus-visible {
   outline: 3px solid var(--note);
   outline-offset: 2px;
 }
@@ -3871,6 +3884,17 @@ button.subhead.folded:hover {
   justify-content: flex-end;
   gap: 8px;
 }
+/* Tighter than a page button, so Hide, Back, Skip tour and Next share one row at 375. */
+.tour-actions .btn {
+  padding: 7px 10px;
+}
+.tour-actions .tour-hide {
+  margin-right: auto;
+}
+.tour-pill {
+  font-size: 11px;
+  box-shadow: 5px 5px 0 rgba(60, 60, 59, 0.2);
+}
 .tab.tour-target {
   outline: 3px solid var(--note);
   outline-offset: 2px;
@@ -3886,11 +3910,15 @@ button.subhead.folded:hover {
     animation: none;
   }
 }
-@media (max-width: 640px) {
-  .tour {
+/* The phone frame (`.app` padding 120px from 720px down): the dock spans the width above Sign out. */
+@media (max-width: 720px) {
+  .tour-dock {
     left: 10px;
     right: 10px;
     bottom: 64px;
     width: auto;
+  }
+  html.tour-open .app {
+    padding-bottom: max(120px, calc(var(--tour-h, 0px) + 64px + 24px));
   }
 }

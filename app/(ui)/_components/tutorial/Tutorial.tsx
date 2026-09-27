@@ -9,6 +9,11 @@
  * Settings, add a binder) with the tour still open; the provider lives in the `(ui)` layout, so the tour keeps
  * its place across tabs. Escape skips it, through the shared escape layer, so a popup opened over it closes first.
  *
+ * NEVER IN THE WAY (the UX Dev's review of #414). While it is open, the page's bottom padding grows by the card's
+ * measured height (`--tour-h` on the root, as the haul bar publishes `--haulbar-h`), so every page's last control can
+ * scroll clear of it; and Hide folds it to a one-line pill, for what padding cannot clear (the desktop spotlight is
+ * sticky). Hiding records nothing: the pill opens the same step again.
+ *
  * Recording it done is best effort. If that call fails, the tour still closes and simply opens again on her
  * next visit, which is the whole cost; nothing she did is lost, so nothing is said.
  */
@@ -18,6 +23,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -32,6 +38,7 @@ import {
   TUTORIAL_NEXT,
   TUTORIAL_STEPS,
   tutorialCounter,
+  tutorialPill,
   type TutorialNext,
 } from "./steps";
 
@@ -58,11 +65,13 @@ export function TutorialProvider({
 }) {
   const [step, setStep] = useState<number | null>(startOpen ? 0 : null);
   const [next, setNext] = useState<TutorialNext | null>(null);
+  const [hidden, setHidden] = useState(false);
   const router = useRouter();
   const isOpen = step !== null;
 
   const open = useCallback(() => {
     setStep(0);
+    setHidden(false);
     window.scrollTo({ top: 0 });
   }, []);
 
@@ -99,14 +108,21 @@ export function TutorialProvider({
     <TutorialContext.Provider value={value}>
       {children}
       {step !== null ? (
-        <TutorialCard
-          step={step}
-          next={next}
-          onBack={() => setStep(Math.max(0, step - 1))}
-          onNext={() => setStep(Math.min(TUTORIAL_STEPS.length - 1, step + 1))}
-          onSkip={close}
-          onFinish={finish}
-        />
+        <TutorialDock>
+          {hidden ? (
+            <TutorialPill step={step} onShow={() => setHidden(false)} />
+          ) : (
+            <TutorialCard
+              step={step}
+              next={next}
+              onBack={() => setStep(Math.max(0, step - 1))}
+              onNext={() => setStep(Math.min(TUTORIAL_STEPS.length - 1, step + 1))}
+              onHide={() => setHidden(true)}
+              onSkip={close}
+              onFinish={finish}
+            />
+          )}
+        </TutorialDock>
       ) : null}
     </TutorialContext.Provider>
   );
@@ -117,6 +133,7 @@ export function TutorialCard(props: {
   next: TutorialNext | null;
   onBack: () => void;
   onNext: () => void;
+  onHide: () => void;
   onSkip: () => void;
   onFinish: () => void;
 }) {
@@ -149,6 +166,9 @@ export function TutorialCard(props: {
       </p>
       {last && next ? <p className="tour-body tour-lead">{TUTORIAL_NEXT[next].lead}</p> : null}
       <div className="tour-actions">
+        <button type="button" className="btn u tour-hide" onClick={props.onHide}>
+          {TUTORIAL_BUTTONS.hide}
+        </button>
         {step > 0 ? (
           <button type="button" className="btn u" onClick={props.onBack}>
             {TUTORIAL_BUTTONS.back}
@@ -170,6 +190,55 @@ export function TutorialCard(props: {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The fixed corner the card or the pill sits in. While it is mounted, its height is published as `--tour-h` on the
+ * root and the root carries `tour-open`, which grows `.app`'s bottom padding (globals.css) so nothing on the page is
+ * left under the tour. ResizeObserver and a viewport listener both, as the haul bar learned (a wrap on a phone can
+ * be missed by the observer alone). Both are removed on close, so no stale padding is left behind.
+ */
+function TutorialDock({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const publish = () => {
+      root.style.setProperty("--tour-h", `${Math.round(el.getBoundingClientRect().height)}px`);
+    };
+    publish();
+    root.classList.add("tour-open");
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(publish);
+    ro?.observe(el);
+    window.addEventListener("resize", publish);
+    window.addEventListener("orientationchange", publish);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", publish);
+      window.removeEventListener("orientationchange", publish);
+      root.classList.remove("tour-open");
+      root.style.removeProperty("--tour-h");
+    };
+  }, []);
+  return (
+    <div ref={ref} className="tour-dock">
+      {children}
+    </div>
+  );
+}
+
+/** The hidden tour: one line that opens the same step again. Takes focus, so the keyboard is not left behind. */
+function TutorialPill({ step, onShow }: { step: number; onShow: () => void }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+  return (
+    <button ref={ref} type="button" className="btn u tour-pill" onClick={onShow}>
+      {tutorialPill(step, TUTORIAL_STEPS.length)}
+    </button>
   );
 }
 
