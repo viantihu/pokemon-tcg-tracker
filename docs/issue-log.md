@@ -9253,3 +9253,49 @@ all on Production — the absence of a banner is itself the Production signal, n
 
 **Cross-reference UIL-127** (the first of the four build stages — banner → tutorial → ownership →
 sign-up — this entry is the "banner" stage specifically).
+
+## UIL-130 — Bulk should be its own storage unit, tracked for capacity like a binder, not just a role flag with no container
+
+- **Reported:** 2026-09-27 (Karvi, direct to the Senior BA). In her words: "Another major conceptual
+  change that needs to happen is that 'Bulk' is a type of storage unit. For phase 2, I plan to introduce
+  'sorted bulk', but bulk needs to be its own storage unit that we can track capacity against."
+- **Status:** Open, design pending.
+- **Priority:** High (pre-go-live; Karvi confirmed "after line work").
+- **Area:** Storage / Bulk / Settings
+- **Env:** Testing
+
+**Her answers to triage, same day.** How many bulk units: "Several," added like binders, each with its
+own name and capacity. Capacity: "This should be configurable. It is also possible to not track capacity
+per box." When a unit is full: "Depends on the configuration." When to build: after the line work
+(UIL-121 A2c / UIL-117 C1-C2), before go-live. Out of scope here: Phase 2's "sorted bulk" — this entry is
+the storage-unit foundation only.
+
+**Confirmed today's shape exactly: bulk is a role value with nothing else attached, not a container.**
+`copy.role` ([`supabase/migrations/0002_domain.sql:156`](../supabase/migrations/0002_domain.sql:156)) is
+`check (role in ('shelved', 'bulk', 'block'))` — a plain enum column, and the shared `binder_id` FK right
+below it is the only location reference `copy` carries. Migration 0018's own comment
+([`0018_haul_copy_state.sql:47`](../supabase/migrations/0018_haul_copy_state.sql:47)) states the current
+model plainly: "'bulk' and 'haul' both mean 'not in a binder' — neither carries a binder." There is no
+bulk-unit table, no capacity, no name — a bulk copy is identified by absence, not by which container
+it's in.
+
+**Confirmed only binders have capacity today, and how it's computed.**
+[`binder.pockets_per_page`](../supabase/migrations/0002_domain.sql:93) "sizes capacity only (CAPACITY,
+NOT ADDRESS)" per its own comment, and a binder's capacity is `pages-in-half × pockets_per_page`
+([`:283-312`](../supabase/migrations/0002_domain.sql:283)). Nothing analogous exists for bulk; this
+entry is asking for the same shape — a named unit with a configurable capacity — applied to bulk.
+
+**The migration this needs carries real, currently-changing data, not a clean slate.** Every existing
+`role = 'bulk'` copy has to move into a first bulk unit rather than starting from empty, and Karvi is
+adding cards to bulk on Testing right now, so the conversion has to account for rows created after this
+entry was written, not just a point-in-time snapshot.
+
+**Related.** The Backfill filler ruling (bulk box first, then haul, each labelled) is the Senior BA's own
+ruling, 2026-09-27 — not Karvi's — extending her words "Choose a basic energy, choose a card from the
+bulk box, or leave empty. If a bulk box card is chosen, the user should specify which card." Shipped in
+PR #424 (merged `a24e63b`). The "every copy comes from a Dex row" principle (UIL-098) is named by the
+Senior BA as adjacent to this design, not re-derived here.
+
+**Cross-reference UIL-121** (the line work this is sequenced after) and **UIL-117** (C1-C2, the same
+sequencing dependency) and **UIL-098** (the Dex-only-creates-copies principle this design has to keep
+holding once bulk becomes a real container).
