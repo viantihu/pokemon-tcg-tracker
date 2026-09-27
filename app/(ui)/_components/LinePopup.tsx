@@ -10,7 +10,7 @@
  * owns the stepping ("Confirm & next") and the write; this component only reports her choice.
  */
 
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import type {
   LineChoice,
   LinePopupProps,
@@ -20,7 +20,7 @@ import type {
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { BandChip } from "./BandChip";
 import { CardFace } from "./CardFace";
-import { ColourChoiceSection, destinationLabel, ReplaceChoice } from "./LinePopupParts";
+import { ColourChoiceSection, destinationLabel, lineNote, ReplaceChoice } from "./LinePopupParts";
 
 const LANGUAGE: Record<string, { name: string; flag: string }> = {
   en: { name: "English", flag: "🇬🇧" },
@@ -94,13 +94,25 @@ export function LinePopup({
     (model.mode === "start"
       ? "Start line"
       : model.mode === "add"
-        ? filingOwn
-          ? "File in front half"
-          : "Add to line"
+        ? cc && cc.picked === null
+          ? "Confirm"
+          : filingOwn
+            ? "File in front half"
+            : "Add to line"
         : swapping
           ? "Swap them"
           : "Keep");
   const where = `${line.binderName} · Back · ${line.bandDisplay}`;
+  // A replace's one-row strip scrolls sideways on a phone: start it on the slot being decided (UX review of #391).
+  const stripRef = useRef<HTMLDivElement>(null);
+  const isReplace = model.mode === "replace";
+  useEffect(() => {
+    const strip = stripRef.current;
+    const two = strip?.querySelector<HTMLElement>(".lp-two");
+    if (!isReplace || !strip || !two || strip.scrollWidth <= strip.clientWidth) return;
+    const offset = two.getBoundingClientRect().left - strip.getBoundingClientRect().left;
+    strip.scrollLeft += offset - (strip.clientWidth - two.offsetWidth) / 2;
+  }, [isReplace]);
   const goingIn = 1 + pulls.length;
 
   function togglePull(copyId: string) {
@@ -148,7 +160,7 @@ export function LinePopup({
             </div>
           </>
         ) : null}
-        <div className="lp-strip">
+        <div ref={stripRef} className={"lp-strip" + (isReplace ? " lp-scroll" : "")}>
           {model.stages.map((s, i) => (
             <Stage
               key={s.stageIndex}
@@ -268,7 +280,7 @@ export function LinePopup({
         {foreign ? (
           <div className="lp-also" role="alert">
             <b className="u">
-              This is a {language(line.locale).name} line, and this card is{" "}
+              This line is {language(line.locale).name} and this card is{" "}
               {language(card.locale).name}
             </b>
             It won&apos;t join a line in another language by default. You can still choose to.
@@ -357,7 +369,11 @@ export function LinePopup({
               ? swapping
                 ? `Line stays ${line.filledAfter}/${line.total} the whole time · one step, no gap · `
                 : "Nothing in the line moves · "
-              : `${goingIn} card${goingIn === 1 ? "" : "s"} go${goingIn === 1 ? "es" : ""} in · ${line.filledAfter + pulls.length}/${line.total} filled · `}
+              : cc && cc.picked === null
+                ? "Pick one above · "
+                : filingOwn
+                  ? "Filed by its own colour, not in a line · "
+                  : `${goingIn} card${goingIn === 1 ? "" : "s"} go${goingIn === 1 ? "es" : ""} in · ${line.filledAfter + pulls.length}/${line.total} filled · `}
             nothing is written until you confirm
           </span>
           <button type="button" className="btn" onClick={onCancel} disabled={busy}>
@@ -524,18 +540,30 @@ function ReplaceMoves({
             {current.card.name} {no(current)} <span className="lp-where">stays in the line</span>
           </span>
         </div>
-        <div className="lp-mrow">
-          <span className="lp-verb u">Shelve</span>
-          {face(incoming)}
-          <span>
-            {incoming.card.name} {no(incoming)}{" "}
-            <span className="lp-where">
-              {value.incoming
-                ? `→ ${destinationLabel(value.incoming, moveOptions)}`
-                : (keepLabel ?? `stays in ${incoming.where}`)}
+        {value.incoming ? (
+          <div className="lp-mrow">
+            <span className="lp-verb u">
+              {value.incoming.kind === "bulk" ? "To bulk" : "Shelve"}
             </span>
-          </span>
-        </div>
+            {face(incoming)}
+            <span>
+              {incoming.card.name} {no(incoming)}{" "}
+              <span className="lp-where">
+                from {incoming.where} → {destinationLabel(value.incoming, moveOptions)}
+              </span>
+            </span>
+          </div>
+        ) : (
+          // Nothing moves for it either (the Lines page): it stays where it is.
+          <div className="lp-mrow lp-muted">
+            <span className="lp-verb u">Stays put</span>
+            {face(incoming)}
+            <span>
+              {incoming.card.name} {no(incoming)}{" "}
+              <span className="lp-where">{keepLabel ?? `stays in ${incoming.where}`}</span>
+            </span>
+          </div>
+        )}
       </div>
     );
   }
@@ -554,7 +582,9 @@ function ReplaceMoves({
         {face(incoming)}
         <span>
           {incoming.card.name} {no(incoming)}{" "}
-          <span className="lp-where">→ {where}, into its spot</span>
+          <span className="lp-where">
+            from {incoming.where} → {where}, into its spot
+          </span>
         </span>
       </div>
       <div className="lp-mrow">
@@ -562,7 +592,10 @@ function ReplaceMoves({
         {face(current)}
         <span>
           {current.card.name} {no(current)}{" "}
-          <span className="lp-where">→ {destinationLabel(value.outgoing, moveOptions)}</span>
+          <span className="lp-where">
+            → {destinationLabel(value.outgoing, moveOptions)}
+            {lineNote(value.outgoingLine)}
+          </span>
         </span>
       </div>
     </div>

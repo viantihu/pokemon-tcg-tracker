@@ -177,6 +177,30 @@ describe("UIL-117 PR 3 · Lines: replace the card in a filled slot", () => {
     expect(moveCardAction).not.toHaveBeenCalled();
   });
 
+  it("Escape closes the replace, from the picker and from its popup, like the Move sheet", async () => {
+    const user = await openReplace();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Replace Toedscruel" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Replace this card/ }));
+    await user.click(await screen.findByRole("button", { name: /Toedscruel.*190\/159/ }));
+    await screen.findByRole("dialog", { name: "A copy for a filled slot" });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "A copy for a filled slot" })).toBeNull();
+    expect(moveCardAction).not.toHaveBeenCalled();
+  });
+
+  it("Escape on the Move sheet opened from the popup closes that sheet only; the replace stays open", async () => {
+    const user = await openReplace();
+    await user.click(await screen.findByRole("button", { name: /Toedscruel.*190\/159/ }));
+    await screen.findByRole("dialog", { name: "A copy for a filled slot" });
+    await user.click(screen.getByRole("radio", { name: /Swap in/ }));
+    await user.click(screen.getByRole("button", { name: "A front half…" }));
+    await screen.findByRole("dialog", { name: "Move Toedscruel" });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Move Toedscruel" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "A copy for a filled slot" })).toBeTruthy();
+  });
+
   it("no other copy outside a line: it says so, and offers nothing to pick", async () => {
     replaceCandidatesAction.mockResolvedValue({
       ok: true,

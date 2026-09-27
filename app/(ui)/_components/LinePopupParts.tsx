@@ -16,8 +16,14 @@ import type { MoveDestination, MoveOptions } from "@/lib/line/types";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { BandChip } from "./BandChip";
 import { MoveOverlay } from "./MoveOverlay";
+import { useEscapeLayer } from "./escape-layer";
 
 type OutgoingLine = Extract<LineChoice, { mode: "start" } | { mode: "join" }>;
+
+/** ", new line" / ", into its slot": the card coming out's own line, as its popup said it. */
+export function lineNote(line: { mode: "start" | "join" } | undefined): string {
+  return line ? (line.mode === "start" ? ", new line" : ", into its slot") : "";
+}
 
 /** Her words for a destination: "the bulk box", "KB-002 · Front · Red", "Specialty A · Starters". */
 export function destinationLabel(dest: MoveDestination, options?: MoveOptions): string {
@@ -133,6 +139,7 @@ export function ReplaceChoice({
             suggested={replace.suggestedOutgoing}
             options={moveOptions}
             lineModel={outgoingLineModel}
+            note={lineNote(!value.keep ? value.outgoingLine : undefined)}
             busy={busy}
             onPick={(dest, line) =>
               onChange({
@@ -149,7 +156,16 @@ export function ReplaceChoice({
 
       {value.keep && keepDestination ? (
         <>
-          <div className="lp-lbl u">Where does {numberOf(incoming.card)} go?</div>
+          <div className="lp-lbl u">
+            Where does {numberOf(incoming.card)} go?{" "}
+            <span className="lp-hint">
+              (anywhere, your choice.{" "}
+              {keepDestination.kind === "bulk"
+                ? "Bulk box"
+                : destinationLabel(keepDestination, moveOptions)}{" "}
+              is suggested)
+            </span>
+          </div>
           <DestinationPicker
             label={`Where ${numberOf(incoming.card)} goes`}
             card={incoming}
@@ -176,10 +192,13 @@ function DestinationPicker({
   suggested,
   options,
   lineModel,
+  note = "",
   busy,
   onPick,
 }: {
   label: string;
+  /** ", new line" / ", into its slot" when the card goes into a line (UX review of #391). */
+  note?: string;
   card: LinePopupReplace["current"];
   value: MoveDestination;
   suggested: MoveDestination;
@@ -189,18 +208,37 @@ function DestinationPicker({
   onPick(dest: MoveDestination, line?: OutgoingLine): void;
 }) {
   const [sheet, setSheet] = useState<MoveDestination | null>(null);
+  // Escape closes this sheet only, not the popup under it (escape-layer.ts).
+  useEscapeLayer(sheet !== null, () => setSheet(null));
   const general = options?.binders.find((b) => b.type === "general");
   const specialty = options?.binders.find(
     (b) => b.type === "specialty" && (options.collectionsByBinder[b.id]?.length ?? 0) > 0,
   );
   const isSuggested = JSON.stringify(value) === JSON.stringify(suggested);
-  const chips: { key: string; text: string; open?: MoveDestination; on: boolean }[] = [
+  const isBulk = value.kind === "bulk";
+  const chips: {
+    key: string;
+    text: string;
+    open?: MoveDestination;
+    pick?: MoveDestination;
+    on: boolean;
+  }[] = [
     {
       key: "suggested",
       text: suggested.kind === "bulk" ? "Bulk box" : destinationLabel(suggested, options),
+      pick: suggested,
       on: isSuggested,
     },
   ];
+  // A one-tap bulk box even when the suggestion is elsewhere (UX review of #391).
+  if (suggested.kind !== "bulk") {
+    chips.push({
+      key: "bulk",
+      text: "Bulk box",
+      pick: { kind: "bulk" },
+      on: !isSuggested && isBulk,
+    });
+  }
   if (options && general) {
     chips.push({
       key: "front",
@@ -237,14 +275,19 @@ function DestinationPicker({
             className={"lp-band u" + (c.on ? " on" : "")}
             aria-pressed={c.on}
             disabled={busy}
-            onClick={() => (c.open ? setSheet(c.open) : onPick(suggested))}
+            onClick={() => (c.open ? setSheet(c.open) : onPick(c.pick ?? suggested))}
           >
             {c.text}
             {c.key === "suggested" ? <span className="lp-sugg">Suggested</span> : null}
           </button>
         ))}
       </div>
-      {!isSuggested ? <div className="lp-note">→ {destinationLabel(value, options)}</div> : null}
+      {!isSuggested ? (
+        <div className="lp-note">
+          → {destinationLabel(value, options)}
+          {note}
+        </div>
+      ) : null}
       {sheet && options ? (
         <MoveOverlay
           card={{
@@ -261,6 +304,7 @@ function DestinationPicker({
           }}
           options={options}
           lineModel={lineModel}
+          openLineOnMount={sheet.kind === "shelf" && sheet.half === "back"}
           onClose={() => setSheet(null)}
           onConfirm={(dest, line) => {
             setSheet(null);

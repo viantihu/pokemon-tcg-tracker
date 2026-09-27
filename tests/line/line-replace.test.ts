@@ -262,6 +262,27 @@ describe("refused, with nothing written", () => {
     await unchanged();
   });
 
+  it("the card coming out sent to be a binder block (QA R4: a phantom block with no block row)", async () => {
+    await expect(
+      move(swap({ kind: "block", lineId: LINE, slotId: SLOT0, binderId: GEN })),
+    ).rejects.toThrow(/can't become a binder block/);
+    await unchanged();
+    expect(await q(`select id from binder_block`)).toEqual([]);
+  });
+
+  it("the card coming out sent to a collection that no longer exists (QA R11: it would sit on no list)", async () => {
+    await expect(
+      move(
+        swap({
+          kind: "collection",
+          binderId: SPEC,
+          collectionId: "a0000000-0000-4000-8000-00000000dead",
+        }),
+      ),
+    ).rejects.toThrow(/collection/i);
+    await unchanged();
+  });
+
   it("a destination that is not the line's binder and band", async () => {
     await expect(
       move(swap({ kind: "bulk" }), NEW, {

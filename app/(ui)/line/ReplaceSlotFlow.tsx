@@ -21,6 +21,7 @@ import type { ReplaceCandidate, ReplaceCandidates } from "@/lib/line/replace-can
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
 import { LinePopup } from "../_components/LinePopup";
+import { useEscapeLayer } from "../_components/escape-layer";
 
 export function ReplaceSlotFlow({
   lineId,
@@ -50,6 +51,8 @@ export function ReplaceSlotFlow({
   const [pop, setPop] = useState<{ model: LinePopupModel; choice: LineChoice } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Escape closes the replace (the picker or its popup), like the Move sheet; a sheet opened inside sits on top.
+  useEscapeLayer(true, onClose);
 
   useEffect(() => {
     let live = true;

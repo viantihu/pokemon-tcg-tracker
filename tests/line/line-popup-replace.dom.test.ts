@@ -119,8 +119,11 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
     expect(radio(/Keep 027\/197/).getAttribute("aria-checked")).toBe("true");
     expect(radio(/Swap in 169\/165/).getAttribute("aria-checked")).toBe("false");
     expect(document.querySelectorAll('[data-stage-state="replace"] .face.l')).toHaveLength(2);
-    expect(movesText()).toContain("Stays put");
-    expect(movesText()).toContain("stays in the line");
+    // Nothing moves on Keep: the card in the line stays, and the other one stays where it is (UX review of #391).
+    expect(movesText()).toMatch(/Stays put.*027\/197.*stays in the line/);
+    expect(movesText()).toMatch(/Stays put.*169\/165.*It stays in KB-001 · Front · Red/);
+    expect(movesText()).not.toContain("Shelve");
+    expect(document.querySelector(".lp-strip.lp-scroll")).not.toBeNull(); // one row on a phone
     expect(confirmBtn().textContent).toBe("Keep ▶");
     await user.click(confirmBtn());
     expect(onConfirm).toHaveBeenCalledWith({
@@ -145,7 +148,10 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
         .getAttribute("aria-pressed"),
     ).toBe("true");
     expect(movesText()).toMatch(/Take out.*027\/197.*from KB-003 · Back · Red/);
-    expect(movesText()).toMatch(/Shelve.*169\/165.*into its spot/);
+    // Where the new card comes FROM is part of what she authorizes (UX review of #391).
+    expect(movesText()).toMatch(
+      /Shelve.*169\/165.*from KB-001 · Front · Red → KB-003 · Back · Red, into its spot/,
+    );
     expect(movesText()).toMatch(/To bulk.*027\/197.*the bulk box/);
     expect(screen.getByText(/Line stays 3\/3 the whole time · one step, no gap/)).toBeTruthy();
     expect(confirmBtn().textContent).toBe("Swap them ▶");
@@ -216,11 +222,12 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
     );
     await user.click(radio(/Swap in/));
     await user.click(screen.getByRole("button", { name: "Another line…" }));
-    await user.click(await screen.findByRole("button", { name: "BACK HALF" }));
+    // The line popup opens with the sheet: the back half IS her choice, no second tap (UX review of #391).
     await screen.findByRole("dialog", { name: "Start a line" });
     expect(outgoingLineModel).toHaveBeenCalledWith({ kind: "start", binderId: "b1", band: "red" });
     await user.click(screen.getByRole("button", { name: /Start line/ }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Start a line" })).toBeNull());
+    expect(movesText()).toMatch(/027\/197.*→ KB-001 · Back · Red, new line/);
     await user.click(confirmBtn());
     expect(onConfirm).toHaveBeenCalledWith({
       mode: "replace",
@@ -284,6 +291,44 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
       keep: true,
       incoming: { kind: "bulk" },
     });
+  });
+
+  it("a Keep picker suggesting a front half still offers the bulk box in one tap, and says what is suggested", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    const front = { kind: "shelf" as const, binderId: "b1", half: "front" as const, band: "red" };
+    render(
+      createElement(Harness, {
+        model: REPLACE,
+        initial: { mode: "replace", lineId: "L1", slotId: "S1", keep: true, incoming: front },
+        keepDestination: front,
+        onConfirm,
+      }),
+    );
+    expect(
+      screen.getByText(/anywhere, your choice\. KB-001 · Front · Red is suggested/),
+    ).toBeTruthy();
+    const where = screen.getByRole("group", { name: /Where 169\/165 goes/ });
+    await user.click(within(where).getByRole("button", { name: "Bulk box" }));
+    await user.click(confirmBtn());
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ keep: true, incoming: { kind: "bulk" } }),
+    );
+  });
+
+  it("Escape closes the top layer only: the Move sheet opened from the popup, not the popup", async () => {
+    const onCancel = vi.fn();
+    const user = userEvent.setup();
+    render(
+      createElement(Harness, { model: REPLACE, initial: defaultChoiceFor(PROPOSAL), onCancel }),
+    );
+    await user.click(radio(/Swap in/));
+    await user.click(screen.getByRole("button", { name: "A front half…" }));
+    await screen.findByRole("dialog", { name: "Move Charmeleon" });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Move Charmeleon" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "A copy for a filled slot" })).toBeTruthy();
+    expect(onCancel).not.toHaveBeenCalled();
   });
 
   it("a swap in another language waits for her second tick", async () => {
@@ -350,7 +395,9 @@ describe("UIL-069 · a colour mismatch on an Add picks neither option for her", 
     expect(radio(/Add to the Green line/).getAttribute("aria-checked")).toBe("false");
     expect(radio(/File by its own colour/).getAttribute("aria-checked")).toBe("false");
     expect((confirmBtn() as HTMLButtonElement).disabled).toBe(true);
+    expect(confirmBtn().textContent).toBe("Confirm ▶"); // leans toward neither (UX review of #391)
     expect(movesText()).toBe("Pick one above.");
+    expect(screen.getByText(/Pick one above · nothing is written until you confirm/)).toBeTruthy();
     expect(screen.getByText("If you add it")).toBeTruthy();
   });
 
@@ -373,6 +420,10 @@ describe("UIL-069 · a colour mismatch on an Add picks neither option for her", 
     render(createElement(ColourHarness, { onConfirm, onConfirmOwn }));
     await user.click(radio(/File by its own colour/));
     expect(confirmBtn().textContent).toBe("File in front half ▶");
+    expect(
+      screen.getByText(/Filed by its own colour, not in a line · nothing is written/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/card goes in/)).toBeNull();
     expect(movesText()).toMatch(/Charmeleon → KB-001 · Front · Red · not in a line/);
     expect(document.querySelector(".lp-slot.lp-in")).toBeNull();
     expect(document.querySelector('[data-stage-state="wanted"]')).not.toBeNull();

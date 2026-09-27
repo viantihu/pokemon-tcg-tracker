@@ -3712,6 +3712,15 @@ button.subhead.folded:hover {
   .lp-arrow {
     display: none;
   }
+  /* A replace keeps the line on ONE row that scrolls sideways, so Keep / Swap stays near the top (UX, #391). */
+  .lp-strip.lp-scroll {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+  .lp-strip.lp-scroll > .lp-slot {
+    flex: 0 0 auto;
+  }
   .lp-foot {
     position: sticky;
     bottom: 0;
