@@ -19,6 +19,7 @@ import { languageName } from "@/lib/catalog/locale";
 import {
   stageLabel,
   type FillerCardOption,
+  type FillerSource,
   type LinePopupStage,
   type StageDecision,
   type StageOption,
@@ -31,12 +32,18 @@ import { CardFace } from "./CardFace";
 
 type Panel = "pick" | "standin" | "filler" | null;
 
-/** Where a filler card comes from: her bulk box (every popup screen), or her haul (Backfill transcribing a binder). */
-export type FillerFrom = "bulk" | "haul";
+const BULK_ONLY: readonly FillerSource[] = ["bulk"];
+/** A pick's source, sent only when it is not the bulk box (the default), so the popup screens send what they did. */
+const fromOf = (o: FillerCardOption) => (o.from && o.from !== "bulk" ? { from: o.from } : {});
+
+/** Which words the filler list uses: her bulk box, her haul, or both (each card then tagged with where it is). */
+type FillerWordsKey = "bulk" | "haul" | "both";
+const wordsKey = (from: readonly FillerSource[]): FillerWordsKey =>
+  from.includes("bulk") && from.includes("haul") ? "both" : from.includes("haul") ? "haul" : "bulk";
 
 /** The words for a filler card's source, so every place the part names it agrees. */
 const FILLER_WORDS: Record<
-  FillerFrom,
+  FillerWordsKey,
   { option: string; leaves: string; loading: string; none: string; list: string; from: string }
 > = {
   bulk: {
@@ -46,6 +53,14 @@ const FILLER_WORDS: Record<
     none: "Your bulk box is empty.",
     list: "Cards in your bulk box",
     from: "from your bulk box",
+  },
+  both: {
+    option: "A spare card from your bulk box or this haul",
+    leaves: "It comes out of the bulk box or the haul and holds the pocket.",
+    loading: "Loading your spare cards…",
+    none: "No spare card in your bulk box or this haul.",
+    list: "Spare cards: your bulk box, then this haul",
+    from: "",
   },
   haul: {
     option: "A spare card from your haul",
@@ -66,7 +81,9 @@ export function stageDecisionLabel(
   d: StageDecision | null,
   cardName: (id: string) => string | null,
   fillerName: (copyId: string) => string | null,
-  fillerFrom: FillerFrom = "bulk",
+  fillerFrom: readonly FillerSource[] = ["bulk"],
+  /** Where the chosen filler card is ("Bulk box", "This haul"), said when the list has both. */
+  fillerWhere: (copyId: string) => string | null = () => null,
 ): string {
   if (!d) return "Choose";
   switch (d.kind) {
@@ -79,7 +96,11 @@ export function stageDecisionLabel(
     case "filler":
       return d.filler.material === "energy"
         ? "Filler: a basic energy"
-        : `Filler: ${fillerName(d.filler.copyId) ?? "a card"} ${FILLER_WORDS[fillerFrom].from}`;
+        : wordsKey(fillerFrom) === "both"
+          ? `Filler: ${fillerName(d.filler.copyId) ?? "a card"}${
+              fillerWhere(d.filler.copyId) ? ` · ${fillerWhere(d.filler.copyId)}` : ""
+            }`
+          : `Filler: ${fillerName(d.filler.copyId) ?? "a card"} ${FILLER_WORDS[wordsKey(fillerFrom)].from}`;
   }
 }
 
@@ -169,9 +190,10 @@ function FillerPicker({
   onCard(o: FillerCardOption): void;
   bulk: ReturnType<typeof useLoaded<FillerCardOption>>;
   busy: boolean;
-  fillerFrom: FillerFrom;
+  fillerFrom: readonly FillerSource[];
 }) {
-  const words = FILLER_WORDS[fillerFrom];
+  const key = wordsKey(fillerFrom);
+  const words = FILLER_WORDS[key];
   const [showBulk, setShowBulk] = useState(value?.material === "card");
   return (
     <>
@@ -212,6 +234,7 @@ function FillerPicker({
         ) : bulk.items ? (
           <CardGrid
             label={words.list}
+            tagOf={key === "both" ? (o) => o.where : undefined}
             items={bulk.items}
             keyOf={(o) => o.copyId}
             cardOf={(o) => o.card}
@@ -296,7 +319,7 @@ export function StageChoice({
   loadOptions,
   loadBulk,
   busy = false,
-  fillerFrom = "bulk",
+  fillerFrom = BULK_ONLY,
 }: {
   stage: LinePopupStage;
   lineLocale: Locale;
@@ -305,8 +328,8 @@ export function StageChoice({
   loadOptions(): Promise<StageOption[]>;
   loadBulk(): Promise<FillerCardOption[]>;
   busy?: boolean;
-  /** Where a filler card comes from: the bulk box (default), or the haul for Backfill. */
-  fillerFrom?: FillerFrom;
+  /** Where a filler card may come from: the bulk box (default); Backfill offers ["bulk", "haul"]. */
+  fillerFrom?: readonly FillerSource[];
 }) {
   const [panel, setPanel] = useState<Panel>(null);
   const options = useLoaded(loadOptions);
@@ -322,6 +345,8 @@ export function StageChoice({
     const o = bulk.items?.find((x) => x.copyId === copyId);
     return o ? labelOf(o.card) : null;
   };
+  const fillerWhere = (copyId: string) =>
+    bulk.items?.find((x) => x.copyId === copyId)?.where ?? null;
   const chasing = value?.kind === "chase" && "catalogCardId" in value ? value.catalogCardId : null;
   const pick = (d: StageDecision) => {
     onChange(d);
@@ -336,10 +361,11 @@ export function StageChoice({
     <section
       className="lp-stagechoice"
       data-stage-index={stage.stageIndex}
-      aria-label={`${stageLabel(stage.stage)}: ${stageDecisionLabel(value, cardName, fillerName, fillerFrom)}`}
+      aria-label={`${stageLabel(stage.stage)}: ${stageDecisionLabel(value, cardName, fillerName, fillerFrom, fillerWhere)}`}
     >
       <div className="lp-lbl u">
-        {stageLabel(stage.stage)} · {stageDecisionLabel(value, cardName, fillerName, fillerFrom)}
+        {stageLabel(stage.stage)} ·{" "}
+        {stageDecisionLabel(value, cardName, fillerName, fillerFrom, fillerWhere)}
       </div>
 
       {suggestion ? (
@@ -460,7 +486,9 @@ export function StageChoice({
         <FillerPicker
           value={value?.kind === "filler" ? value.filler : null}
           onEnergy={() => pick({ kind: "filler", filler: { material: "energy" } })}
-          onCard={(o) => pick({ kind: "filler", filler: { material: "card", copyId: o.copyId } })}
+          onCard={(o) =>
+            pick({ kind: "filler", filler: { material: "card", copyId: o.copyId, ...fromOf(o) } })
+          }
           bulk={bulk}
           busy={busy}
           fillerFrom={fillerFrom}
@@ -476,13 +504,13 @@ export function ThirdPocketChoice({
   onChange,
   loadBulk,
   busy = false,
-  fillerFrom = "bulk",
+  fillerFrom = BULK_ONLY,
 }: {
   value: ThirdPocketValue | null;
   onChange(v: ThirdPocketValue): void;
   loadBulk(): Promise<FillerCardOption[]>;
   busy?: boolean;
-  fillerFrom?: FillerFrom;
+  fillerFrom?: readonly FillerSource[];
 }) {
   const bulk = useLoaded(loadBulk);
   return (
@@ -495,7 +523,7 @@ export function ThirdPocketChoice({
             ? "Left empty"
             : value.material === "energy"
               ? "A basic energy"
-              : FILLER_WORDS[fillerFrom].option}
+              : FILLER_WORDS[wordsKey(fillerFrom)].option}
       </div>
       <div className="lp-note">
         This line is complete with fewer than 3 cards, so its row has one pocket left.
@@ -503,7 +531,7 @@ export function ThirdPocketChoice({
       <FillerPicker
         value={value && value.material !== "empty" ? value : null}
         onEnergy={() => onChange({ material: "energy" })}
-        onCard={(o) => onChange({ material: "card", copyId: o.copyId })}
+        onCard={(o) => onChange({ material: "card", copyId: o.copyId, ...fromOf(o) })}
         bulk={bulk}
         busy={busy}
         fillerFrom={fillerFrom}
