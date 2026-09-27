@@ -46,8 +46,14 @@ const EMPTY_VIEW: LookupView = { answer: null, copies: [], notFound: false, fail
  * The Move sheet's card for one of her copies of the looked-up printing (UIL-051/UIL-077). PURE and
  * exported so the mapping is unit-pinned; `openMove` runs from a click a static render cannot reach.
  */
-export function lookupMoveTarget(answer: LookupAnswer, copy: LookupMovableCopy): MoveTargetCard {
+export function lookupMoveTarget(
+  answer: LookupAnswer,
+  copy: LookupMovableCopy,
+  /** False for a species with no evolutions: never a line, so no back half (Karvi, 2026-09-27). */
+  formsALine = true,
+): MoveTargetCard {
   return {
+    ...(formsALine ? {} : { formsALine: false }),
     copyId: copy.copyId,
     tcgdexId: answer.card.tcgdexId,
     name: answer.card.name,
@@ -108,7 +114,7 @@ export function LookupScreen() {
       opts = r.options;
       setMoveOptions(opts);
     }
-    setMoveTarget(lookupMoveTarget(answer, copy));
+    setMoveTarget(lookupMoveTarget(answer, copy, view.formsALine !== false));
   }
 
   /**

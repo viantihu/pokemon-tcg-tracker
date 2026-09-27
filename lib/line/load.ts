@@ -14,6 +14,7 @@
 
 import type { Locale } from "@/lib/sync/types";
 import {
+  formsALine,
   band as bandOf,
   lineLocaleOf,
   rankAlternates,
@@ -442,6 +443,7 @@ export async function buildScreenModel(
     if (!cc) continue;
     const join = joinOptionsFor(cc, joinIndex, typeColorMap, catalog);
     if (!join) continue; // Trainer/Energy: no species, no line concept
+    if (!formsALine(cc, catalog)) continue; // no evolutions: never a line (Karvi, 2026-09-27)
     const bandKey = c.color_band ?? join.naturalBandKey;
 
     unlinedCards.push({

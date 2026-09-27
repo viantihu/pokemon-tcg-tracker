@@ -11,6 +11,7 @@ import type { BlockNeedCandidate } from "@/lib/line/types";
 
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import {
+  formsALine,
   assertBandConfig,
   band,
   placeCard,
@@ -293,6 +294,7 @@ export async function loadPlanContext(
         },
       },
       copyLabel: (copyId) => copyLabelOf(copyId),
+      formsALine: (card) => formsALine(card, ctx.catalog),
     },
   };
 }

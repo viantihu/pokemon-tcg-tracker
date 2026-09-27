@@ -149,3 +149,45 @@ describe("UIL-073 · clicking a line-candidate chip selects it and the reason fl
     expect(backHalf().disabled).toBe(false);
   });
 });
+
+describe("a Basic with no evolutions is never a line (Karvi, 2026-09-27)", () => {
+  const WHY =
+    "A Basic with no evolutions can't start a line. Put it in a front half, a collection or the bulk box.";
+
+  it("the back half is not offered and says why; no new line is offered; the front half still places it", async () => {
+    const { onConfirm, user } = mount({
+      allowLineJoin: false,
+      joinCandidates: undefined,
+      formsALine: false,
+    });
+    expect(backHalf().disabled).toBe(true);
+    expect(backHalf().title).toBe(WHY);
+    expect(screen.getByText(WHY)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: NEW_LINE })).toBeNull();
+
+    await user.click(button("Binder 1"));
+    await user.click(button("FRONT HALF"));
+    await user.click(confirm());
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm.mock.calls[0][0]).toMatchObject({
+      kind: "shelf",
+      binderId: "b1",
+      half: "front",
+    });
+  });
+
+  it("even with the line picker on, no line she picks turns its back half on", async () => {
+    const { onConfirm, user } = mount({ formsALine: false });
+    await user.click(candidate());
+    expect(backHalf().disabled).toBe(true);
+    await user.click(button(NEW_LINE));
+    expect(backHalf().disabled).toBe(true);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("a card that forms a line keeps its back half, without her words", () => {
+    mount({ allowLineJoin: false, joinCandidates: undefined });
+    expect(backHalf().title).not.toBe(WHY);
+    expect(screen.queryByText(WHY)).toBeNull();
+  });
+});

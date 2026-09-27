@@ -31,8 +31,10 @@ beforeEach(async () => {
     `insert into catalog_card (tcgdex_id, name, dex_id, types, stage, evolve_from, card_class, local_id, set_card_count_official)
        values ('emberling', 'Emberling', $1, '{Fire}', 'Basic', null, 'standard', '099', 182),
               ('emberdrake', 'Emberdrake', $2, '{Fire}', 'Stage1', 'Emberling', 'standard', '100', 210),
-              ('emberkit', 'Emberkit', $3, '{Fire}', 'Basic', null, 'standard', '007', null)`,
-    [[EMBERLING_DEX], [EMBERDRAKE_DEX], [EMBERKIT_DEX]],
+              ('emberkit', 'Emberkit', $3, '{Fire}', 'Basic', null, 'standard', '007', null),
+              -- It evolves, so it forms a line and is listed as not in one yet (Karvi, 2026-09-27).
+              ('emberkitten', 'Emberkitten', $4, '{Fire}', 'Stage1', 'Emberkit', 'standard', '008', null)`,
+    [[EMBERLING_DEX], [EMBERDRAKE_DEX], [EMBERKIT_DEX], [EMBERKIT_DEX + 1]],
   );
   for (const [copyId, catalogId] of [
     [IN_LINE, "emberling"],

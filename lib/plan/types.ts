@@ -76,6 +76,8 @@ export interface PlanItem {
   startsLine?: string | null;
   /** The line stage a card headed into a line goes into (0 = the Basic), for the step-through's order (UIL-120). */
   lineStage?: number | null;
+  /** False for a species with no evolutions: never a line, so her Move offers no back half (Karvi, 2026-09-27). */
+  formsALine?: boolean;
 }
 
 /** The line a plain extra copy duplicates, in her words (UIL-126). */

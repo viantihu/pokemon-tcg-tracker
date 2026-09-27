@@ -369,6 +369,10 @@ export function leavesLineText(l: LeavesLine): string {
   return `leaves the ${l.lineName} one short (its ${l.stage} goes empty)`;
 }
 
+/** Her words when a card's species has no evolutions: it is never a line (Karvi's ruling, 2026-09-27). */
+export const NOT_A_LINE =
+  "A Basic with no evolutions can't start a line. Put it in a front half, a collection or the bulk box.";
+
 /** Where a card still in her haul is, in her words: produced by the popup's loaders, read by the popup itself. */
 export const IN_THE_HAUL = "Still in the haul";
 

@@ -35,6 +35,7 @@ import {
 } from "@/lib/engine";
 import type { WriteOp } from "@/lib/repo";
 import type { CopyPlacementPatch, LineJoinChoice, MoveDestination, MoveOptions } from "./types";
+import { NOT_A_LINE } from "./popup";
 
 /** Derive the four placement columns (+ cleared line link) for a moved copy. */
 export function placementForMove(dest: MoveDestination): CopyPlacementPatch {
@@ -322,6 +323,8 @@ export function buildNewLineJoinOps(ctx: NewLineContext): {
   rootDexId: number;
 } {
   const chainViability = testViability(ctx.incoming, [], ctx.catalog, ctx.typeColorMap);
+  // A species with no evolutions is never a line (Karvi's ruling, 2026-09-27).
+  if (chainViability.chain.length < 2) throw new Error(NOT_A_LINE);
   // Chain-walking is species-only (no band involved); same-colour/placeholder matching is not — so
   // `band` is overridden to HER destination band here, before any of that matching runs, rather than
   // trusting `testViability`'s own band guess from the card's type.

@@ -196,6 +196,8 @@ describe("loadLineScreen's unlinedCards filter — the role and species guards (
   it("lists ONLY shelved copies: a bulk copy and a binder-block copy have no line slot either, and still stay out", async () => {
     await seedBinders(db, [{ id: GEN, type: "general", name: "Binder 1" }]);
     await seedCard("emberling", "Emberling", EMBERLING_DEX, "Basic", null);
+    // It evolves, so it forms a line (a Basic with no evolutions is never listed: Karvi, 2026-09-27).
+    await seedCard("emberdrake", "Emberdrake", EMBERDRAKE_DEX, "Stage1", "Emberling");
     // The control: a shelved, line-less copy IS unlined — so an empty list would not pass this test.
     await seedShelvedFront(UNLINED_EMBERDRAKE, "emberling");
     // Same species, no `line_slot_id` — the only thing separating these from the control is `role`.
@@ -221,9 +223,22 @@ describe("loadLineScreen's unlinedCards filter — the role and species guards (
     expect(ids).toHaveLength(1);
   });
 
+  it("a shelved Basic with no evolutions is NOT listed: it is never a line (Karvi, 2026-09-27)", async () => {
+    await seedBinders(db, [{ id: GEN, type: "general", name: "Binder 1" }]);
+    await seedCard("emberling", "Emberling", EMBERLING_DEX, "Basic", null);
+    await seedCard("emberdrake", "Emberdrake", EMBERDRAKE_DEX, "Stage1", "Emberling");
+    await seedCard("loner", "Loner", 9799, "Basic", null);
+    await seedShelvedFront(UNLINED_EMBERDRAKE, "emberling");
+    await seedShelvedFront(SHELVED_TRAINER, "loner");
+    const data = await loadLineScreen(pgliteClient(db));
+    // PRE-FIX: both listed, and "start a new line" offered for the Basic that has no line.
+    expect(data.unlinedCards.map((c) => c.copyId)).toEqual([UNLINED_EMBERDRAKE]);
+  });
+
   it("skips a shelved Trainer rather than throwing on it — there is no line concept for a card with no species", async () => {
     await seedBinders(db, [{ id: GEN, type: "general", name: "Binder 1" }]);
     await seedCard("emberling", "Emberling", EMBERLING_DEX, "Basic", null);
+    await seedCard("emberdrake", "Emberdrake", EMBERDRAKE_DEX, "Stage1", "Emberling");
     await seedTrainer("nest-ball", "Nest Ball");
     await seedShelvedFront(UNLINED_EMBERDRAKE, "emberling"); // control, see above
     await seedShelvedFront(SHELVED_TRAINER, "nest-ball"); // a front-half Trainer, exactly as sync shelves them
