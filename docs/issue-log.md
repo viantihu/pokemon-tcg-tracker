@@ -9101,3 +9101,63 @@ identified above, not a new mobile layer.
 
 **Cross-reference UIL-058** (the same `.spot` component, a different desktop-only overlap bug — not the
 same mechanism, noted only to distinguish the two).
+
+## UIL-126 — A plain extra copy of a card already in a line should get a note and a Swap offer, not the line popup; only a genuine holo/reverse-holo upgrade should
+
+- **Reported:** 2026-09-27 (Karvi, ruling relayed by the UX Dev; a UIL-117 follow-up). In her words:
+  "Only add a picker if the new card is a holo/reverse holo variant and the original is not. Otherwise,
+  there should be some help text … saying that there is another Charmeleon line so that if the user does
+  choose to replace the card, they are able to." On where: "In the spotlight … the haul plan will
+  already suggest that this card should go in the front half, but there should be some text there itself
+  prompting the user to potentially consider adding to a line." She picked "Normal card + prompt" over
+  keeping the popup. Scope, confirmed to the Senior BA: "Yes, any holo or reverse holo counts" (any
+  printing of that species, whichever set).
+- **Status:** Open, assigned to Full Stack Dev - 2 (the Tech Lead reviews the engine and server rule; the
+  UX Dev reviews the UI), after the UIL-120 fix.
+- **Priority:** High (Senior BA's read: it changes her Haul Plan flow, and plain duplicates currently
+  trap her in the popup step-through, related to UIL-120).
+- **Area:** Haul Plan
+- **Env:** Testing, `develop` `7090b37`
+
+**Confirmed the server rule treats every filled stage as a line card today, with no variant check at
+all.** `isLineCard` ([`lib/plan/line-proposal.ts:62-65`](../lib/plan/line-proposal.ts:62)) returns true
+whenever `result.target.kind === "back-half-line" || !!result.filledStage` — a plain identical extra
+copy and a genuine holo upgrade both set `filledStage`/route through `back-half-line` identically.
+`lineProposalFor` ([`:32-49`](../lib/plan/line-proposal.ts:32)) reflects the same non-distinction: the
+generic "filled stage" branch (`:45`) returns `{ kind: "replace", ..., defaultKeep: true }` for ANY
+match, holo or not, and only the separate holo-swap-inherited branch (`:52`, fed by the cascade's own
+`duplicate` step) sets `defaultKeep: false`. This is exactly why a plain duplicate today opens the same
+popup step-through as a real upgrade, with only the picker's default (Keep vs. Swap) differing — not
+whether the popup opens at all.
+
+**Confirmed two real gaps in the engine's own holo-swap detection, checked directly, not assumed.**
+`resolveDuplicate`'s swap condition ([`lib/engine/duplicate.ts:85`](../lib/engine/duplicate.ts:85)) is
+the literal string check `incomingVariant === "holo" && match.variant === "normal"` — a reverse-holo
+incoming card never satisfies this, so it can't trigger today's holo-swap path at all, let alone the new
+picker. Separately, `isDuplicateCard`
+([`:19-28`](../lib/engine/duplicate.ts:19)) matches on a shared `artworkGroupId` OR identical
+`(setId, localId)` — its own comment says art reprints share a group, but a different printing that
+doesn't happen to share TCGdex's artwork cluster only matches by falling back to the same-printing
+check, which by definition can't match a different printing. In practice this means an upgrade offer
+today is reachable mostly for the exact printing already in the line, not reliably "any holo or reverse
+holo of that species, whichever set" — the scope she just confirmed.
+
+**What has to change, per her ruling, not decided further here:**
+
+1. **A genuine upgrade** (incoming holo or reverse holo, existing line card neither) stays a line card:
+   pink badge, Swap pre-set, Keep picker with bulk suggested — today's behavior, once the two engine
+   gaps above are closed so it actually fires for reverse holo and for any printing of the species.
+2. **A plain extra copy** (not a variant upgrade) stops being a line card: a front-half Done, plus a
+   spotlight note — her wording: "ⓘ Your `<X>` line (`<binder · half · band>`) already has `<card>`." —
+   and a "⇄ Swap this one into the line…" button that opens the popup in replace mode with Swap already
+   picked, for whenever she chooses to act on it rather than being routed there automatically.
+
+**Suggested fix, scoped by the above, design otherwise open.** `isLineCard`/`lineProposalFor` need a
+variant check added so a plain-copy match returns no proposal (front half, no popup) while an
+upgrade-shaped match still does; the note-and-button UI in the spotlight is new surface, not a
+repurposing of the existing popup.
+
+**Cross-reference UIL-117** (the popup and proposal system this changes), **UIL-120** (sequenced ahead
+of this fix; the step-through gap that currently traps her applies to both line-card kinds this entry
+splits apart), and **UIL-049** (a different specialty-routing exception to the same duplicate-detection
+system, for context on how many special cases it already carries).
