@@ -169,6 +169,35 @@ describe("buildLineView", () => {
       ],
     });
     expect(decided.thirdPocketOpen).toBe(false);
+    // A complete THREE-stage line has no third pocket to ask about: every pocket holds its card.
+    const full = buildLineView({
+      lineId: "L4",
+      rootDexId: 4,
+      bandKey: "red",
+      binderId: "b1",
+      binderLabel: "Binder 1 · BACK",
+      status: "closed",
+      extraPocket: null,
+      slots: [
+        slot({ stageIndex: 0, state: "filled", card: card("Charmander", "026"), copyId: "c1" }),
+        slot({
+          stageIndex: 1,
+          stage: "Stage1",
+          state: "filled",
+          card: card("Charmeleon", "027"),
+          copyId: "c2",
+        }),
+        slot({
+          stageIndex: 2,
+          stage: "Stage2",
+          state: "filled",
+          card: card("Charizard", "125"),
+          copyId: "c3",
+        }),
+      ],
+    });
+    expect(full.thirdPocketOpen).toBe(false);
+    expect(full.info.map((b) => b.v).join(" ")).not.toMatch(/last pocket/);
   });
 });
 
