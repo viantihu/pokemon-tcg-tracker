@@ -14,7 +14,7 @@
  *   - "Add to that line" on a line she already has reloads the popup for that line.
  *
  * The step-through ("Line card k of N", "Confirm & next") is the screen's: it opens the next line card after a
- * confirm, unless that confirm completes the line (UIL-120), so a confirm that will complete it does not say
+ * confirm, unless its line is then DONE (UIL-120, `lineDoneFor`), so a confirm that will leave it done does not say
  * "· next". Escape cancels, through the app's layer stack.
  */
 
@@ -29,6 +29,7 @@ import {
 } from "@/lib/line/popup";
 import { LinePopup } from "../_components/LinePopup";
 import { useEscapeLayer } from "../_components/escape-layer";
+import { lineDoneFor } from "@/lib/plan/line-done";
 
 export function PlanLinePopup({
   item,
@@ -122,12 +123,23 @@ export function PlanLinePopup({
     proposal.lineId === opened.lineId &&
     proposal.slotId === opened.slotId;
   const mismatch = model.mode === "add" && onOpenedLine && bandMismatch ? bandMismatch : null;
-  // UIL-120: a confirm that fills the line's last slot completes it, and the screen then stops stepping; the popup's
-  // own count ("N/M filled") is the forecast. Filing by its own colour puts it in no line at all.
+  // UIL-120: when this confirm leaves its line DONE the screen stops stepping, so the button does not say "· next".
+  // The forecast is the server's one rule over the slots as they will be: the card going in (or the one kept there),
+  // every card already here, a pull only if she ticked it, a block as a block. Filing by its own colour is no line.
+  const ticked = value.mode === "start" ? value.pulls : [];
   const completes =
-    model.mode !== "replace" &&
     colour !== "own" &&
-    model.line.filledAfter + (value.mode === "start" ? value.pulls.length : 0) >= model.line.total;
+    lineDoneFor(
+      model.stages.map((st) =>
+        st.state === "incoming" || st.state === "here"
+          ? "filled"
+          : st.state === "blocked"
+            ? "block"
+            : st.state === "pullable" && st.pull && ticked.includes(st.pull.copyId)
+              ? "filled"
+              : "placeholder",
+      ),
+    );
 
   return (
     <div className="lp-overlay">

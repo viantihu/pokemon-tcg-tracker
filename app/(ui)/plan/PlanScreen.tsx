@@ -726,7 +726,7 @@ export function PlanScreen({
     item: PlanItem,
     /** From the line popup (UIL-117): her line choice, or her "file by its own colour" destination. */
     extra?: { lineChoice?: LineChoice; override?: MoveDestination },
-  ): Promise<false | { completedLine: boolean }> {
+  ): Promise<false | { lineDone: boolean }> {
     if (done.has(item.incomingId) || shelving) return false;
     const entry = draft.find((d) => d.id === item.incomingId);
     if (!entry) return false;
@@ -816,7 +816,7 @@ export function PlanScreen({
       // Roll the cache forward rather than letting the write invalidate it (see shelveCardAction).
       setLiveStamp(res.stamp);
       setDone((prev) => new Set(prev).add(item.incomingId));
-      return { completedLine: res.completedLine === true };
+      return { lineDone: res.lineDone === true };
     } finally {
       setShelving(null);
     }
@@ -1049,9 +1049,10 @@ export function PlanScreen({
    * opens straight away, so a big haul is one pass rather than a hunt (v3 section 1). A refusal keeps the popup
    * open with the reason in it.
    *
-   * EXCEPT when her confirm COMPLETED a line (UIL-120). Karvi: "Once the line is complete, it should not open the
-   * popup again for the next card automatically." The popup closes and she stays on the plan; the next line card
-   * waits for her tap. Whether it completed is the server's answer, read off the write it built.
+   * EXCEPT when the line her confirm concerned is DONE (UIL-120): nothing left in it to chase, which includes a Keep or
+   * a Swap on a line that was already complete and a line whose only unfilled stage is a block (`lineDoneFor`). Karvi:
+   * "Once the line is complete, it should not open the popup again for the next card automatically." The popup closes
+   * and she stays on the plan; the next line card waits for her tap. It is the server's answer, read after the write.
    */
   async function confirmLinePopup(
     item: PlanItem,
@@ -1062,7 +1063,7 @@ export function PlanScreen({
     // A line write can change what the other cards would do (a card that would have started this line now joins
     // it), so the rest re-route and their badges follow; the batch runs a moment later, as for any change.
     if (extra.lineChoice) scheduleReroute();
-    const next = shelved.completedLine ? undefined : nextLineCard(item.incomingId);
+    const next = shelved.lineDone ? undefined : nextLineCard(item.incomingId);
     if (next) openLinePopup(next);
     else {
       setLinePop(null);
@@ -1367,8 +1368,8 @@ function PlanView(props: {
   setCur: (i: number) => void;
   done: Set<string>;
   /** Writes ONE card now; resolves true when it was shelved (UIL-027). */
-  /** Truthy once written; `completedLine` says it completed a line (UIL-120). */
-  shelveCard: (item: PlanItem) => Promise<false | { completedLine: boolean }>;
+  /** Truthy once written; `lineDone` says the line it concerned has nothing left to chase (UIL-120). */
+  shelveCard: (item: PlanItem) => Promise<false | { lineDone: boolean }>;
   /** Draft id of the card mid-write, so only its own control shows a pending state. */
   shelving: string | null;
   /** The spotlight card re-derived against current state, keyed by draft id (UIL-045). */
