@@ -1810,9 +1810,20 @@ nav.menu .tab .n {
   background: #5f5035;
   color: #f1d6af;
 }
+/* Leave empty, picked: an inset ink ring on a light fill, so it reads as picked beside the unpicked tan (the fill
+   alone was 1.3:1; the ring is 7.9:1 against it) and stays apart from Filled's solid ink and Block's brown. */
 .seg3 button.on.em {
-  background: var(--lo);
+  background: var(--hi);
   color: var(--ink);
+  box-shadow: inset 0 0 0 3px var(--ink);
+  font-weight: 700;
+}
+.bf-cleared {
+  font-size: 10px;
+  color: var(--ink);
+  background: var(--note);
+  border: 2px solid var(--ink);
+  padding: 4px 6px;
 }
 .seg3 button:disabled {
   opacity: 0.45;

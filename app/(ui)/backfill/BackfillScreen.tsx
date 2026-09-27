@@ -380,6 +380,11 @@ interface StageEntry {
   /** A repurposed duplicate is a card she owns too, so it is picked from her haul as well. */
   blockCard: WaitingCard | null;
   pocketCount: number;
+  /**
+   * Her hunt was cleared when she marked the line terminated. The row says so while the stage is undecided (UX review
+   * of #400); unticking terminated drops it.
+   */
+  huntCleared?: boolean;
 }
 
 function defaultEntry(info: BackLineStageInfo): StageEntry {
@@ -459,7 +464,16 @@ function BackHalfPanel({
   /** A terminated line hunts nothing (the Senior BA's Q1), so a hunt goes back to undecided for her to redo. */
   function markTerminated(on: boolean) {
     setTerminated(on);
-    if (on) setEntries((es) => es.map((e) => (e.choice === "hunt" ? { ...e, choice: null } : e)));
+    // Never silently: the row she hunted says why it went back to undecided (the UX Dev's review of #400).
+    setEntries((es) =>
+      es.map((e) =>
+        on && e.choice === "hunt"
+          ? { ...e, choice: null, huntCleared: true }
+          : !on && e.huntCleared
+            ? { ...e, huntCleared: false }
+            : e,
+      ),
+    );
   }
 
   const status = deriveStatus(entries, terminated);
@@ -722,11 +736,19 @@ function StageRow({
       </span>
 
       <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-        {choice === null && (
-          <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
-            Not decided yet: Filled, Hunt, Leave empty or Block.
+        {choice === null && entry.huntCleared ? (
+          <span className="bf-cleared" role="status">
+            Wishlist hunt cleared: a terminated line hunts nothing. Pick another option.
           </span>
-        )}
+        ) : choice === null ? (
+          <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
+            {huntOff
+              ? `Not decided yet: Filled, Leave empty or Block. Hunt is off: ${
+                  terminated ? "a terminated line hunts nothing" : "no same-colour printing to hunt"
+                }.`
+              : "Not decided yet: Filled, Hunt, Leave empty or Block."}
+          </span>
+        ) : null}
 
         {/* FILLED: which printing do you own */}
         {choice === "filled" && (

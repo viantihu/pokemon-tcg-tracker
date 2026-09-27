@@ -170,6 +170,9 @@ describe("UIL-117 PR 5 · every Backfill stage is her decision", () => {
     await openLine();
     expect(choice("Stage2", "Hunt").disabled).toBe(true);
     expect(choice("Stage2", "Leave empty").disabled).toBe(false);
+    // Why, on the row itself: a title never shows on a phone (UX review of #400).
+    const row = group("Stage2").closest(".lf") as HTMLElement;
+    expect(within(row).getByText(/Hunt is off: no same-colour printing to hunt\./)).toBeTruthy();
   });
 
   it("a terminated line hunts nothing: Hunt is off, and a stage she hunted goes back to undecided", async () => {
@@ -189,5 +192,31 @@ describe("UIL-117 PR 5 · every Backfill stage is her decision", () => {
     expect(choice("Basic", "Leave empty").getAttribute("aria-pressed")).toBe("true");
     expect(saveButton().disabled).toBe(true);
     expect(screen.getByText("Decide every stage (1 left), then save the line.")).toBeTruthy();
+  });
+
+  it("…and never silently: the hunted row says its hunt was cleared, until she picks again", async () => {
+    const CLEARED = "Wishlist hunt cleared: a terminated line hunts nothing. Pick another option.";
+    const row = (stage: string) => group(stage).closest(".lf") as HTMLElement;
+    const user = await openLine();
+    await user.click(choice("Basic", "Hunt"));
+    await user.click(choice("Stage1", "Hunt"));
+    await user.click(screen.getByRole("checkbox"));
+
+    // PRE-FIX (#400): the hunt went back to undecided with no word on the row.
+    for (const stage of ["Basic", "Stage1"]) {
+      expect(within(row(stage)).getByRole("status").textContent).toBe(CLEARED);
+    }
+    expect(within(row("Stage2")).queryByText(CLEARED)).toBeNull(); // it was never hunted
+
+    // Picking another option on a row clears its note; the other row keeps its own.
+    await user.click(choice("Basic", "Leave empty"));
+    expect(within(row("Basic")).queryByText(CLEARED)).toBeNull();
+    expect(within(row("Stage1")).getByText(CLEARED)).toBeTruthy();
+
+    // Unticking terminated clears the note too; the stage stays undecided for her to choose.
+    await user.click(screen.getByRole("checkbox"));
+    expect(within(row("Stage1")).queryByText(CLEARED)).toBeNull();
+    expect(choice("Stage1", "Hunt").getAttribute("aria-pressed")).toBe("false");
+    expect(choice("Stage1", "Hunt").disabled).toBe(false);
   });
 });
