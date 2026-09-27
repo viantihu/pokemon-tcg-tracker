@@ -54,11 +54,23 @@ alter table binder_block add constraint binder_block_slot_names_line
 
 -- ---------------------------------------------------------------------------------------------------------------
 -- 2. Existing rows, in her terms. Every statement has a WHERE (pg_safeupdate).
+--
+-- >>> 0030 CONVERSION. The statements between the two markers also run, unchanged, on each labelled Testing baseline
+-- (a backup_* schema) when it is re-stamped past 0030, with search_path set to that schema. So they name tables
+-- unqualified, need only the three columns section 1 adds, and change nothing when run twice.
+-- tests/db/line-open-closed.test.ts runs them on a copy of the tables and compares the result with this migration's.
 update evolution_line set status = 'closed' where status in ('complete', 'terminated');
 update evolution_line set status = 'open' where status = 'capped';
+-- A line with every slot filled is closed, whatever word it carried.
+update evolution_line l set status = 'closed'
+ where l.status = 'open'
+   and exists (select 1 from line_slot s where s.line_id = l.id)
+   and not exists (select 1 from line_slot s where s.line_id = l.id and s.state <> 'filled');
 
+-- A chase is on an OPEN line only: a closed line chases nothing (its leftover wish stays hers to keep or remove).
 update line_slot s set stage_choice = 'chase'
  where s.state = 'placeholder' and s.target_catalog_card_id is not null
+   and exists (select 1 from evolution_line l where l.id = s.line_id and l.status = 'open')
    and (select count(*) from wishlist_item w where w.line_slot_id = s.id and w.resolved_at is null) = 1;
 update line_slot s set stage_choice = 'empty'
  where s.state = 'placeholder' and s.stage_choice is null
@@ -94,6 +106,7 @@ update line_slot s set state = 'placeholder', target_catalog_card_id = null, not
        resolved_decision_kind = null, resolved_decision_choice = null, resolved_decision_collection_id = null
  where s.state = 'block'
    and not exists (select 1 from binder_block b where b.line_id = s.line_id);
+-- <<< 0030 CONVERSION
 
 -- ---------------------------------------------------------------------------------------------------------------
 -- 3. apply_write_ops.

@@ -170,6 +170,18 @@ describe("0030 · existing rows convert, in her terms", () => {
     await slot(61, 6, 0, "block");
     await slot(62, 6, 1, "block");
     await block(3, 6); // one row for two block slots: they cannot be paired
+    await line(7, "open"); // every slot filled, the word never moved
+    await slot(71, 7, 0, "placeholder");
+    await shelvedIn(71, 71);
+    await line(8, "terminated"); // a closed line with a leftover wish on a named stage
+    await slot(81, 8, 0, "placeholder", { target: "emberdrake" });
+    await wish(81);
+    // A labelled Testing baseline is a plain copy of these tables, taken before 0030 (CREATE TABLE AS: no keys).
+    await db.exec(`create schema backup_t;
+      create table backup_t.evolution_line as table public.evolution_line;
+      create table backup_t.line_slot as table public.line_slot;
+      create table backup_t.binder_block as table public.binder_block;
+      create table backup_t.wishlist_item as table public.wishlist_item;`);
     await applyMigration(db, "0030_line_open_closed.sql");
   });
 
@@ -181,6 +193,8 @@ describe("0030 · existing rows convert, in her terms", () => {
       { id: LINE(4), status: "open" },
       { id: LINE(5), status: "open" },
       { id: LINE(6), status: "open" },
+      { id: LINE(7), status: "closed" }, // every slot filled
+      { id: LINE(8), status: "closed" },
     ]);
   });
 
@@ -197,6 +211,8 @@ describe("0030 · existing rows convert, in her terms", () => {
     expect(by.get(SLOT(1))).toMatchObject({ state: "filled", stage_choice: null });
     expect(by.get(SLOT(3))).toMatchObject({ stage_choice: "chase" }); // capped's chased stage
     expect(by.get(SLOT(41))).toMatchObject({ stage_choice: "chase" });
+    // A closed line chases nothing: its leftover wish is not turned into a chase (the wish itself is left as it was).
+    expect(by.get(SLOT(81))).toMatchObject({ state: "placeholder", stage_choice: null });
     expect(by.get(SLOT(42))).toMatchObject({ stage_choice: "empty" });
     // The engine's block with no row on its line was never hers: an open slot she decides.
     expect(by.get(SLOT(43))).toMatchObject({
@@ -226,9 +242,48 @@ describe("0030 · existing rows convert, in her terms", () => {
     await asOwner(db);
     await applyOps(db, {
       ops: withLineSlotCheck(
-        [1, 2, 3, 4, 5, 6].map((n) => ({ op: "update_line", id: LINE(n), patch: {} })),
+        [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ op: "update_line", id: LINE(n), patch: {} })),
       ),
     });
+  });
+
+  /** The migration's marked conversion statements, as the baseline re-stamp reads them. */
+  const conversion = () => {
+    const sql = readFileSync(
+      path.join(process.cwd(), "supabase", "migrations", "0030_line_open_closed.sql"),
+      "utf8",
+    );
+    const from = sql.indexOf("\n-- >>> 0030 CONVERSION");
+    const to = sql.indexOf("\n-- <<< 0030 CONVERSION");
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeGreaterThan(from);
+    return sql.slice(from, to);
+  };
+  const rows = async (schema: string) => {
+    const out: Record<string, unknown[]> = {};
+    for (const t of ["evolution_line", "line_slot", "binder_block", "wishlist_item"])
+      out[t] = (
+        await q<{ r: unknown }>(`select to_jsonb(t) as r from ${schema}.${t} t order by t.id`)
+      ).map((x) => x.r);
+    return out;
+  };
+
+  it("a baseline copy re-stamped with the marked statements reads exactly as the migrated tables do", async () => {
+    await asSuperuser(db);
+    // The re-stamp adds the three columns 0030 adds (plain, as the copy has no constraints), then runs the statements.
+    await db.exec(`alter table backup_t.evolution_line add column if not exists extra_pocket text;
+      alter table backup_t.line_slot add column if not exists stage_choice text;
+      alter table backup_t.binder_block add column if not exists line_slot_id uuid;`);
+    // Only the baseline's schema on the path: a statement naming anything else fails here rather than on her data.
+    await db.exec(`set search_path = backup_t; ${conversion()}; set search_path = public;`);
+    expect(await rows("backup_t")).toEqual(await rows("public"));
+  });
+
+  it("the marked statements change nothing when run a second time", async () => {
+    const before = await rows("public");
+    await asSuperuser(db);
+    await db.exec(conversion());
+    expect(await rows("public")).toEqual(before);
   });
 });
 
