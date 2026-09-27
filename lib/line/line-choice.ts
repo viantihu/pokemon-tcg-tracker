@@ -40,7 +40,7 @@ import {
   placementForMove,
   releaseSlotOps,
 } from "./move";
-import { lineStatusFor, type LineChoice } from "./popup";
+import { lineReadsClosed, lineStatusFor, type LineChoice } from "./popup";
 
 /** Everything `buildLineChoiceOps` reads, loaded fresh by the server just before the write. */
 export interface LineWriteState {
@@ -195,7 +195,7 @@ function pullInto(
     const leaving = [...state.slotsByLine.values()].flat().find((s) => s.id === row.line_slot_id);
     if (leaving && leaving.copy_id === row.id) {
       const line = state.lines.get(leaving.line_id);
-      ops.push(...releaseSlotOps(leaving.id, line?.status === "complete" ? line.id : null));
+      ops.push(...releaseSlotOps(leaving.id, lineReadsClosed(line?.status) ? line!.id : null));
     }
   }
   ops.push(

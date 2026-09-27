@@ -44,11 +44,15 @@ export interface SlotPatch {
   resolved_decision_kind?: string | null;
   resolved_decision_choice?: string | null;
   resolved_decision_collection_id?: string | null;
+  /** Her choice for an unfilled stage (0030, UIL-121): chase a card, leave it empty, or a filler pocket; null = undecided. */
+  stage_choice?: "chase" | "empty" | "filler" | null;
 }
 
-/** An evolution-line patch (0008). Only `status` is expressible — nothing else needs patching. */
+/** An evolution-line patch (0008; `extra_pocket` since 0030). */
 export interface LinePatch {
   status?: string;
+  /** What fills a short complete line's third pocket (0030, UIL-121); null = not decided. */
+  extra_pocket?: "energy" | "card" | "empty" | null;
 }
 
 export interface EntryPatch {
@@ -144,7 +148,11 @@ export type WriteOp =
       line_id?: string | null;
       line_slot_id?: string | null;
     }
-  /** M5 backfill only — a reserved pocket run (0007). `copy_id` is set iff a duplicate was sacrificed. */
+  /**
+   * A block: a reserved pocket (0007). `copy_id` is set iff a card fills it. Since 0030 (UIL-121) `line_slot_id` names
+   * the ONE stage pocket it fills (her "filler" choice); absent, it is line-level (a short line's third pocket, or a
+   * pre-0030 run).
+   */
   | {
       op: "insert_binder_block";
       id: string;
@@ -155,7 +163,10 @@ export type WriteOp =
       material: string;
       copy_id: string | null;
       line_id: string | null;
+      line_slot_id?: string | null;
     }
+  /** Take a block out (0030, UIL-121): she changed what fills a pocket. Owner- and id-scoped, as the signed-in owner. */
+  | { op: "delete_binder_block"; id: string; line_id: string }
   | {
       op: "insert_presence_group";
       id: string;
@@ -378,6 +389,19 @@ export function touchedLineState(ops: readonly WriteOp[]): {
       // it is harmless; what the check then proves is that the write left no half-written slot anywhere.
       case "delete_line":
         lines.add(o.line_id);
+        break;
+      // 0030 (UIL-121): a block or a wish is part of what a stage choice requires, so writing one checks that stage.
+      case "insert_binder_block":
+        if (o.line_id) lines.add(o.line_id);
+        if (o.line_slot_id) slots.add(o.line_slot_id);
+        if (o.copy_id) copies.add(o.copy_id);
+        break;
+      case "delete_binder_block":
+        lines.add(o.line_id);
+        break;
+      case "upsert_wishlist_for_slot":
+      case "resolve_wishlist_for_slot":
+        slots.add(o.line_slot_id);
         break;
     }
   }

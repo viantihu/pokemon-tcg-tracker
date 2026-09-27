@@ -200,6 +200,8 @@ export function releaseSlotOps(
         resolved_decision_kind: null,
         resolved_decision_choice: null,
         resolved_decision_collection_id: null,
+        // UIL-121 (0030): a stage that just lost its card is undecided; she chooses again what it waits for.
+        stage_choice: null,
       },
     });
   }
@@ -338,7 +340,8 @@ export function buildNewLineJoinOps(ctx: NewLineContext): {
       color_band: ctx.destinationBand,
       binder_id: ctx.binderId,
       half: "back",
-      status: gen.status,
+      // UIL-121: open or closed only; nothing is capped for her.
+      status: gen.status === "complete" ? "closed" : "open",
     },
   ];
   let ownSlotId: string | null = null;
@@ -373,10 +376,17 @@ export function buildExistingLineJoinOps(params: {
   slotIsLastOpen: boolean;
 }): { ops: WriteOp[]; slotId: string } {
   const ops: WriteOp[] = [
-    { op: "update_slot", id: params.slotId, patch: { state: "filled", copy_id: params.copyId } },
+    // UIL-121 (0030): a filled stage carries no choice, and the card she was chasing for it is found, so its wish
+    // closes in the same write.
+    {
+      op: "update_slot",
+      id: params.slotId,
+      patch: { state: "filled", copy_id: params.copyId, stage_choice: null },
+    },
+    { op: "resolve_wishlist_for_slot", line_slot_id: params.slotId },
   ];
   if (params.slotIsLastOpen) {
-    ops.push({ op: "update_line", id: params.lineId, patch: { status: "complete" } });
+    ops.push({ op: "update_line", id: params.lineId, patch: { status: "closed" } });
   }
   return { ops, slotId: params.slotId };
 }

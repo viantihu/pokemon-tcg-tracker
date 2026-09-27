@@ -179,7 +179,8 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     const lines = await q<{ root_dex_id: number; color_band: string; status: string }>(
       `select root_dex_id, color_band, status from evolution_line`,
     );
-    expect(lines).toEqual([{ root_dex_id: ONLYMON_DEX, color_band: "red", status: "complete" }]);
+    // UIL-121: every slot filled reads CLOSED (was "complete").
+    expect(lines).toEqual([{ root_dex_id: ONLYMON_DEX, color_band: "red", status: "closed" }]);
 
     const slots = await q<{ stage_index: number; state: string; copy_id: string | null }>(
       `select stage_index, state, copy_id from line_slot order by stage_index`,
@@ -554,7 +555,7 @@ describe("applyMove: shelf → back half → join an existing line's open slot",
     expect(
       (await q<{ status: string }>(`select status from evolution_line where id = '${LINE}'`))[0]
         .status,
-    ).toBe("complete");
+    ).toBe("closed"); // UIL-121: was "complete"
   });
 
   it("does NOT complete the line when another slot is still open", async () => {
@@ -652,7 +653,7 @@ describe("a line-join move cannot half-apply", () => {
         color_band: "red",
         binder_id: GEN,
         half: "back",
-        status: "complete",
+        status: "closed", // UIL-121: was "complete"
       },
       {
         op: "insert_slot",

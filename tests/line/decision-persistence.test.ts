@@ -212,6 +212,7 @@ describe("UIL-078 · a released slot forgets its resolution", () => {
         resolved_decision_kind: null,
         resolved_decision_choice: null,
         resolved_decision_collection_id: null,
+        stage_choice: null, // UIL-121: a stage that lost its card is undecided again
       },
     });
   });

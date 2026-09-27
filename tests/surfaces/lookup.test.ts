@@ -68,9 +68,20 @@ describe("buildLookupAnswer", () => {
     expect(ans.location).toEqual({ binderName: "Binder 1", half: "BACK HALF", bandDisplay: "Red" });
     const line = ans.facts.find((f) => f.label === "IN A LINE");
     expect(line?.tone).toBe("y");
-    expect(line?.detail).toContain("CAPPED");
+    // UIL-121: a line is OPEN or CLOSED; nobody capped it for her, so a stored 'capped' shows as open (no tag).
+    expect(line?.detail).toBe("Charmander line · Stage1");
     expect(line?.lineId).toBe("L1");
   });
+
+  it.each(["closed", "complete", "terminated"] as const)(
+    "a line stored as %s shows CLOSED (UIL-121)",
+    (status) => {
+      const input = base();
+      input.ownedInLine = { lineId: "L1", lineLabel: "Charmander line", stage: "Stage1", status };
+      const line = buildLookupAnswer(input).facts.find((f) => f.label === "IN A LINE");
+      expect(line?.detail).toBe("Charmander line · Stage1 · CLOSED");
+    },
+  );
 
   it("flags an unowned printing that would complete a line and is wishlisted to specialty", () => {
     const input = base();

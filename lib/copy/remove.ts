@@ -39,6 +39,7 @@ import {
   type WriteOp,
   type WritePayload,
 } from "@/lib/repo";
+import { lineReadsClosed } from "@/lib/line/popup";
 
 /** Everything the op set needs, read once so the builder stays pure and testable. */
 export interface RemoveCopyPlan {
@@ -144,7 +145,7 @@ export async function loadRemoveCopyPlan(
       // nothing about its status, and rewriting it would make the audit trail claim a change that is not
       // one. Same rule the Line-screen move follows.
       const line = await evolutionLineRepo.getByPk(db, slot.line_id);
-      if (line?.status === "complete") demoteLineId = line.id;
+      if (lineReadsClosed(line?.status)) demoteLineId = line!.id;
     }
   }
 

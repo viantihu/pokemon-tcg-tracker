@@ -48,7 +48,12 @@ export type BinderHalf = "front" | "back";
 export type BinderType = "general" | "specialty";
 
 /** Evolution line lifecycle (system-design §4 `EvolutionLine.status`). */
-export type LineStatus = "open" | "capped" | "complete" | "terminated";
+/**
+ * A line is OPEN or CLOSED (Karvi, UIL-121). 'capped', 'complete' and 'terminated' are the pre-0030 words: still
+ * readable while the last writers move (Backfill, the Haul Plan cascade), then dropped. Read one with
+ * `lineReadsClosed` (lib/line/popup.ts), never by string.
+ */
+export type LineStatus = "open" | "closed" | "capped" | "complete" | "terminated";
 
 /** Per-stage slot state (system-design §4 `LineSlot.state`). */
 export type SlotState = "filled" | "placeholder" | "block";
