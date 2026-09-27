@@ -118,7 +118,9 @@ const WANTED = {
   dexId: DEX.Kadabra,
 };
 /** The line as the server reads it after a confirm that leaves its Stage 2 open (for the second card's species). */
-const LINE_AFTER = { lineId: "L1", openDexIds: [DEX.Kadabra], locale: "en" };
+const LINE_AFTER = { lineId: "L1", openDexIds: [DEX.Kadabra] };
+/** The new Charmander line a START proposal would write, by the identity the commit gives it (UIL-120). */
+const STARTS_CHARMANDER = "kb1:4:red:en";
 /** The same popup model with nothing left to chase: the confirm leaves its line done. */
 const withNothingLeft = (m: LinePopupModel): LinePopupModel => ({
   ...m,
@@ -192,16 +194,28 @@ function modelFor(name: string, proposal: LineProposal): LinePopupModel {
   };
 }
 
-/** A parked sitting whose rows carry these line proposals (null = a plain front-half card). */
-function park(
-  rows: { name: string; proposal: LineProposal | null }[],
-  lineNames: Record<string, string> = {},
+/**
+ * One card of a parked sitting: its line proposal (null = a plain front-half card), the new line a start would write
+ * (default: the Charmander line), and its proposal once the plan is routed again after a write (default: unchanged).
+ */
+interface Row {
+  name: string;
+  proposal: LineProposal | null;
+  startsLine?: string | null;
+  after?: LineProposal | null;
+}
+/** Each card's plan item as the server routes it now; the re-route and the spotlight refresh both answer from it. */
+const routedNow = new Map<string, PlanItem>();
+function itemsFor(
+  base: RunPlanResult,
+  rows: Row[],
+  lineNames: Record<string, string>,
+  rerouted: boolean,
 ) {
-  const draft = rows.map((r) => waiting(r.name));
-  const base = routedPlan(draft.map((d) => ({ ...d, tcgdexId: d.card.tcgdexId })));
-  const byName = new Map(rows.map((r) => [r.name, r.proposal]));
-  const items: PlanItem[] = flattenPlan(base).map((it) => {
-    const proposal = byName.get(it.name) ?? null;
+  const byName = new Map(rows.map((r) => [r.name, r]));
+  return flattenPlan(base).map((it): PlanItem => {
+    const row = byName.get(it.name);
+    const proposal = (rerouted && row && "after" in row ? row.after : row?.proposal) ?? null;
     const action =
       proposal?.kind === "start"
         ? "NEWLINE"
@@ -216,7 +230,26 @@ function park(
       lineProposal: proposal,
       lineName: lineNames[it.name] ?? null,
       dexIds: DEX[it.name] !== undefined ? [DEX[it.name]] : [],
+      startsLine:
+        proposal?.kind === "start"
+          ? row && "startsLine" in row
+            ? (row.startsLine ?? null)
+            : STARTS_CHARMANDER
+          : null,
     };
+  });
+}
+function park(rows: Row[], lineNames: Record<string, string> = {}) {
+  const draft = rows.map((r) => waiting(r.name));
+  const base = routedPlan(draft.map((d) => ({ ...d, tcgdexId: d.card.tcgdexId })));
+  const items = itemsFor(base, rows, lineNames, false);
+  for (const it of items) routedNow.set(it.incomingId, it);
+  // Routing again (after a write) answers with each card's proposal as the write left it.
+  runHaulPlan.mockImplementation(async (p: DraftPayloadItem[]) => {
+    const again = routedPlan(p);
+    const next = itemsFor(again, rows, lineNames, true);
+    for (const it of next) routedNow.set(it.incomingId, it);
+    return { ...again, groups: groupPlan(next, ["orange"]) };
   });
   const plan: RunPlanResult = { ...base, groups: groupPlan(items, ["orange"]) };
   window.sessionStorage.setItem(
@@ -244,6 +277,7 @@ const box = (name: string) => screen.getByRole("button", { name: `Shelve ${name}
 
 beforeEach(() => {
   window.sessionStorage.clear();
+  routedNow.clear();
   for (const f of [shelveCardAction, refreshSpotlightAction, runHaulPlan, lineModelAction])
     f.mockReset();
   shelveCardAction.mockResolvedValue({
@@ -262,15 +296,16 @@ beforeEach(() => {
 afterEach(cleanup);
 
 async function mount(
-  rows: { name: string; proposal: LineProposal | null }[],
+  rows: Row[],
   bandMismatch: unknown = null,
   lineNames: Record<string, string> = {},
   screenProps: Partial<Parameters<typeof PlanScreen>[0]> = {},
 ) {
-  const { items } = park(rows, lineNames);
+  park(rows, lineNames);
+  // The spotlight's fresh derivation is the server's, so it follows a re-route.
   refreshSpotlightAction.mockImplementation(async ({ card: c }: { card: { id: string } }) => ({
     ok: true,
-    item: items.find((it) => it.incomingId === c.id),
+    item: routedNow.get(c.id),
     digest: "dg",
     proposedPulls: [],
     bandMismatch,
@@ -442,6 +477,168 @@ describe("UIL-117 4b · the badges", () => {
     expect(screen.getByRole("button", { name: "＋ Starts Charizard line" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "◆ Adds to Toedscruel line" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "⇄ Could replace a card" })).toBeTruthy();
+  });
+});
+
+/**
+ * UIL-120, the Senior BA's ruling on #430 (QA's HOLD): the SAME line is a POSITIVE match. A waiting card opens next
+ * only if its proposal names this line once her write has landed, routed again: never by species and language alone.
+ * Her Charmander line (A, "L1") wants a Charizard for its Stage 2 in every case; only the Charizard's proposal changes.
+ */
+describe("UIL-120 · 'Confirm & next' opens only a card proposed into THIS line", () => {
+  const INTO_A: LineProposal = { kind: "add", lineId: "L1", slotId: "S2" };
+  const INTO_B: LineProposal = { kind: "add", lineId: "L2", slotId: "S9" };
+  beforeEach(() => {
+    lineModelAction.mockImplementation(async (copyId: string, proposal: LineProposal) => {
+      const m = modelFor(copyId.replace(/^id-/, ""), proposal);
+      const stages = m.stages.map((st) =>
+        st.stage === "Stage2" ? { ...st, dexId: DEX.Charizard } : st,
+      );
+      return {
+        ok: true,
+        model: {
+          ...m,
+          stages: [
+            ...stages,
+            ...(proposal.kind === "start" ? [{ ...WANTED, dexId: DEX.Charizard }] : []),
+          ],
+        },
+      };
+    });
+    shelveCardAction.mockResolvedValue({
+      ok: true,
+      counts: { routed: 1, lines: 0, slots: 0, decisions: 1, wishlist: 0 },
+      stamp: "s2",
+      lineDone: false,
+      line: { lineId: "L1", openDexIds: [DEX.Charizard] },
+    });
+  });
+  const openCharmeleon = async (user: ReturnType<typeof userEvent.setup>, badge: RegExp) => {
+    await user.click(
+      within(document.getElementById("plan-row-id-Charmeleon")!).getByRole("button", {
+        name: badge,
+      }),
+    );
+    await screen.findByRole("dialog");
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+  };
+  /** She confirms the Charmeleon into A: the popup closes, the Charizard's does NOT open, and it says why. */
+  async function confirmsAndStops(user: ReturnType<typeof userEvent.setup>) {
+    expect(confirmIn().textContent).not.toContain("next");
+    await user.click(confirmIn());
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(lineModelAction.mock.calls.map((c) => c[0])).toEqual(["id-Charmeleon"]);
+    expect(
+      await screen.findByText("That's every card you have for the Charizard line"),
+    ).toBeTruthy();
+  }
+
+  it("(1) QA's case: a Charizard proposed into ANOTHER red Charmander line (B) does not open", async () => {
+    const user = await mount([
+      { name: "Charmeleon", proposal: ADD },
+      { name: "Charizard", proposal: INTO_B },
+    ]);
+    await openCharmeleon(user, /Adds to/);
+    await confirmsAndStops(user);
+    // PRE-FIX (#430 at 070fa03): the same species and language read as this line's card, and B's Charizard opened.
+    // The rest were routed again before the answer (it still goes into B).
+    expect(runHaulPlan).toHaveBeenCalled();
+  });
+
+  it("(2) a Charizard proposed to start a new line of its own does not open", async () => {
+    const user = await mount([
+      { name: "Charmeleon", proposal: ADD },
+      { name: "Charizard", proposal: START },
+    ]);
+    await openCharmeleon(user, /Adds to/);
+    await confirmsAndStops(user);
+  });
+
+  it("(3) a Charizard headed into a front half does not open", async () => {
+    const user = await mount([
+      { name: "Charmeleon", proposal: ADD },
+      { name: "Charizard", proposal: null },
+    ]);
+    await openCharmeleon(user, /Adds to/);
+    await confirmsAndStops(user);
+  });
+
+  it("(4) a Charizard that 'Adds to' A opens next, and the button said so", async () => {
+    const user = await mount([
+      { name: "Charmeleon", proposal: ADD },
+      { name: "Charizard", proposal: INTO_A },
+    ]);
+    await openCharmeleon(user, /Adds to/);
+    expect(confirmIn().textContent).toContain("· next ▶");
+    await user.click(confirmIn());
+    // The Charizard's own popup, on its proposal into A. (The plan is A to Z, so it is the haul's line card 1 of 2.)
+    await waitFor(() => expect(lineModelAction).toHaveBeenCalledTimes(2));
+    expect(lineModelAction.mock.calls.at(-1)).toEqual(["id-Charizard", INTO_A]);
+    await waitFor(() => expect(within(popup()).getByText(/Line card 1 of 2/)).toBeTruthy());
+  });
+
+  it("her sequence: the Charmeleon STARTS the line, and the waiting Charizard opens next, re-routed to 'Adds to' it", async () => {
+    const INTO_NEW: LineProposal = { kind: "add", lineId: "L-new", slotId: "S-new-2" };
+    shelveCardAction.mockResolvedValue({
+      ok: true,
+      counts: { routed: 1, lines: 1, slots: 3, decisions: 1, wishlist: 0 },
+      stamp: "s2",
+      lineDone: false,
+      line: { lineId: "L-new", openDexIds: [DEX.Charizard] },
+    });
+    const user = await mount(
+      [
+        { name: "Charmeleon", proposal: START },
+        // Before the write it would start the same new line; routed again after it, it adds to the line just written.
+        { name: "Charizard", proposal: START, after: INTO_NEW },
+      ],
+      null,
+      { Charmeleon: "Charizard" },
+    );
+    await openCharmeleon(user, /Starts Charizard line/);
+    await user.click(within(popup()).getByRole("checkbox")); // her Charmander
+    // The forecast matches them on the new line they would both start.
+    expect(confirmIn().textContent).toContain("· next ▶");
+    await user.click(confirmIn());
+    // Before the write the Charizard names no line (a start); routed again after it, it names the line just written,
+    // and its popup opens on that "Adds to" (A to Z, it is the haul's line card 1 of 2).
+    await waitFor(() => expect(lineModelAction).toHaveBeenCalledTimes(2));
+    // Only the cards still waiting are routed again: not the Charmeleon she has just shelved.
+    expect((runHaulPlan.mock.calls.at(-1)![0] as DraftPayloadItem[]).map((d) => d.id)).toEqual([
+      "id-Charizard",
+    ]);
+    expect(lineModelAction.mock.calls.at(-1)).toEqual(["id-Charizard", INTO_NEW]);
+    await waitFor(() => expect(within(popup()).getByText(/Line card 1 of 2/)).toBeTruthy());
+    expect(screen.getByRole("dialog", { name: "Add to a line" })).toBeTruthy();
+  });
+
+  it("…and a Charizard that would start a DIFFERENT new line (another binder) is not promised", async () => {
+    const user = await mount([
+      { name: "Charmeleon", proposal: START },
+      { name: "Charizard", proposal: START, startsLine: "kb2:4:red:en", after: START },
+    ]);
+    await openCharmeleon(user, /Starts a line/);
+    await user.click(within(popup()).getByRole("checkbox"));
+    expect(confirmIn().textContent).not.toContain("next");
+  });
+
+  it("a re-route that cannot reach the server opens nothing, and claims nothing about the line", async () => {
+    const user = await mount([
+      { name: "Charmeleon", proposal: ADD },
+      { name: "Charizard", proposal: INTO_A },
+    ]);
+    runHaulPlan.mockRejectedValue(new Error("offline"));
+    await openCharmeleon(user, /Adds to/);
+    await user.click(confirmIn());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(lineModelAction.mock.calls.map((c) => c[0])).toEqual(["id-Charmeleon"]);
+    expect(
+      await screen.findByText(
+        "The rest of the plan could not be updated. Its homes may be out of date; reload the page to route it again.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/That's every card you have/)).toBeNull();
   });
 });
 
@@ -718,7 +915,7 @@ describe("UIL-117 4b · the popup", () => {
       counts: { routed: 1, lines: 1, slots: 3, decisions: 2, wishlist: 0 },
       stamp: "s2",
       lineDone: false,
-      line: { lineId: "L-new", openDexIds: [DEX.Charizard], locale: "en" },
+      line: { lineId: "L-new", openDexIds: [DEX.Charizard] },
     });
     const user = await mount(
       [
@@ -943,7 +1140,8 @@ describe("UIL-117 4b · the popup", () => {
   it("a confirmed line write re-routes the rest, so their badges follow it", async () => {
     const user = await mount([
       { name: "Charmander", proposal: START },
-      { name: "Charmeleon", proposal: START },
+      // Routed again, it files in a front half.
+      { name: "Charmeleon", proposal: START, after: null },
     ]);
     await user.click(screen.getAllByRole("button", { name: "＋ Starts a line" })[0]);
     await screen.findByRole("dialog", { name: "Start a line" });

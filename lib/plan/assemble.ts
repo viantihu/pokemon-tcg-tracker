@@ -10,6 +10,8 @@ import { extraCopyOfFor, lineNameFor, lineProposalFor, type LineLookups } from "
 import type { CascadeResult, IncomingCard, PlacementTarget } from "@/lib/engine";
 import { actionForResult, resultNeedsDecision } from "./action";
 import type { PlanItem } from "./types";
+import { localeOfId } from "@/lib/catalog/locale";
+import { newLineKey } from "./line-done";
 
 export interface AssembleLookups {
   binderNameById: Map<string, string>;
@@ -163,5 +165,14 @@ export function toPlanItem(
     lineName: l.lines ? lineNameFor(result, l.lines) : null,
     extraCopyOf: l.lines ? extraCopyOfFor(result, l.lines) : null,
     dexIds: [...incoming.card.dexId],
+    startsLine:
+      result.step === "line-new" && result.newLine
+        ? newLineKey(
+            result.newLine.binderId,
+            result.newLine.rootDexId,
+            result.newLine.colorBand,
+            localeOfId(incoming.card.tcgdexId),
+          )
+        : null,
   };
 }

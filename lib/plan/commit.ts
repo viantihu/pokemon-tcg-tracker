@@ -58,7 +58,7 @@ import type { LineChoice } from "@/lib/line/popup";
 import { lineReadsClosed } from "@/lib/line/popup";
 import { buildBackHalfLineOps } from "@/lib/line/write";
 import { isLineCard } from "./line-proposal";
-import { lineDoneFor } from "./line-done";
+import { lineDoneFor, newLineKey } from "./line-done";
 
 /**
  * `applyMove`'s exact wording (lib/line/write.ts) for the same refusals on this path (UIL-070 part 1).
@@ -182,8 +182,8 @@ export interface CommitResult {
   lineDone?: boolean;
   /**
    * The line her confirm concerned, as it reads after the write (UIL-120, Karvi 2026-09-27: "Confirm & next" never
-   * opens another line's card): the species its open stages still want, and its language, so the step-through can
-   * open the next card only when it is for THIS line (`sameLineWaiting`). A stage she left empty wants none.
+   * opens another line's card): its id, and the species its open stages still want, so the step-through opens the next
+   * card only when its re-routed proposal names THIS line (`sameLineWaiting`). A stage she left empty wants none.
    */
   line?: LineAfterWrite;
 }
@@ -193,7 +193,6 @@ export interface LineAfterWrite {
   lineId: string;
   /** Species (dex ids) its open stages still want: a placeholder that is not a stage she left empty. */
   openDexIds: number[];
-  locale: string;
 }
 
 /** The one rule (./line-done) over the line as it is now, and what it still wants: read AFTER her confirm's write. */
@@ -223,7 +222,6 @@ async function lineAfterWrite(
       openDexIds: open
         .map((s) => chain[s.stage_index]?.dexId)
         .filter((d): d is number => d !== undefined),
-      locale: localeOfId(incoming.tcgdexId),
     },
   };
 }
@@ -1324,12 +1322,15 @@ function findLineInBinder(
   return null;
 }
 
-/** The in-pass key for a line created earlier in THIS payload — the same (binder, species, band). */
+/**
+ * The in-pass key for a line created earlier in THIS payload — the same (binder, species, band). The same identity the
+ * Haul Plan's step-through gives a line a start would write (`newLineKey`, UIL-120).
+ */
 function passLineKey(
   binderId: string | null,
   rootDexId: number,
   colorBand: string,
   locale: Locale,
 ): string {
-  return `${binderId ?? ""}:${rootDexId}:${colorBand}:${locale}`;
+  return newLineKey(binderId, rootDexId, colorBand, locale);
 }

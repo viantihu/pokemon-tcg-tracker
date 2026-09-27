@@ -19,7 +19,13 @@ import {
   deriveSpotlightPlacement,
   type DraftItem,
 } from "@/lib/plan";
-import { lineDoneFor, sameLineWaiting } from "@/lib/plan/line-done";
+import {
+  lineDoneFor,
+  lineKeyFor,
+  lineKeyOf,
+  newLineKey,
+  sameLineWaiting,
+} from "@/lib/plan/line-done";
 import {
   CHARIZARD_BASE1_4,
   CHARMANDER_SV03_026,
@@ -90,8 +96,9 @@ afterEach(async () => {
 
 const commit = (input: Parameters<typeof commitCardPlacement>[1]) =>
   commitCardPlacement(pgliteClient(db), input);
-const proposalFor = async (card: DraftItem) =>
-  (await deriveSpotlightPlacement(pgliteClient(db), card))?.item.lineProposal ?? null;
+const itemFor = async (card: DraftItem) =>
+  (await deriveSpotlightPlacement(pgliteClient(db), card))?.item ?? null;
+const proposalFor = async (card: DraftItem) => (await itemFor(card))?.lineProposal ?? null;
 async function statusOf(lineId: string) {
   await asSuperuser(db);
   const r = await db.query<{ status: string }>(`select status from evolution_line where id = $1`, [
@@ -140,15 +147,40 @@ async function seedLine(opts: {
   }
 }
 
-describe("sameLineWaiting, the one next-card rule (UIL-120)", () => {
-  it("only a waiting card of a species an open stage wants, in the line's language", () => {
-    const waiting = [
-      { id: "cml", dexIds: [5], locale: "en" },
-      { id: "cml-ja", dexIds: [5], locale: "ja" },
-      { id: "machop", dexIds: [66], locale: "en" },
-    ];
-    expect(sameLineWaiting([5], "en", waiting)).toEqual(["cml"]);
-    expect(sameLineWaiting([], "en", waiting)).toEqual([]);
+describe("sameLineWaiting, the one next-card rule (UIL-120): a POSITIVE match on the line (the Senior BA's ruling on #430)", () => {
+  const A = lineKeyFor("A");
+  const B = lineKeyFor("B");
+  const STARTS = newLineKey("kb1", 4, "red", "en");
+  const waiting = [
+    { id: "czd-a", dexIds: [6], lineKey: lineKeyOf({ kind: "add", lineId: "A", slotId: "S2" }) },
+    // QA's case: the same species, in the same colour, proposed into ANOTHER line.
+    { id: "czd-b", dexIds: [6], lineKey: lineKeyOf({ kind: "add", lineId: "B", slotId: "S9" }) },
+    // The same species proposed "start a new line", a front half, and a collection: none is this line's card.
+    {
+      id: "czd-new",
+      dexIds: [6],
+      lineKey: lineKeyOf({ kind: "start", binderId: "kb1", band: "red" }, STARTS),
+    },
+    { id: "czd-front", dexIds: [6], lineKey: lineKeyOf(null) },
+    // Proposed into A, of a species none of its open stages wants.
+    { id: "machop-a", dexIds: [66], lineKey: A },
+  ];
+
+  it("only a card whose proposal names THIS line, of a species an open stage wants", () => {
+    expect(sameLineWaiting(A, [6], waiting)).toEqual(["czd-a"]);
+    expect(sameLineWaiting(B, [6], waiting)).toEqual(["czd-b"]);
+    expect(sameLineWaiting(A, [], waiting)).toEqual([]);
+  });
+
+  it("a start's new line is its own line, matched by the identity the commit gives it, before it has an id", () => {
+    expect(sameLineWaiting(`new:${STARTS}`, [6], waiting)).toEqual(["czd-new"]);
+    expect(sameLineWaiting(`new:${newLineKey("kb1", 4, "red", "ja")}`, [6], waiting)).toEqual([]);
+    expect(sameLineWaiting(`new:${newLineKey("kb2", 4, "red", "en")}`, [6], waiting)).toEqual([]);
+  });
+
+  it("a line it cannot key has no next card", () => {
+    expect(sameLineWaiting(null, [6], waiting)).toEqual([]);
+    expect(lineKeyOf({ kind: "start", binderId: "kb1", band: "red" }, null)).toBeNull();
   });
 });
 
@@ -242,6 +274,11 @@ describe("UIL-120 (a) · a join or a start that leaves the line done", () => {
     // Charmeleon starts the line; Charizard, the last open stage, then joins it.
     const start = await proposalFor(CML);
     if (start?.kind !== "start") throw new Error(`expected a start, got ${start?.kind}`);
+    // Before the write both would start the SAME new line: the popup's "· next" forecast matches them on it.
+    const [cmlBefore, czdBefore] = [await itemFor(CML), await itemFor(CZD)];
+    expect(czdBefore?.lineProposal?.kind).toBe("start");
+    expect(cmlBefore?.startsLine).toBe(newLineKey(KB1, CHARMANDER_SV03_026.dexId[0], "red", "en"));
+    expect(czdBefore?.startsLine).toBe(cmlBefore?.startsLine);
     const first = await commit({
       card: CML,
       // UIL-121: she chases the Charizard for its stage.
@@ -256,18 +293,17 @@ describe("UIL-120 (a) · a join or a start that leaves the line done", () => {
     expect(first.lineDone).toBe(false); // the Charizard stage is still open
     // …and the line as the server reads it says what that stage wants, so the step-through opens only a card for
     // THIS line (UIL-120, her ruling): here the Charizard in her haul.
-    expect(first.line).toMatchObject({
-      openDexIds: [CHARIZARD_BASE1_4.dexId[0]],
-      locale: "en",
-    });
-    expect(
-      sameLineWaiting(first.line!.openDexIds, first.line!.locale, [
-        { id: CZD.id, dexIds: CHARIZARD_BASE1_4.dexId, locale: "en" },
-        { id: "another-line", dexIds: [66], locale: "en" },
-      ]),
-    ).toEqual([CZD.id]);
+    expect(first.line).toMatchObject({ openDexIds: [CHARIZARD_BASE1_4.dexId[0]] });
+    // After it, the Charizard is routed again: its proposal now names the line just written, so it is THIS line's card.
     const add = await proposalFor(CZD);
     if (add?.kind !== "add") throw new Error(`expected an add, got ${add?.kind}`);
+    expect(add.lineId).toBe(first.line!.lineId);
+    expect(
+      sameLineWaiting(lineKeyFor(first.line!.lineId), first.line!.openDexIds, [
+        { id: CZD.id, dexIds: CHARIZARD_BASE1_4.dexId, lineKey: lineKeyOf(add) },
+        { id: "another-line", dexIds: CHARIZARD_BASE1_4.dexId, lineKey: lineKeyFor("L-other") },
+      ]),
+    ).toEqual([CZD.id]);
     const last = await commit({
       card: CZD,
       lineChoice: { mode: "join", lineId: add.lineId, slotId: add.slotId },

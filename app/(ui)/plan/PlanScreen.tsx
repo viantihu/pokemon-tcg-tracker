@@ -35,7 +35,7 @@ import type { LineJoinOptions } from "@/lib/line/join-options";
 // Leaf import of the pure move module (its only dependency is ./types; the `WriteOp` it names is a
 // type-only import), so bringing `describeMove` into the browser bundle drags in no server code.
 import { describeMove, moveNameLookups, type MoveNameLookups } from "@/lib/line/move";
-import { cardTag, localeOfId, stripLocaleNamespace } from "@/lib/catalog/locale";
+import { cardTag, stripLocaleNamespace } from "@/lib/catalog/locale";
 import { BandChip } from "../_components/BandChip";
 import { NoBinderNotice } from "../_components/NoBinderNotice";
 import { CardFace } from "../_components/CardFace";
@@ -69,7 +69,7 @@ import {
 import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
 import { lineModelAction } from "../_components/line-popup-actions";
 import { PlanLinePopup } from "./PlanLinePopup";
-import { sameLineWaiting, type WaitingHaulCard } from "@/lib/plan/line-done";
+import { lineKeyFor, lineKeyOf, sameLineWaiting, type WaitingHaulCard } from "@/lib/plan/line-done";
 
 /* ------------------------- resuming a plan in progress (UIL-006) ------------------------- */
 
@@ -346,6 +346,8 @@ export function PlanScreen({
   const [liveStamp, setLiveStamp] = useState(resumed?.stamp ?? stateStamp);
   /** The card currently being written, so only its own control shows a pending state. */
   const [shelving, setShelving] = useState<string | null>(null);
+  /** The line card just confirmed, while the rest re-route to find the next card for its line (UIL-120). */
+  const [stepping, setStepping] = useState<string | null>(null);
   /**
    * The spotlight card, RE-DERIVED against current state (UIL-045).
    *
@@ -594,12 +596,16 @@ export function PlanScreen({
    * against everything she has shelved; `mergeReroute` keeps her shelved cards as they were, keeps the
    * spotlight on the card it was on, and names any waiting card whose home changed. A failure leaves the
    * plan she has, which is still usable, and says so.
+   *
+   * Answers with the plan as it now stands, flattened (null when it could not be routed). `shelvedId`: a card shelved
+   * a moment ago, before the screen has re-rendered with it done, so it is not routed again as waiting.
    */
-  async function reroute(): Promise<void> {
+  async function reroute(shelvedId?: string): Promise<PlanItem[] | null> {
     const at = latest.current;
-    if (!at.plan) return;
-    const waiting = at.draft.filter((d) => !at.done.has(d.id));
-    if (waiting.length === 0) return;
+    if (!at.plan) return null;
+    const doneAt = shelvedId ? new Set(at.done).add(shelvedId) : at.done;
+    const waiting = at.draft.filter((d) => !doneAt.has(d.id));
+    if (waiting.length === 0) return flattenPlan(at.plan);
     setUpdating(true);
     const [res, stamp] = await Promise.all([
       reach(() => runHaulPlan(toPayload(waiting)), REROUTE_FAILED),
@@ -608,10 +614,11 @@ export function PlanScreen({
     setUpdating(false);
     if (isUnreached(res)) {
       setError(REROUTE_FAILED);
-      return;
+      return null;
     }
     const now = latest.current;
-    if (!now.plan) return;
+    if (!now.plan) return null;
+    const doneNow = shelvedId ? new Set(now.done).add(shelvedId) : now.done;
     // A card she took off while this ran stays off: route only what is still in the draft.
     const inDraft = new Set(now.draft.map((d) => d.id));
     const gone = new Set(
@@ -623,7 +630,7 @@ export function PlanScreen({
       plan: next,
       moved: changed,
       added,
-    } = mergeReroute(now.plan, dropFromPlan(res, gone), now.done);
+    } = mergeReroute(now.plan, dropFromPlan(res, gone), doneNow);
     const spotId = flattenPlan(now.plan)[now.cur]?.incomingId;
     const flat = flattenPlan(next);
     const at2 = spotId ? flat.findIndex((it) => it.incomingId === spotId) : -1;
@@ -638,6 +645,7 @@ export function PlanScreen({
       setArrived((prev) => new Set([...prev, ...added.map((a) => a.incomingId)]));
       setJoined((prev) => [...(prev ?? []), ...added]);
     }
+    return flat;
   }
   const rerouteRef = useRef(reroute);
   useEffect(() => {
@@ -647,7 +655,9 @@ export function PlanScreen({
   const batcher = useRef<ReturnType<typeof createRerouteBatcher> | null>(null);
   useEffect(() => () => batcher.current?.cancel(), []);
   function scheduleReroute() {
-    batcher.current ??= createRerouteBatcher(() => rerouteRef.current());
+    batcher.current ??= createRerouteBatcher(async () => {
+      await rerouteRef.current();
+    });
     batcher.current.schedule();
   }
   /**
@@ -1032,26 +1042,37 @@ export function PlanScreen({
       return next;
     });
   }
-  /** The next line card after this one that is not shelved yet, wrapping round; the step-through's one rule. */
-  /** The cards still waiting in this haul, other than this one, as the step-through reads them (UIL-120). */
-  function waitingHaulCards(exceptId: string): WaitingHaulCard[] {
-    return flatItems
+  /**
+   * The cards still waiting in this haul, other than this one, as the step-through reads them (UIL-120): each with the
+   * line its proposal names. `items`: the plan to read, this render's unless a re-route has just answered.
+   */
+  function waitingHaulCards(exceptId: string, items: PlanItem[] = flatItems): WaitingHaulCard[] {
+    return items
       .filter((it) => it.incomingId !== exceptId && !done.has(it.incomingId))
       .map((it) => ({
         id: it.incomingId,
         dexIds: it.dexIds ?? [],
-        locale: localeOfId(it.tcgdexId),
+        lineKey: lineKeyOf(it.lineProposal, it.startsLine),
       }));
   }
 
   /**
-   * The next card for THIS line, after this one in the plan, wrapping round (UIL-120, Karvi 2026-09-27: "Confirm &
-   * next" never opens another line's card by itself). The line is the server's read of it after her write.
+   * The next card for THIS line, after this one in the plan, wrapping round, and where it sits (UIL-120, Karvi
+   * 2026-09-27: "Confirm & next" never opens another line's card by itself). The line is the server's read of it after
+   * her write; `items` the plan as it was routed again after it, so the proposals are the ones her write left.
    */
-  function nextSameLineCard(afterId: string, line: LineAfterWrite): PlanItem | undefined {
-    const same = new Set(sameLineWaiting(line.openDexIds, line.locale, waitingHaulCards(afterId)));
-    const after = flatItems.slice((flatIndex.get(afterId) ?? -1) + 1);
-    return [...after, ...flatItems].find((it) => same.has(it.incomingId));
+  function nextSameLineCard(
+    afterId: string,
+    line: LineAfterWrite,
+    items: PlanItem[],
+  ): { item: PlanItem; index: number } | undefined {
+    const same = new Set(
+      sameLineWaiting(lineKeyFor(line.lineId), line.openDexIds, waitingHaulCards(afterId, items)),
+    );
+    const from = items.findIndex((it) => it.incomingId === afterId) + 1;
+    const order = [...items.keys()].map((k) => (from + k) % items.length);
+    const index = order.find((i) => same.has(items[i].incomingId));
+    return index === undefined ? undefined : { item: items[index], index };
   }
 
   /**
@@ -1059,8 +1080,8 @@ export function PlanScreen({
    * and its fresh derivation (which carries any colour question) is the one the popup reads. The move options load
    * once, for the replace view's pickers.
    */
-  function openLinePopup(item: PlanItem, swap: LineProposal | null = null) {
-    const i = flatIndex.get(item.incomingId);
+  function openLinePopup(item: PlanItem, swap: LineProposal | null = null, at?: number) {
+    const i = at ?? flatIndex.get(item.incomingId);
     if (i !== undefined) setCur(i);
     setError(null);
     setLinePop(item.incomingId);
@@ -1092,9 +1113,13 @@ export function PlanScreen({
   }
 
   /**
-   * Her confirm in the line popup, then "Confirm & next": the next line card in the plan that is not shelved yet
-   * opens straight away, so a big haul is one pass rather than a hunt (v3 section 1). A refusal keeps the popup
-   * open with the reason in it.
+   * Her confirm in the line popup, then "Confirm & next": the next card for THE SAME line opens straight away, so a
+   * big haul is one pass rather than a hunt (v3 section 1). A refusal keeps the popup open with the reason in it.
+   *
+   * The same line is a positive match (the Senior BA's ruling on #430): a waiting card whose proposal names this line
+   * once her write has landed. So when a waiting card could fill one of the line's open stages at all, the rest are
+   * routed again NOW rather than in a moment, and the next card is read off their new proposals: a card that would
+   * have started this line now adds to it, and a card of the same species headed anywhere else is not its card.
    *
    * EXCEPT when the line her confirm concerned is DONE (UIL-120): nothing left in it to chase, which includes a Keep or
    * a Swap on a line that was already complete and a line whose only unfilled stage is a block (`lineDoneFor`). Karvi:
@@ -1119,22 +1144,33 @@ export function PlanScreen({
       advance();
       return;
     }
-    // A line write can change what the other cards would do (a card that would have started this line now joins
-    // it), so the rest re-route and their badges follow; the batch runs a moment later, as for any change.
-    if (extra.lineChoice) scheduleReroute();
     // "Confirm & next" opens only the next card for THIS line (UIL-120, her ruling); a closed line has none.
-    const next =
-      !shelved.lineDone && shelved.line
-        ? nextSameLineCard(item.incomingId, shelved.line)
-        : undefined;
+    const line = shelved.lineDone ? undefined : shelved.line;
+    const open = new Set(line?.openDexIds ?? []);
+    const mightStep = waitingHaulCards(item.incomingId).some((c) =>
+      c.dexIds.some((d) => open.has(d)),
+    );
+    let routed: PlanItem[] | null = flatItems;
+    if (line && mightStep) {
+      setStepping(item.incomingId);
+      batcher.current?.cancel();
+      routed = await reroute(item.incomingId);
+      setStepping(null);
+    } else if (extra.lineChoice) {
+      // A line write can change what the other cards would do, so the rest re-route and their badges follow; the
+      // batch runs a moment later, as for any change.
+      scheduleReroute();
+    }
+    const next = line && routed ? nextSameLineCard(item.incomingId, line, routed) : undefined;
     if (next) {
-      openLinePopup(next);
+      openLinePopup(next.item, null, next.index);
       return;
     }
-    // A confirm that does not lead on says why, so the popup closing reads as a finish (UX review of #402).
+    // A confirm that does not lead on says why, so the popup closing reads as a finish (UX review of #402). A re-route
+    // that could not reach the server says so itself, and claims nothing about the line.
     if (shelved.lineDone) {
       flashToast(opts.lineName ? `Line closed · ${opts.lineName} line` : "Line closed");
-    } else if (shelved.line) {
+    } else if (shelved.line && routed) {
       flashToast(
         opts.lineName
           ? `That's every card you have for the ${opts.lineName} line`
@@ -1142,13 +1178,19 @@ export function PlanScreen({
       );
     }
     closeLinePopup();
-    advance();
+    if (routed && routed !== flatItems) {
+      advance(
+        routed,
+        routed.findIndex((it) => it.incomingId === item.incomingId),
+      );
+    } else advance();
   }
 
-  function advance() {
-    let i = cur + 1;
-    while (i < flatItems.length && done.has(flatItems[i].incomingId)) i++;
-    setCur(Math.min(i, Math.max(flatItems.length - 1, 0)));
+  /** The spotlight moves on to the next card not yet shelved. `items`/`from`: the plan a re-route has just answered. */
+  function advance(items: PlanItem[] = flatItems, from: number = cur) {
+    let i = from + 1;
+    while (i < items.length && done.has(items[i].incomingId)) i++;
+    setCur(Math.min(i, Math.max(items.length - 1, 0)));
   }
 
   return (
@@ -1262,7 +1304,7 @@ export function PlanScreen({
           }
           // " · next ▶" only when confirming really opens another card for this line (UIL-120; UX review of #392).
           waiting={waitingHaulCards(popLive.incomingId)}
-          busy={shelving === popLive.incomingId}
+          busy={shelving === popLive.incomingId || stepping === popLive.incomingId}
           error={error}
           onConfirm={(choice, lineName) =>
             // On the swap for a plain extra copy (UIL-126), Keep is her normal Done: the front half, no line choice.

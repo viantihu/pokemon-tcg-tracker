@@ -29,7 +29,13 @@ import {
 } from "@/lib/line/popup";
 import { LinePopup } from "../_components/LinePopup";
 import { useEscapeLayer } from "../_components/escape-layer";
-import { lineDoneFor, sameLineWaiting, type WaitingHaulCard } from "@/lib/plan/line-done";
+import {
+  lineDoneFor,
+  lineKeyFor,
+  lineKeyOf,
+  sameLineWaiting,
+  type WaitingHaulCard,
+} from "@/lib/plan/line-done";
 
 export function PlanLinePopup({
   item,
@@ -63,8 +69,8 @@ export function PlanLinePopup({
    */
   position?: { index: number; total: number };
   /**
-   * The other cards still waiting in this haul. "· next" only when one of them goes into THIS line, by the same
-   * predicate the step-through opens the next card with (`sameLineWaiting`, UIL-120).
+   * The other cards still waiting in this haul, with the line each is proposed into. "· next" only when one of them
+   * goes into THIS line, by the same predicate the step-through opens the next card with (`sameLineWaiting`, UIL-120).
    */
   waiting: WaitingHaulCard[];
   /**
@@ -160,8 +166,9 @@ export function PlanLinePopup({
       model.line.status,
     );
 
-  // Whether confirming leads on to another card for THIS line: a waiting card of a species one of its stages will
-  // still want after this confirm (a wanted stage, or a pull she did not tick), in the line's language.
+  // Whether confirming leads on to another card for THIS line: a waiting card proposed into it (this line's id, or for
+  // a start the same new line), of a species one of its stages will still want after this confirm (a wanted stage, or
+  // a pull she did not tick).
   const openAfter = model.stages
     .filter(
       (st) =>
@@ -170,8 +177,10 @@ export function PlanLinePopup({
     )
     .map((st) => st.dexId)
     .filter((d): d is number => d !== undefined);
-  const nextHere =
-    colour !== "own" && sameLineWaiting(openAfter, model.line.locale, waiting).length > 0;
+  const thisLine = model.line.lineId
+    ? lineKeyFor(model.line.lineId)
+    : lineKeyOf(proposal, item.startsLine);
+  const nextHere = colour !== "own" && sameLineWaiting(thisLine, openAfter, waiting).length > 0;
 
   return (
     <div className="lp-overlay">

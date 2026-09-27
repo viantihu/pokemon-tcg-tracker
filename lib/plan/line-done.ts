@@ -19,29 +19,66 @@
  * Pure, and free of I/O imports, so the client popup can use it.
  */
 
-import { lineReadsClosed } from "@/lib/line/popup";
+import { lineReadsClosed, type LineProposal } from "@/lib/line/popup";
 
-/** A card still waiting in this haul, as the step-through reads it: its species, in its language. */
+/**
+ * The line a card's proposal routes it into, as one key (UIL-120, the Senior BA's ruling on #430): an existing line by
+ * its id, or the new line a start would write by the identity the commit gives it (binder, root species, band,
+ * language: `newLineKey`), so two cards that would start the SAME line match before it has an id. Null for a card
+ * headed into no line: a front half, a collection, the bulk box.
+ */
+export function lineKeyOf(
+  proposal: LineProposal | null | undefined,
+  startsLine?: string | null,
+): string | null {
+  if (!proposal) return null;
+  if (proposal.kind === "start") return startsLine ? `new:${startsLine}` : null;
+  return lineKeyFor(proposal.lineId);
+}
+
+/** An existing line's key. */
+export function lineKeyFor(lineId: string): string {
+  return `line:${lineId}`;
+}
+
+/** The identity of a line not written yet: the one the commit keys a line started earlier in the same pass on. */
+export function newLineKey(
+  binderId: string | null,
+  rootDexId: number,
+  colorBand: string,
+  locale: string,
+): string {
+  return `${binderId ?? ""}:${rootDexId}:${colorBand}:${locale}`;
+}
+
+/** A card still waiting in this haul, as the step-through reads it: its species, and the line it is proposed into. */
 export interface WaitingHaulCard {
   id: string;
   dexIds: readonly number[];
-  locale: string;
+  /** `lineKeyOf` its current proposal. */
+  lineKey: string | null;
 }
 
 /**
  * The haul cards still waiting that go into THIS line (UIL-120, Karvi 2026-09-27: "Confirm & next" never opens another
- * line's card by itself): a card of a species one of the line's open stages wants, in the line's language. ONE
- * predicate for the step-through's `next` (fed the line as the server reads it after the write) and for the popup's
- * "· next" label (fed the line as the popup lays it out), so the label never promises a jump that will not happen.
+ * line's card by itself). A POSITIVE match (the Senior BA's ruling on #430): the card's current proposal names this
+ * line, and its species is one of the stages the line still wants. Not species and language alone: a card of the right
+ * species proposed into ANOTHER line, a new line of its own, a front half or a collection is not this line's card.
+ *
+ * ONE predicate for the step-through's `next` (fed the line as the server reads it after the write, and the waiting
+ * cards as they are routed again after it, so a card that would have started this line now names it) and for the
+ * popup's "· next" label (fed the line as the popup lays it out, and the plan as it stands), so the label never
+ * promises a jump that will not happen.
  */
 export function sameLineWaiting(
+  lineKey: string | null,
   openDexIds: readonly number[],
-  lineLocale: string,
   waiting: readonly WaitingHaulCard[],
 ): string[] {
+  if (!lineKey) return [];
   const open = new Set(openDexIds);
   return waiting
-    .filter((c) => c.locale === lineLocale && c.dexIds.some((d) => open.has(d)))
+    .filter((c) => c.lineKey === lineKey && c.dexIds.some((d) => open.has(d)))
     .map((c) => c.id);
 }
 
