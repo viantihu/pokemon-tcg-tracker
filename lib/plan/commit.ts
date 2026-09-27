@@ -1034,7 +1034,6 @@ function writeNewLine(
   });
   counts.lines += 1;
 
-  const slotIdByStage = new Map<number, string>();
   const mirror: MutableSlot[] = [];
 
   for (const slot of plan.slots) {
@@ -1065,7 +1064,6 @@ function writeNewLine(
       note: declinedPull ? "left in place (not confirmed)" : (slot.note ?? null),
     });
     counts.slots += 1;
-    slotIdByStage.set(slot.stageIndex, slotId);
     mirror.push({
       id: slotId,
       stage_index: slot.stageIndex,
@@ -1139,22 +1137,9 @@ function writeNewLine(
     }
   }
 
-  // Wishlist every placeholder slot (system-design §6 alternates).
-  for (const w of p.result.wishlist ?? []) {
-    const lineSlotId = slotIdByStage.get(w.stageIndex) ?? null;
-    ops.push({
-      op: "insert_wishlist",
-      line_slot_id: lineSlotId,
-      required_dex_id: w.requiredDexId,
-      required_type: w.requiredType,
-      required_stage: w.requiredStage,
-      chosen_catalog_card_id: w.chosenCatalogCardId,
-      alternate_catalog_card_ids: w.alternateCatalogCardIds,
-      will_live_in_specialty: w.willLiveInSpecialty,
-      held_for_binder_id: plan.binderId,
-    });
-    counts.wishlist += 1;
-  }
+  // No wish for an empty stage (UIL-119, Karvi's ruling): a stage goes on her wishlist only when SHE adds it. The
+  // cascade's `wishlist` proposals are not written; the line popup's builder, the Haul Plan's writer since UIL-117,
+  // wishes nothing either.
 
   slotsByLine.set(lineId, mirror);
   passLines.set(key, { lineId });
