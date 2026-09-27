@@ -315,6 +315,7 @@ describe("the popup's model (loadLinePopupModel), built from fresh state", () =>
       locale: "en",
       filledBefore: 0,
       total: 2,
+      status: null, // a line being started has no status yet
     });
     expect(m.stages.map((s) => [s.stage, s.state, s.card?.name])).toEqual([
       ["Basic", "pullable", "Emberling"],
@@ -357,6 +358,7 @@ describe("the popup's model (loadLinePopupModel), built from fresh state", () =>
     });
     expect(m.line).toMatchObject({
       lineId: LINE,
+      status: "open", // the line row's own status, for a screen's "· next" forecast
       locale: "ja",
       filledBefore: 1,
       filledAfter: 2,

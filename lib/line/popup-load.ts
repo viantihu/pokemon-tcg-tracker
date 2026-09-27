@@ -194,6 +194,7 @@ export async function loadLinePopupModel(
         filledBefore: 0,
         filledAfter: 1,
         total: stages.length,
+        status: null,
       },
       stages,
     };
@@ -259,6 +260,7 @@ export async function loadLinePopupModel(
         filledBefore,
         filledAfter: replacing ? filledBefore : filledBefore + 1,
         total: lineSlots.length,
+        status: line.status,
       },
       stages,
       ...(replacing && current && currentCard

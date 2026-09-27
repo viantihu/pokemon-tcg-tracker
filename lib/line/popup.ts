@@ -174,6 +174,11 @@ export interface LinePopupLine {
   filledBefore: number;
   filledAfter: number;
   total: number;
+  /**
+   * The line's stored status now (UIL-121: read it through `lineReadsClosed`, never as a string), for a screen's
+   * forecast of whether her confirm leaves the line done. Null while the line is only being started.
+   */
+  status?: string | null;
 }
 
 /** UIL-096: every line this family already has, anywhere, so she sees it before starting a second one. */
