@@ -60,6 +60,8 @@ export interface PlanItem {
    * add yellow, replace pink). Null for every card with no line. Absent on a plan parked before UIL-117.
    */
   lineProposal?: LineProposal | null;
+  /** The line's name for the badge ("Charizard"), its top stage; null for a replace or when it cannot be named. */
+  lineName?: string | null;
 }
 
 /** A planned card paired with its full cascade result — the commit input (not sent to the client). */

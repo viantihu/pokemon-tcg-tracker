@@ -221,6 +221,36 @@ nav.menu .tab .n {
   padding: 9px 13px;
   margin-bottom: 10px;
 }
+/* The Haul Plan's line badge (UIL-117, v3 section 1): start green, add yellow, replace pink; it opens the popup. */
+.linebadge {
+  display: inline-block;
+  padding: 4px 7px;
+  border: 3px solid var(--ink);
+  color: var(--ink);
+  font: inherit;
+  font-size: 10px;
+  box-shadow: 2px 2px 0 rgba(60, 60, 59, 0.25);
+  cursor: pointer;
+}
+.linebadge.start {
+  background: var(--mint);
+}
+.linebadge.add {
+  background: var(--note);
+}
+.linebadge.replace {
+  background: var(--b-pink);
+}
+/* At a phone width the badge wraps under its verb ("＋ Starts / Charizard line") instead of squeezing the card's
+   name to "Charma…" (UX review of #392). It stays one button, so one tap target. */
+@media (max-width: 420px) {
+  .linebadge {
+    max-width: 112px;
+    white-space: normal;
+    text-align: left;
+    line-height: 1.25;
+  }
+}
 /* "Search haul" (UIL-115): under the haul bar, results as the app's card tiles (`.cgrid`). */
 .haulsearch {
   padding: 9px 13px;

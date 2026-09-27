@@ -6,7 +6,7 @@
  * this only flattens and describes.
  */
 
-import { lineProposalFor, type LineLookups } from "./line-proposal";
+import { lineNameFor, lineProposalFor, type LineLookups } from "./line-proposal";
 import type { CascadeResult, IncomingCard, PlacementTarget } from "@/lib/engine";
 import { actionForResult, resultNeedsDecision } from "./action";
 import type { PlanItem } from "./types";
@@ -152,5 +152,6 @@ export function toPlanItem(
     collectionPick: result.collectionPick ?? null,
     // UIL-117: the badge, and what the line popup opens on. Null for every card with no line.
     lineProposal: l.lines ? lineProposalFor(result, l.lines) : null,
+    lineName: l.lines ? lineNameFor(result, l.lines) : null,
   };
 }

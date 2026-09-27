@@ -23,6 +23,10 @@ export interface LineLookups {
   slotIdAt(lineId: string, stageIndex: number): string | null;
   /** The line a slot belongs to, or null when the slot is gone. */
   lineOfSlot(slotId: string): string | null;
+  /** A line's name, as the popup names it: its top stage's card ("Charizard"). Optional for hand-built lookups. */
+  lineName?(lineId: string): string | null;
+  /** A species' card name by dex id ("Charizard"), for a line not written yet. Optional for hand-built lookups. */
+  dexName?(dexId: number): string | null;
 }
 
 export function lineProposalFor(result: CascadeResult, l: LineLookups): LineProposal | null {
@@ -59,4 +63,17 @@ export function isLineCard(result: CascadeResult): boolean {
   // A holo over a copy in a line slot targets that slot (`back-half-line`, lineId "inherited"), so the first test
   // covers it; a copy for a filled stage is placed in a front half, so it needs the second.
   return result.target.kind === "back-half-line" || !!result.filledStage;
+}
+
+/**
+ * The name the row badge gives a line (v3 section 1: "＋ Starts Charizard line", "◆ Adds to Toedscruel line"): its
+ * top stage, the way the popup names it. Null for a replace, which stays generic, and when it cannot be named.
+ */
+export function lineNameFor(result: CascadeResult, l: LineLookups): string | null {
+  if (result.step === "line-new" && result.newLine) {
+    const top = result.newLine.slots.at(-1);
+    return top ? (l.dexName?.(top.dexId) ?? null) : null;
+  }
+  const open = result.step === "line-existing" ? result.filledExistingSlot : null;
+  return open ? (l.lineName?.(open.lineId) ?? null) : null;
 }
