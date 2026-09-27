@@ -32,8 +32,19 @@ import { MoveOverlay, type MoveTargetCard } from "../_components/MoveOverlay";
 import { bandMeta } from "../_components/plan-meta";
 import { fmtPrice } from "../_components/decision-format";
 import { loadLine, moveCardAction, removeSlotCopyAction, resolveDecisionAction } from "./actions";
+import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
+import { lineModelAction } from "../_components/line-popup-actions";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
 import { LOST, reach } from "../_components/reach";
+
+/** UIL-117: the line popup's model, from the server; a refusal becomes the message the sheet shows. */
+function lineModelFor(copyId: string) {
+  return async (proposal: LineProposal): Promise<LinePopupModel> => {
+    const res = await reach(() => lineModelAction(copyId, proposal), LOST.action);
+    if (!res.ok) throw new Error(res.error);
+    return res.model;
+  };
+}
 
 const SLOT_HEAD: Record<SlotView["state"], string> = {
   filled: "FILLED",
@@ -269,11 +280,11 @@ export function LineScreen() {
     }
   }
 
-  async function onMoveConfirm(dest: MoveDestination) {
+  async function onMoveConfirm(dest: MoveDestination, lineChoice?: LineChoice) {
     if (!move) return;
     setBusy(true);
     setError(null);
-    const res = await reach(() => moveCardAction(move.copyId, dest, view), LOST.action);
+    const res = await reach(() => moveCardAction(move.copyId, dest, view, lineChoice), LOST.action);
     setBusy(false);
     // Close the sheet either way: a failure shown behind a veil is a failure she cannot read.
     setMove(null);
@@ -319,7 +330,8 @@ export function LineScreen() {
           <MoveOverlay
             card={move}
             options={data.moveOptions}
-            allowLineJoin={Boolean(move.joinCandidates)}
+            allowLineJoin={false}
+            lineModel={lineModelFor(move.copyId)}
             onConfirm={onMoveConfirm}
             onClose={() => setMove(null)}
           />
@@ -492,7 +504,8 @@ export function LineScreen() {
         <MoveOverlay
           card={move}
           options={data.moveOptions}
-          allowLineJoin={Boolean(move.joinCandidates)}
+          allowLineJoin={false}
+          lineModel={lineModelFor(move.copyId)}
           onConfirm={onMoveConfirm}
           onClose={() => setMove(null)}
         />

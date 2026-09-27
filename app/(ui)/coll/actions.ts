@@ -11,6 +11,7 @@
  * All catalog access is server-side (client never hits TCGdex). Owner/session via the M6 seam.
  */
 
+import type { LineChoice } from "@/lib/line/popup";
 import {
   binderRepo,
   catalogCardRepo,
@@ -336,6 +337,8 @@ export async function removeCardFromCollection(
   collectionId: string,
   tcgdexId: string,
   destination: MoveDestination,
+  /** Her line popup choice when the card goes into a back half (UIL-117). */
+  lineChoice?: LineChoice,
 ): Promise<SaveResult> {
   try {
     const { db } = await getOwnerContext();
@@ -349,7 +352,7 @@ export async function removeCardFromCollection(
       collectionName: (id) => collections.find((c) => c.id === id)?.name ?? null,
       bandDisplay: (key) => bands.find((b) => b.band === key)?.display_name ?? key,
     };
-    await applyCollectionRemoval(db, { collectionId, tcgdexId, destination }, names);
+    await applyCollectionRemoval(db, { collectionId, tcgdexId, destination, lineChoice }, names);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };

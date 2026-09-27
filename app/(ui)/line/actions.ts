@@ -23,6 +23,7 @@ import {
 import { getOwnerContext } from "@/lib/plan/session";
 import { applyCopyRemoval } from "@/lib/copy";
 import { errorMessage } from "@/lib/errors";
+import type { LineChoice } from "@/lib/line/popup";
 
 /** Reload the whole screen model (called after every mutation so the strip + queue stay truthful). */
 export async function loadLine(view: LineViewMode = "color"): Promise<LineScreenData> {
@@ -45,11 +46,17 @@ export async function moveCardAction(
   destination: MoveDestination,
   /** The strip order she is viewing (UIL-074), so the refreshed data comes back in it. */
   view: LineViewMode = "color",
+  /** Her line popup choice for a back-half move (UIL-117). */
+  lineChoice?: LineChoice,
 ): Promise<MoveActionResult> {
   try {
     const { db } = await getOwnerContext();
     const before = await loadLineScreen(db);
-    const res = await applyMove(db, { copyId, destination }, moveNameLookups(before.moveOptions));
+    const res = await applyMove(
+      db,
+      { copyId, destination, lineChoice },
+      moveNameLookups(before.moveOptions),
+    );
     const data = await loadLineScreen(db, { view });
     return { ok: true, label: res.destinationLabel, data };
   } catch (err) {

@@ -49,6 +49,8 @@ import {
   type MoveNameLookups,
 } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
+import type { LineChoice } from "@/lib/line/popup";
+import { buildBackHalfLineOps } from "@/lib/line/write";
 
 /* ------------------------------- pure planning ------------------------------ */
 
@@ -208,6 +210,8 @@ export interface CollectionRemovalRequest {
   collectionId: string;
   tcgdexId: string;
   destination: MoveDestination;
+  /** Her line popup choice for a back-half destination (UIL-117). */
+  lineChoice?: LineChoice;
 }
 
 /**
@@ -237,17 +241,35 @@ export async function applyCollectionRemoval(
   const binderIds = col.current_binder_ids ?? [];
   const rejection = rejectSelfDestination(req.destination, col.id, binderIds);
   if (rejection) throw new Error(rejection);
-  // UIL-117 gap 3: this path moves every copy here and writes no line ops, so a back-half destination would shelve
-  // the card on no line. The screen greys the back half out; a stale or bypassing caller is refused here.
-  if (req.destination.kind === "shelf" && req.destination.half === "back") {
-    throw new Error(
-      "A back half needs a line. Move this card from the Lines page, where you can pick a line or start one.",
-    );
-  }
 
   const copyRows = (await copyRepo.listByCatalogCard(db, req.tcgdexId)).filter(
     (c) => c.role === "shelved" && c.binder_id !== null && binderIds.includes(c.binder_id),
   );
+
+  /**
+   * INTO A BACK HALF (UIL-117 gap 3, then PR 2): only through her line popup choice, and only for ONE copy, since a
+   * line slot holds one card. The line is written in this same transaction as the removal, so the card is never
+   * off the list and on no line. Without a choice, or with several copies here, it is refused before any write.
+   */
+  let lineOps: WriteOp[] = [];
+  let lineSlotId: string | null = null;
+  if (req.destination.kind === "shelf" && req.destination.half === "back") {
+    if (!req.lineChoice) {
+      throw new Error(
+        "A back half needs a line. Move this card from the Lines page, where you can pick a line or start one.",
+      );
+    }
+    if (copyRows.length !== 1) {
+      throw new Error(
+        copyRows.length === 0
+          ? "You hold no copy of this card in this collection's binder, so there is nothing to put in a line."
+          : `There are ${copyRows.length} copies of this card here, and a line holds one. Move each one from Lookup.`,
+      );
+    }
+    const built = await buildBackHalfLineOps(db, copyRows[0], req.destination, req.lineChoice);
+    lineOps = built.ops;
+    lineSlotId = built.slotId;
+  }
 
   const copies: RemovalCopy[] = [];
   for (const c of copyRows) {
@@ -278,7 +300,12 @@ export async function applyCollectionRemoval(
       req.destination.kind === "collection" ? req.destination.collectionId : null,
   });
 
-  await applyWriteOps(db, { ops });
+  if (lineSlotId) {
+    const own = ops.find((o) => o.op === "update_copy" && o.id === copyRows[0].id);
+    if (own && own.op === "update_copy") own.patch = { ...own.patch, line_slot_id: lineSlotId };
+  }
+  // The line first: the copy's pointer names a slot this same write creates or fills.
+  await applyWriteOps(db, { ops: [...lineOps, ...ops] });
 
   return {
     collectionName: col.name,
