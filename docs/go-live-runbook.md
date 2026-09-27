@@ -422,6 +422,12 @@ Testing diagnostic read (counts only, `ops/read-band-config`). Then run it for r
 TESTING_DB_URL='postgres://...testing...' PROD_DB_URL='postgres://...prod...' ALLOWED_OWNER_EMAIL='...' node scripts/promote-collection.mjs
 ```
 
+**Once the app is multi-user** (sign-up open, the single-owner allow-list gone), name both
+owners by email rather than relying on `ALLOWED_OWNER_EMAIL`:
+`--owner-email=<her address>` for Production, and `--source-owner-email=<her address>` for
+Testing, which then holds more than one owner. Without them the script refuses (it never
+guesses whose collection to copy) and lists the owners it found.
+
 Everything lands inside **one transaction** on Production: it all commits or none of it
 does. After commit the script re-counts every table and fails loudly if any count
 disagrees with what it read from Testing.

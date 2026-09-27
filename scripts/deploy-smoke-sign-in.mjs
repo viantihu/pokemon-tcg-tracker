@@ -5,9 +5,11 @@
  * string, and Next throws when it loads such a file), while the build, the tests and both page checks in
  * deploy.yml's smoke job stayed green: a page renders without loading its actions. Only calling one shows it.
  *
- * The call: POST /login's `signIn` action with an address that is NOT on the allow-list. `signIn` refuses it
- * before any network call ("That email is not authorised for this binder."), so no email is sent and nothing
- * is written. The action's id is build-specific, and since #364 /login's HTML no longer carries it (its form
+ * The call: POST /login's `signIn` action with a MALFORMED address. `signIn` validates the address first and
+ * refuses it before any network call ("Enter a valid email address."), so no email is sent, no auth user is
+ * created, and nothing is written, whether or not sign-up is open to new users (the multi-user work removes the
+ * single-owner allow-list; a well-formed stranger's address would then get a real email and a new account on
+ * every deploy). The action's id is build-specific, and since #364 /login's HTML no longer carries it (its form
  * action is a client wrapper), so it is read from the page's client chunk, where the bundler emits
  * `createServerReference("<id>", …, "signIn")`.
  *
@@ -16,9 +18,9 @@
  *   APP_URL=https://… node scripts/deploy-smoke-sign-in.mjs
  */
 
-/** Never the owner's address: a reserved example domain, so the allow-list can only refuse it. */
-export const PROBE_EMAIL = "deploy-smoke@example.com";
-export const REFUSAL = "That email is not authorised for this binder.";
+/** Not an address at all (no "@"), so `signIn`'s own validation refuses it before Supabase is ever called. */
+export const PROBE_EMAIL = "deploy-smoke-not-an-address";
+export const REFUSAL = "Enter a valid email address.";
 
 /**
  * Every client chunk a page names, in its script tags or in its flight data (where quotes are escaped). Vercel
@@ -45,7 +47,10 @@ export function actionIdIn(js, name) {
 /** What the action's answer means. `ok` only for the refusal itself. */
 export function verdict(status, body) {
   if (status === 200 && body.includes('"status":"error"') && body.includes(REFUSAL)) {
-    return { ok: true, why: "the sign-in action loaded, ran, and refused the probe address" };
+    return {
+      ok: true,
+      why: "the sign-in action loaded, ran, and refused the malformed probe address",
+    };
   }
   if (status >= 500) {
     return {
@@ -59,7 +64,7 @@ export function verdict(status, body) {
   if (status === 200 && body.includes('"status":"sent"')) {
     return {
       ok: false,
-      why: `the probe address was ACCEPTED and a sign-in email was sent: the allow-list is not refusing strangers.`,
+      why: `the MALFORMED probe address was ACCEPTED and a sign-in was attempted: signIn's address check is not running.`,
     };
   }
   return { ok: false, why: `unexpected answer from the sign-in action: HTTP ${status}` };

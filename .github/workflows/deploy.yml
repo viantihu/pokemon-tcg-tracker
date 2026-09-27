@@ -554,9 +554,10 @@ jobs:
 
       # A page can render while none of its server actions load: from 2026-09-25 to
       # 09-26 every action on every page failed (E352, UIL-107) and both checks above
-      # stayed green. This CALLS the sign-in action with an address that is not on
-      # the allow-list and expects its refusal: no email is sent, nothing is written.
-      - name: Action check (the sign-in action loads, runs, and refuses a stranger)
+      # stayed green. This CALLS the sign-in action with a MALFORMED address and expects
+      # its own validation to refuse it: no email is sent, no account is made, nothing
+      # is written, with or without the single-owner allow-list (multi-user sign-up).
+      - name: Action check (the sign-in action loads, runs, and refuses a malformed address)
         env:
           APP_URL: ${{ vars.APP_URL }}
         run: node scripts/deploy-smoke-sign-in.mjs

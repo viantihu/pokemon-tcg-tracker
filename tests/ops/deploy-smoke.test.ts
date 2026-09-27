@@ -64,22 +64,26 @@ describe("the action check reads the answer strictly", () => {
     expect(v.why).toMatch(/E352/);
   });
 
-  it("fails LOUDLY if the probe address was accepted and an email sent", () => {
+  it("fails LOUDLY if the malformed probe was accepted and a sign-in attempted", () => {
     const v = verdict(200, `1:{"status":"sent","email":"${PROBE_EMAIL}"}`);
     expect(v.ok).toBe(false);
-    expect(v.why).toMatch(/allow-list is not refusing/);
+    expect(v.why).toMatch(/address check is not running/);
   });
 
   it("fails on any other refusal, a redirect, or an empty 200", () => {
-    expect(verdict(200, '1:{"status":"error","message":"Enter a valid email address."}').ok).toBe(
-      false,
-    );
+    // Past the address check (the old allow-list refusal): the malformed probe should never get that far.
+    expect(
+      verdict(200, '1:{"status":"error","message":"That email is not authorised for this binder."}')
+        .ok,
+    ).toBe(false);
     expect(verdict(303, "").ok).toBe(false);
     expect(verdict(200, "").ok).toBe(false);
   });
 
-  it("probes with an address that can never be the owner's", () => {
-    expect(PROBE_EMAIL).toMatch(/@example\.com$/);
+  it("probes with something that is not an address at all", () => {
+    // Malformed on purpose: signIn's own check refuses it, so no email is ever sent and no account is made,
+    // allow-list or not (the multi-user sign-up work).
+    expect(PROBE_EMAIL).not.toContain("@");
   });
 });
 
