@@ -17,12 +17,12 @@ import type { PGlite } from "@electric-sql/pglite";
 import {
   applyDecision,
   applyMove,
-  loadLineScreen,
   loadMoveOptions,
   moveNameLookups,
   releaseSlotOps,
 } from "@/lib/line";
 import { executeApply, type SyncPlanBundle } from "@/lib/sync";
+import { buildScreenModel } from "@/lib/line/load";
 import type { ReconcilePlan } from "@/lib/sync/reconcile";
 import { asOwner, asSuperuser, freshRpcDb, OWNER, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
@@ -61,9 +61,13 @@ async function seedCatalog(
   }
 }
 
+/**
+ * The decisions the SERVER derives. Since UIL-121 A2c her screen shows only collection-vs-line (the other cards
+ * retired), but the derivation and its UIL-078 markers stay on the server until the tightening migration (D), so
+ * they are pinned here, where they still run (`applyDecision` reads the same derivation).
+ */
 async function decisionIds(): Promise<string[]> {
-  const data = await loadLineScreen(pgliteClient(db));
-  return data.decisions.map((d) => d.id);
+  return (await buildScreenModel(pgliteClient(db))).derived.map((d) => d.card.id);
 }
 
 describe("UIL-078 · ex-only-cap stays resolved", () => {
@@ -134,6 +138,26 @@ describe("UIL-078 · collection-vs-line stays resolved", () => {
     expect(await decisionIds()).not.toContain(`${LINE}:collection-vs-line:0`);
     // And keeps staying resolved: the same collection, still claiming, is the same question.
     expect(await decisionIds()).not.toContain(`${LINE}:collection-vs-line:0`);
+  });
+
+  it("UIL-121: 'collection wins' records her chase of the card it wishlists; 'nothing wishlisted' is her empty", async () => {
+    // A second printing the collection does not claim: the one the line's stage can chase instead.
+    await asSuperuser(db);
+    await seedCatalog([{ id: "collectamon-alt", name: "Collectamon", dexId: DEX }]);
+    const client = pgliteClient(db);
+    await asOwner(db);
+    await applyDecision(client, OWNER, `${LINE}:collection-vs-line:0`, "collection-wins");
+    await asSuperuser(db);
+    const [row] = (
+      await db.query<{ stage_choice: string | null; target: string | null; chosen: string | null }>(
+        `select s.stage_choice, s.target_catalog_card_id as target, w.chosen_catalog_card_id as chosen
+           from line_slot s left join wishlist_item w on w.line_slot_id = s.id and w.resolved_at is null
+          where s.id = '50000000-0000-0000-0000-00000000cc01'`,
+      )
+    ).rows;
+    expect(row.stage_choice).toBe("chase");
+    expect(row.target).toBe(row.chosen);
+    expect(row.chosen).not.toBeNull();
   });
 
   /**

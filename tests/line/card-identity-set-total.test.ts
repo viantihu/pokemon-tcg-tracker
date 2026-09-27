@@ -54,6 +54,7 @@ beforeEach(async () => {
       values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${IN_LINE}');
     insert into line_slot (id, owner_id, line_id, stage_index, stage, state, target_catalog_card_id)
       values ('${SLOT_NEXT}', '${OWNER}', '${LINE}', 1, 'Stage1', 'placeholder', 'emberdrake');
+    update line_slot set stage_choice = 'chase' where id = '${SLOT_NEXT}';
     update copy set line_slot_id = '${SLOT_ROOT}', binder_half = 'back' where id = '${IN_LINE}';
   `);
 });
@@ -67,7 +68,8 @@ describe("UIL-077 · CardIdentity carries the printed set total off the loader",
     const line = data.lines.find((l) => l.lineId === LINE)!;
     const filled = line.slots.find((s) => s.slotId === SLOT_ROOT)!;
     expect(filled.card).toMatchObject({ localId: "099", setCardCountOfficial: 182 });
-    // The placeholder's identity is its target printing, from a DIFFERENT set: 210, not 182.
+    // The placeholder's identity is its target printing, from a DIFFERENT set: 210, not 182. (UIL-121: shown because
+    // she chases it; the seed sets that below.)
     const open = line.slots.find((s) => s.slotId === SLOT_NEXT)!;
     expect(open.card).toMatchObject({ localId: "100", setCardCountOfficial: 210 });
     // Its ranked alternates carry it too (DecisionCard's wishlist tiles and the Line screen's

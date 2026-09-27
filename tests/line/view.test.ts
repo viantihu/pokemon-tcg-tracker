@@ -72,14 +72,14 @@ describe("buildLineView", () => {
     expect(view.slots.every((s) => s.moveable)).toBe(true);
   });
 
-  it("a capped line ends in a cap plate naming the specialty target; placeholders are not moveable", () => {
+  it("UIL-121: no cap plate any more; the info boxes say what she chases and what is not decided", () => {
     const view = buildLineView({
       lineId: "L1",
       rootDexId: 4,
       bandKey: "red",
       binderId: "b1",
       binderLabel: "Binder 1 · BACK",
-      status: "capped",
+      status: "open",
       slots: [
         slot({
           stageIndex: 0,
@@ -90,38 +90,33 @@ describe("buildLineView", () => {
         }),
         slot({
           stageIndex: 1,
-          state: "filled",
-          card: card("Charmeleon", "027"),
-          copyId: "c2",
-          copyShelved: true,
-        }),
-        slot({
-          stageIndex: 2,
-          stage: "Stage2",
+          stage: "Stage1",
           state: "placeholder",
-          card: card("Charizard ex", "006"),
-          priceMarket: 24.1,
-          willLiveInSpecialty: true,
+          card: card("Charmeleon", "027"),
+          priceMarket: 0.5,
+          stageChoice: "chase",
         }),
+        slot({ stageIndex: 2, stage: "Stage2", state: "placeholder", stageChoice: null }),
       ],
     });
-    expect(view.status).toBe("capped");
-    expect(view.cap).not.toBeNull();
-    expect(view.cap?.targetLabel).toMatch(/CHARIZARD EX/);
-    expect(view.slots[2].moveable).toBe(false);
-    expect(view.info[0].k).toBe("CAPPED BECAUSE");
+    expect(view.cap).toBeNull();
+    expect(view.slots[1].moveable).toBe(false);
+    expect(view.info).toEqual([
+      { k: "NOT DECIDED", v: "One stage waits for your choice. Tap Choose." },
+      { k: "CHASING", v: "CHARMELEON · $0.50" },
+    ]);
   });
 
-  it("a terminated line reports NO LINE BECAUSE and its block keeps the no-page wedge", () => {
-    const view = buildLineView({
+  it("UIL-121: every open stage decided and none chased reads CLOSED; a complete short line asks its pocket", () => {
+    const closed = buildLineView({
       lineId: "L2",
       rootDexId: 123,
       bandKey: "white",
       binderId: "b1",
       binderLabel: "Binder 2 · BACK",
-      status: "terminated",
+      status: "closed",
       slots: [
-        slot({ stageIndex: 0, state: "block", wedgeLabel: "NO PAGE, SO NO POCKET." }),
+        slot({ stageIndex: 0, state: "placeholder", stageChoice: "empty" }),
         slot({
           stageIndex: 1,
           stage: "Stage1",
@@ -131,9 +126,49 @@ describe("buildLineView", () => {
         }),
       ],
     });
-    expect(view.counts.block).toBe(1);
-    expect(view.info[0].k).toBe("NO LINE BECAUSE");
-    expect(view.slots[0].wedgeLabel).toBe("NO PAGE, SO NO POCKET.");
+    expect(closed.info.map((b) => b.k)).toEqual(["CLOSED"]);
+    expect(closed.thirdPocketOpen).toBe(false);
+    const short = buildLineView({
+      lineId: "L3",
+      rootDexId: 123,
+      bandKey: "white",
+      binderId: "b1",
+      binderLabel: "Binder 2 · BACK",
+      status: "closed",
+      extraPocket: null,
+      slots: [
+        slot({ stageIndex: 0, state: "filled", card: card("Scyther", "123"), copyId: "c8" }),
+        slot({
+          stageIndex: 1,
+          stage: "Stage1",
+          state: "filled",
+          card: card("Scizor", "141"),
+          copyId: "c9",
+        }),
+      ],
+    });
+    expect(short.thirdPocketOpen).toBe(true);
+    expect(short.info[0].v).toMatch(/last pocket/);
+    const decided = buildLineView({
+      lineId: "L3",
+      rootDexId: 123,
+      bandKey: "white",
+      binderId: "b1",
+      binderLabel: "Binder 2 · BACK",
+      status: "closed",
+      extraPocket: "energy",
+      slots: [
+        slot({ stageIndex: 0, state: "filled", card: card("Scyther", "123"), copyId: "c8" }),
+        slot({
+          stageIndex: 1,
+          stage: "Stage1",
+          state: "filled",
+          card: card("Scizor", "141"),
+          copyId: "c9",
+        }),
+      ],
+    });
+    expect(decided.thirdPocketOpen).toBe(false);
   });
 });
 

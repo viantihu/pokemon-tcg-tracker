@@ -29,7 +29,7 @@ export function isUpgradeVariant(v: Variant): boolean {
 /**
  * Whether an incoming variant upgrades a shelved card (UIL-126): the incoming card is a holo or a reverse holo, and the
  * one shelved is a plain NORMAL. Not a 1st Edition or a W Promo: her ruling is an upgrade over a normal, and swapping one
- * of those out to the bulk box is not hers (TL review). The one rule for an upgrade, shared by the duplicate step and
+ * of those out to the bulk box is not hers (Karvi, 2026-09-27: "Keep 1st Edition and W Promo as built"). The one rule for an upgrade, shared by the duplicate step and
  * the cascade's line step.
  */
 export function isUpgradeOver(incoming: Variant, held: Variant): boolean {

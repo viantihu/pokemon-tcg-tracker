@@ -69,6 +69,11 @@ export interface SlotView {
    * rather than hidden so she can see which slots are wrong and move the card to fix them.
    */
   copyNotShelved: boolean;
+  /**
+   * UIL-121: what she chose for an open stage (chase a card, left empty, a filler), or null while she has not. The
+   * card shown on an open stage is her chase's only; an engine's pick is never shown as hers.
+   */
+  stageChoice?: "chase" | "empty" | "filler" | null;
 }
 
 export interface LineInfoBox {
@@ -93,6 +98,10 @@ export interface LineView {
   /** The torn-corner cap plate shown after the last slot when the line is capped. */
   cap: { targetLabel: string; note: string } | null;
   info: LineInfoBox[];
+  /**
+   * UIL-121: a complete line shorter than three pockets whose third pocket she has not decided: Lines asks her.
+   */
+  thirdPocketOpen?: boolean;
 }
 
 /* ------------------------------ decision cards ----------------------------- */
