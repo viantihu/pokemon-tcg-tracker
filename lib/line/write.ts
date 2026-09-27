@@ -54,6 +54,7 @@ import {
 } from "./move";
 import type { DecisionChoiceId, LineJoinChoice, MoveDestination, MoveRequest } from "./types";
 import { buildLineChoiceOps, type LineWriteState } from "./line-choice";
+import { buildDecideStagesOps, DECIDE_REFUSAL, type DecideStagesChoice } from "./decide-stages";
 import type { LineChoice } from "./popup";
 import { lineReadsClosed } from "./popup";
 
@@ -450,6 +451,22 @@ export async function applyDecision(
       // Never set by this path before 0021 either: a decision's wishlist row is not held for a binder.
       held_for_binder_id: null,
     });
+    // UIL-121 (A2c): the one card kept, collection-vs-line. Its "collection wins" wishlists a card for the line's
+    // stage, and that is her chase of THAT card, so the stage records it (0030: a chase names its card). Before this
+    // the stage read "Not decided" with a wish on it.
+    if (derived.card.kind === "collection-vs-line" && up.chosenCatalogCardId) {
+      ops.push({
+        op: "update_slot",
+        id: up.lineSlotId,
+        patch: { target_catalog_card_id: up.chosenCatalogCardId, stage_choice: "chase" },
+      });
+    }
+  }
+  // …and "collection wins, nothing wishlisted" is her leaving the stage empty.
+  if (derived.card.kind === "collection-vs-line" && choiceId === "collection-wins-no-target") {
+    for (const slotId of writes.wishlistResolveSlotIds) {
+      ops.push({ op: "update_slot", id: slotId, patch: { stage_choice: "empty" } });
+    }
   }
 
   // Audit (dev-spec §4 — one row per user decision). `line_id`/`line_slot_id` are traceability only
@@ -468,4 +485,34 @@ export async function applyDecision(
   });
 
   await applyWriteOps(db, { ops });
+}
+
+/**
+ * Lines' "Choose" (UIL-121 A2c): her choices for an existing line's open stages and its third pocket, checked on
+ * fresh state and written in one call (./decide-stages).
+ */
+export async function applyStageDecisions(db: DbClient, choice: DecideStagesChoice): Promise<void> {
+  const [line, slots, blocks, catalogRows, typeMapRows, copies] = await Promise.all([
+    evolutionLineRepo.getByPk(db, choice.lineId),
+    lineSlotRepo.listByLine(db, choice.lineId),
+    binderBlockRepo.list(db),
+    catalogCardRepo.listAll(db),
+    typeColorMapRepo.list(db),
+    copyRepo.list(db),
+  ]);
+  if (!line) throw new Error(DECIDE_REFUSAL.noStage);
+  const typeColorMap: TypeColorMap = {};
+  for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
+  const ops = buildDecideStagesOps(
+    {
+      line,
+      slots,
+      blocks: blocks.filter((b) => b.line_id === line.id),
+      catalog: catalogRows.map(toCatalogCard),
+      copiesById: new Map(copies.map((c) => [c.id, c])),
+      typeColorMap,
+    },
+    choice,
+  );
+  if (ops.length > 0) await applyWriteOps(db, { ops });
 }

@@ -94,9 +94,9 @@ export type StageDecision =
   | { kind: "empty" }
   | { kind: "filler"; filler: FillerChoice }
   /**
-   * "Decide later" (the Senior BA, from her always-movable rule: placing a card never waits on deciding another
-   * stage). Writes nothing for the stage: it stays "Not decided" and the line open, for Lines' Choose. The line popup
-   * offers it; a screen that does not is refused it.
+   * "Decide later" (Karvi, 2026-09-27: "Keep Decide later"; from her always-movable rule, placing a card never waits
+   * on deciding another stage). Writes nothing for the stage: it stays "Not decided" and the line open, for Lines'
+   * Choose. The line popup offers it; a screen that does not is refused it.
    */
   | { kind: "later" };
 

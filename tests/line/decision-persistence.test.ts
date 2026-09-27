@@ -23,6 +23,7 @@ import {
   releaseSlotOps,
 } from "@/lib/line";
 import { executeApply, type SyncPlanBundle } from "@/lib/sync";
+import { buildScreenModel } from "@/lib/line/load";
 import type { ReconcilePlan } from "@/lib/sync/reconcile";
 import { asOwner, asSuperuser, freshRpcDb, OWNER, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
@@ -61,9 +62,13 @@ async function seedCatalog(
   }
 }
 
+/**
+ * The decisions the SERVER derives. Since UIL-121 A2c her screen shows only collection-vs-line (the other cards
+ * retired), but the derivation and its UIL-078 markers stay on the server until the tightening migration (D), so
+ * they are pinned here, where they still run (`applyDecision` reads the same derivation).
+ */
 async function decisionIds(): Promise<string[]> {
-  const data = await loadLineScreen(pgliteClient(db));
-  return data.decisions.map((d) => d.id);
+  return (await buildScreenModel(pgliteClient(db))).derived.map((d) => d.card.id);
 }
 
 describe("UIL-078 · ex-only-cap stays resolved", () => {
@@ -134,6 +139,26 @@ describe("UIL-078 · collection-vs-line stays resolved", () => {
     expect(await decisionIds()).not.toContain(`${LINE}:collection-vs-line:0`);
     // And keeps staying resolved: the same collection, still claiming, is the same question.
     expect(await decisionIds()).not.toContain(`${LINE}:collection-vs-line:0`);
+  });
+
+  it("UIL-121: 'collection wins' records her chase of the card it wishlists; 'nothing wishlisted' is her empty", async () => {
+    // A second printing the collection does not claim: the one the line's stage can chase instead.
+    await asSuperuser(db);
+    await seedCatalog([{ id: "collectamon-alt", name: "Collectamon", dexId: DEX }]);
+    const client = pgliteClient(db);
+    await asOwner(db);
+    await applyDecision(client, OWNER, `${LINE}:collection-vs-line:0`, "collection-wins");
+    await asSuperuser(db);
+    const [row] = (
+      await db.query<{ stage_choice: string | null; target: string | null; chosen: string | null }>(
+        `select s.stage_choice, s.target_catalog_card_id as target, w.chosen_catalog_card_id as chosen
+           from line_slot s left join wishlist_item w on w.line_slot_id = s.id and w.resolved_at is null
+          where s.id = '50000000-0000-0000-0000-00000000cc01'`,
+      )
+    ).rows;
+    expect(row.stage_choice).toBe("chase");
+    expect(row.target).toBe(row.chosen);
+    expect(row.chosen).not.toBeNull();
   });
 
   /**
@@ -401,5 +426,50 @@ describe("UIL-078 · leave-it resurfaces by design — the one choice that must 
     await applyDecision(client, OWNER, `${LINE}:ex-only-cap:0`, "leave-it");
 
     expect(await decisionIds()).toContain(`${LINE}:ex-only-cap:0`);
+  });
+});
+
+/**
+ * UIL-121 A2c (her Q5, 2026-09-27): only the collection-vs-line decision card remains on her screen. The server still
+ * derives a cap and a termination (above) until the tightening migration; `loadLineScreen` is what she sees.
+ */
+describe("UIL-121 A2c · her screen shows only the collection-vs-line decision card", () => {
+  const CAPPED = "10000000-0000-0000-0000-00000000a2c1";
+  const ENDED = "10000000-0000-0000-0000-00000000a2c2";
+  const CLAIMED = "10000000-0000-0000-0000-00000000a2c3";
+
+  beforeEach(async () => {
+    await seedCatalog([
+      { id: "onlymon-ex", name: "Onlymon ex", dexId: 9411, cardClass: "specialty" },
+      { id: "lonelymon", name: "Lonelymon", dexId: 9412 },
+      { id: "collectamon", name: "Collectamon", dexId: 9413 },
+    ]);
+    await db.exec(`
+      insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status) values
+        ('${CAPPED}', '${OWNER}', 9411, 'red', '${B1}', 'back', 'open'),
+        ('${ENDED}', '${OWNER}', 9412, 'red', '${B1}', 'back', 'terminated'),
+        ('${CLAIMED}', '${OWNER}', 9413, 'red', '${B1}', 'back', 'open');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, target_catalog_card_id) values
+        ('50000000-0000-0000-0000-00000000a2c1', '${OWNER}', '${CAPPED}', 0, 'Basic', 'placeholder', 'onlymon-ex'),
+        ('50000000-0000-0000-0000-00000000a2c2', '${OWNER}', '${ENDED}', 0, 'Basic', 'placeholder', 'lonelymon'),
+        ('50000000-0000-0000-0000-00000000a2c3', '${OWNER}', '${CLAIMED}', 0, 'Basic', 'placeholder', 'collectamon');
+      insert into collection (owner_id, name, target_catalog_card_ids)
+        values ('${OWNER}', 'Fire Collection', array['collectamon']);
+    `);
+  });
+
+  it("a derived cap and a derived termination show no card; the collection-vs-line one still does", async () => {
+    await asOwner(db);
+    // The server derives all three (so the filter, not the data, is what hides two of them) ...
+    expect(await decisionIds()).toEqual(
+      expect.arrayContaining([
+        `${CAPPED}:ex-only-cap:0`,
+        `${ENDED}:termination`,
+        `${CLAIMED}:collection-vs-line:0`,
+      ]),
+    );
+    // ... and her screen gets only the collection-vs-line card.
+    const screen = await loadLineScreen(pgliteClient(db));
+    expect(screen.decisions.map((d) => d.id)).toEqual([`${CLAIMED}:collection-vs-line:0`]);
   });
 });

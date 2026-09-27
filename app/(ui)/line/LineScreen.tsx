@@ -39,9 +39,14 @@ import {
   removeSlotCopyAction,
   replaceCandidatesAction,
   resolveDecisionAction,
+  decideStagesAction,
+  lineStagesAction,
 } from "./actions";
 import { DeleteLineButton } from "./DeleteLineButton";
 import { ReplaceSlotFlow } from "./ReplaceSlotFlow";
+import { LineStagesPopup } from "./LineStagesPopup";
+import type { DecideStagesChoice } from "@/lib/line/decide-stages";
+import type { LineStagesModel } from "@/lib/line/stages-load";
 import {
   lineStatusShown,
   stageLabel,
@@ -53,6 +58,13 @@ import type { ReplaceCandidates } from "@/lib/line/replace-candidates";
 import { lineModelAction } from "../_components/line-popup-actions";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
 import { LOST, reach } from "../_components/reach";
+
+/** UIL-121: the Choose popup's model for a line; a refusal throws its message. */
+async function loadStagesModel(lineId: string): Promise<LineStagesModel> {
+  const res = await reach(() => lineStagesAction(lineId), LOST.action);
+  if (!res.ok) throw new Error(res.error);
+  return res.model;
+}
 
 /** UIL-117: the line popup's model, from the server; a refusal becomes the message the sheet shows. */
 function lineModelFor(copyId: string) {
@@ -72,6 +84,19 @@ const SLOT_TAG: Record<SlotView["state"], string> = {
   filled: "◆ OWNED",
   placeholder: "◇ OPEN",
   block: "✕ DEAD",
+};
+/** UIL-121: an open stage says what she chose for it; "none" is a stage she has not decided yet. */
+const CHOICE_HEAD: Record<"chase" | "empty" | "filler" | "none", string> = {
+  chase: "CHASING",
+  empty: "LEFT EMPTY",
+  filler: "FILLER",
+  none: "NOT DECIDED",
+};
+const CHOICE_TAG: Record<"chase" | "empty" | "filler" | "none", string> = {
+  chase: "◇ CHASING",
+  empty: "— EMPTY",
+  filler: "▣ FILLER",
+  none: "? CHOOSE",
 };
 const STATUS_GLYPH: Record<"open" | "closed", string> = {
   open: "● OPEN",
@@ -193,6 +218,9 @@ export function LineScreen() {
     return "unreached" in res ? { ok: false, error: res.error } : res;
   }, [replaceSlotId]);
   const [busy, setBusy] = useState(false);
+  /** UIL-121: the line whose open stages (and third pocket) she is choosing for. */
+  const [chooseFor, setChooseFor] = useState<string | null>(null);
+  const [chooseError, setChooseError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -322,6 +350,21 @@ export function LineScreen() {
       flashToast(`Deleted · the ${label}`);
     } else {
       setError(res.error);
+    }
+  }
+
+  /** UIL-121: her choices for a line's open stages and third pocket, then fresh data. */
+  async function onChooseConfirm(choice: DecideStagesChoice) {
+    setBusy(true);
+    setChooseError(null);
+    const res = await reach(() => decideStagesAction(choice, view), LOST.action);
+    setBusy(false);
+    if (res.ok) {
+      setData(res.data);
+      setChooseFor(null);
+      flashToast("Saved your choices for this line");
+    } else {
+      setChooseError(res.error);
     }
   }
 
@@ -546,6 +589,10 @@ export function LineScreen() {
                     name: slot.card?.name ?? slot.stage,
                   })
                 }
+                onChoose={() => {
+                  setChooseError(null);
+                  setChooseFor(curLine.lineId);
+                }}
               />
             </div>
           ))}
@@ -563,6 +610,25 @@ export function LineScreen() {
           ) : null}
         </div>
       </div>
+
+      {curLine.thirdPocketOpen ? (
+        // UIL-121: a complete line shorter than three pockets: its row has a pocket left, and it is her call.
+        <div className="alertbar" role="status" style={{ marginBottom: 12 }}>
+          <span>◇</span>
+          <b>This line is complete with fewer than 3 cards, so its row has a pocket left.</b>
+          <button
+            type="button"
+            className="btn sm"
+            style={{ marginLeft: "auto" }}
+            onClick={() => {
+              setChooseError(null);
+              setChooseFor(curLine.lineId);
+            }}
+          >
+            Choose what fills it
+          </button>
+        </div>
+      ) : null}
 
       <div className="lineinfo">
         {curLine.info.map((box, i) => (
@@ -606,6 +672,17 @@ export function LineScreen() {
           lineModel={lineModelFor(move.copyId)}
           onConfirm={onMoveConfirm}
           onClose={() => setMove(null)}
+        />
+      ) : null}
+
+      {chooseFor ? (
+        <LineStagesPopup
+          lineId={chooseFor}
+          loadModel={loadStagesModel}
+          onConfirm={onChooseConfirm}
+          onClose={() => setChooseFor(null)}
+          busy={busy}
+          error={chooseError}
         />
       ) : null}
 
@@ -722,6 +799,7 @@ export function Slot({
   onMove,
   onRemoveCopy,
   onReplace,
+  onChoose,
 }: {
   line: LineView;
   slot: SlotView;
@@ -730,6 +808,8 @@ export function Slot({
   onRemoveCopy?: (copyId: string) => void;
   /** UIL-117 PR 3: swap another copy she owns into this filled slot. */
   onReplace?: () => void;
+  /** UIL-121: choose (or change) what this open stage waits for. */
+  onChoose?: () => void;
 }) {
   const meta = bandMeta(line.bandKey);
   const topBg =
@@ -744,11 +824,19 @@ export function Slot({
         {/* UIL-087: a slot reading FILLED whose card was never shelved says so, rather than looking
             like every other filled stage. She can see which rows are wrong before she moves them, and
             Move is now offered on exactly these (lib/line/view.ts). */}
-        <span>{slot.copyNotShelved ? "FILLED · CARD NOT SHELVED" : SLOT_HEAD[slot.state]}</span>
+        <span>
+          {slot.copyNotShelved
+            ? "FILLED · CARD NOT SHELVED"
+            : slot.state === "filled"
+              ? SLOT_HEAD.filled
+              : CHOICE_HEAD[slot.stageChoice ?? "none"]}
+        </span>
       </div>
       <div className="pocket">
         <div className="top u" style={topStyle}>
-          <span>{SLOT_TAG[slot.state]}</span>
+          <span>
+            {slot.state === "filled" ? SLOT_TAG.filled : CHOICE_TAG[slot.stageChoice ?? "none"]}
+          </span>
         </div>
         <div className="art">
           {slot.state === "block" ? (
@@ -824,6 +912,11 @@ export function Slot({
           {slot.moveable ? (
             <button type="button" className="movebtn u" onClick={onMove}>
               ↔ Move
+            </button>
+          ) : null}
+          {onChoose && slot.state !== "filled" ? (
+            <button type="button" className="movebtn u" onClick={onChoose}>
+              {slot.stageChoice ? "Change" : "Choose"}
             </button>
           ) : null}
           {onReplace && slot.state === "filled" && slot.copyId && !slot.copyNotShelved ? (

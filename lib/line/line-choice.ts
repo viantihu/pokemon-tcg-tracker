@@ -557,6 +557,15 @@ function describePatch(p: ReturnType<typeof placementForMove>): string {
 
 /** Fresh state as her stage choices are checked against (lib/line/stage-choice). */
 function stageStateOf(state: LineWriteState): StageState {
+  return stageStateFor(state.catalog, state.copiesById);
+}
+
+/** The shared rule's view of the catalog and her copies, for any line writer (the popup's builder, Lines' Choose). */
+export function stageStateFor(
+  catalog: readonly CatalogCard[],
+  copiesById: ReadonlyMap<string, Row<"copy">>,
+): StageState {
+  const state = { catalog, copiesById };
   const asStage = (c: CatalogCard): StageCatalogCard => ({
     tcgdexId: c.tcgdexId,
     name: c.name,
@@ -588,7 +597,7 @@ function stageStateOf(state: LineWriteState): StageState {
 }
 
 /** The line colour's representative type, for her wishlist's `required_type` and a placeholder card's type. */
-function typeOfBand(bandKey: string, map: TypeColorMap): string | null {
+export function typeOfBand(bandKey: string, map: TypeColorMap): string | null {
   return Object.entries(map).find(([, b]) => b === bandKey)?.[0] ?? null;
 }
 

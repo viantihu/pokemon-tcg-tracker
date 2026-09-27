@@ -58,6 +58,8 @@ import type {
 
 /** A single per-slot resolution feeding both the view model and the decision model. */
 interface ResolvedSlot {
+  /** UIL-121: her choice for an open stage, or null. */
+  stageChoice: "chase" | "empty" | "filler" | null;
   slotId: string;
   stageIndex: number;
   stage: string;
@@ -367,6 +369,7 @@ export async function buildScreenModel(
         wedgeLabel,
         resolvedDecisionKind: s.resolved_decision_kind,
         resolvedDecisionCollectionId: s.resolved_decision_collection_id,
+        stageChoice: (s.stage_choice ?? null) as ResolvedSlot["stageChoice"],
       };
     });
 
@@ -380,27 +383,37 @@ export async function buildScreenModel(
         binderId: line.binder_id,
         binderLabel: `${binderName} · BACK`,
         status: line.status as LineView["status"],
-        slots: resolved.map((r): SlotInput => ({
-          slotId: r.slotId,
-          stageIndex: r.stageIndex,
-          stage: r.stage,
-          state: r.state,
-          card: r.card,
-          copyId: r.copyId,
-          variant: r.variant,
-          copyShelved: r.copyShelved,
-          priceMarket: r.priceMarket,
-          willLiveInSpecialty: r.willLiveInSpecialty,
-          alternates: r.alternates.map((a) => ({
-            tcgdexId: a.tcgdexId,
-            name: a.name,
-            localId: a.localId,
-            setCardCountOfficial: a.setCardCountOfficial ?? null,
-            priceMarket: a.priceMarket,
-          })),
-          note: null,
-          wedgeLabel: r.wedgeLabel,
-        })),
+        extraPocket: line.extra_pocket,
+        // UIL-121: an open stage shows a card only when she is chasing it; an engine's pick (or the cheapest at
+        // load) is never shown as hers. What she decides is her choice, and "Not decided" until she does.
+        slots: resolved.map((r): SlotInput => {
+          const shows = r.state !== "placeholder" || r.stageChoice === "chase";
+          return {
+            slotId: r.slotId,
+            stageIndex: r.stageIndex,
+            stage: r.stage,
+            state: r.state,
+            card: shows ? r.card : null,
+            copyId: r.copyId,
+            variant: r.variant,
+            copyShelved: r.copyShelved,
+            priceMarket: shows ? r.priceMarket : null,
+            willLiveInSpecialty: shows ? r.willLiveInSpecialty : false,
+            alternates: shows
+              ? r.alternates.map((a) => ({
+                  tcgdexId: a.tcgdexId,
+                  name: a.name,
+                  localId: a.localId,
+                  setCardCountOfficial: a.setCardCountOfficial ?? null,
+                  priceMarket: a.priceMarket,
+                }))
+              : [],
+            note: null,
+            wedgeLabel: r.wedgeLabel,
+            stageChoice: r.stageChoice,
+            speciesName: r.speciesName,
+          };
+        }),
       }),
     );
 
@@ -535,7 +548,11 @@ export async function loadLineScreen(
   return {
     view: model.view,
     lines: model.lines,
-    decisions: model.derived.map((d) => d.card),
+    // UIL-121 (Karvi, 2026-09-27; A2c): the decision cards RETIRE from her screen, except collection-vs-line (her Q5:
+    // kept for now). A cap, a block, a root block and a termination are no longer questions she is asked: each open
+    // stage is hers on "Choose", and nothing is capped, blocked or terminated for her. Their derivation stays on the
+    // server, unreached from here, until the tightening migration (D) drops those statuses.
+    decisions: model.derived.map((d) => d.card).filter((c) => c.kind === "collection-vs-line"),
     moveOptions: model.moveOptions,
     unlinedCards: model.unlinedCards,
   };

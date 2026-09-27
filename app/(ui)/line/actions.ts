@@ -26,6 +26,9 @@ import { checkLineDeletion, deleteLine, type LineDeletionCheck } from "@/lib/lin
 import { listReplaceCandidates, type ReplaceCandidates } from "@/lib/line/replace-candidates";
 import { errorMessage } from "@/lib/errors";
 import type { LineChoice } from "@/lib/line/popup";
+import { applyStageDecisions } from "@/lib/line/write";
+import type { DecideStagesChoice } from "@/lib/line/decide-stages";
+import { loadLineStagesModel, type LineStagesModel } from "@/lib/line/stages-load";
 
 /** Reload the whole screen model (called after every mutation so the strip + queue stay truthful). */
 export async function loadLine(view: LineViewMode = "color"): Promise<LineScreenData> {
@@ -147,6 +150,32 @@ export async function resolveDecisionAction(
     await applyDecision(db, ownerId, decisionId, choiceId, pickedCatalogCardId);
     const data = await loadLineScreen(db, { view });
     return { ok: true, data };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/** UIL-121 Lines' "Choose": the popup's model for one line's open stages and its third pocket. */
+export async function lineStagesAction(
+  lineId: string,
+): Promise<{ ok: true; model: LineStagesModel } | { ok: false; error: string }> {
+  try {
+    const { db } = await getOwnerContext();
+    return { ok: true, model: await loadLineStagesModel(db, lineId) };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/** UIL-121 Lines' "Choose": her choices for one line's open stages and third pocket, then fresh data. */
+export async function decideStagesAction(
+  choice: DecideStagesChoice,
+  view: LineViewMode = "color",
+): Promise<DecisionActionResult> {
+  try {
+    const { db } = await getOwnerContext();
+    await applyStageDecisions(db, choice);
+    return { ok: true, data: await loadLineScreen(db, { view }) };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }

@@ -9,6 +9,7 @@
  */
 
 import type { LineStatus, SlotState } from "@/lib/engine";
+import { LINE_ROW_POCKETS } from "./popup";
 import type { AlternateView, CardIdentity, LineInfoBox, LineView, SlotView } from "./types";
 
 /** One stage of the line with its card identity already resolved (I/O done upstream). */
@@ -28,6 +29,10 @@ export interface SlotInput {
   note: string | null;
   /** Block: the wedge card label, or null (a terminated line has no pocket to wedge into). */
   wedgeLabel: string | null;
+  /** UIL-121: her choice for an open stage, or null (absent reads as null). */
+  stageChoice?: "chase" | "empty" | "filler" | null;
+  /** The species this stage stands for (its chain name), for the line's name when no card is shown on it. */
+  speciesName?: string | null;
 }
 
 export interface LineViewInput {
@@ -39,13 +44,18 @@ export interface LineViewInput {
   status: LineStatus;
   /** Any block-species names keyed by dexId, so a block slot with no card still reads a name. */
   slots: SlotInput[];
+  /** UIL-121: what she chose for the third pocket, or null. */
+  extraPocket?: string | null;
 }
 
 const cap = (s: string) => s.toUpperCase();
 
 /** Prefer the root's species name; fall back to the first named slot. */
 function speciesLabel(slots: SlotInput[]): string {
-  const named = slots.find((s) => s.card?.name)?.card?.name;
+  // The species a stage stands for (its chain name) before a card shown on it: since UIL-121 an open stage shows no
+  // card until she chases one, and the line still has a name.
+  const named =
+    slots.find((s) => s.speciesName)?.speciesName ?? slots.find((s) => s.card?.name)?.card?.name;
   return named ? `${cap(named)} LINE` : "EVOLUTION LINE";
 }
 
@@ -77,67 +87,47 @@ function toSlotView(s: SlotInput): SlotView {
     moveable: s.state === "filled" && Boolean(s.copyId),
     /** A filled slot whose card is not actually shelved — she needs to see WHICH rows are wrong. */
     copyNotShelved: s.state === "filled" && Boolean(s.copyId) && !s.copyShelved,
+    stageChoice: s.stageChoice ?? null,
   };
 }
 
-/** The two info boxes under the strip (design/rationale §7 — line detail earns the most copy). */
-function infoBoxes(input: LineViewInput, slots: SlotView[]): LineInfoBox[] {
-  const specialtySlot = slots.find((s) => s.state === "placeholder" && s.willLiveInSpecialty);
-  const blockSlot = slots.find((s) => s.state === "block");
-  const openPlaceholder = slots.find((s) => s.state === "placeholder" && !s.willLiveInSpecialty);
-
-  if (input.status === "capped" && specialtySlot) {
-    const name = specialtySlot.card?.name ?? "the top stage";
-    const price = fmtPrice(specialtySlot.priceMarket);
-    return [
-      { k: "CAPPED BECAUSE", v: `Every same-color ${cap(name)} in print is a specialty card.` },
-      {
-        k: "WISHLIST",
-        v: `${cap(name)}${price ? ` · ${price}` : ""} · lives in the specialty binder.`,
-      },
-    ];
+/**
+ * The two info boxes under the strip (design/rationale §7 — line detail earns the most copy), in her terms since
+ * UIL-121: what she is chasing, what she has not decided yet, and whether anything is left. The old capped and
+ * terminated boxes went with those statuses (nothing is capped or terminated for her any more).
+ */
+function infoBoxes(slots: SlotView[], thirdPocketOpen: boolean): LineInfoBox[] {
+  const open = slots.filter((s) => s.state !== "filled");
+  const chased = open.filter((s) => s.stageChoice === "chase");
+  const undecided = open.filter((s) => s.stageChoice === null);
+  const out: LineInfoBox[] = [];
+  if (undecided.length > 0) {
+    out.push({
+      k: "NOT DECIDED",
+      v: `${undecided.length === 1 ? "One stage waits" : `${undecided.length} stages wait`} for your choice. Tap Choose.`,
+    });
   }
-  if (input.status === "terminated") {
-    const survivor = slots.find((s) => s.state === "filled")?.card?.name;
-    return [
-      {
-        k: "NO LINE BECAUSE",
-        v: "A line needs two same-color members; a blocked stage leaves too few.",
-      },
-      {
-        k: "WHERE IT GOES",
-        v: survivor
-          ? `${cap(survivor)} falls through to the front half.`
-          : "Surviving card to the front half.",
-      },
-    ];
+  if (chased.length > 0) {
+    out.push({
+      k: "CHASING",
+      v: chased
+        .map((s) => {
+          const price = fmtPrice(s.priceMarket);
+          return `${cap(s.card?.name ?? s.stage)}${price ? ` · ${price}` : ""}`;
+        })
+        .join(" · "),
+    });
   }
-  if (blockSlot) {
-    const price = openPlaceholder ? fmtPrice(openPlaceholder.priceMarket) : null;
-    return [
-      { k: "ONE BLOCK, ONE HUNT", v: "Dead root, live top. Two different jobs on one page." },
-      openPlaceholder
-        ? {
-            k: "WISHLIST",
-            v: `${cap(openPlaceholder.card?.name ?? "the open stage")}${price ? ` · ${price}` : ""} closes this page.`,
-          }
-        : { k: "ROOT BLOCKED", v: "Nothing can ever fill it. Never wishlisted." },
-    ];
+  if (open.length === 0) {
+    out.push(
+      thirdPocketOpen
+        ? { k: "COMPLETE", v: "Every stage is filled. Choose what fills the row's last pocket." }
+        : { k: "COMPLETE", v: "Every stage is filled. This page is done." },
+    );
+  } else if (undecided.length === 0 && chased.length === 0) {
+    out.push({ k: "CLOSED", v: "Nothing left to chase. Choose a stage again to chase it." });
   }
-  if (openPlaceholder) {
-    const price = fmtPrice(openPlaceholder.priceMarket);
-    return [
-      {
-        k: "STILL OPEN",
-        v: `${cap(openPlaceholder.card?.name ?? "a stage")} is a hunt, not owned yet.`,
-      },
-      {
-        k: "WISHLIST",
-        v: `${cap(openPlaceholder.card?.name ?? "target")}${price ? ` · ${price}` : ""}`,
-      },
-    ];
-  }
-  return [{ k: "COMPLETE", v: "Every stage is filled. This page is done." }];
+  return out.slice(0, 2);
 }
 
 export function fmtPrice(p: number | null | undefined): string | null {
@@ -154,14 +144,12 @@ export function buildLineView(input: LineViewInput): LineView {
     placeholder: slots.filter((s) => s.state === "placeholder").length,
     block: slots.filter((s) => s.state === "block").length,
   };
-  const capSlot = slots.find((s) => s.state === "placeholder" && s.willLiveInSpecialty);
-  const capPlate =
-    input.status === "capped" && capSlot
-      ? {
-          targetLabel: `${cap(capSlot.card?.name ?? "SPECIALTY CARD")} · SPECIALTY BINDER`,
-          note: "This page never closes. That is correct, not an error.",
-        }
-      : null;
+  // UIL-121: a complete line shorter than three pockets whose third pocket she has not decided.
+  const thirdPocketOpen =
+    slots.length > 0 &&
+    slots.length < LINE_ROW_POCKETS &&
+    slots.every((sl) => sl.state === "filled") &&
+    input.extraPocket == null;
 
   return {
     lineId: input.lineId,
@@ -173,7 +161,9 @@ export function buildLineView(input: LineViewInput): LineView {
     status: input.status,
     counts,
     slots,
-    cap: capPlate,
-    info: infoBoxes(input, slots),
+    // UIL-121: the cap plate retired with the capped status (nothing is capped for her).
+    cap: null,
+    info: infoBoxes(slots, thirdPocketOpen),
+    thirdPocketOpen,
   };
 }
