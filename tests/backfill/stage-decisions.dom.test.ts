@@ -269,6 +269,30 @@ describe("the Senior BA's ruling · a spare card comes from her bulk box first, 
     expect(await within(row("Stage2")).findByRole("button", { name: /Bulk box$/ })).toBeTruthy();
   });
 
+  it("one tile per printing (UIL-121): two pockets take two copies of it, and the tile counts what is left", async () => {
+    bulkFillerAction.mockResolvedValue({
+      ok: true,
+      options: [{ ...BULK, copyIds: ["bulk-scz", "bulk-scz-2"], count: 2 }],
+    });
+    const user = await openLine();
+    await user.click(choice("Basic", "Leave empty"));
+    await spareOf(user, "Stage1");
+    await user.click(
+      await within(row("Stage1")).findByRole("button", { name: "Scizor 141/197 · ×2 · Bulk box" }),
+    );
+    await spareOf(user, "Stage2");
+    await user.click(
+      await within(row("Stage2")).findByRole("button", { name: /Scizor.*Bulk box$/ }),
+    );
+    await user.click(saveButton());
+    await waitFor(() => expect(commitLineAction).toHaveBeenCalledTimes(1));
+    const stages = commitLineAction.mock.calls[0][0].stages;
+    expect([stages[1].choice.filler.copyId, stages[2].choice.filler.copyId]).toEqual([
+      "bulk-scz",
+      "bulk-scz-2",
+    ]);
+  });
+
   it("a bulk box that cannot be read says so, and this haul is still offered", async () => {
     bulkFillerAction.mockResolvedValue({ ok: false, error: "Could not read your bulk box." });
     const user = await openLine();

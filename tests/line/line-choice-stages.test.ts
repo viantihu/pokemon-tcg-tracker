@@ -155,6 +155,22 @@ describe("START · every stage the line leaves unfilled is hers to decide", () =
     expect(await q(`select count(*)::int n from wishlist_item`)).toEqual([{ n: 0 }]);
   });
 
+  it("one spare card cannot fill two pockets: the second is refused and nothing is written", async () => {
+    await copy(SPARE, "emberling", "bulk");
+    await expect(
+      move(
+        start({
+          stages: {
+            0: { kind: "filler", filler: { material: "card", copyId: SPARE } },
+            2: { kind: "filler", filler: { material: "card", copyId: SPARE } },
+          },
+        }),
+      ),
+    ).rejects.toThrow("That card is already filling another pocket.");
+    expect(await q(`select count(*)::int n from evolution_line`)).toEqual([{ n: 0 }]);
+    expect(await q(`select role from copy where id = $1`, [SPARE])).toEqual([{ role: "bulk" }]);
+  });
+
   it("a stage with no choice is refused, the stage named, and nothing is written", async () => {
     await expect(move(start({ stages: { 0: { kind: "empty" } } }))).rejects.toThrow(
       "Choose what goes in the Stage 2 slot.",

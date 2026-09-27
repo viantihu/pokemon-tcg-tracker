@@ -555,9 +555,18 @@ function describePatch(p: ReturnType<typeof placementForMove>): string {
 
 /* ----------------------------------------------- UIL-121 ----------------------------------------------- */
 
-/** Fresh state as her stage choices are checked against (lib/line/stage-choice). */
+/**
+ * Fresh state as her stage choices are checked against (lib/line/stage-choice): ONE per write, so every stage and the
+ * third pocket share the set of filler copies already named (one card fills one pocket).
+ */
+const stageStates = new WeakMap<LineWriteState, StageState>();
 function stageStateOf(state: LineWriteState): StageState {
-  return stageStateFor(state.catalog, state.copiesById);
+  let st = stageStates.get(state);
+  if (!st) {
+    st = stageStateFor(state.catalog, state.copiesById);
+    stageStates.set(state, st);
+  }
+  return st;
 }
 
 /** The shared rule's view of the catalog and her copies, for any line writer (the popup's builder, Lines' Choose). */
@@ -593,6 +602,7 @@ export function stageStateFor(
         .map(asStage),
     newId: () => crypto.randomUUID(),
     newStandInId: standInIdFor,
+    claimedFillers: new Set<string>(),
   };
 }
 

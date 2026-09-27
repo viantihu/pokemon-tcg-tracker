@@ -760,7 +760,13 @@ function SparePicker({
       live = false;
     };
   }, []);
-  const left = bulk?.filter((o) => !usedBulk.has(o.copyId)) ?? null;
+  // One option per printing (UIL-121, the UX Dev): a pick takes its next copy no other pocket holds, and the tile
+  // says how many are left.
+  const left =
+    bulk?.flatMap((o) => {
+      const free = (o.copyIds ?? [o.copyId]).filter((id) => !usedBulk.has(id));
+      return free.length > 0 ? [{ ...o, copyId: free[0], count: free.length }] : [];
+    }) ?? null;
   const onHaul = (card: WaitingCard) => onPick({ from: "haul", card });
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -793,7 +799,9 @@ function SparePicker({
                 key={o.copyId}
                 type="button"
                 className="ccard"
-                aria-label={`${o.card.name}${number ? ` ${number}` : ""} · Bulk box`}
+                aria-label={`${o.card.name}${number ? ` ${number}` : ""}${
+                  (o.count ?? 1) > 1 ? ` · ×${o.count}` : ""
+                } · Bulk box`}
                 onClick={() => onPick({ from: "bulk", option: o })}
               >
                 <CardFace
@@ -804,6 +812,7 @@ function SparePicker({
                 />
                 <div className="cn u">{o.card.name}</div>
                 {number ? <div className="cno">{number}</div> : null}
+                {(o.count ?? 1) > 1 ? <div className="cno">×{o.count}</div> : null}
               </button>
             );
           })}

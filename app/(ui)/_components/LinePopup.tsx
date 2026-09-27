@@ -12,6 +12,7 @@
 
 import { Fragment, useEffect, useRef } from "react";
 import {
+  chosenFillerCopyIds,
   IN_THE_HAUL,
   LINE_ROW_POCKETS,
   leavesLineText,
@@ -110,6 +111,10 @@ export function LinePopup({
         ? value.stages
         : undefined
       : undefined;
+  const chosen = chosenFillerCopyIds(
+    decisions,
+    value.mode === "start" || value.mode === "join" ? value.thirdPocket : null,
+  );
   const stagesDecided = undecided.every((s) => decisions?.[s.stageIndex] !== undefined);
   const pocketAsked =
     !filingOwn &&
@@ -337,6 +342,7 @@ export function LinePopup({
                 loadBulk={loadBulk}
                 busy={busy}
                 allowLater
+                chosenFillerCopyIds={chosen}
               />
             ))}
           </>
@@ -348,6 +354,7 @@ export function LinePopup({
             loadBulk={loadBulk}
             busy={busy}
             allowLater
+            chosenFillerCopyIds={chosen}
           />
         ) : null}
 

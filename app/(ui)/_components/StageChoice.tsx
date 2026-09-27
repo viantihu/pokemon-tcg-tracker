@@ -116,6 +116,8 @@ function CardGrid<T>({
   onPick,
   busy,
   label,
+  disabledOf,
+  scroll = false,
 }: {
   items: readonly T[];
   keyOf(t: T): string;
@@ -125,9 +127,12 @@ function CardGrid<T>({
   onPick(t: T): void;
   busy: boolean;
   label: string;
+  disabledOf?(t: T): boolean;
+  /** A long list: the grid is capped and scrolls, so the popup's buttons stay in reach. */
+  scroll?: boolean;
 }) {
   return (
-    <div className="lp-minigrid" role="group" aria-label={label}>
+    <div className={"lp-minigrid" + (scroll ? " lp-scroll" : "")} role="group" aria-label={label}>
       {items.map((t) => {
         const c = cardOf(t);
         const tag = tagOf?.(t) ?? null;
@@ -138,7 +143,7 @@ function CardGrid<T>({
             key={k}
             className={"lp-mini lp-pick" + (selected === k ? " on" : "")}
             aria-pressed={selected === k}
-            disabled={busy}
+            disabled={busy || (disabledOf?.(t) ?? false)}
             onClick={() => onPick(t)}
           >
             <CardFace name={c.name} tcgdexId={c.tcgdexId} imageUrl={c.imageUrl} size="s" />
@@ -179,6 +184,14 @@ function useLoaded<T>(load: () => Promise<T[]>) {
 }
 
 /** The bulk-box picker and the energy option, shared by a stage's filler and the third pocket. */
+/** The copies of one printing (an option lists them, oldest first); an older option is one copy. */
+const copiesOf = (o: FillerCardOption) => o.copyIds ?? [o.copyId];
+/** The option that holds a copy. */
+const optionOf = (items: readonly FillerCardOption[] | null, copyId: string) =>
+  items?.find((o) => copiesOf(o).includes(copyId));
+/** Past this many printings, the list gets a search box. */
+const SEARCH_FROM = 12;
+
 function FillerPicker({
   value,
   onEnergy,
@@ -186,6 +199,7 @@ function FillerPicker({
   bulk,
   busy,
   fillerFrom,
+  chosenCopyIds,
 }: {
   value: { material: "energy" } | { material: "card"; copyId: string } | null;
   onEnergy(): void;
@@ -193,10 +207,23 @@ function FillerPicker({
   bulk: ReturnType<typeof useLoaded<FillerCardOption>>;
   busy: boolean;
   fillerFrom: readonly FillerSource[];
+  chosenCopyIds: readonly string[];
 }) {
   const key = wordsKey(fillerFrom);
   const words = FILLER_WORDS[key];
   const [showBulk, setShowBulk] = useState(value?.material === "card");
+  const [find, setFind] = useState("");
+  const own = value?.material === "card" ? value.copyId : null;
+  /** The copies another pocket in this popup holds (this pocket's own pick is free to keep). */
+  const taken = new Set(chosenCopyIds.filter((id) => id !== own));
+  const free = (o: FillerCardOption) => copiesOf(o).filter((id) => !taken.has(id));
+  const needle = find.trim().toLowerCase();
+  const shown = (bulk.items ?? []).filter(
+    (o) =>
+      !needle ||
+      labelOf(o.card).toLowerCase().includes(needle) ||
+      (o.card.setName ?? "").toLowerCase().includes(needle),
+  );
   return (
     <>
       <div className="lp-choice">
@@ -234,16 +261,41 @@ function FillerPicker({
         ) : bulk.items && bulk.items.length === 0 ? (
           <div className="lp-note">{words.none}</div>
         ) : bulk.items ? (
-          <CardGrid
-            label={words.list}
-            tagOf={key === "both" ? (o) => o.where : undefined}
-            items={bulk.items}
-            keyOf={(o) => o.copyId}
-            cardOf={(o) => o.card}
-            selected={value?.material === "card" ? value.copyId : null}
-            onPick={onCard}
-            busy={busy}
-          />
+          <>
+            {bulk.items.length > SEARCH_FROM ? (
+              <input
+                type="search"
+                className="lp-find"
+                aria-label="Find a spare card"
+                placeholder="Find a card by name or set"
+                value={find}
+                onChange={(e) => setFind(e.target.value)}
+              />
+            ) : null}
+            {shown.length === 0 ? <div className="lp-note">No spare card matches that.</div> : null}
+            <CardGrid
+              label={words.list}
+              tagOf={(o) => {
+                const left = free(o).length;
+                const parts = [
+                  key === "both" ? o.where : null,
+                  left === 0 ? "In another pocket" : copiesOf(o).length > 1 ? `×${left}` : null,
+                ];
+                return parts.filter(Boolean).join(" · ") || null;
+              }}
+              items={shown}
+              keyOf={(o) => o.copyId}
+              cardOf={(o) => o.card}
+              selected={own ? (optionOf(bulk.items, own)?.copyId ?? null) : null}
+              disabledOf={(o) => free(o).length === 0}
+              // A pick takes the printing's next copy no other pocket holds (her own pick stays hers).
+              onPick={(o) =>
+                onCard({ ...o, copyId: own && copiesOf(o).includes(own) ? own : free(o)[0] })
+              }
+              busy={busy}
+              scroll={shown.length > SEARCH_FROM}
+            />
+          </>
         ) : null
       ) : null}
     </>
@@ -323,6 +375,7 @@ export function StageChoice({
   busy = false,
   fillerFrom = BULK_ONLY,
   allowLater = false,
+  chosenFillerCopyIds = [],
 }: {
   stage: LinePopupStage;
   lineLocale: Locale;
@@ -335,6 +388,8 @@ export function StageChoice({
   fillerFrom?: readonly FillerSource[];
   /** Offer "Decide later" (the line popup): the stage stays not decided, and this card still goes in. */
   allowLater?: boolean;
+  /** Every spare card this popup's choices put in a pocket (chosenFillerCopyIds): one copy, one pocket. */
+  chosenFillerCopyIds?: readonly string[];
 }) {
   const [panel, setPanel] = useState<Panel>(null);
   const options = useLoaded(loadOptions);
@@ -347,11 +402,10 @@ export function StageChoice({
     return o ? labelOf(o.card) : null;
   };
   const fillerName = (copyId: string) => {
-    const o = bulk.items?.find((x) => x.copyId === copyId);
+    const o = optionOf(bulk.items, copyId);
     return o ? labelOf(o.card) : null;
   };
-  const fillerWhere = (copyId: string) =>
-    bulk.items?.find((x) => x.copyId === copyId)?.where ?? null;
+  const fillerWhere = (copyId: string) => optionOf(bulk.items, copyId)?.where ?? null;
   const chasing = value?.kind === "chase" && "catalogCardId" in value ? value.catalogCardId : null;
   const pick = (d: StageDecision) => {
     onChange(d);
@@ -510,6 +564,7 @@ export function StageChoice({
           bulk={bulk}
           busy={busy}
           fillerFrom={fillerFrom}
+          chosenCopyIds={chosenFillerCopyIds}
         />
       ) : null}
     </section>
@@ -524,6 +579,7 @@ export function ThirdPocketChoice({
   busy = false,
   fillerFrom = BULK_ONLY,
   allowLater = false,
+  chosenFillerCopyIds = [],
 }: {
   value: ThirdPocketValue | null;
   onChange(v: ThirdPocketValue): void;
@@ -531,6 +587,7 @@ export function ThirdPocketChoice({
   busy?: boolean;
   fillerFrom?: readonly FillerSource[];
   allowLater?: boolean;
+  chosenFillerCopyIds?: readonly string[];
 }) {
   const bulk = useLoaded(loadBulk);
   return (
@@ -557,6 +614,7 @@ export function ThirdPocketChoice({
         bulk={bulk}
         busy={busy}
         fillerFrom={fillerFrom}
+        chosenCopyIds={chosenFillerCopyIds}
       />
       <div className="lp-choice">
         <button

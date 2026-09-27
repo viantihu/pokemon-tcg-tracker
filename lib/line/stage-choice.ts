@@ -60,6 +60,12 @@ export interface StageState {
   mirrorCandidates(draft: StandInDraft): readonly StageCatalogCard[];
   newId(): string;
   newStandInId(language: Language): string;
+  /**
+   * The filler copies this ONE write has already named (UIL-121): one physical card fills one pocket, so a second
+   * pocket naming the same copy is refused. Shared by every stage and the third pocket of the write; the caller makes
+   * one set per write.
+   */
+  claimedFillers?: Set<string>;
 }
 
 /** The stage being decided, from the server's own read of the line (never the browser's). */
@@ -97,6 +103,7 @@ export const STAGE_REFUSAL = {
   mirrorDuplicate: "That card is already in the catalog; pick it from the list.",
   fillerNotInBulk: "That card isn't in your bulk box any more.",
   fillerNotInHaul: "That card isn't waiting in your haul any more.",
+  fillerTwice: "That card is already filling another pocket. Pick another card for this one.",
   thirdPocketMissing: "Choose what fills the third pocket.",
   noThirdPocket: "This line has no third pocket to fill.",
 } as const;
@@ -294,6 +301,8 @@ function fillerWrites(
   if (!fillerFrom.includes(from) || !copy || copy.role !== from) {
     refuse(from === "haul" ? STAGE_REFUSAL.fillerNotInHaul : STAGE_REFUSAL.fillerNotInBulk);
   }
+  if (st.claimedFillers?.has(filler.copyId)) refuse(STAGE_REFUSAL.fillerTwice);
+  st.claimedFillers?.add(filler.copyId);
   return {
     copyPatch: {
       op: "update_copy",

@@ -196,6 +196,23 @@ describe("UIL-121 · Choose opens the line's popup; only what she changes is sen
     );
   });
 
+  it("the strip across the top shows the whole line and follows her choices; the footer says why Save is off", async () => {
+    const user = await mount();
+    await user.click(screen.getByRole("button", { name: "Choose" }));
+    const dialog = await screen.findByRole("dialog", { name: "Choose for this line" });
+    const strip = await within(dialog).findByRole("list", { name: "This line's stages" });
+    const words = () =>
+      within(strip)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent);
+    expect(words()).toEqual(["Basic Charmander", "Stage 1 Chasing", "Stage 2 Not decided"]);
+    expect(within(dialog).getByText("Change a choice to save")).toBeTruthy();
+    const stage2 = within(dialog).getByRole("region", { name: /Stage 2/ });
+    await user.click(within(stage2).getByRole("button", { name: "Leave empty" }));
+    expect(words()[2]).toBe("Stage 2 Left empty");
+    expect(within(dialog).getByText("nothing is written until you save")).toBeTruthy();
+  });
+
   it("she can take back a chase: 'Decide later' on the chased stage is sent as that", async () => {
     const user = await mount();
     await user.click(screen.getByRole("button", { name: "Change" }));

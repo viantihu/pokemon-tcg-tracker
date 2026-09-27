@@ -68,4 +68,32 @@ describe("loadBulkFillers", () => {
       }),
     ]);
   });
+
+  it("one option per printing and variant, its copies oldest first (hundreds of copies are not hundreds of tiles)", async () => {
+    const C = (n: number) => `c0000000-0000-4000-8000-00000000010${n}`;
+    // Two more normal Sprigatitos (the newest first in id order, to show the order is by age), and a reverse one.
+    for (const [id, variant, age] of [
+      [C(1), "normal", "3 days"],
+      [C(2), "normal", "1 day"],
+      [C(3), "reverse", "2 days"],
+    ]) {
+      await db.query(
+        `insert into copy (id, owner_id, catalog_card_id, variant, role, created_at)
+           values ($1, $2, 'sv01-001', $3, 'bulk', now() - $4::interval)`,
+        [id, OWNER, variant, age],
+      );
+    }
+    await db.query(`update copy set created_at = now() - interval '5 days' where id = $1`, [
+      "c0000000-0000-4000-8000-000000000001",
+    ]);
+    const out = await loadBulkFillers(pgliteClient(db));
+    expect(out.map((o) => [o.copyId, o.count, o.copyIds])).toEqual([
+      [
+        "c0000000-0000-4000-8000-000000000001",
+        3,
+        ["c0000000-0000-4000-8000-000000000001", C(1), C(2)],
+      ],
+      [C(3), 1, [C(3)]],
+    ]);
+  });
 });

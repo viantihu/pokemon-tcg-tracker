@@ -48,19 +48,34 @@ export async function loadStageOptions(
   );
 }
 
-/** The spare copies in her bulk box, image first, for a pocket's filler. */
+/**
+ * The spare copies in her bulk box, image first, for a pocket's filler: ONE option per printing and variant, with its
+ * copies oldest first and how many (UIL-121, the UX Dev: hundreds of copies must not become hundreds of tiles).
+ */
 export async function loadBulkFillers(db: DbClient): Promise<FillerCardOption[]> {
   const [copies, map] = await Promise.all([copyRepo.listBulk(db), colourMap(db)]);
   const rows = await catalogCardRepo.listByIds(db, [
     ...new Set(copies.map((c) => c.catalog_card_id)),
   ]);
   const byId = new Map(rows.map((r) => [r.tcgdex_id, r]));
-  const out: FillerCardOption[] = [];
-  for (const c of copies) {
+  const groups = new Map<string, FillerCardOption>();
+  const oldestFirst = [...copies].sort(
+    (a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id),
+  );
+  for (const c of oldestFirst) {
     const r = byId.get(c.catalog_card_id);
     if (!r) continue;
-    out.push({
+    const key = `${c.catalog_card_id}|${c.variant}`;
+    const had = groups.get(key);
+    if (had) {
+      had.copyIds!.push(c.id);
+      had.count = had.copyIds!.length;
+      continue;
+    }
+    groups.set(key, {
       copyId: c.id,
+      copyIds: [c.id],
+      count: 1,
       where: "Bulk box",
       card: {
         tcgdexId: r.tcgdex_id,
@@ -74,7 +89,7 @@ export async function loadBulkFillers(db: DbClient): Promise<FillerCardOption[]>
       },
     });
   }
-  return out.sort(
+  return [...groups.values()].sort(
     (a, b) => a.card.name.localeCompare(b.card.name) || a.copyId.localeCompare(b.copyId),
   );
 }
