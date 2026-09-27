@@ -31,6 +31,32 @@ import { CardFace } from "./CardFace";
 
 type Panel = "pick" | "standin" | "filler" | null;
 
+/** Where a filler card comes from: her bulk box (every popup screen), or her haul (Backfill transcribing a binder). */
+export type FillerFrom = "bulk" | "haul";
+
+/** The words for a filler card's source, so every place the part names it agrees. */
+const FILLER_WORDS: Record<
+  FillerFrom,
+  { option: string; leaves: string; loading: string; none: string; list: string; from: string }
+> = {
+  bulk: {
+    option: "A card from your bulk box",
+    leaves: "It leaves the bulk box and holds the pocket.",
+    loading: "Loading your bulk box…",
+    none: "Your bulk box is empty.",
+    list: "Cards in your bulk box",
+    from: "from your bulk box",
+  },
+  haul: {
+    option: "A spare card from your haul",
+    leaves: "It comes out of the haul and holds the pocket.",
+    loading: "Loading your haul…",
+    none: "No card is waiting in your haul.",
+    list: "Cards waiting in your haul",
+    from: "from your haul",
+  },
+};
+
 const numberOf = (c: CardIdentity) =>
   formatCollectorNumber(c.localId, c.setCardCountOfficial ?? null) ?? c.name;
 const labelOf = (c: CardIdentity) => `${c.name} ${numberOf(c)}`.trim();
@@ -40,6 +66,7 @@ export function stageDecisionLabel(
   d: StageDecision | null,
   cardName: (id: string) => string | null,
   fillerName: (copyId: string) => string | null,
+  fillerFrom: FillerFrom = "bulk",
 ): string {
   if (!d) return "Choose";
   switch (d.kind) {
@@ -52,7 +79,7 @@ export function stageDecisionLabel(
     case "filler":
       return d.filler.material === "energy"
         ? "Filler: a basic energy"
-        : `Filler: ${fillerName(d.filler.copyId) ?? "a card"} from your bulk box`;
+        : `Filler: ${fillerName(d.filler.copyId) ?? "a card"} ${FILLER_WORDS[fillerFrom].from}`;
   }
 }
 
@@ -135,13 +162,16 @@ function FillerPicker({
   onCard,
   bulk,
   busy,
+  fillerFrom,
 }: {
   value: { material: "energy" } | { material: "card"; copyId: string } | null;
   onEnergy(): void;
   onCard(o: FillerCardOption): void;
   bulk: ReturnType<typeof useLoaded<FillerCardOption>>;
   busy: boolean;
+  fillerFrom: FillerFrom;
 }) {
+  const words = FILLER_WORDS[fillerFrom];
   const [showBulk, setShowBulk] = useState(value?.material === "card");
   return (
     <>
@@ -166,22 +196,22 @@ function FillerPicker({
             void bulk.open();
           }}
         >
-          <b className="u">A card from your bulk box</b>
-          <span>It leaves the bulk box and holds the pocket.</span>
+          <b className="u">{words.option}</b>
+          <span>{words.leaves}</span>
         </button>
       </div>
       {showBulk ? (
         bulk.loading ? (
-          <div className="lp-note">Loading your bulk box…</div>
+          <div className="lp-note">{words.loading}</div>
         ) : bulk.error ? (
           <div className="lp-error" role="alert">
             {bulk.error}
           </div>
         ) : bulk.items && bulk.items.length === 0 ? (
-          <div className="lp-note">Your bulk box is empty.</div>
+          <div className="lp-note">{words.none}</div>
         ) : bulk.items ? (
           <CardGrid
-            label="Cards in your bulk box"
+            label={words.list}
             items={bulk.items}
             keyOf={(o) => o.copyId}
             cardOf={(o) => o.card}
@@ -266,6 +296,7 @@ export function StageChoice({
   loadOptions,
   loadBulk,
   busy = false,
+  fillerFrom = "bulk",
 }: {
   stage: LinePopupStage;
   lineLocale: Locale;
@@ -274,6 +305,8 @@ export function StageChoice({
   loadOptions(): Promise<StageOption[]>;
   loadBulk(): Promise<FillerCardOption[]>;
   busy?: boolean;
+  /** Where a filler card comes from: the bulk box (default), or the haul for Backfill. */
+  fillerFrom?: FillerFrom;
 }) {
   const [panel, setPanel] = useState<Panel>(null);
   const options = useLoaded(loadOptions);
@@ -303,10 +336,10 @@ export function StageChoice({
     <section
       className="lp-stagechoice"
       data-stage-index={stage.stageIndex}
-      aria-label={`${stageLabel(stage.stage)}: ${stageDecisionLabel(value, cardName, fillerName)}`}
+      aria-label={`${stageLabel(stage.stage)}: ${stageDecisionLabel(value, cardName, fillerName, fillerFrom)}`}
     >
       <div className="lp-lbl u">
-        {stageLabel(stage.stage)} · {stageDecisionLabel(value, cardName, fillerName)}
+        {stageLabel(stage.stage)} · {stageDecisionLabel(value, cardName, fillerName, fillerFrom)}
       </div>
 
       {suggestion ? (
@@ -430,6 +463,7 @@ export function StageChoice({
           onCard={(o) => pick({ kind: "filler", filler: { material: "card", copyId: o.copyId } })}
           bulk={bulk}
           busy={busy}
+          fillerFrom={fillerFrom}
         />
       ) : null}
     </section>
@@ -442,11 +476,13 @@ export function ThirdPocketChoice({
   onChange,
   loadBulk,
   busy = false,
+  fillerFrom = "bulk",
 }: {
   value: ThirdPocketValue | null;
   onChange(v: ThirdPocketValue): void;
   loadBulk(): Promise<FillerCardOption[]>;
   busy?: boolean;
+  fillerFrom?: FillerFrom;
 }) {
   const bulk = useLoaded(loadBulk);
   return (
@@ -459,7 +495,7 @@ export function ThirdPocketChoice({
             ? "Left empty"
             : value.material === "energy"
               ? "A basic energy"
-              : "A card from your bulk box"}
+              : FILLER_WORDS[fillerFrom].option}
       </div>
       <div className="lp-note">
         This line is complete with fewer than 3 cards, so its row has one pocket left.
@@ -470,6 +506,7 @@ export function ThirdPocketChoice({
         onCard={(o) => onChange({ material: "card", copyId: o.copyId })}
         bulk={bulk}
         busy={busy}
+        fillerFrom={fillerFrom}
       />
       <div className="lp-choice">
         <button

@@ -233,6 +233,37 @@ describe("StageChoice · her other choices", () => {
   });
 });
 
+describe("Backfill's filler comes from her haul (fillerFrom)", () => {
+  it("the stage and the third pocket say the haul, not the bulk box", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      createElement(StageChoice, {
+        stage: STAGE,
+        lineLocale: "en",
+        value: { kind: "filler", filler: { material: "card", copyId: "c-bulk" } },
+        onChange,
+        loadOptions: async () => [],
+        loadBulk: async () => BULK,
+        fillerFrom: "haul",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Fill the pocket" }));
+    expect(screen.getByRole("button", { name: /A spare card from your haul/ })).toBeTruthy();
+    expect(screen.queryByText(/bulk box/)).toBeNull();
+    cleanup();
+    render(
+      createElement(ThirdPocketChoice, {
+        value: { material: "card", copyId: "c-bulk" },
+        onChange,
+        loadBulk: async () => BULK,
+        fillerFrom: "haul",
+      }),
+    );
+    expect(screen.getByText(/Third pocket · A spare card from your haul/)).toBeTruthy();
+  });
+});
+
 describe("ThirdPocketChoice · a complete short line's last pocket", () => {
   it("nothing chosen until she picks: energy, a card from her bulk box, or empty", async () => {
     const onChange = vi.fn();
