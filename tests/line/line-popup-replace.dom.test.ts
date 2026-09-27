@@ -331,6 +331,29 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
     expect(onCancel).not.toHaveBeenCalled();
   });
 
+  it("a Keep to a place the screen decided (the Haul Plan's extra copy): Shelve from this haul, no picker", () => {
+    render(
+      createElement(Harness, {
+        model: {
+          ...REPLACE,
+          replace: {
+            ...REPLACE.replace!,
+            incoming: { ...REPLACE.replace!.incoming, where: "Still in the haul" },
+          },
+        },
+        initial: defaultChoiceFor(PROPOSAL),
+        keepTo: "KB-001 · Front · Red",
+      }),
+    );
+    expect(movesText()).toMatch(/Shelve.*169\/165.*from this haul → KB-001 · Front · Red/);
+    const rows = [...document.querySelectorAll(".lp-mrow")].map((r) => r.textContent ?? "");
+    expect(rows.find((r) => r.includes("169/165"))).toMatch(/^Shelve/);
+    expect(radio(/Keep 027\/197/).textContent).toMatch(
+      /The new Charmeleon goes to KB-001 · Front · Red\. Nothing in the line moves\./,
+    );
+    expect(screen.queryByRole("group", { name: /Where 169\/165 goes/ })).toBeNull();
+  });
+
   it("a swap in another language waits for her second tick", async () => {
     const onConfirm = vi.fn();
     const user = userEvent.setup();

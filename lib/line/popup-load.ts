@@ -35,7 +35,13 @@ import {
   type Row,
 } from "@/lib/repo";
 import { buildLineJoinIndex, joinOptionsFor } from "./join-options";
-import type { LinePopupExistingLine, LinePopupModel, LinePopupStage, LineProposal } from "./popup";
+import {
+  IN_THE_HAUL,
+  type LinePopupExistingLine,
+  type LinePopupModel,
+  type LinePopupStage,
+  type LineProposal,
+} from "./popup";
 import type { CardIdentity } from "./types";
 
 export async function loadLinePopupModel(
@@ -83,7 +89,7 @@ export async function loadLinePopupModel(
     lineLocaleOf((slotsByLine.get(lineId) ?? []).map(toSlotRecord), cardOfCopy);
   /** Where a card is now, in her words: "KB-001 · Front · Red", the bulk box, or still in the haul. */
   const whereIs = (c: Row<"copy">): string => {
-    if (c.role === "haul") return "Still in the haul";
+    if (c.role === "haul") return IN_THE_HAUL;
     if (c.role === "bulk" || !c.binder_id) return "Bulk box";
     const half = c.binder_half === "back" ? "Back" : c.binder_half === "front" ? "Front" : null;
     return [

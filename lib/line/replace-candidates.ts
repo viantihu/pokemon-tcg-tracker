@@ -16,6 +16,7 @@ import {
   type DbClient,
   type Row,
 } from "@/lib/repo";
+import { IN_THE_HAUL } from "./popup";
 import type { CardIdentity } from "./types";
 
 export interface ReplaceCandidate {
@@ -54,7 +55,7 @@ export async function listReplaceCandidates(
   const binderName = new Map(binders.map((b) => [b.id, b.name]));
   const bandDisplay = new Map(bands.map((b) => [b.band, b.display_name]));
   const whereIs = (c: Row<"copy">): string => {
-    if (c.role === "haul") return "Still in the haul";
+    if (c.role === "haul") return IN_THE_HAUL;
     if (c.role === "bulk" || !c.binder_id) return "Bulk box";
     const half = c.binder_half === "back" ? "Back" : c.binder_half === "front" ? "Front" : null;
     return [
