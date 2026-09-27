@@ -75,7 +75,6 @@ export const COLL_LOST = {
 
 type Tab = "coll" | "wish";
 
-/** A card held in the editor's working target list. */
 /**
  * UIL-117: a move into a back half goes through the line popup, and a line slot holds ONE card, so the popup is
  * offered only when exactly one copy of the card is shelved in the collection's binder (the server refuses the
@@ -90,6 +89,7 @@ function lineModelForOnly(copyIds: readonly string[]) {
   };
 }
 
+/** A card held in the editor's working target list. */
 interface DraftTarget {
   tcgdexId: string;
   name: string;
