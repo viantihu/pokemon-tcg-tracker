@@ -8883,7 +8883,7 @@ these same wishlist rows, so a narrower auto-wish rule changes what a future del
 - **Reported:** 2026-09-27 (Karvi). In her words: "Once the line is complete, it should not open the
   popup again for the next card automatically."
 - **Status:** Open, assigned to Full Stack Dev - 2, after UIL-117 PR 5a.
-- **Priority:** Medium (Senior BA's read; Karvi to confirm).
+- **Priority:** High (Karvi, 2026-09-27).
 - **Area:** Haul Plan / line popup
 - **Env:** Testing, `develop` `a181336`
 
@@ -9013,3 +9013,49 @@ pointing her at a different wrong place instead of a real fix.
 
 **Cross-reference UIL-121** (the design question this entry's fix depends on) and **UIL-117** (PR #392,
 which changed where a holo-swap is actually confirmed, making this banner's wording stale for that case).
+
+## UIL-123 — Phase 2 backlog: configurable line settings for binder size
+
+- **Reported:** 2026-09-27 (Karvi). In her words: "The current design assumes a 3 x 3 binder, which is
+  fine for now. Other users may have different size binders that will affect their decision to keep a
+  line open or closed, and it will affect how they deal with filling up the rest of the pockets once a
+  line is complete. Thinking about this is not needed right now, but it needs to be noted that a future
+  phase will require 'line' settings to be configurable."
+- **Status:** Open, Phase 2 backlog, not scheduled.
+- **Priority:** Phase 2 (backlog).
+- **Area:** Lines
+- **Env:** n/a — noted for a future phase, nothing to reproduce today.
+
+**Noted, not investigated further, per Karvi's own framing — nothing is to be built now.** Binder page
+geometry itself (pages, pockets per page, the front/back divider) is already a per-binder configurable
+setting ([`app/(ui)/settings/actions.ts`](<../app/(ui)/settings/actions.ts>), UIL-050's own resize-safety
+check reads `back_half_start_page` and page count directly). What she's flagging is a level below that:
+how a LINE — an evolution chain occupying a run of pockets within a page — decides open-vs-closed and
+what fills a completed line's leftover pockets, which is not itself configurable and isn't expected to
+need to be yet.
+
+**Cross-reference UIL-121** (the open/closed line model and the "extra pocket after a short complete
+line" question — filled with a basic energy, a bulk card she picks, or left empty — this backlog item is
+about making that behavior configurable per binder size, once it exists).
+
+## UIL-124 — Phase 2 backlog: tracking energy cards
+
+- **Reported:** 2026-09-27 (Karvi). In her words: "Another thing to save for phase 2: tracking energy
+  cards."
+- **Status:** Open, Phase 2 backlog, not scheduled.
+- **Priority:** Phase 2 (backlog).
+- **Area:** Lines, Binders
+- **Env:** n/a — noted for a future phase, nothing to reproduce today.
+
+**Confirmed the current design this backlog item is asking to change.** The discovery rule is explicit:
+`docs/system-design.md:72`, "Binder blocks | Basic energy (untracked) or repurposed duplicates (tracked,
+including which card)." A basic-energy pocket filler is recorded today as a `binder_block` row with
+`material = 'basicEnergy'` and no `copy_id` — a deliberately untracked placeholder, by design, not a gap
+in an otherwise-tracked model. Tracking energy cards individually would mean giving them the same
+tracked shape a repurposed duplicate already has (a real `copy` row `binder_block` can point at), which
+is a design change to a rule stated on purpose, not a bug fix.
+
+**Cross-reference UIL-121** (the line-completion pocket-filling this connects to — a basic-energy filler
+is one of the three options that entry names) and **UIL-030** ("the user must be able to track where ALL
+cards are, including blocks" — this backlog item is the energy-specific instance of that same standing
+ask).
