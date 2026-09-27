@@ -405,6 +405,31 @@ describe("UIL-117 4b · the popup", () => {
     expect(confirmIn().textContent).not.toContain("next");
   });
 
+  it("UIL-120: an Add whose line has only a block left besides it does not say '· next' (case d)", async () => {
+    lineModelAction.mockImplementation(async (copyId: string, proposal: LineProposal) => {
+      const m = withNothingLeft(modelFor(copyId.replace(/^id-/, ""), proposal));
+      return {
+        ok: true,
+        model: {
+          ...m,
+          stages: [
+            ...m.stages,
+            { stageIndex: 2, stage: "Stage2", state: "blocked" as const, card: null },
+          ],
+        },
+      };
+    });
+    const user = await mount([
+      { name: "Charmeleon", proposal: ADD },
+      { name: "Kadabra", proposal: ADD },
+    ]);
+    await user.click(screen.getAllByRole("button", { name: "◆ Adds to a line" })[0]);
+    await screen.findByRole("dialog", { name: "Add to a line" });
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    // A block is decided: nothing is left to chase, so no next card is promised (QA's L7 on #410).
+    expect(confirmIn().textContent).not.toContain("next");
+  });
+
   it("UIL-120: a Keep on a line that is ALREADY complete stops too (she tested past #402 here)", async () => {
     shelveCardAction.mockResolvedValue({
       ok: true,

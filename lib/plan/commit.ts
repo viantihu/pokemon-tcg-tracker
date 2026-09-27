@@ -369,7 +369,11 @@ export async function commitCardPlacement(
       // Keep means "the card already in the line stays". Only a card that could replace one has that choice; sent
       // for any other line card it would fall through to the cascade, which writes the line itself (TL review).
       if (!lead.result.filledStage && !lead.result.swap) throw new Error(LINE_CHOICE.missing);
-      keptLineId = choice.lineId;
+      // The line it concerned, from the server's own derivation, not the browser's choice (QA on #410).
+      const heldSlot = lead.result.swap?.incomingInherits.lineSlotId ?? null;
+      keptLineId =
+        lead.result.filledStage?.lineId ??
+        (heldSlot ? (pc.lookups.lines?.lineOfSlot(heldSlot) ?? null) : null);
       if (choice.incoming) {
         if (!isMoveDestinationComplete(choice.incoming)) throw new Error(REFUSE.incomplete);
         override = choice.incoming;

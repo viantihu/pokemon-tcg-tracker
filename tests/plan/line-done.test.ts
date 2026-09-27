@@ -179,6 +179,26 @@ describe("UIL-120 (a) · a join or a start that leaves the line done", () => {
     expect(last.lineDone).toBe(true);
   });
 
+  it("a START that leaves the line done in that one confirm (her ticked pull fills the only other stage)", async () => {
+    // A 2-stage family here: without the Charizard printing, the Charmander chain ends at Charmeleon (QA on #410).
+    await asSuperuser(db);
+    await db.query(`delete from catalog_card where tcgdex_id = $1`, [CHARIZARD_BASE1_4.tcgdexId]);
+    clearCatalogCache();
+    await db.exec(`
+      insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band) values
+        ('${OWNED_CMD}', '${OWNER}', '${CHARMANDER_SV03_026.tcgdexId}', 'normal', 'shelved', '${KB1}', 'front', 'red');
+    `);
+    await seedHaulRows(db, [CML]);
+    await asOwner(db);
+    const start = await proposalFor(CML);
+    if (start?.kind !== "start") throw new Error(`expected a start, got ${start?.kind}`);
+    const res = await commit({
+      card: CML,
+      lineChoice: { mode: "start", binderId: KB1, band: "red", pulls: [OWNED_CMD] },
+    });
+    expect(res.lineDone).toBe(true);
+  });
+
   it("the Haul Plan's action hands the answer to the screen", async () => {
     await seedLine({ stage1: "open" });
     await seedHaulRows(db, [CML]);
