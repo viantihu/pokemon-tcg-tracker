@@ -1057,6 +1057,8 @@ export function PlanScreen({
   async function confirmLinePopup(
     item: PlanItem,
     extra: { lineChoice?: LineChoice; override?: MoveDestination },
+    /** The line's name as the popup shows it (its top stage), for the "Line complete" toast. */
+    lineName?: string | null,
   ) {
     const shelved = await shelveCard(item, extra);
     if (!shelved) return;
@@ -1064,6 +1066,10 @@ export function PlanScreen({
     // it), so the rest re-route and their badges follow; the batch runs a moment later, as for any change.
     if (extra.lineChoice) scheduleReroute();
     const next = shelved.lineDone ? undefined : nextLineCard(item.incomingId);
+    // The one time a confirm does not lead on, say why, so the popup closing reads as a finish (UX review of #402).
+    if (shelved.lineDone) {
+      flashToast(lineName ? `Line complete · ${lineName} line` : "Line complete");
+    }
     if (next) openLinePopup(next);
     else {
       setLinePop(null);
@@ -1181,7 +1187,9 @@ export function PlanScreen({
           }}
           busy={shelving === popLive.incomingId}
           error={error}
-          onConfirm={(choice) => void confirmLinePopup(popLive, { lineChoice: choice })}
+          onConfirm={(choice, lineName) =>
+            void confirmLinePopup(popLive, { lineChoice: choice }, lineName)
+          }
           onConfirmOwnColour={(dest) => void confirmLinePopup(popLive, { override: dest })}
           onCancel={() => setLinePop(null)}
         />

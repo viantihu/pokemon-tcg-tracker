@@ -59,7 +59,8 @@ export function PlanLinePopup({
   position: { index: number; total: number; next: boolean };
   busy: boolean;
   error: string | null;
-  onConfirm(choice: LineChoice): void;
+  /** Her confirm, with the line's name as the popup shows it (its top stage), or null when it has none. */
+  onConfirm(choice: LineChoice, lineName: string | null): void;
   /** "File by its own colour": the front half, not a line. */
   onConfirmOwnColour(destination: MoveDestination): void;
   onCancel(): void;
@@ -148,7 +149,7 @@ export function PlanLinePopup({
         value={value}
         onChange={setValue}
         onCancel={onCancel}
-        onConfirm={onConfirm}
+        onConfirm={(choice) => onConfirm(choice, model.stages.at(-1)?.card?.name ?? null)}
         onSwitch={(p) => setProposal(p)}
         position={{ ...position, next: position.next && !completes }}
         busy={busy}
