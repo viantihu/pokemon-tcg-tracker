@@ -195,8 +195,7 @@ describe("UIL-117 PR 5 · every Backfill stage is her decision", () => {
   });
 
   it("…and never silently: the hunted row says its hunt was cleared, until she picks again", async () => {
-    const CLEARED =
-      "Wishlist hunt cleared: a terminated line has no stage to fill. Pick another option.";
+    const CLEARED = "Wishlist hunt cleared: a terminated line hunts nothing. Pick another option.";
     const row = (stage: string) => group(stage).closest(".lf") as HTMLElement;
     const user = await openLine();
     await user.click(choice("Basic", "Hunt"));

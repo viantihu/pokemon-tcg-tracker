@@ -738,7 +738,7 @@ function StageRow({
       <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
         {choice === null && entry.huntCleared ? (
           <span className="bf-cleared" role="status">
-            Wishlist hunt cleared: a terminated line has no stage to fill. Pick another option.
+            Wishlist hunt cleared: a terminated line hunts nothing. Pick another option.
           </span>
         ) : choice === null ? (
           <span style={{ fontSize: 10, color: "var(--ink-2)" }}>
