@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import type { WriteOp } from "@/lib/repo";
 import { withLineSlotCheck } from "@/lib/repo/write-ops";
-import type { StageDecision, ThirdPocketChoice } from "@/lib/line/popup";
+import { lineStatusOf, type StageDecision, type ThirdPocketChoice } from "@/lib/line/popup";
 import {
   stageWriteOps,
   thirdPocketWriteOps,
@@ -210,6 +210,69 @@ describe("each stage choice, written, passes 0030's rules", () => {
     await write(stage(1, { kind: "filler", filler: { material: "energy" } }));
     expect(await q(`select count(*)::int n from wishlist_item where resolved_at is null`)).toEqual([
       { n: 0 },
+    ]);
+  });
+});
+
+describe("a NEW line (Backfill's shape): insert the slots, then each stage's writes, in one call", () => {
+  const NEW = "10000000-0000-4000-8000-0000000000c2";
+  const newTarget = (i: number): StageTarget => ({
+    ...target(i),
+    lineId: NEW,
+    slotId: SLOT(30 + i),
+  });
+  const build = (decisions: StageDecision[], st = state()): WriteOp[] => {
+    const writes = decisions.map((d, i) => validateStageDecision(st, newTarget(i), d));
+    const status = lineStatusOf(
+      writes.map((w) => ({
+        state: w.slotPatch.state ?? "placeholder",
+        stageChoice: w.slotPatch.stage_choice,
+      })),
+    );
+    return [
+      {
+        op: "insert_line",
+        id: NEW,
+        root_dex_id: 9301,
+        color_band: "red",
+        binder_id: BINDER,
+        half: "back",
+        status,
+      },
+      ...decisions.map((_, i): WriteOp => ({
+        op: "insert_slot",
+        id: SLOT(30 + i),
+        line_id: NEW,
+        stage_index: i,
+        stage: STAGES[i],
+        state: "placeholder",
+        copy_id: null,
+        target_catalog_card_id: null,
+        note: null,
+      })),
+      ...writes.flatMap((w, i) => stageWriteOps(SLOT(30 + i), w)),
+    ];
+  };
+
+  it("a chased stage: accepted, and the line reads open", async () => {
+    await write(
+      build([
+        {
+          kind: "chase",
+          newStandIn: { name: "Emberling", setName: "Promo", localId: "P1", language: "en" },
+        },
+        { kind: "filler", filler: { material: "energy" } },
+      ]),
+    );
+    expect(await q(`select status from evolution_line where id = $1`, [NEW])).toEqual([
+      { status: "open" },
+    ]);
+  });
+
+  it("every stage left empty or given a filler: accepted, and the line reads closed", async () => {
+    await write(build([{ kind: "empty" }, { kind: "filler", filler: { material: "energy" } }]));
+    expect(await q(`select status from evolution_line where id = $1`, [NEW])).toEqual([
+      { status: "closed" },
     ]);
   });
 });

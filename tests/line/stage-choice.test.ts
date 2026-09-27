@@ -16,7 +16,7 @@ import {
   type StageState,
   type StageTarget,
 } from "@/lib/line/stage-choice";
-import type { StageDecision } from "@/lib/line/popup";
+import { lineStatusOf, type StageDecision } from "@/lib/line/popup";
 
 const card = (over: Partial<StageCatalogCard> & { tcgdexId: string }): StageCatalogCard => ({
   name: "Charmeleon",
@@ -336,5 +336,26 @@ describe("the THIRD POCKET: a complete line shorter than 3 (Q4)", () => {
         validateThirdPocket(state(), { ...LINE, completeAfterWrite: false }, { material: "empty" }),
       STAGE_REFUSAL.noThirdPocket,
     );
+  });
+});
+
+describe("lineStatusOf: CLOSED when no stage waits (the Senior BA's Q1 ruling)", () => {
+  it.each([
+    [[{ state: "filled" }, { state: "filled" }], "closed"],
+    [[{ state: "filled" }, { state: "placeholder", stageChoice: "empty" }], "closed"],
+    [[{ state: "filled" }, { state: "block", stageChoice: "filler" }], "closed"],
+    [
+      [
+        { state: "placeholder", stageChoice: "empty" },
+        { state: "placeholder", stageChoice: "empty" },
+      ],
+      "closed",
+    ],
+    [[{ state: "filled" }, { state: "placeholder", stageChoice: "chase" }], "open"],
+    [[{ state: "filled" }, { state: "placeholder", stageChoice: null }], "open"], // not decided yet
+    [[{ state: "filled" }, { state: "block", stageChoice: null }], "open"], // a pre-0030 engine block
+    [[], "open"],
+  ])("%j → %s", (stages, status) => {
+    expect(lineStatusOf(stages)).toBe(status);
   });
 });

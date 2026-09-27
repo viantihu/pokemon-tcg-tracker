@@ -301,6 +301,19 @@ export function lineReadsClosed(status: string | null | undefined): boolean {
   return status === "closed" || status === "complete" || status === "terminated";
 }
 
+/**
+ * A line's status from her stage choices (UIL-121, the Senior BA's Q1 ruling): CLOSED when no stage waits, that is,
+ * every slot holds a card, was left empty, or holds a filler. A chased stage keeps it OPEN, and so does a stage she has
+ * not decided yet. Every line writer that knows the choices derives the status here, never from the browser.
+ */
+export function lineStatusOf(
+  stages: readonly { state: string; stageChoice?: string | null }[],
+): "open" | "closed" {
+  const settled = (s: { state: string; stageChoice?: string | null }) =>
+    s.state === "filled" || s.stageChoice === "empty" || s.stageChoice === "filler";
+  return stages.length > 0 && stages.every(settled) ? "closed" : "open";
+}
+
 /** The one word a screen shows for a line's status (Lines, Lookup): OPEN or CLOSED, whatever word is stored. */
 export function lineStatusShown(status: string | null | undefined): "open" | "closed" {
   return lineReadsClosed(status) ? "closed" : "open";
