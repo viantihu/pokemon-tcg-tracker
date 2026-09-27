@@ -52,6 +52,9 @@ import {
   releaseSlotOps,
 } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
+import type { LineChoice } from "@/lib/line/popup";
+import { buildBackHalfLineOps } from "@/lib/line/write";
+import { isLineCard } from "./line-proposal";
 
 /**
  * `applyMove`'s exact wording (lib/line/write.ts) for the same refusals on this path (UIL-070 part 1).
@@ -64,6 +67,16 @@ const REFUSE = {
   slotGone: "That line slot no longer exists — reload the screen and pick again.",
   slotFilled: "That slot has already been filled — reload the screen and pick again.",
   catalogMissing: "That card's catalog entry is missing — reload and try again.",
+} as const;
+
+/**
+ * UIL-117: a card headed into a line waits for her OK in the line popup. Karvi: "The user must always authorize all
+ * moves." Exported so the screen and the tests agree on the wording.
+ */
+export const LINE_CHOICE = {
+  missing: "This card goes into a line. Open it and confirm its line first.",
+  holoNeedsHome: "Pick where the holo goes, then confirm.",
+  lineGone: "That line is no longer there. Reload the plan and pick again.",
 } as const;
 
 /**
@@ -133,6 +146,8 @@ export interface CommitInput {
    * draft id. `commitCardPlacement` has already checked each is one of that binder's collections.
    */
   collectionChoices?: Record<string, string>;
+  /** The audit text for an override that stands for a line-popup Keep (UIL-117), keyed by draft id. */
+  overrideReasons?: Record<string, string>;
 }
 
 export interface CommitCounts {
@@ -274,6 +289,12 @@ export async function commitCardPlacement(
      * override, which names its own destination.
      */
     collectionChoice?: string | null;
+    /**
+     * Her choice in the line popup (UIL-117), REQUIRED for a card whose placement is in a line or that could
+     * replace a card in one, unless she moved it instead (`override`). Start and join are written by the ONE line
+     * builder over fresh state; a replace's Keep writes no line at all.
+     */
+    lineChoice?: LineChoice | null;
   },
 ): Promise<CommitResult> {
   // UIL-070 part 1: the refusal `applyMove` makes, made here too. The panel disables Confirm for an
@@ -315,6 +336,44 @@ export async function commitCardPlacement(
   // Consent rides on the planned card, so `writeNewLine` never has to guess (UIL-061).
   const withConsent = planned.map((pl) => ({ ...pl, confirmedPulls: input.confirmedPulls ?? [] }));
 
+  /**
+   * UIL-117: EVERY card headed into a line waits for her OK; the cascade no longer starts, fills or swaps a line on
+   * its own. Her Move (`override`) is her OK too, and goes the way it always has (a card must always be movable).
+   *   - start / join / swap: the ONE line builder, over fresh state, then this card, then its decision;
+   *   - keep (the card already in the line stays): no line write. This card goes where she sent it (a kept holo
+   *     always names where, the Senior BA's ruling), else where the cascade already put an extra copy.
+   */
+  let override = input.override ?? null;
+  let overrideReason: string | null = null;
+  const lead = planned[0];
+  if (lead && isLineCard(lead.result) && !override) {
+    const choice = input.lineChoice;
+    if (!choice) throw new Error(LINE_CHOICE.missing);
+    if (choice.mode === "replace" && choice.keep) {
+      // Keep means "the card already in the line stays". Only a card that could replace one has that choice; sent
+      // for any other line card it would fall through to the cascade, which writes the line itself (TL review).
+      if (!lead.result.filledStage && !lead.result.swap) throw new Error(LINE_CHOICE.missing);
+      if (choice.incoming) {
+        if (!isMoveDestinationComplete(choice.incoming)) throw new Error(REFUSE.incomplete);
+        override = choice.incoming;
+        overrideReason =
+          "Kept the card already in the line (her call, UIL-117); this copy went where she sent it.";
+      } else if (lead.result.swap) {
+        throw new Error(LINE_CHOICE.holoNeedsHome);
+      } else {
+        // An extra copy for a filled stage: where the cascade already puts one, the front half. Nothing else is a
+        // Keep, so nothing here may fall through to the cascade.
+        const t = lead.result.target;
+        if (t.kind !== "front-half") throw new Error(LINE_CHOICE.missing);
+        override = { kind: "shelf", binderId: t.binderId ?? "", half: "front", band: t.band };
+        overrideReason =
+          "Kept the card already in the line (her call, UIL-117); this copy goes to the front half, as an extra copy does.";
+      }
+    } else {
+      return commitLineChoice(db, pc, lead, copy, choice);
+    }
+  }
+
   // A colour mismatch (UIL-069) is never a silent default. "File by its own colour" arrives as
   // `override` below and is drift-proof by construction; nothing further to check. "Join the line"
   // has no override to carry — it IS the cascade's own placement — so it is refused unless she
@@ -324,7 +383,7 @@ export async function commitCardPlacement(
   // is the exact silent default this whole check exists to prevent.
   if (
     planned[0]?.result.bandMismatch &&
-    !input.override &&
+    !override &&
     (input.bandChoice !== "line" || !input.expectedDigest)
   ) {
     throw new Error(
@@ -334,7 +393,7 @@ export async function commitCardPlacement(
 
   // UIL-053: in a binder that holds collections, the card joins the one she picked, never none.
   const pick = planned[0]?.result.collectionPick;
-  if (pick && !input.override) {
+  if (pick && !override) {
     if (!input.collectionChoice) throw new Error(COLLECTION_PICK.missing);
     if (!pick.collections.some((c) => c.id === input.collectionChoice)) {
       throw new Error(COLLECTION_PICK.notHere);
@@ -342,7 +401,7 @@ export async function commitCardPlacement(
   }
 
   // Compare BEFORE building the payload, so a conflict costs nothing and writes nothing.
-  if (input.expectedDigest && !input.override && planned[0]) {
+  if (input.expectedDigest && !override && planned[0]) {
     const actual = placementDigest(planned[0].result);
     if (actual !== input.expectedDigest) {
       throw new PlacementChangedError(
@@ -355,12 +414,100 @@ export async function commitCardPlacement(
 
   const { payload, counts } = buildHaulCommitPayload(pc, withConsent, {
     draft,
-    overrides: input.override ? { [input.card.id]: input.override } : undefined,
+    overrides: override ? { [input.card.id]: override } : undefined,
+    overrideReasons: overrideReason ? { [input.card.id]: overrideReason } : undefined,
     collectionChoices:
-      pick && !input.override && input.collectionChoice
+      pick && !override && input.collectionChoice
         ? { [input.card.id]: input.collectionChoice }
         : undefined,
   });
+  assertPlacementBandsConfigured(payload, pc);
+  await applyWriteOps(db, payload);
+  return { counts };
+}
+
+/** How her line-popup choice is named in the decision history (UIL-117). */
+const LINE_DECISION = {
+  start: {
+    decision: "line-start",
+    reason: "Started this line (her call in the line popup, UIL-117).",
+  },
+  join: {
+    decision: "line-join",
+    reason: "Added to this line (her call in the line popup, UIL-117).",
+  },
+  replace: {
+    decision: "line-replace",
+    reason:
+      "Swapped into this line; the card it replaced went where she sent it (her call in the line popup, UIL-117).",
+  },
+} as const;
+
+/**
+ * Her line-popup choice for one card (UIL-117): start a line, join one, or swap a card in one. The ONE line builder
+ * writes the line side from fresh state (`buildBackHalfLineOps`, which checks the choice against its line, or a
+ * start against where the card is going); this card then goes into the slot it names, in the LINE's binder and band,
+ * and its decision records her call. One `apply_write_ops` call; 0028's slot check runs on all of it.
+ */
+async function commitLineChoice(
+  db: DbClient,
+  pc: PlanContext,
+  p: PlannedCard,
+  copy: Row<"copy">,
+  choice: Exclude<LineChoice, { mode: "replace"; keep: true }>,
+): Promise<CommitResult> {
+  let dest: Extract<MoveDestination, { kind: "shelf" }>;
+  if (choice.mode === "start") {
+    dest = { kind: "shelf", binderId: choice.binderId, half: "back", band: choice.band };
+  } else {
+    const line = pc.ctx.lines.find((l) => l.id === choice.lineId);
+    if (!line) throw new Error(LINE_CHOICE.lineGone);
+    dest = { kind: "shelf", binderId: line.binderId ?? "", half: "back", band: line.colorBand };
+  }
+  const built = await buildBackHalfLineOps(db, copy, dest, choice);
+  const ops: WriteOp[] = [...built.ops];
+  const counts: CommitCounts = {
+    routed: 0,
+    lines: ops.filter((o) => o.op === "insert_line").length,
+    slots: ops.filter((o) => o.op === "insert_slot").length,
+    wishlist: ops.filter((o) => o.op === "insert_wishlist").length,
+    decisions: 0,
+  };
+  // After the line side, so the slot this card points at already exists (a start inserts it).
+  const copyId = emitIncomingCopy(
+    ops,
+    p,
+    {
+      role: "shelved",
+      binderId: dest.binderId,
+      binderHalf: "back",
+      colorBand: dest.band,
+      lineSlotId: built.slotId,
+    },
+    counts,
+  );
+  const started = ops.find((o) => o.op === "insert_line");
+  // UIL-069's honest audit, kept: a card joined to a line of another colour says she chose the line over its own.
+  const named =
+    choice.mode === "join" && p.result.bandMismatch
+      ? {
+          decision: "colour-mismatch-join-line",
+          reason:
+            "Colour mismatch resolved at intake (her call, UIL-069): joined the existing line over filing by its own colour.",
+        }
+      : LINE_DECISION[choice.mode];
+  ops.push({
+    op: "insert_decision",
+    haul_id: null,
+    copy_id: copyId,
+    ...named,
+    resolved_by: "user",
+    line_id:
+      choice.mode === "start" ? (started?.op === "insert_line" ? started.id : null) : choice.lineId,
+    line_slot_id: built.slotId,
+  });
+  counts.decisions += 1;
+  const payload: WritePayload = { ops };
   assertPlacementBandsConfigured(payload, pc);
   await applyWriteOps(db, payload);
   return { counts };
@@ -455,10 +602,12 @@ export function buildHaulCommitPayload(
     if (override) {
       // Manual placement wins: place the copy where she said, skip all cascade side effects.
       const copyId = writeOverriddenCard(ops, p, override, pc, slotsByLine, passLines, counts);
-      const reason = mismatch
-        ? "Colour mismatch resolved at intake (her call, UIL-069): filed by its own colour rather " +
-          "than joining the existing line."
-        : `Manual placement override at intake (your call, cascade skipped): ${p.result.reason}`;
+      const reason =
+        input.overrideReasons?.[p.incomingId] ??
+        (mismatch
+          ? "Colour mismatch resolved at intake (her call, UIL-069): filed by its own colour rather " +
+            "than joining the existing line."
+          : `Manual placement override at intake (your call, cascade skipped): ${p.result.reason}`);
       ops.push({
         op: "insert_decision",
         haul_id: null,

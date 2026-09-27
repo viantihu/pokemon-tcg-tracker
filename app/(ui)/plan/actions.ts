@@ -28,6 +28,7 @@ import {
   type PlanItem,
   type ProposedPull,
 } from "@/lib/plan";
+import type { LineChoice } from "@/lib/line/popup";
 import { loadMoveOptions, type MoveOptions } from "@/lib/line";
 import type { LineJoinOptions } from "@/lib/line/join-options";
 import type { MoveDestination } from "@/lib/line/types";
@@ -190,6 +191,8 @@ export async function shelveCardAction(input: {
   bandChoice?: "line" | "own-color" | null;
   /** The collection she picked for a specialty card whose binder holds collections (UIL-053). */
   collectionChoice?: string | null;
+  /** Her choice in the line popup, for a card headed into a line (UIL-117). */
+  lineChoice?: LineChoice | null;
 }): Promise<
   | { ok: true; counts: CommitCounts; stamp: string }
   /**
@@ -214,6 +217,7 @@ export async function shelveCardAction(input: {
       confirmedPulls: input.confirmedPulls ?? [],
       bandChoice: input.bandChoice ?? null,
       collectionChoice: input.collectionChoice ?? null,
+      lineChoice: input.lineChoice ?? null,
     });
     const stamp = await loadPlanFingerprint(db, input.pendingCopyIds ?? []);
     return { ok: true, counts: res.counts, stamp };

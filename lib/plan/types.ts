@@ -9,6 +9,7 @@
  * These types are I/O-free and shared between the server actions, the client screen, and the tests.
  */
 
+import type { LineProposal } from "@/lib/line/popup";
 import type { CascadeResult, Variant } from "@/lib/engine";
 
 /**
@@ -54,6 +55,11 @@ export interface PlanItem {
    * Absent on a plan parked before UIL-053; the server asks for the pick either way.
    */
   collectionPick?: { binderId: string; collections: { id: string; name: string }[] } | null;
+  /**
+   * UIL-117: what the plan proposes for a card headed into a back half; its `kind` is the row badge (start green,
+   * add yellow, replace pink). Null for every card with no line. Absent on a plan parked before UIL-117.
+   */
+  lineProposal?: LineProposal | null;
 }
 
 /** A planned card paired with its full cascade result — the commit input (not sent to the client). */

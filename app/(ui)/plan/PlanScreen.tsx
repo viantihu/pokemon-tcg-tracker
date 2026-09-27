@@ -59,6 +59,7 @@ import {
   mergeReroute,
   type MovedCard,
 } from "./reroute";
+import { defaultChoiceFor, type LineChoice } from "@/lib/line/popup";
 
 /* ------------------------- resuming a plan in progress (UIL-006) ------------------------- */
 
@@ -143,6 +144,33 @@ interface ParkedRun {
   stampMatches: boolean;
 }
 
+/** A parked plan from before UIL-117: a back-half card on it carries no line proposal. */
+function predatesLineProposals(plan: RunPlanResult | null | undefined): boolean {
+  if (!plan) return false;
+  return plan.groups.some((g) =>
+    g.subgroups.some((s) =>
+      s.rows.some(
+        (r) =>
+          (r.action === "FILL" || r.action === "NEWLINE" || r.action === "SWAP") &&
+          !("lineProposal" in r),
+      ),
+    ),
+  );
+}
+
+/**
+ * 4a's bridge (UIL-117): her Done on a line card read as her line choice from the spotlight's own controls, until
+ * the line popup (the next commit) replaces them. The pulls she ticked become a start's pulls; everything else is
+ * what the plan proposes (a join; Keep for an extra copy; Swap for a holo, the old bulk rule for the normal).
+ * An override carries its own destination, so it needs none.
+ */
+export function lineChoiceFromSpotlight(item: PlanItem, pulls: string[]): LineChoice | null {
+  const p = item.lineProposal;
+  if (!p) return null;
+  const choice = defaultChoiceFor(p);
+  return choice.mode === "start" ? { ...choice, pulls } : choice;
+}
+
 function readResume(stamp: string): ParkedRun | null {
   if (typeof window === "undefined") return null;
   try {
@@ -155,7 +183,12 @@ function readResume(stamp: string): ParkedRun | null {
       window.sessionStorage.removeItem(RESUME_KEY);
       return null;
     }
-    return { state: parsed, stampMatches: parsed.stamp === stamp };
+    // A plan parked before UIL-117 has back-half cards with no line proposal, so it cannot ask her about them:
+    // route it again (the Senior BA's ruling: once, on deploy; nothing she shelved is lost, it is written).
+    return {
+      state: parsed,
+      stampMatches: parsed.stamp === stamp && !predatesLineProposals(parsed.plan),
+    };
   } catch {
     // Corrupt entry, quota error, or storage disabled — never break the screen over a cache.
     return null;
@@ -743,6 +776,13 @@ export function PlanScreen({
             // Only her pick FOR THIS CARD's current derivation, same rule as confirmedPulls (UIL-069).
             bandChoice:
               fresh?.id === item.incomingId ? (bandChoice[item.incomingId] ?? null) : null,
+            // Her line choice for a card headed into a line (UIL-117), read off the spotlight's controls.
+            lineChoice: overrides[item.incomingId]
+              ? null
+              : lineChoiceFromSpotlight(
+                  (fresh?.id === item.incomingId && fresh.item) || item,
+                  fresh?.id === item.incomingId ? (confirmedPulls[item.incomingId] ?? []) : [],
+                ),
             // Her collection for a specialty card (UIL-053). An override names its own destination.
             collectionChoice: overrides[item.incomingId]
               ? null
@@ -919,11 +959,14 @@ export function PlanScreen({
    * cannot show one card's pocket on another card.
    */
   const spotlightId = flatItems[cur]?.incomingId ?? null;
+  const spotIsLineCard = !!flatItems[cur]?.lineProposal;
   useEffect(() => {
     // No setState on this path, deliberately: a stale entry is IGNORED at the point of use (it is
     // keyed by draft id and every reader checks the key), so clearing it here would be a cascading
     // render for no observable difference.
-    if (!spotlightId || done.size === 0 || overrides[spotlightId]) return;
+    // A line card is re-derived from the very first card (UIL-117): its pulls and colour question live on the
+    // fresh derivation, and before this the first card of a sitting was shelved with neither on screen.
+    if (!spotlightId || (done.size === 0 && !spotIsLineCard) || overrides[spotlightId]) return;
     const entry = draft.find((d) => d.id === spotlightId);
     if (!entry) return;
     let live = true;
@@ -966,7 +1009,7 @@ export function PlanScreen({
     // `done` in full rather than `done.size`: its identity changes on every shelve, and re-deriving
     // then is exactly right — a card was just written, which is the event that can move this card's
     // pocket. The guard above still skips the whole thing before the first Done.
-  }, [spotlightId, done, draft, overrides]);
+  }, [spotlightId, spotIsLineCard, done, draft, overrides]);
 
   /** Fold / unfold one band (UIL-018). Same shape as `toggleDone` — a set of keys, not a flag map. */
   function toggleCollapse(bandKey: string) {
@@ -1634,10 +1677,10 @@ function PlanView(props: {
               flatIndex={flatIndex}
               done={done}
               onSelect={setCur}
-              // UIL-053: a card that joins a collection is shelved from the spotlight, where she can see
-              // which collection; its row box brings it there instead of shelving it unseen.
+              // UIL-053 / UIL-117: a card that joins a collection, or goes into a line, is shelved from the
+              // spotlight, where she can see which; its row box brings it there instead of shelving it unseen.
               onShelve={(it) =>
-                it.collectionPick && !overrides[it.incomingId]
+                (it.collectionPick || it.lineProposal) && !overrides[it.incomingId]
                   ? setCur(flatIndex.get(it.incomingId) ?? cur)
                   : void shelveCard(it)
               }
@@ -1712,7 +1755,7 @@ function PlanView(props: {
               }}
               refreshing={
                 !!flatItems[cur] &&
-                doneCount > 0 &&
+                (doneCount > 0 || !!flatItems[cur].lineProposal) &&
                 !overrides[flatItems[cur].incomingId] &&
                 fresh?.id !== flatItems[cur].incomingId
               }

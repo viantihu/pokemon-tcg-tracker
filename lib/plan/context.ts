@@ -240,7 +240,18 @@ export async function loadPlanContext(
     copyRowById,
     slotRowsByLine: slotsByLine,
     orderedBandKeys,
-    lookups: { binderNameById, bandDisplayByKey, collectionNameById, imageUrlByTcgdexId },
+    lookups: {
+      binderNameById,
+      bandDisplayByKey,
+      collectionNameById,
+      imageUrlByTcgdexId,
+      lines: {
+        slotIdAt: (lineId, stageIndex) =>
+          slotsByLine.get(lineId)?.find((s) => s.stage_index === stageIndex)?.id ?? null,
+        lineOfSlot: (slotId) =>
+          [...slotsByLine.values()].flat().find((s) => s.id === slotId)?.line_id ?? null,
+      },
+    },
   };
 }
 

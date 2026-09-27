@@ -40,6 +40,7 @@ import {
 import { applyMove } from "@/lib/line";
 import { executeUndo } from "@/lib/sync";
 import type { MoveDestination } from "@/lib/line/types";
+import { defaultChoiceFor, type LineChoice } from "@/lib/line/popup";
 import {
   applyOps,
   asOwner,
@@ -51,6 +52,21 @@ import {
   seedHaulRows,
 } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
+
+/**
+ * UIL-117: her choice in the line popup for the Toedscruel line this haul card starts, with the pulls she ticked.
+ * Built from the plan's own proposal, the way the screen opens the popup, so it names the binder and band the
+ * cascade chose. Pulls are never ticked for her; each one here is a pull she ticked.
+ */
+async function startChoice(pulls: string[]): Promise<LineChoice> {
+  const spot = await deriveSpotlightPlacement(pgliteClient(db), TOEDSCRUEL);
+  const proposal = spot?.item.lineProposal;
+  if (proposal?.kind !== "start")
+    throw new Error(`expected a start proposal, got ${proposal?.kind}`);
+  const choice = defaultChoiceFor(proposal);
+  if (choice.mode !== "start") throw new Error("expected a start choice");
+  return { ...choice, pulls };
+}
 
 const KB1 = "b0000000-0000-0000-0000-00000000e801";
 const ROOT_DEX = 9481; // Toedscool, the Basic
@@ -165,7 +181,7 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
       card: TOEDSCRUEL,
-      confirmedPulls: [BULK_COOL], // she ticked it
+      lineChoice: await startChoice([BULK_COOL]), // she ticked it
     });
     await asSuperuser(db);
 
@@ -183,7 +199,7 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
       card: TOEDSCRUEL,
-      confirmedPulls: [BULK_COOL],
+      lineChoice: await startChoice([BULK_COOL]),
     });
     await asSuperuser(db);
     const rootSlot = (await slots()).find((s) => s.stage_index === 0)!;
@@ -197,7 +213,10 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
   it("a DECLINED pull still leaves a placeholder and touches nothing (UIL-061, unchanged)", async () => {
     await seedBulkCool();
     await asOwner(db);
-    await commitCardPlacement(pgliteClient(db), { card: TOEDSCRUEL });
+    await commitCardPlacement(pgliteClient(db), {
+      card: TOEDSCRUEL,
+      lineChoice: await startChoice([]),
+    });
     await asSuperuser(db);
     const rootSlot = (await slots()).find((s) => s.stage_index === 0)!;
     expect(rootSlot.state).toBe("placeholder");
@@ -211,7 +230,7 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
       card: TOEDSCRUEL,
-      confirmedPulls: [FRONT_COOL],
+      lineChoice: await startChoice([FRONT_COOL]),
     });
     await asSuperuser(db);
     expect(await copyRow(FRONT_COOL)).toMatchObject({ role: "shelved", binder_half: "back" });
@@ -222,14 +241,16 @@ describe("UIL-087 · V1: pulling a card that is not shelved", () => {
   it("a BLOCK copy is never proposed at all: shelving it would orphan its binder_block row", async () => {
     await seedBlockCool();
     await asOwner(db);
-    await commitCardPlacement(pgliteClient(db), {
-      card: TOEDSCRUEL,
-      // Even if a stale client ticks it, the engine never named this stage as filled by it.
-      confirmedPulls: [BLOCK_COOL],
-    });
+    // Even if a stale client ticks it, the engine never named this stage as filled by it. Since UIL-117 the one
+    // line builder REFUSES the tick outright (it used to be ignored), so nothing at all is written.
+    await expect(
+      commitCardPlacement(pgliteClient(db), {
+        card: TOEDSCRUEL,
+        lineChoice: await startChoice([BLOCK_COOL]),
+      }),
+    ).rejects.toThrow(/no longer one this line can take/);
     await asSuperuser(db);
-    const rootSlot = (await slots()).find((s) => s.stage_index === 0)!;
-    expect(rootSlot.state).toBe("placeholder");
+    expect(await slots()).toEqual([]); // no line was started
     expect(await copyRow(BLOCK_COOL)).toMatchObject({ role: "block" });
     // And its block row still names it — nothing was orphaned.
     const blocks = await db.query<{ copy_id: string | null }>(
@@ -248,7 +269,7 @@ describe("UIL-087 · V2: deleting a copy that fills a slot", () => {
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
       card: TOEDSCRUEL,
-      confirmedPulls: [BULK_COOL],
+      lineChoice: await startChoice([BULK_COOL]),
     });
     await asSuperuser(db);
     return (await copyRow(BULK_COOL)).line_slot_id as string;
@@ -346,7 +367,7 @@ describe("UIL-087 · V2 through its real path: undoing a sync that created a now
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
       card: TOEDSCRUEL,
-      confirmedPulls: [BULK_COOL],
+      lineChoice: await startChoice([BULK_COOL]),
     });
     await asSuperuser(db);
     const slotId = (await copyRow(BULK_COOL)).line_slot_id as string;
@@ -409,7 +430,7 @@ describe("UIL-087 · her remedy: moving the card puts the record right", () => {
     await asOwner(db);
     await commitCardPlacement(pgliteClient(db), {
       card: TOEDSCRUEL,
-      confirmedPulls: [BULK_COOL],
+      lineChoice: await startChoice([BULK_COOL]),
     });
     await asSuperuser(db);
     const slotId = (await copyRow(BULK_COOL)).line_slot_id as string;
@@ -486,12 +507,15 @@ describe("UIL-088 · an in-haul copy is the queue, not a pull", () => {
     await asSuperuser(db);
     expect(placement!.proposedPulls).toEqual([]);
 
-    // Even ticked by a stale client, nothing moves: the engine never claimed that stage was filled.
+    // Even ticked by a stale client, nothing moves: the engine never claimed that stage was filled. Since UIL-117
+    // the one line builder refuses the tick outright, so nothing at all is written.
     await asOwner(db);
-    await commitCardPlacement(pgliteClient(db), {
-      card: TOEDSCRUEL,
-      confirmedPulls: [BULK_COOL],
-    });
+    await expect(
+      commitCardPlacement(pgliteClient(db), {
+        card: TOEDSCRUEL,
+        lineChoice: await startChoice([BULK_COOL]),
+      }),
+    ).rejects.toThrow(/no longer one this line can take/);
     await asSuperuser(db);
     expect(await copyRow(BULK_COOL)).toMatchObject({ role: "haul", line_slot_id: null });
     expect(await violations()).toEqual([]);
