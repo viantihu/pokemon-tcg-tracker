@@ -505,6 +505,11 @@ function Stage({
   );
 }
 
+/** "from this haul" rather than "from Still in the haul" (a Haul Plan card, UX review of #391). */
+function fromWhere(where: string): string {
+  return where === "Still in the haul" ? "this haul" : where;
+}
+
 /** "What moves" for a replace: the swap as three physical steps, or the Keep as nothing in the line moving. */
 function ReplaceMoves({
   replace,
@@ -549,7 +554,7 @@ function ReplaceMoves({
             <span>
               {incoming.card.name} {no(incoming)}{" "}
               <span className="lp-where">
-                from {incoming.where} → {destinationLabel(value.incoming, moveOptions)}
+                from {fromWhere(incoming.where)} → {destinationLabel(value.incoming, moveOptions)}
               </span>
             </span>
           </div>
@@ -583,7 +588,7 @@ function ReplaceMoves({
         <span>
           {incoming.card.name} {no(incoming)}{" "}
           <span className="lp-where">
-            from {incoming.where} → {where}, into its spot
+            from {fromWhere(incoming.where)} → {where}, into its spot
           </span>
         </span>
       </div>

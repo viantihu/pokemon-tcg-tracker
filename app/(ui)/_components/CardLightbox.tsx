@@ -15,7 +15,8 @@
  * (lib/catalog/tcgdex.ts); the thumbnail already fetched `low`, this is the same card at `high`.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useEscapeLayer } from "./escape-layer";
 
 /** The lightbox caption from what a site knows: "Set · 027/197", either half alone, or null. */
 export function cardCaption(
@@ -63,13 +64,9 @@ export function CardLightbox({
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (lightboxClosesOnKey(e.key)) onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Escape closes the enlarged card and nothing under it (UX review of #391): it opens last, so it is the top
+  // layer over a line popup, a Move sheet or a replace (escape-layer.ts). The layer leaves with the component.
+  useEscapeLayer(true, onClose);
 
   return (
     <div

@@ -201,6 +201,35 @@ describe("UIL-117 PR 3 · Lines: replace the card in a filled slot", () => {
     expect(screen.getByRole("dialog", { name: "A copy for a filled slot" })).toBeTruthy();
   });
 
+  it("Escape on an enlarged card closes the card only; the replace and her Swap stay (UX review of #391)", async () => {
+    const art = "https://assets.tcgdex.net/en/sv09/190";
+    lineModelAction.mockResolvedValue({
+      ok: true,
+      model: {
+        ...MODEL,
+        replace: {
+          ...MODEL.replace!,
+          incoming: {
+            ...MODEL.replace!.incoming,
+            card: { ...card("sv09-190", "190"), imageUrl: art },
+          },
+        },
+      },
+    });
+    const user = await openReplace();
+    await user.click(await screen.findByRole("button", { name: /Toedscruel.*190\/159/ }));
+    await screen.findByRole("dialog", { name: "A copy for a filled slot" });
+    await user.click(screen.getByRole("radio", { name: /Swap in/ }));
+    await user.click(screen.getAllByRole("button", { name: "Enlarge Toedscruel" })[0]);
+    await screen.findByRole("dialog", { name: "Toedscruel, enlarged" });
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Toedscruel, enlarged" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "A copy for a filled slot" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Swap in/ }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+  });
+
   it("no other copy outside a line: it says so, and offers nothing to pick", async () => {
     replaceCandidatesAction.mockResolvedValue({
       ok: true,
