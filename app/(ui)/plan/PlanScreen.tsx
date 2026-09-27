@@ -1084,7 +1084,7 @@ export function PlanScreen({
     item: PlanItem,
     extra: { lineChoice?: LineChoice; override?: MoveDestination },
     /**
-     * `lineName`: the line's name as the popup shows it (its top stage), for the "Line complete" toast. `stepOn` false:
+     * `lineName`: the line's name as the popup shows it (its top stage), for the "Line closed" toast. `stepOn` false:
      * the swap on a plain extra copy (UIL-126), never in the step-through, so nothing opens after it and no stop needs
      * explaining.
      */
@@ -1104,7 +1104,7 @@ export function PlanScreen({
     const next = shelved.lineDone ? undefined : nextLineCard(item.incomingId);
     // The one time a confirm does not lead on, say why, so the popup closing reads as a finish (UX review of #402).
     if (shelved.lineDone) {
-      flashToast(opts.lineName ? `Line complete · ${opts.lineName} line` : "Line complete");
+      flashToast(opts.lineName ? `Line closed · ${opts.lineName} line` : "Line closed");
     }
     if (next) openLinePopup(next);
     else {

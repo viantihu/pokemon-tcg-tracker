@@ -107,8 +107,9 @@ async function statusOf(lineId: string) {
  */
 async function seedLine(opts: {
   stage1: "open" | "cml";
-  stage2?: "open";
-  status?: "open" | "complete" | "capped";
+  /** A Charizard stage, still to fill (`open`), or one she left EMPTY (UIL-121: a stage she declined). */
+  stage2?: "open" | "empty";
+  status?: "open" | "closed" | "complete" | "capped";
 }) {
   const status = opts.status ?? (opts.stage1 === "cml" && !opts.stage2 ? "complete" : "open");
   await db.exec(`
@@ -124,7 +125,9 @@ async function seedLine(opts: {
   if (opts.stage2) {
     await db.exec(`
       insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id, target_catalog_card_id)
-        values ('${S2}', '${OWNER}', '${LINE}', 2, 'Stage2', 'placeholder', null, '${CHARIZARD_BASE1_4.tcgdexId}');
+        values ('${S2}', '${OWNER}', '${LINE}', 2, 'Stage2', 'placeholder', null,
+                ${opts.stage2 === "empty" ? "null" : `'${CHARIZARD_BASE1_4.tcgdexId}'`});
+      ${opts.stage2 === "empty" ? `update line_slot set stage_choice = 'empty' where id = '${S2}';` : ""}
     `);
   }
   if (opts.stage1 === "cml") {
@@ -137,12 +140,70 @@ async function seedLine(opts: {
   }
 }
 
-describe("lineDoneFor, the one rule", () => {
+describe("lineDoneFor, the one rule: the line reads closed, OR no slot waits (the Senior BA's ruling)", () => {
   it("done when no slot is a placeholder: filled and block slots both count", () => {
     expect(lineDoneFor(["filled", "filled"])).toBe(true);
     expect(lineDoneFor(["block", "filled", "filled"])).toBe(true);
     expect(lineDoneFor(["filled", "placeholder"])).toBe(false);
     expect(lineDoneFor([])).toBe(false);
+  });
+
+  it("done when the status reads CLOSED, whatever the slots say (a line she declined: UIL-121)", () => {
+    expect(lineDoneFor(["filled", "placeholder"], "closed")).toBe(true);
+    // Pre-0030 words for closed still count; 'capped' reads open.
+    expect(lineDoneFor(["filled", "placeholder"], "complete")).toBe(true);
+    expect(lineDoneFor(["filled", "placeholder"], "capped")).toBe(false);
+    expect(lineDoneFor(["filled", "placeholder"], "open")).toBe(false);
+    // …and a stale status never holds a full line open.
+    expect(lineDoneFor(["filled", "filled"], "open")).toBe(true);
+  });
+});
+
+describe("UIL-120 after UIL-121 · the five states (the Senior BA's ruling; each through a real Keep)", () => {
+  // A Keep of an upgrade writes no line: the popup's answer is the line as it already is, read after the write.
+  const keep = () =>
+    commit({
+      card: CML_HOLO,
+      lineChoice: {
+        mode: "replace",
+        lineId: LINE,
+        slotId: S1,
+        keep: true,
+        incoming: { kind: "bulk" },
+      },
+    });
+  beforeEach(async () => {
+    await seedHaulRows(db, [CML_HOLO]);
+  });
+
+  it("(a) a CLOSED line stops", async () => {
+    await seedLine({ stage1: "cml", status: "closed" });
+    await asOwner(db);
+    expect((await keep()).lineDone).toBe(true);
+  });
+
+  it("(b) a line whose status is still open but every slot is filled stops (a stale status never holds it open)", async () => {
+    await seedLine({ stage1: "cml", status: "open" });
+    await asOwner(db);
+    expect((await keep()).lineDone).toBe(true);
+  });
+
+  it("(c) a capped line whose specialty stage is still a placeholder steps on", async () => {
+    await seedLine({ stage1: "cml", stage2: "open", status: "capped" });
+    await asOwner(db);
+    expect((await keep()).lineDone).toBe(false);
+  });
+
+  it("(d) an open line with a stage still undecided steps on", async () => {
+    await seedLine({ stage1: "cml", stage2: "open", status: "open" });
+    await asOwner(db);
+    expect((await keep()).lineDone).toBe(false);
+  });
+
+  it("(e) a line she declined (CLOSED, a stage left empty) stops, though a slot is still a placeholder", async () => {
+    await seedLine({ stage1: "cml", stage2: "empty", status: "closed" });
+    await asOwner(db);
+    expect((await keep()).lineDone).toBe(true);
   });
 });
 

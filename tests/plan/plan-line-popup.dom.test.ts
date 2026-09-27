@@ -509,7 +509,7 @@ describe("UIL-117 4b · the popup", () => {
     // PRE-FIX: "Line card 2 of 2" opened by itself.
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     // …and it says why, naming the line as the popup did (its top stage), so the close reads as a finish.
-    expect(await screen.findByText("Line complete · Charmeleon line")).toBeTruthy();
+    expect(await screen.findByText("Line closed · Charmeleon line")).toBeTruthy();
     expect(lineModelAction.mock.calls.map((c) => c[0])).toEqual(["id-Charmeleon"]);
     // She is still on the plan, and the next line card opens when SHE taps it.
     await user.click(screen.getByRole("button", { name: "◆ Adds to a line" }));
@@ -591,7 +591,7 @@ describe("UIL-117 4b · the popup", () => {
     expect(lineModelAction.mock.calls.map((c) => c[0])).toEqual(["id-Charmeleon"]);
   });
 
-  it("UIL-120: a line the popup cannot name still says it is complete", async () => {
+  it("UIL-120: a line the popup cannot name still says it is closed", async () => {
     shelveCardAction.mockResolvedValue({
       ok: true,
       counts: { routed: 1, lines: 0, slots: 0, decisions: 1, wishlist: 0 },
@@ -617,7 +617,7 @@ describe("UIL-117 4b · the popup", () => {
     await screen.findByRole("dialog", { name: "Add to a line" });
     await waitFor(() => expect(confirmIn().disabled).toBe(false));
     await user.click(confirmIn());
-    expect(await screen.findByText("Line complete")).toBeTruthy();
+    expect(await screen.findByText("Line closed")).toBeTruthy();
   });
 
   it("UIL-120: a confirm that leaves a stage open still opens the next one, as today", async () => {
@@ -637,7 +637,7 @@ describe("UIL-117 4b · the popup", () => {
     await user.click(confirmIn());
     await waitFor(() => expect(within(popup()).getByText(/Line card 2 of 2/)).toBeTruthy());
     expect(lineModelAction.mock.calls.at(-1)?.[0]).toBe("id-Kadabra");
-    expect(screen.queryByText(/Line complete/)).toBeNull();
+    expect(screen.queryByText(/Line closed/)).toBeNull();
   });
 
   it("the holo upgrade opens pre-set to Swap, the old copy to the bulk box", async () => {

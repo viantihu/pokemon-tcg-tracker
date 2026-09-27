@@ -35,6 +35,7 @@ import type { Locale } from "@/lib/sync/types";
 import { lineLocaleOf, effectiveType, isPlaced, type Role } from "@/lib/engine";
 import {
   applyWriteOps,
+  evolutionLineRepo,
   lineSlotRepo,
   type DbClient,
   type Row,
@@ -183,8 +184,14 @@ export interface CommitResult {
 
 /** The one rule (./line-done) over the line as it is now: read AFTER her confirm's write. */
 async function lineDoneAfterWrite(db: DbClient, lineId: string): Promise<boolean> {
-  const slots = await lineSlotRepo.listByLine(db, lineId);
-  return lineDoneFor(slots.map((s) => s.state));
+  const [slots, line] = await Promise.all([
+    lineSlotRepo.listByLine(db, lineId),
+    evolutionLineRepo.getByPk(db, lineId),
+  ]);
+  return lineDoneFor(
+    slots.map((s) => s.state),
+    line?.status,
+  );
 }
 
 /**
