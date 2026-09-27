@@ -9290,9 +9290,11 @@ entry is asking for the same shape — a named unit with a configurable capacity
 adding cards to bulk on Testing right now, so the conversion has to account for rows created after this
 entry was written, not just a point-in-time snapshot.
 
-**Related, reported context, not independently verified in this pass:** the Backfill filler ruling
-(bulk box first, then haul) and the "every copy comes from a Dex row" principle (UIL-098) — both named
-by the Senior BA as adjacent to this design, not re-derived here.
+**Related.** The Backfill filler ruling (bulk box first, then haul, each labelled) is the Senior BA's own
+ruling, 2026-09-27 — not Karvi's — extending her words "Choose a basic energy, choose a card from the
+bulk box, or leave empty. If a bulk box card is chosen, the user should specify which card." Shipped in
+PR #424 (merged `a24e63b`). The "every copy comes from a Dex row" principle (UIL-098) is named by the
+Senior BA as adjacent to this design, not re-derived here.
 
 **Cross-reference UIL-121** (the line work this is sequenced after) and **UIL-117** (C1-C2, the same
 sequencing dependency) and **UIL-098** (the Dex-only-creates-copies principle this design has to keep
