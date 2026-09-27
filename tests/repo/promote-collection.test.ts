@@ -653,7 +653,17 @@ describe("promote-collection: what 0033 made hers travels as hers (UIL-127b)", (
     expect(fire.rows).toEqual([{ band: "pink" }]);
   });
 
-  it("refuses loudly when the Production owner already changed her colours there (the Tech Lead's case)", async () => {
+  it("refuses loudly when the Production owner already changed her type map there (the Tech Lead's case)", async () => {
+    await target.query(
+      `insert into owner_type_band (owner_id, card_type, band) values ($1, 'Fire', 'orange')`,
+      [PROD_OWNER],
+    );
+    await expect(
+      promoteCollection({ source, target, ownerEmail: PROD_EMAIL, sourceOwner: TESTING_OWNER }),
+    ).rejects.toThrow(/owner_type_band: 1/);
+  });
+
+  it("refuses loudly when the Production owner already changed her rainbow order there (the Tech Lead's case)", async () => {
     await target.query(
       `insert into owner_band_order (owner_id, band, position) select $1, band, position from color_band`,
       [PROD_OWNER],

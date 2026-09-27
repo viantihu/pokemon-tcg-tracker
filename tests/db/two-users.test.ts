@@ -527,3 +527,34 @@ describe("UIL-127b · a binder a row names is its owner's (the Tech Lead's C2), 
     });
   });
 });
+
+describe("UIL-127b · a band or type added later reaches an account that already chose its colours (TL review of #426)", () => {
+  const order = async (owner: string) => {
+    await as(owner);
+    return (await colorBandRepo.listOrdered(pgliteClient(db))).map((b) => [b.band, b.position]);
+  };
+
+  it("a new global band follows hers, in the global order, and her order can then be saved whole", async () => {
+    await asSuperuser(db);
+    await db.exec(
+      `insert into color_band (band, display_name, position) values ('gold', 'Gold', 11)`,
+    );
+    const mine = await order(A);
+    expect(mine.at(-1)).toEqual(["gold", 11]);
+    expect(mine).toHaveLength(11);
+    await as(A);
+    const keys = mine.map(([band]) => band as string);
+    await applyWriteOps(pgliteClient(db), { ops: [{ op: "set_band_order", bands: keys }] });
+    expect(await order(A)).toEqual(mine);
+  });
+
+  it("a new global type reads its default band until she changes it", async () => {
+    await asSuperuser(db);
+    await db.exec(`insert into type_color_map (card_type, band) values ('Stellar', 'white')`);
+    await as(A);
+    const map = Object.fromEntries(
+      (await typeColorMapRepo.list(pgliteClient(db))).map((t) => [t.card_type, t.band]),
+    );
+    expect(map.Stellar).toBe("white");
+  });
+});

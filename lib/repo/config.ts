@@ -4,7 +4,8 @@
  * PER OWNER since 0033 (UIL-127b; Karvi: colour settings are per user). The band KEYS are global: `color_band.band`
  * is the one registry, and the FK target of every stored band, so no stored band changes meaning. What is hers is
  * the ORDER (`owner_band_order`) and the MAP (`owner_type_band`). An account that has never changed either reads the
- * global rows, the defaults every account starts from.
+ * global rows, the defaults every account starts from; anything the defaults hold that her rows do not (a band or a
+ * type a later migration adds) is filled in from them.
  *
  * THE ONE READ POINT. Every reader of band order or the type map goes through these two functions, which return the
  * same shapes as before (tests/repo/band-reads-one-place.test.ts scans for any other). Both read through the
@@ -26,21 +27,35 @@ export const colorBandRepo = {
     const own = mine.data ?? [];
     if (own.length === 0) return global;
     const byKey = new Map(global.map((b) => [b.band, b]));
-    return own.flatMap((o) => {
+    const hers = own.flatMap((o) => {
       const b = byKey.get(o.band);
       return b ? [{ band: o.band, display_name: b.display_name, position: o.position }] : [];
     });
+    // A band a later migration adds is not in her rows yet: it follows hers, in the global order, so it never
+    // vanishes from Settings or a band list (the Tech Lead's review of #426).
+    const seen = new Set(hers.map((b) => b.band));
+    const last = hers.reduce((m, b) => Math.max(m, b.position), 0);
+    const added = global
+      .filter((b) => !seen.has(b.band))
+      .map((b, i) => ({ ...b, position: last + i + 1 }));
+    return [...hers, ...added];
   },
 };
 
 export const typeColorMapRepo = {
-  /** HER type→band map: her own rows when she has any, else the global defaults. */
+  /**
+   * HER type→band map: the global defaults, with her own rows over them. A type a later migration adds to the
+   * defaults, which her rows do not have yet, reads its default instead of going unmapped.
+   */
   async list(db: DbClient): Promise<Row<"type_color_map">[]> {
-    const mine = await db.from("owner_type_band").select("card_type, band");
-    if (mine.error) throw mine.error;
-    if ((mine.data ?? []).length > 0) return mine.data ?? [];
-    const defaults = await db.from("type_color_map").select("card_type, band");
+    const [defaults, mine] = await Promise.all([
+      db.from("type_color_map").select("card_type, band"),
+      db.from("owner_type_band").select("card_type, band"),
+    ]);
     if (defaults.error) throw defaults.error;
-    return defaults.data ?? [];
+    if (mine.error) throw mine.error;
+    const merged = new Map((defaults.data ?? []).map((t) => [t.card_type, t.band]));
+    for (const t of mine.data ?? []) merged.set(t.card_type, t.band);
+    return [...merged].map(([card_type, band]) => ({ card_type, band }));
   },
 };
