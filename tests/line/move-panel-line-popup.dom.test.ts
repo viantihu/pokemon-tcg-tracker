@@ -175,6 +175,46 @@ describe("UIL-117 · BACK HALF opens the line popup", () => {
     expect(lineModel).toHaveBeenLastCalledWith({ kind: "add", lineId: "L1", slotId: "S2" });
   });
 
+  it("an Add reached through 'Add to that line' moves it into THAT line's binder and band, not the sheet's (QA U1)", async () => {
+    const elsewhere = {
+      lineId: "L9",
+      speciesLabel: "Charizard",
+      filledCount: 1,
+      totalCount: 3,
+      binderId: "b2",
+      bandKey: "green",
+      locale: "en" as const,
+      binderName: "KB-002",
+      bandDisplay: "Green",
+      joinSlotId: "S9",
+      sameHere: false,
+    };
+    const lineModel = vi.fn(async (p: LineProposal): Promise<LinePopupModel> =>
+      p.kind === "add"
+        ? {
+            ...model("add", "green"),
+            line: {
+              ...model("add", "green").line,
+              lineId: "L9",
+              binderId: "b2",
+              binderName: "KB-002",
+            },
+          }
+        : { ...model("start"), existingLines: [elsewhere] },
+    );
+    const { onConfirm, user } = mount({ lineModel });
+    await user.click(backHalf());
+    await screen.findByRole("dialog", { name: "Start a line" });
+    await user.click(screen.getByRole("button", { name: "Add to that line" }));
+    await screen.findByRole("dialog", { name: "Add to a line" });
+    await user.click(screen.getByRole("button", { name: /Add to line/ }));
+    // The sheet still says KB-001 · red; the line is in KB-002 · green, and that is where the card goes.
+    expect(onConfirm).toHaveBeenCalledWith(
+      { kind: "shelf", binderId: "b2", half: "back", band: "green" },
+      { mode: "join", lineId: "L9", slotId: "S9" },
+    );
+  });
+
   it("Escape closes the popup, not the Move sheet behind it; a second Escape closes the sheet", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();

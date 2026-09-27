@@ -58,6 +58,7 @@ const STATE = {
       owned: true,
       imageUrl: null,
       bandKey: "red",
+      copyIds: ["copy-minior"],
     },
     {
       tcgdexId: "sv03-026",
@@ -68,6 +69,7 @@ const STATE = {
       owned: false,
       imageUrl: null,
       bandKey: "red",
+      copyIds: [],
     },
   ],
 };
@@ -148,7 +150,8 @@ describe("UIL-043 · click Move → the shared move sheet, seeded on the collect
     await user.click(chip(/Bulk box/));
     expect(chip("Place it here ▶").disabled).toBe(false);
     await user.click(chip("Place it here ▶"));
-    expect(onMoveOwned).toHaveBeenCalledWith("sv04-099", { kind: "bulk" });
+    // No line choice: nothing is going into a back half (UIL-117).
+    expect(onMoveOwned).toHaveBeenCalledWith("sv04-099", { kind: "bulk" }, undefined);
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
     const next = onChange.mock.calls[0][0] as typeof STATE;
     expect(next.targets.map((t) => t.tcgdexId)).toEqual(["sv03-026"]);
@@ -160,11 +163,11 @@ describe("UIL-043 · click Move → the shared move sheet, seeded on the collect
     await user.click(button(/Move/));
     await user.click(chip(/Fossils/));
     await user.click(chip("Place it here ▶"));
-    expect(onMoveOwned).toHaveBeenCalledWith("sv04-099", {
-      kind: "collection",
-      binderId: "spec",
-      collectionId: "col-2",
-    });
+    expect(onMoveOwned).toHaveBeenCalledWith(
+      "sv04-099",
+      { kind: "collection", binderId: "spec", collectionId: "col-2" },
+      undefined,
+    );
   });
 
   it("a refused move keeps the sheet open and the row on the list", async () => {

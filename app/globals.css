@@ -3595,8 +3595,22 @@ button.subhead.folded:hover {
     position: sticky;
     bottom: 0;
     margin: 16px -16px -16px;
-    padding: 10px 16px;
+    padding: 8px 12px;
+    gap: 6px 8px;
     background: var(--panel);
     border-top: 3px solid var(--ink);
+  }
+  /* A full-width line above the buttons, so Cancel and Confirm share one row (UX nit on #385: ~140px bar). */
+  .lp-foot .lp-sum {
+    flex-basis: 100%;
+    min-width: 0;
+    font-size: 9px;
+  }
+  .lp-foot .btn {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .lp-foot .btn-primary {
+    margin-left: auto;
   }
 }
