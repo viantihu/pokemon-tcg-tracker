@@ -16,7 +16,7 @@ import { CollHub } from "@/app/(ui)/coll/CollHub";
 
 const DEST: MoveDestination = { kind: "shelf", binderId: "kb1", half: "back", band: "red" };
 const PROPOSAL: LineProposal = { kind: "start", binderId: "kb1", band: "red" };
-const CHOICE: LineChoice = { mode: "start", binderId: "kb1", band: "red", pulls: [] };
+const CHOICE: LineChoice = { mode: "start", binderId: "kb1", band: "red", pulls: [], stages: {} };
 
 vi.mock("next/navigation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/navigation")>()),

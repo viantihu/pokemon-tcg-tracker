@@ -135,6 +135,7 @@ export async function buildBackHalfLineOps(
   copy: Row<"copy">,
   destination: MoveDestination,
   choice: LineChoice,
+  opts: { undecidedOk?: boolean } = {},
 ): Promise<{ ops: WriteOp[]; slotId: string }> {
   if (choice.mode === "join") await assertJoinMatchesLine(db, choice.lineId, destination);
   if (choice.mode === "start") assertStartMatchesDestination(choice, destination);
@@ -158,7 +159,7 @@ export async function buildBackHalfLineOps(
     else assertStartMatchesDestination(next, choice.outgoing);
     state.outgoing = await loadLineWriteState(db, outgoing, next);
   }
-  const built = buildLineChoiceOps(state, copy.id, choice);
+  const built = buildLineChoiceOps(state, copy.id, choice, opts);
   return { ops: built.ops, slotId: built.slotId };
 }
 
@@ -167,7 +168,8 @@ function lineChoiceFromJoin(join: LineJoinChoice | null, dest: MoveDestination):
   if (!join || dest.kind !== "shelf") return null;
   return join.mode === "existing"
     ? { mode: "join", lineId: join.lineId, slotId: join.slotId }
-    : { mode: "start", binderId: dest.binderId, band: dest.band, pulls: [] };
+    : // UIL-121: no stage is decided for her; the builder writes this older request's other stages undecided.
+      { mode: "start", binderId: dest.binderId, band: dest.band, pulls: [], stages: {} };
 }
 
 /**
@@ -179,12 +181,13 @@ async function loadLineWriteState(
   copy: Row<"copy">,
   choice: LineChoice,
 ): Promise<LineWriteState> {
-  const [catalogRows, typeMapRows, copies, lines, slots] = await Promise.all([
+  const [catalogRows, typeMapRows, copies, lines, slots, blocks] = await Promise.all([
     catalogCardRepo.listAll(db),
     typeColorMapRepo.list(db),
     copyRepo.list(db),
     evolutionLineRepo.list(db),
     lineSlotRepo.list(db),
+    binderBlockRepo.list(db),
   ]);
   const catalog = catalogRows.map(toCatalogCard);
   const catalogById = new Map(catalog.map((c) => [c.tcgdexId, c]));
@@ -194,6 +197,10 @@ async function loadLineWriteState(
   for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
   const slotsByLine = new Map<string, Row<"line_slot">[]>();
   for (const sl of slots) slotsByLine.set(sl.line_id, [...(slotsByLine.get(sl.line_id) ?? []), sl]);
+  const blocksByLine = new Map<string, Row<"binder_block">[]>();
+  for (const b of blocks) {
+    if (b.line_id) blocksByLine.set(b.line_id, [...(blocksByLine.get(b.line_id) ?? []), b]);
+  }
   return {
     copy,
     incoming: { id: copy.id, card, variant: (copy.variant as Variant) ?? "normal" },
@@ -209,6 +216,7 @@ async function loadLineWriteState(
     copiesById: new Map(copies.map((c) => [c.id, c])),
     lines: new Map(lines.map((l) => [l.id, l])),
     slotsByLine,
+    blocksByLine,
   };
 }
 
@@ -258,7 +266,10 @@ export async function applyMove(
   if (req.destination.kind === "shelf" && req.destination.half === "back") {
     const choice = req.lineChoice ?? lineChoiceFromJoin(join, req.destination);
     if (choice) {
-      const built = await buildBackHalfLineOps(db, copy, req.destination, choice);
+      // An older `lineJoin` (no popup) carries no stage choices: its unfilled stages are written undecided.
+      const built = await buildBackHalfLineOps(db, copy, req.destination, choice, {
+        undecidedOk: !req.lineChoice,
+      });
       lineJoinOps = built.ops;
       resolvedLineSlotId = built.slotId;
     }

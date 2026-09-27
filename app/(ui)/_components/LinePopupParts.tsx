@@ -494,8 +494,24 @@ export function LineStageTile({
         {number ? <div className="lp-no">{number}</div> : null}
         {state === "incoming" ? <span className="lp-src lp-haul">{incomingLabel}</span> : null}
         {state === "here" ? <span className="lp-src lp-binder">Already here</span> : null}
-        {state === "wanted" ? <span className="lp-src lp-want">Wanted</span> : null}
-        {state === "blocked" ? <span className="lp-src lp-want">Blocked</span> : null}
+        {state === "wanted" ? (
+          <span className="lp-src lp-want">
+            {/* UIL-121: an existing line's open stage says what she chose for it; a new line's is "Wanted". */}
+            {stage.choice === "chase"
+              ? "Chasing"
+              : stage.choice === "empty"
+                ? "Left empty"
+                : stage.choice === "filler"
+                  ? "Filler"
+                  : stage.choice === null
+                    ? "Not decided"
+                    : "Wanted"}
+          </span>
+        ) : null}
+        {state === "blocked" ? (
+          <span className="lp-src lp-want">{stage.choice === "filler" ? "Filler" : "Blocked"}</span>
+        ) : null}
+        {state === "coming" ? <span className="lp-src lp-haul">In this haul</span> : null}
         {state === "pullable" && stage.pull ? (
           <>
             <span className="lp-src lp-binder">

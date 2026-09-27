@@ -123,6 +123,9 @@ function modelFor(name: string, proposal: LineProposal): LinePopupModel {
           state: "pullable",
           card: identity("Charmander"),
           pull: { copyId: "own-charmander", fromLabel: "KB-001 · Front · Red" },
+          // UIL-121: left unticked, the stage is hers to decide, with this printing suggested (never chosen).
+          dexId: 4,
+          suggestion: { card: identity("Charmander"), special: false },
         },
         { stageIndex: 1, stage: "Stage1", state: "incoming", card: me },
       ],
@@ -450,7 +453,13 @@ describe("UIL-117 4b · the popup", () => {
     await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
     expect(shelveCardAction.mock.calls[0][0]).toMatchObject({
       card: { id: "id-Charmeleon" },
-      lineChoice: { mode: "start", binderId: "kb1", band: "red", pulls: ["own-charmander"] },
+      lineChoice: {
+        mode: "start",
+        binderId: "kb1",
+        band: "red",
+        pulls: ["own-charmander"],
+        stages: {},
+      },
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
@@ -527,8 +536,9 @@ describe("UIL-117 4b · the popup", () => {
     ]);
     await user.click(screen.getAllByRole("button", { name: "＋ Starts a line" })[0]);
     await screen.findByRole("dialog", { name: "Start a line" });
+    // The Basic stays in her front half unless she ticks it; she chases it, so the line still has it to chase.
+    await user.click(within(popup()).getByRole("button", { name: "Chase this" }));
     await waitFor(() => expect(confirmIn().disabled).toBe(false));
-    // The Basic stays in her front half unless she ticks it, so the line would still have that stage to chase.
     expect(confirmIn().textContent).toContain("· next ▶");
     await user.click(within(popup()).getByRole("checkbox"));
     expect(confirmIn().textContent).not.toContain("next");
@@ -700,6 +710,8 @@ describe("UIL-117 4b · the popup", () => {
       "own-normal",
       expect.objectContaining({ kind: "start" }),
     );
+    // UIL-121: the new line's unticked Basic is hers to decide; she leaves it empty.
+    await user.click(within(start).getByRole("button", { name: "Leave empty" }));
     await user.click(within(start).getByRole("button", { name: /Start line/ }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Start a line" })).toBeNull());
     const swap = within(screen.getByRole("dialog", { name: "A copy for a filled slot" }))
@@ -827,6 +839,7 @@ describe("UIL-117 4b · the popup", () => {
     ]);
     await user.click(screen.getAllByRole("button", { name: "＋ Starts a line" })[0]);
     await screen.findByRole("dialog", { name: "Start a line" });
+    await user.click(within(popup()).getByRole("button", { name: "Leave empty" })); // UIL-121: her choice
     await waitFor(() => expect(confirmIn().disabled).toBe(false));
     await user.click(confirmIn());
     await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));

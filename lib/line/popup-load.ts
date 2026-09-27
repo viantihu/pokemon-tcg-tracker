@@ -44,11 +44,20 @@ import {
   type LineProposal,
 } from "./popup";
 import type { CardIdentity } from "./types";
+import { LINE_ROW_POCKETS } from "./popup";
+import { stageOptionsFrom, stageSuggestion } from "./stage-options";
+import { printingFromRow } from "./stage-options-load";
 
 export async function loadLinePopupModel(
   db: DbClient,
   copyId: string,
   proposal: LineProposal,
+  /**
+   * UIL-121: the haul copies the SCREEN routes to this same line (the Haul Plan's proposals: an add to this line, or a
+   * start of the same new line). Only those count as "coming" (the Senior BA: species and language cannot say which
+   * line a card is for). Absent: nothing is coming, so every open stage is asked.
+   */
+  opts: { comingCopyIds?: readonly string[] } = {},
 ): Promise<LinePopupModel> {
   const [copy, catalogRows, typeMapRows, copies, lines, slots, binders, bands] = await Promise.all([
     copyRepo.getByPk(db, copyId),
@@ -133,6 +142,30 @@ export async function loadLinePopupModel(
   let hereBinder: string | null;
   let hereBand: string;
 
+  /** UIL-121: a stage she may decide carries its species and its suggestion (shown, never selected). */
+  const decidableIn = (dexId: number, locale: string, bandKey: string) => ({
+    dexId,
+    suggestion: stageSuggestion(
+      stageOptionsFrom(
+        catalogRows
+          .filter((r) => r.dex_id.includes(dexId))
+          .map((r) => printingFromRow(r, typeColorMap)),
+        { locale: locale as typeof cardLocale, bandKey },
+      ),
+    ),
+  });
+  /** A haul copy the screen routes to this line, of that species and language (its stage is not asked yet). */
+  const routedHere = new Set(opts.comingCopyIds ?? []);
+  const waitingFor = (dexId: number, locale: string) =>
+    copies.find(
+      (c) =>
+        c.id !== copy.id &&
+        routedHere.has(c.id) &&
+        c.role === "haul" &&
+        (catalogById.get(c.catalog_card_id)?.dexId ?? []).includes(dexId) &&
+        localeOfId(c.catalog_card_id) === locale,
+    );
+
   if (proposal.kind === "start") {
     const general = binders.filter((b) => b.type === "general");
     hereBinder = proposal.binderId ?? general[0]?.id ?? null;
@@ -147,6 +180,7 @@ export async function loadLinePopupModel(
       viable: true,
     };
     const gen = generateSlots(incoming, viability, owned, catalog, typeColorMap);
+    const decidable = (dexId: number) => decidableIn(dexId, cardLocale, hereBand);
     const stages: LinePopupStage[] = gen.slots.map((s) => {
       if (s.stageIndex === gen.incomingStageIndex) {
         return {
@@ -165,6 +199,8 @@ export async function loadLinePopupModel(
           stage: s.stage,
           state: "pullable",
           card: identity(pullCard, hereBand),
+          // Left unticked, the stage is unfilled and hers to decide.
+          ...decidable(s.dexId),
           pull: {
             copyId: pullRow.id,
             fromLabel: whereIs(pullRow),
@@ -172,12 +208,27 @@ export async function loadLinePopupModel(
           },
         };
       }
-      const target = s.targetCatalogCardId ? catalogById.get(s.targetCatalogCardId) : undefined;
+      // Its card still waiting in THIS haul: not asked about now; it joins when she places that card (Karvi's ruling:
+      // she is asked about a missing stage only after the last card she has for the line).
+      const waiting = waitingFor(s.dexId, cardLocale);
+      const waitingCard = waiting ? catalogById.get(waiting.catalog_card_id) : undefined;
+      if (waiting && waitingCard) {
+        return {
+          stageIndex: s.stageIndex,
+          stage: s.stage,
+          state: "coming",
+          card: identity(waitingCard, hereBand),
+          dexId: s.dexId,
+          coming: { copyId: waiting.id },
+        };
+      }
+      // Nothing is chosen for her: the stage shows no card until she decides (the suggestion rides alongside).
       return {
         stageIndex: s.stageIndex,
         stage: s.stage,
-        state: s.state === "block" ? "blocked" : "wanted",
-        card: target ? identity(target, hereBand) : null,
+        state: "wanted",
+        card: null,
+        ...decidable(s.dexId),
       };
     });
     model = {
@@ -214,6 +265,8 @@ export async function loadLinePopupModel(
     }
     hereBinder = line.binder_id;
     hereBand = line.color_band;
+    const chain = testViability(incoming, [], catalog, typeColorMap).chain;
+    const lineLocale = localeOfLine(line.id);
     const stages: LinePopupStage[] = lineSlots.map((s) => {
       if (s.id === proposal.slotId) {
         return {
@@ -234,14 +287,44 @@ export async function loadLinePopupModel(
           copyId: here.id,
         };
       }
-      const target = s.target_catalog_card_id
-        ? catalogById.get(s.target_catalog_card_id)
-        : undefined;
+      // UIL-121: a card shows on an open stage only when she is chasing it. A card the engine stored before her
+      // choices existed is never shown as hers (the Senior BA's condition 2).
+      const choice = (s.stage_choice ?? null) as LinePopupStage["choice"];
+      const target =
+        choice === "chase" && s.target_catalog_card_id
+          ? catalogById.get(s.target_catalog_card_id)
+          : undefined;
+      // An open stage she has not decided: its card still in this haul (not asked yet), or hers to decide now.
+      const node = chain[s.stage_index];
+      if (s.state === "placeholder" && choice === null && node) {
+        const waiting = waitingFor(node.dexId, lineLocale);
+        const waitingCard = waiting ? catalogById.get(waiting.catalog_card_id) : undefined;
+        if (waiting && waitingCard) {
+          return {
+            stageIndex: s.stage_index,
+            stage: s.stage,
+            state: "coming",
+            card: identity(waitingCard, hereBand),
+            dexId: node.dexId,
+            choice,
+            coming: { copyId: waiting.id },
+          };
+        }
+        return {
+          stageIndex: s.stage_index,
+          stage: s.stage,
+          state: "wanted",
+          card: null,
+          choice,
+          ...decidableIn(node.dexId, lineLocale, hereBand),
+        };
+      }
       return {
         stageIndex: s.stage_index,
         stage: s.stage,
         state: s.state === "block" ? "blocked" : "wanted",
         card: target ? identity(target, hereBand) : null,
+        choice,
       };
     });
     const filledBefore = lineSlots.filter((s) => s.state === "filled").length;
@@ -261,6 +344,7 @@ export async function loadLinePopupModel(
         filledAfter: replacing ? filledBefore : filledBefore + 1,
         total: lineSlots.length,
         status: line.status,
+        thirdPocketOpen: lineSlots.length < LINE_ROW_POCKETS && line.extra_pocket == null,
       },
       stages,
       ...(replacing && current && currentCard

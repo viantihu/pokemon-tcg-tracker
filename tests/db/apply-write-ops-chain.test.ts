@@ -35,6 +35,14 @@ const REWRITTEN: Record<string, { lines: string[]; why: string }> = {
     lines: ["id, binder_id, half, pocket_count, purpose, material, copy_id, line_id, created_at"],
     why: "the binder_block insert's column list gained line_slot_id (UIL-121)",
   },
+  "0032_third_pocket_stays.sql": {
+    lines: [
+      "and ((select count(*) from line_slot s where s.line_id = l.id) >= 3",
+      "or exists (select 1 from line_slot s where s.line_id = l.id and s.state <> 'filled'))",
+      "select count(*) into n_block from binder_block where line_id = lid;",
+    ],
+    why: "the third-pocket rule no longer requires a complete line, and delete_line no longer counts energy fillers (UIL-121)",
+  },
 };
 
 /** A line as SQL reads it: whitespace collapsed, a trailing comma dropped. */

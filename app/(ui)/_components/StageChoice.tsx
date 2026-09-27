@@ -93,6 +93,8 @@ export function stageDecisionLabel(
         : `Chasing a placeholder card: ${d.newStandIn.name.trim()}`;
     case "empty":
       return "Left empty";
+    case "later":
+      return "Decide later";
     case "filler":
       return d.filler.material === "energy"
         ? "Filler: a basic energy"
@@ -200,7 +202,7 @@ function FillerPicker({
       <div className="lp-choice">
         <button
           type="button"
-          className={"lp-opt" + (value?.material === "energy" ? " on" : "")}
+          className={"lp-opt" + (value?.material === "energy" ? " on picked" : "")}
           aria-pressed={value?.material === "energy"}
           disabled={busy}
           onClick={onEnergy}
@@ -210,7 +212,7 @@ function FillerPicker({
         </button>
         <button
           type="button"
-          className={"lp-opt" + (value?.material === "card" ? " on" : "")}
+          className={"lp-opt" + (value?.material === "card" ? " on picked" : "")}
           aria-pressed={value?.material === "card"}
           disabled={busy}
           onClick={() => {
@@ -320,6 +322,7 @@ export function StageChoice({
   loadBulk,
   busy = false,
   fillerFrom = BULK_ONLY,
+  allowLater = false,
 }: {
   stage: LinePopupStage;
   lineLocale: Locale;
@@ -330,6 +333,8 @@ export function StageChoice({
   busy?: boolean;
   /** Where a filler card may come from: the bulk box (default); Backfill offers ["bulk", "haul"]. */
   fillerFrom?: readonly FillerSource[];
+  /** Offer "Decide later" (the line popup): the stage stays not decided, and this card still goes in. */
+  allowLater?: boolean;
 }) {
   const [panel, setPanel] = useState<Panel>(null);
   const options = useLoaded(loadOptions);
@@ -388,7 +393,7 @@ export function StageChoice({
           </span>
           <button
             type="button"
-            className="btn sm"
+            className={"btn sm" + (chasing === suggestion.card.tcgdexId ? " picked" : "")}
             aria-pressed={chasing === suggestion.card.tcgdexId}
             disabled={busy}
             onClick={() => pick({ kind: "chase", catalogCardId: suggestion.card.tcgdexId })}
@@ -409,7 +414,9 @@ export function StageChoice({
       >
         <button
           type="button"
-          className={"btn sm" + (panel === "pick" ? " on" : "")}
+          className={
+            "btn sm" + (chasing !== null && chasing !== suggestion?.card.tcgdexId ? " picked" : "")
+          }
           aria-expanded={panel === "pick"}
           disabled={busy}
           onClick={() => toggle("pick")}
@@ -418,7 +425,7 @@ export function StageChoice({
         </button>
         <button
           type="button"
-          className={"btn sm" + (panel === "standin" ? " on" : "")}
+          className={"btn sm" + (value?.kind === "chase" && "newStandIn" in value ? " picked" : "")}
           aria-expanded={panel === "standin"}
           disabled={busy}
           onClick={() => toggle("standin")}
@@ -427,7 +434,7 @@ export function StageChoice({
         </button>
         <button
           type="button"
-          className={"btn sm" + (value?.kind === "empty" ? " on" : "")}
+          className={"btn sm" + (value?.kind === "empty" ? " picked" : "")}
           aria-pressed={value?.kind === "empty"}
           disabled={busy}
           onClick={() => pick({ kind: "empty" })}
@@ -436,13 +443,24 @@ export function StageChoice({
         </button>
         <button
           type="button"
-          className={"btn sm" + (panel === "filler" || value?.kind === "filler" ? " on" : "")}
+          className={"btn sm" + (value?.kind === "filler" ? " picked" : "")}
           aria-expanded={panel === "filler"}
           disabled={busy}
           onClick={() => toggle("filler")}
         >
           Fill the pocket
         </button>
+        {allowLater ? (
+          <button
+            type="button"
+            className={"btn sm" + (value?.kind === "later" ? " picked" : "")}
+            aria-pressed={value?.kind === "later"}
+            disabled={busy}
+            onClick={() => pick({ kind: "later" })}
+          >
+            Decide later
+          </button>
+        ) : null}
       </div>
 
       {panel === "pick" ? (
@@ -505,12 +523,14 @@ export function ThirdPocketChoice({
   loadBulk,
   busy = false,
   fillerFrom = BULK_ONLY,
+  allowLater = false,
 }: {
   value: ThirdPocketValue | null;
   onChange(v: ThirdPocketValue): void;
   loadBulk(): Promise<FillerCardOption[]>;
   busy?: boolean;
   fillerFrom?: readonly FillerSource[];
+  allowLater?: boolean;
 }) {
   const bulk = useLoaded(loadBulk);
   return (
@@ -521,15 +541,17 @@ export function ThirdPocketChoice({
           ? "Choose"
           : value.material === "empty"
             ? "Left empty"
-            : value.material === "energy"
-              ? "A basic energy"
-              : FILLER_WORDS[wordsKey(fillerFrom)].option}
+            : value.material === "later"
+              ? "Decide later"
+              : value.material === "energy"
+                ? "A basic energy"
+                : FILLER_WORDS[wordsKey(fillerFrom)].option}
       </div>
       <div className="lp-note">
         This line is complete with fewer than 3 cards, so its row has one pocket left.
       </div>
       <FillerPicker
-        value={value && value.material !== "empty" ? value : null}
+        value={value && value.material !== "empty" && value.material !== "later" ? value : null}
         onEnergy={() => onChange({ material: "energy" })}
         onCard={(o) => onChange({ material: "card", copyId: o.copyId, ...fromOf(o) })}
         bulk={bulk}
@@ -539,7 +561,7 @@ export function ThirdPocketChoice({
       <div className="lp-choice">
         <button
           type="button"
-          className={"lp-opt" + (value?.material === "empty" ? " on" : "")}
+          className={"lp-opt" + (value?.material === "empty" ? " on picked" : "")}
           aria-pressed={value?.material === "empty"}
           disabled={busy}
           onClick={() => onChange({ material: "empty" })}
@@ -547,6 +569,18 @@ export function ThirdPocketChoice({
           <b className="u">Leave it empty</b>
           <span>Nothing holds the pocket.</span>
         </button>
+        {allowLater ? (
+          <button
+            type="button"
+            className={"lp-opt" + (value?.material === "later" ? " on picked" : "")}
+            aria-pressed={value?.material === "later"}
+            disabled={busy}
+            onClick={() => onChange({ material: "later" })}
+          >
+            <b className="u">Decide later</b>
+            <span>It stays not decided; choose it on Lines.</span>
+          </button>
+        ) : null}
       </div>
     </section>
   );

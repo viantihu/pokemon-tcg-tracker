@@ -33,14 +33,23 @@ const names: MoveNameLookups = {
   collectionName: () => null,
   bandDisplay: (k) => k.toUpperCase(),
 };
-const START: LineChoice = { mode: "start", binderId: GEN, band: "red", pulls: [] };
+/** UIL-121: she leaves the new line's Stage 1 empty, her choice. */
+const START: LineChoice = {
+  mode: "start",
+  binderId: GEN,
+  band: "red",
+  pulls: [],
+  stages: { 1: { kind: "empty" } },
+};
 
 let db: PGlite;
 beforeEach(async () => {
   db = await freshRpcDb();
   await db.query(
     `insert into catalog_card (tcgdex_id, name, dex_id, types, stage, evolve_from, card_class, locale)
-       values ('emberling', 'Emberling', '{9301}', '{Fire}', 'Basic', null, 'standard', 'en')`,
+       values ('emberling', 'Emberling', '{9301}', '{Fire}', 'Basic', null, 'standard', 'en'),
+              -- UIL-121: a line has two stages or more, so the Emberling's family has its Stage 1.
+              ('emberdrake', 'Emberdrake', '{9302}', '{Fire}', 'Stage1', 'Emberling', 'standard', 'en')`,
   );
   await seedBinders(db, [
     { id: SPEC, type: "specialty", name: "Specialty A" },

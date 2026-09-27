@@ -156,7 +156,22 @@ describe("UIL-096 · the Lines screen's Move starts a second line in the same bi
     const client = pgliteClient(db);
     await asOwner(db);
     const names = moveNameLookups(await loadMoveOptions(client));
-    await applyMove(client, { copyId: LOOSE_CRUEL, destination: NEW_LINE_HERE }, names);
+    // UIL-121: she chooses what the new line's Basic waits for (here: she leaves it empty).
+    await applyMove(
+      client,
+      {
+        copyId: LOOSE_CRUEL,
+        destination: NEW_LINE_HERE,
+        lineChoice: {
+          mode: "start",
+          binderId: KB1,
+          band: "orange",
+          pulls: [],
+          stages: { 0: { kind: "empty" } },
+        },
+      },
+      names,
+    );
 
     const lines = await linesInKb1();
     expect(lines).toHaveLength(2);

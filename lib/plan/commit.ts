@@ -639,6 +639,9 @@ export function assertPlacementBindersConfigured(payload: WritePayload, pc: Plan
       if (op.binder_id == null || !known.has(op.binder_id)) {
         throw new Error(NO_BINDER.refusal(`The evolution line for dex #${op.root_dex_id}`));
       }
+    } else if (op.op === "insert_binder_block") {
+      // UIL-121: a pocket's filler (an energy has no copy of its own to check) is in one of her binders too.
+      if (!known.has(op.binder_id)) throw new Error(NO_BINDER.refusal("That filler"));
     }
   }
 }

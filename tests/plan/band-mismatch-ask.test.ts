@@ -216,7 +216,13 @@ describe('UIL-069 · picking "join the line"', () => {
 
     await commitCardPlacement(client, {
       card: INCOMING,
-      lineChoice: { mode: "join", lineId: LINE, slotId: SLOT_STAGE1 },
+      // UIL-121: it completes the two-card line, so she says what fills its third pocket.
+      lineChoice: {
+        mode: "join",
+        lineId: LINE,
+        slotId: SLOT_STAGE1,
+        thirdPocket: { material: "empty" },
+      },
     });
 
     await asSuperuser(db);

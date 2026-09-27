@@ -65,7 +65,11 @@ async function startChoice(pulls: string[]): Promise<LineChoice> {
     throw new Error(`expected a start proposal, got ${proposal?.kind}`);
   const choice = defaultChoiceFor(proposal);
   if (choice.mode !== "start") throw new Error("expected a start choice");
-  return { ...choice, pulls };
+  // UIL-121: her choices too. With the Basic pulled the two-card line is complete, so she says what fills its third
+  // pocket; declined, the Basic's stage is hers to decide (she leaves it empty).
+  return pulls.length > 0
+    ? { ...choice, pulls, thirdPocket: { material: "empty" } }
+    : { ...choice, pulls, stages: { 0: { kind: "empty" } } };
 }
 
 const KB1 = "b0000000-0000-0000-0000-00000000e801";

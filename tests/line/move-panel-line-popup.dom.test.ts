@@ -133,10 +133,12 @@ describe("UIL-117 · BACK HALF opens the line popup", () => {
       name: /Pull it into this line/,
     })) as HTMLInputElement;
     expect(pull.checked).toBe(false);
+    // UIL-121: that unticked stage is hers to decide; she leaves it empty.
+    await user.click(screen.getByRole("button", { name: "Leave empty" }));
     await user.click(screen.getByRole("button", { name: /Start line/ }));
     expect(onConfirm).toHaveBeenCalledWith(
       { kind: "shelf", binderId: "b1", half: "back", band: "red" },
-      { mode: "start", binderId: "b1", band: "red", pulls: [] },
+      { mode: "start", binderId: "b1", band: "red", pulls: [], stages: { 0: { kind: "empty" } } },
     );
   });
 
@@ -157,7 +159,7 @@ describe("UIL-117 · BACK HALF opens the line popup", () => {
     await user.click(screen.getByRole("button", { name: /Start line/ }));
     expect(onConfirm).toHaveBeenCalledWith(
       { kind: "shelf", binderId: "b1", half: "back", band: "green" },
-      { mode: "start", binderId: "b1", band: "green", pulls: [] },
+      { mode: "start", binderId: "b1", band: "green", pulls: [], stages: {} },
     );
   });
 

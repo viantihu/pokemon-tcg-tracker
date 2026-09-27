@@ -95,7 +95,14 @@ describe("UIL-119 · a Haul Plan line never wishes an empty stage", () => {
     if (p?.kind !== "start") throw new Error(`expected a start proposal, got ${p?.kind}`);
     await commitCardPlacement(pgliteClient(db), {
       card: CML,
-      lineChoice: { mode: "start", binderId: p.binderId ?? "", band: p.band, pulls: [] },
+      lineChoice: {
+        mode: "start",
+        binderId: p.binderId ?? "",
+        band: p.band,
+        pulls: [],
+        // UIL-121: she leaves every other stage empty (a choice for a stage the line does not have is not read).
+        stages: { 0: { kind: "empty" }, 2: { kind: "empty" } },
+      },
     });
     await asSuperuser(db);
     const states = (

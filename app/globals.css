@@ -3619,6 +3619,13 @@ button.subhead.folded:hover {
   gap: 10px;
   margin-top: 16px;
   flex-wrap: wrap;
+  /* A popup with stage questions runs past the screen: Confirm stays in reach (UX on #429). */
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 10px 0;
+  background: var(--panel);
+  border-top: 2px solid var(--ink);
 }
 .lp-foot .lp-sum {
   font-size: 10px;
@@ -3724,8 +3731,15 @@ button.subhead.folded:hover {
   border: 3px solid var(--ink);
   background: var(--panel);
 }
-.lp-stagechoice .lp-choice .btn.on {
+/* One PICKED look for every decision (note fill + inset ink ring); an OPEN panel is its own cue (UX on #429). */
+.lp-stagechoice .btn.picked,
+.lp-stagechoice .lp-opt.picked {
   background: var(--note);
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+.lp-stagechoice .btn[aria-expanded="true"] {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .lp-suggested {
   margin-top: 6px;

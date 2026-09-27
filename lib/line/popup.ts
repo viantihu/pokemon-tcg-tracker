@@ -20,10 +20,39 @@ import type { CardIdentity, ExistingLineBlock, MoveDestination, MoveOptions } fr
 
 /** Her choice in the popup: the ONE input every back-half write takes. */
 export type LineChoice =
-  /** Start a new line here. `pulls` are the owned copies she TICKED to move into it (UIL-061; empty = none). */
-  | { mode: "start"; binderId: string; band: string; pulls: string[] }
-  /** Join an existing line's open slot. `foreignLocale` is her second confirm for a line in another language. */
-  | { mode: "join"; lineId: string; slotId: string; foreignLocale?: true }
+  /**
+   * Start a new line here. `pulls` are the owned copies she TICKED to move into it (UIL-061; empty = none).
+   * `stages` is her choice for EVERY stage left unfilled, by stage index (UIL-121: nothing is decided for her), and
+   * `thirdPocket` what fills the last pocket when the line is complete with fewer than LINE_ROW_POCKETS cards.
+   */
+  | {
+      mode: "start";
+      binderId: string;
+      band: string;
+      pulls: string[];
+      stages: Record<number, StageDecision>;
+      thirdPocket?: ThirdPocketChoice;
+      /** UIL-121: haul copies the screen routes to this same line: their stages are not asked on this confirm. */
+      comingCopyIds?: string[];
+    }
+  /**
+   * Join an existing line's open slot. `foreignLocale` is her second confirm for a line in another language;
+   * `thirdPocket` her choice when this card completes a short line whose last pocket she has not decided.
+   */
+  | {
+      mode: "join";
+      lineId: string;
+      slotId: string;
+      foreignLocale?: true;
+      thirdPocket?: ThirdPocketChoice;
+      /**
+       * Her choice for the line's OTHER open stages she has not decided yet (UIL-121, Karvi's ruling: once she places
+       * the last card she has for a line, she is asked about the stages still missing). By stage index.
+       */
+      stages?: Record<number, StageDecision>;
+      /** As a start's: haul copies the screen routes to this same line. */
+      comingCopyIds?: string[];
+    }
   /**
    * A copy for a filled slot: keep the one that's there (nothing in the line moves). NOT a line write: the builder
    * refuses it, and the incoming card's placement is the screen's. `incoming` is where she sent it on Keep when the
@@ -44,6 +73,9 @@ export type LineChoice =
       outgoing: MoveDestination;
       outgoingLine?: OutgoingLineChoice;
       foreignLocale?: true;
+      /** As a join's: her choice for the line's other open stages she has not decided yet (UIL-121). */
+      stages?: Record<number, StageDecision>;
+      comingCopyIds?: string[];
     };
 
 /** Where a card coming out of a line goes when that is another back half: a line it starts or joins. */
@@ -60,7 +92,13 @@ export type StageDecision =
   | { kind: "chase"; catalogCardId: string }
   | { kind: "chase"; newStandIn: StandInDraft }
   | { kind: "empty" }
-  | { kind: "filler"; filler: FillerChoice };
+  | { kind: "filler"; filler: FillerChoice }
+  /**
+   * "Decide later" (the Senior BA, from her always-movable rule: placing a card never waits on deciding another
+   * stage). Writes nothing for the stage: it stays "Not decided" and the line open, for Lines' Choose. The line popup
+   * offers it; a screen that does not is refused it.
+   */
+  | { kind: "later" };
 
 /**
  * A pocket's filler: a basic energy (untracked), or one of her copies, which becomes a block there. `from` is where
@@ -73,7 +111,7 @@ export type FillerChoice =
 export type FillerSource = "bulk" | "haul";
 
 /** What fills a complete short line's third pocket (UIL-121 Q4): a filler, or nothing. */
-export type ThirdPocketChoice = FillerChoice | { material: "empty" };
+export type ThirdPocketChoice = FillerChoice | { material: "empty" } | { material: "later" };
 
 /**
  * A placeholder card she makes from the popup: a CATALOG-ONLY stand-in (no copy; UIL-108's form). Its dex id, stage,
@@ -131,8 +169,11 @@ export type LineBadge = LineProposal["kind"];
  *   pullable  a card she owns elsewhere that could fill it: shown UNTICKED, "Pull it into this line"
  *   wanted    an open slot with no card yet (a placeholder; on her wishlist only if SHE adds it: Karvi, UIL-119)
  *   blocked   a slot no card can fill
+ *   coming    UIL-121: an open slot whose card is still waiting in THIS haul. She is not asked about it now; it joins
+ *             when she places that card (Karvi's ruling: she is asked about a missing stage only after the last card
+ *             she has for the line)
  */
-export type LineStageState = "incoming" | "here" | "pullable" | "wanted" | "blocked";
+export type LineStageState = "incoming" | "here" | "pullable" | "wanted" | "blocked" | "coming";
 
 export interface LinePopupStage {
   stageIndex: number;
@@ -154,6 +195,13 @@ export interface LinePopupStage {
   };
   /** The stage's species (UIL-121): what her choice for an unfilled stage is checked against. */
   dexId?: number;
+  /**
+   * An existing line's open stage (UIL-121): what she chose for it, or null when she has not yet. The card shown is
+   * her chase's only when she chose one; an engine's stored pick is never shown as hers.
+   */
+  choice?: "chase" | "empty" | "filler" | null;
+  /** `coming`: the copy waiting in this haul that will fill it. */
+  coming?: { copyId: string };
   /**
    * An unfilled stage's suggestion (UIL-121): the cheapest same-colour printing in the line's language, else the
    * special one when that is all there is (`special`). SHOWN, never selected: she chooses.
@@ -179,6 +227,11 @@ export interface LinePopupLine {
    * forecast of whether her confirm leaves the line done. Null while the line is only being started.
    */
   status?: string | null;
+  /**
+   * UIL-121: the line is shorter than LINE_ROW_POCKETS and she has not yet said what fills its third pocket, so a
+   * confirm that completes it asks. Absent on a new line (its pocket is always undecided).
+   */
+  thirdPocketOpen?: boolean;
 }
 
 /** UIL-096: every line this family already has, anywhere, so she sees it before starting a second one. */
@@ -360,7 +413,13 @@ export function lineStatusShown(status: string | null | undefined): "open" | "cl
 export function defaultChoiceFor(proposal: LineProposal): LineChoice {
   switch (proposal.kind) {
     case "start":
-      return { mode: "start", binderId: proposal.binderId ?? "", band: proposal.band, pulls: [] };
+      return {
+        mode: "start",
+        binderId: proposal.binderId ?? "",
+        band: proposal.band,
+        pulls: [],
+        stages: {},
+      };
     case "add":
       return { mode: "join", lineId: proposal.lineId, slotId: proposal.slotId };
     case "replace":
