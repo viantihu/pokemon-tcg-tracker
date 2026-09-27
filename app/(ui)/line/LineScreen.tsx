@@ -43,6 +43,7 @@ import {
 import { DeleteLineButton } from "./DeleteLineButton";
 import { ReplaceSlotFlow } from "./ReplaceSlotFlow";
 import {
+  lineStatusShown,
   stageLabel,
   type LineChoice,
   type LinePopupModel,
@@ -72,12 +73,9 @@ const SLOT_TAG: Record<SlotView["state"], string> = {
   placeholder: "◇ OPEN",
   block: "✕ DEAD",
 };
-const STATUS_GLYPH: Record<LineView["status"], string> = {
+const STATUS_GLYPH: Record<"open" | "closed", string> = {
   open: "● OPEN",
   closed: "◆ CLOSED",
-  capped: "▲ CAPPED",
-  complete: "◆ COMPLETE",
-  terminated: "■ TERMINATED",
 };
 
 /**
@@ -485,7 +483,10 @@ export function LineScreen() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span className={`status ${curLine.status}`}>{STATUS_GLYPH[curLine.status]}</span>
+          {/* UIL-121: OPEN or CLOSED; a pre-0030 word shows as the one it means. */}
+          <span className={`status ${lineStatusShown(curLine.status)}`}>
+            {STATUS_GLYPH[lineStatusShown(curLine.status)]}
+          </span>
           {/* UIL-118. Keyed by line, so switching lines never carries a half-armed confirm across. */}
           <DeleteLineButton
             key={curLine.lineId}

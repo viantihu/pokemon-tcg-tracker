@@ -3,7 +3,7 @@
  * reader every demote asks, and what a fill and a release now write for her stage choice (0030 checks all three).
  */
 import { describe, expect, it } from "vitest";
-import { lineReadsClosed, lineStatusFor } from "@/lib/line/popup";
+import { lineReadsClosed, lineStatusFor, lineStatusShown } from "@/lib/line/popup";
 import { buildExistingLineJoinOps, releaseSlotOps } from "@/lib/line/move";
 
 describe("lineStatusFor · closed when every slot is filled, else open; nothing capped for her", () => {
@@ -29,6 +29,8 @@ describe("lineReadsClosed · the pre-0030 words read the way she means them", ()
     [undefined, false],
   ])("%s → %s", (status, closed) => {
     expect(lineReadsClosed(status as string | null | undefined)).toBe(closed);
+    // …and the word Lines and Lookup show for it.
+    expect(lineStatusShown(status as string | null | undefined)).toBe(closed ? "closed" : "open");
   });
 });
 

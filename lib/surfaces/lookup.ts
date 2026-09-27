@@ -10,6 +10,7 @@
  *
  * No I/O: the server action does the joins and calls this. That keeps the decision logic testable.
  */
+import { lineStatusShown } from "@/lib/line/popup";
 
 /**
  * Where an owned copy sits (system-design §4 `Copy.role`), including "nowhere yet" (UIL-088).
@@ -152,14 +153,8 @@ export function buildLookupAnswer(input: LookupInput): LookupAnswer {
   // 1. Line — already in one, or would complete one.
   if (input.ownedInLine) {
     const l = input.ownedInLine;
-    const statusTag =
-      l.status === "capped"
-        ? " · CAPPED"
-        : l.status === "complete"
-          ? " · COMPLETE"
-          : l.status === "closed"
-            ? " · CLOSED"
-            : "";
+    // UIL-121: OPEN or CLOSED; a pre-0030 word shows as the one it means (an open line needs no tag).
+    const statusTag = lineStatusShown(l.status) === "closed" ? " · CLOSED" : "";
     facts.push({
       tone: "y",
       label: "IN A LINE",

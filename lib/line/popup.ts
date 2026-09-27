@@ -267,6 +267,11 @@ export function lineReadsClosed(status: string | null | undefined): boolean {
   return status === "closed" || status === "complete" || status === "terminated";
 }
 
+/** The one word a screen shows for a line's status (Lines, Lookup): OPEN or CLOSED, whatever word is stored. */
+export function lineStatusShown(status: string | null | undefined): "open" | "closed" {
+  return lineReadsClosed(status) ? "closed" : "open";
+}
+
 /** The choice a proposal opens on: nothing is ever pre-ticked, and Keep is the default for a replace. */
 export function defaultChoiceFor(proposal: LineProposal): LineChoice {
   switch (proposal.kind) {
