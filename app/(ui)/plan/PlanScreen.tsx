@@ -901,6 +901,7 @@ export function PlanScreen({
     }
     const item = flatItems.find((it) => it.incomingId === target.copyId);
     if (!item) return;
+    // Whether the line is done is not asked: a Move is not the step-through, so nothing opens after it (UIL-120).
     const shelved = await shelveCard(item, { override: dest, lineChoice });
     if (!shelved) return;
     // A line write can change what the other cards would do, so the rest re-route, as after any line write.

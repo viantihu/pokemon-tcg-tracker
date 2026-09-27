@@ -324,13 +324,19 @@ function joinLine(
   }
 
   const catalogById = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
-  if (slot.target_catalog_card_id) {
-    const target = catalogById.get(slot.target_catalog_card_id);
-    const same = !!target && state.incoming.card.dexId.some((d) => target.dexId.includes(d));
-    if (!same)
-      throw new Error(
-        "That slot is for a different card — pick the slot for this card's own stage.",
-      );
+  // The slot must be this card's own stage of this line. A slot with a target names its card; an undecided one (no
+  // target since UIL-121) is read off the family's chain: the line's root, and this card at the slot's stage. Any
+  // card can bring a line choice (the Haul Plan's Move sheet, #434), so this is what holds a join to its line.
+  const chain = testViability(state.incoming, [], state.catalog, state.typeColorMap).chain;
+  const target = slot.target_catalog_card_id
+    ? catalogById.get(slot.target_catalog_card_id)
+    : undefined;
+  const same = slot.target_catalog_card_id
+    ? !!target && state.incoming.card.dexId.some((d) => target.dexId.includes(d))
+    : chain[0]?.dexId === line.root_dex_id &&
+      state.incoming.card.dexId.includes(chain[slot.stage_index]?.dexId ?? -1);
+  if (!same) {
+    throw new Error("That slot is for a different card — pick the slot for this card's own stage.");
   }
 
   const cardOf = (id: string) => state.copiesById.get(id)?.catalog_card_id ?? null;

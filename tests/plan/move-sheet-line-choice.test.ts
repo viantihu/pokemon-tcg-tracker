@@ -11,7 +11,9 @@ import type { PGlite } from "@electric-sql/pglite";
 import { clearCatalogCache, commitCardPlacement, LINE_CHOICE, type DraftItem } from "@/lib/plan";
 import type { LineChoice } from "@/lib/line/popup";
 import type { MoveDestination } from "@/lib/line/types";
+import { KEEP_IS_NO_LINE_MOVE } from "@/lib/line/write";
 import { CHARMANDER_SV03_026, CHARMELEON_SV03_027 } from "../engine/fixtures";
+import { OWNER } from "../support/pglite-rpc";
 import {
   asOwner,
   asSuperuser,
@@ -113,7 +115,98 @@ describe("the Plan's Move sheet → back half → the line popup's choice is wha
   it("a Keep is no move into a line, and is refused", async () => {
     await expect(
       move(BACK, { mode: "replace", lineId: "L", slotId: "S", keep: true }),
-    ).rejects.toThrow("That destination is incomplete");
+    ).rejects.toThrow(KEEP_IS_NO_LINE_MOVE);
     await nothingWritten();
+  });
+});
+
+describe("…and a JOIN through the Move sheet is held to the line's own slot (TL review of #434)", () => {
+  const LINE = "10000000-0000-0000-0000-0000000000e1";
+  const S0 = "50000000-0000-0000-0000-0000000000e0";
+  const S1 = "50000000-0000-0000-0000-0000000000e1";
+  const OWNED_CMD = "c0000000-0000-0000-0000-0000000000e0";
+  /** Her Charmeleon, waiting in the haul. */
+  const CML: DraftItem = haulRow(
+    "d0000000-0000-4000-8000-0000000000e2",
+    CHARMELEON_SV03_027.tcgdexId,
+  );
+  beforeEach(async () => {
+    await seedHaulRows(db, [CML]);
+    await asSuperuser(db);
+    // Her Charmander line in KB-001 · Back · Red: the Basic filled, the Stage 1 an open slot.
+    await db.exec(`
+      insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band) values
+        ('${OWNED_CMD}', '${OWNER}', '${CHARMANDER_SV03_026.tcgdexId}', 'normal', 'shelved', '${KB1}', 'back', 'red');
+      insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+        values ('${LINE}', '${OWNER}', 4, 'red', '${KB1}', 'back', 'open');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id, target_catalog_card_id) values
+        ('${S0}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OWNED_CMD}', null),
+        ('${S1}', '${OWNER}', '${LINE}', 1, 'Stage1', 'placeholder', null, null);
+      update copy set line_slot_id = '${S0}' where id = '${OWNED_CMD}';
+    `);
+    await asOwner(db);
+  });
+  const join = (card: DraftItem, slotId: string) =>
+    commitCardPlacement(pgliteClient(db), {
+      card,
+      override: BACK,
+      // A two-stage line her join completes: she says what fills its third pocket (UIL-121 Q4).
+      lineChoice: { mode: "join", lineId: LINE, slotId, thirdPocket: { material: "empty" } },
+    });
+
+  it("an Add to the open slot of the card's stage fills it, both pointers agreeing, with a line-join decision", async () => {
+    await join(CML, S1);
+    expect(await read(`select state, copy_id from line_slot where id = $1`, [S1])).toEqual([
+      { state: "filled", copy_id: CML.id },
+    ]);
+    expect(
+      await read(`select role, binder_half, line_slot_id from copy where id = $1`, [CML.id]),
+    ).toEqual([{ role: "shelved", binder_half: "back", line_slot_id: S1 }]);
+    expect(
+      await read(`select decision, line_id from placement_decision where copy_id = $1`, [CML.id]),
+    ).toEqual([{ decision: "line-join", line_id: LINE }]);
+  });
+
+  it("a join naming a slot of ANOTHER species is refused, with nothing written", async () => {
+    // Her Charmander (the Basic) named for the Stage 1 slot: any card can bring a line choice now, so this holds it.
+    const err = await join(CMD, S1).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect((err as Error).message).toBe(
+      "That slot is for a different card — pick the slot for this card's own stage.",
+    );
+    expect(await read(`select state, copy_id from line_slot where id = $1`, [S1])).toEqual([
+      { state: "placeholder", copy_id: null },
+    ]);
+    expect(await read(`select role, line_slot_id from copy where id = $1`, [CMD.id])).toEqual([
+      { role: "haul", line_slot_id: null },
+    ]);
+    expect(await read(`select id from placement_decision`)).toEqual([]);
+  });
+
+  it("…and so is a join into ANOTHER family's line at the card's own stage: the line's root is held too", async () => {
+    // A Squirtle line (root 7) with an undecided Stage 1: her Charmeleon is a Stage 1, but not of this line.
+    const SQUIRTLE_LINE = "10000000-0000-0000-0000-0000000000e7";
+    const SQ1 = "50000000-0000-0000-0000-0000000000e7";
+    await asSuperuser(db);
+    await db.exec(`
+      insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+        values ('${SQUIRTLE_LINE}', '${OWNER}', 7, 'red', '${KB1}', 'back', 'open');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id, target_catalog_card_id)
+        values ('${SQ1}', '${OWNER}', '${SQUIRTLE_LINE}', 1, 'Stage1', 'placeholder', null, null);
+    `);
+    await asOwner(db);
+    await expect(
+      commitCardPlacement(pgliteClient(db), {
+        card: CML,
+        override: BACK,
+        lineChoice: { mode: "join", lineId: SQUIRTLE_LINE, slotId: SQ1 },
+      }),
+    ).rejects.toThrow("That slot is for a different card");
+    expect(await read(`select state from line_slot where id = $1`, [SQ1])).toEqual([
+      { state: "placeholder" },
+    ]);
+    expect(await read(`select role from copy where id = $1`, [CML.id])).toEqual([{ role: "haul" }]);
   });
 });

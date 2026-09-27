@@ -423,6 +423,33 @@ describe("UIL-117 · the Plan's own Move sheet: BACK HALF opens the one line pop
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  it("the rest of the plan is routed again after that write, and a card whose home it changed follows (TL review)", async () => {
+    // Kadabra files in a front half now; once Abra's line is written it would add to it.
+    const user = await mount([
+      { name: "Abra", proposal: null },
+      { name: "Kadabra", proposal: null, after: ADD },
+    ]);
+    await user.click(screen.getByRole("button", { name: "↔ Change position" }));
+    const sheet = await screen.findByRole("dialog", { name: "Move Abra" });
+    await user.click(within(sheet).getByRole("button", { name: "BACK HALF" }));
+    await screen.findByRole("dialog", { name: "Start a line" });
+    await user.click(within(popup()).getByRole("checkbox"));
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    expect(runHaulPlan).not.toHaveBeenCalled();
+    await user.click(confirmIn());
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
+    // PRE-FIX of this review item: nothing routed again, so Kadabra kept its stale front-half home.
+    await waitFor(() => expect(runHaulPlan).toHaveBeenCalled(), { timeout: 4000 });
+    expect((runHaulPlan.mock.calls.at(-1)![0] as DraftPayloadItem[]).map((d) => d.id)).toEqual([
+      "id-Kadabra",
+    ]);
+    expect(
+      await within(document.getElementById("plan-row-id-Kadabra")!).findByRole("button", {
+        name: "◆ Adds to a line",
+      }),
+    ).toBeTruthy();
+  });
+
   it("a Move anywhere else is still an override, written with her Done", async () => {
     const user = await mount([{ name: "Abra", proposal: null }]);
     await user.click(screen.getByRole("button", { name: "↔ Change position" }));

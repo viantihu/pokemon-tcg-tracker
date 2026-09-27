@@ -56,7 +56,7 @@ import {
 import type { MoveDestination } from "@/lib/line/types";
 import { NOT_A_LINE, type LineChoice } from "@/lib/line/popup";
 import { lineReadsClosed } from "@/lib/line/popup";
-import { buildBackHalfLineOps } from "@/lib/line/write";
+import { buildBackHalfLineOps, KEEP_IS_NO_LINE_MOVE } from "@/lib/line/write";
 import { isLineCard } from "./line-proposal";
 import { lineDoneFor, newLineKey } from "./line-done";
 
@@ -421,7 +421,7 @@ export async function commitCardPlacement(
    */
   if (lead && movedIntoLine && input.lineChoice) {
     const choice = input.lineChoice;
-    if (choice.mode === "replace" && choice.keep) throw new Error(REFUSE.incomplete);
+    if (choice.mode === "replace" && choice.keep) throw new Error(KEEP_IS_NO_LINE_MOVE);
     return commitLineChoice(db, pc, lead, copy, choice);
   }
   /**
