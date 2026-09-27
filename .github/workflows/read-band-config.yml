@@ -1431,7 +1431,10 @@ jobs:
             all("binder_block", "id,purpose,material,copy_id,line_id"),
             all("copy", "id,role"),
             all("wishlist_item", "id,line_slot_id,resolved_at"),
-            all("catalog_card", "tcgdex_id,source").then((r) => r.filter((c) => c.source === "user")),
+            db.from("catalog_card").select("tcgdex_id", { count: "exact", head: true }).eq("source", "user").then(({ count, error }) => {
+              if (error) throw new Error(`catalog_card: ${error.message}`);
+              return count ?? 0;
+            }),
           ]);
           const tally = (xs, f) => xs.reduce((m, x) => ((m[f(x)] = (m[f(x)] ?? 0) + 1), m), {});
           const slotsByLine = new Map();
@@ -1450,7 +1453,7 @@ jobs:
             short_lines_by_status_and_all_filled: tally(short, (l) => `${l.status}/${(slotsByLine.get(l.id) ?? []).every((s) => s.state === "filled") ? "all-filled" : "not-all-filled"}`),
             resolved_decision_markers: tally(slots.filter((s) => s.resolved_decision_kind), (s) => s.resolved_decision_kind),
             wishlist: { total: wishes.length, open: wishes.filter((w) => !w.resolved_at).length, on_a_slot_by_state: tally(wishes.filter((w) => w.line_slot_id), (w) => slotState.get(w.line_slot_id) ?? "slot-gone") },
-            catalog_stand_ins: standIns.length,
+            catalog_stand_ins: standIns,
           }));
           JS
           node uil121.mjs
