@@ -8877,3 +8877,45 @@ the open question is yes — the mark-as-wishlist-hunt step already is her addin
 **Cross-reference UIL-117** (the line-popup rework already touching how lines get created and joined;
 worth checking this doesn't collide with it) and **UIL-118** (the delete-line entry whose cleanup counts
 these same wishlist rows, so a narrower auto-wish rule changes what a future delete has to account for).
+
+## UIL-120 — Once her confirm completes a line, the Haul Plan's line popup should not auto-open for the next card
+
+- **Reported:** 2026-09-27 (Karvi). In her words: "Once the line is complete, it should not open the
+  popup again for the next card automatically."
+- **Status:** Open, assigned to Full Stack Dev - 2, after UIL-117 PR 5a.
+- **Priority:** Medium (Senior BA's read; Karvi to confirm).
+- **Area:** Haul Plan / line popup
+- **Env:** Testing, `develop` `a181336`
+
+**Confirmed the mechanism exactly: the step-through has no line-completion check at all, by its own
+doc comment's own description of the design.** `confirmLinePopup`
+([`app/(ui)/plan/PlanScreen.tsx:1052-1066`](<../app/(ui)/plan/PlanScreen.tsx>:1052), added by PR #392,
+UIL-117 PR 4) shelves the confirmed card, then unconditionally calls `nextLineCard(item.incomingId)` and
+opens its popup if one exists. `nextLineCard`
+([`:1021-1025`](<../app/(ui)/plan/PlanScreen.tsx>:1021)) searches the WHOLE haul, wrapping around, for
+any undone item with `it.lineProposal` — any card headed into ANY line, not specifically the line just
+confirmed — and its own comment states the intent plainly: "the next line card in the plan that is not
+shelved yet opens straight away, so a big haul is one pass rather than a hunt." Nothing here asks
+whether the confirm that just fired completed the line it was for; her ask is to add exactly that check.
+
+**Confirmed the underlying fact is already computed server-side, just not (confirmed) surfaced to this
+check.** `slotIsLastOpen`
+([`lib/plan/commit.ts:828, 958`](../lib/plan/commit.ts:828)) — `siblings.every((s) => s.id === slot.id
+|| s.state === "filled")` — is exactly "does filling this slot complete the line," computed at commit
+time and passed into `buildExistingLineJoinOps` to decide whether to also mark the line `complete`. The
+fact exists in the pipeline; whether it currently reaches the client in a form `confirmLinePopup` could
+check before deciding whether to auto-open the next popup is an implementation question for whoever
+picks this up, not confirmed either way here.
+
+**Suggested fix.** Thread the completing-confirm fact (already computed server-side, per above) back
+through `shelveCard`'s result to `confirmLinePopup`, and skip the `openLinePopup(next)` call — falling
+through to the same `else` branch that already runs when there's no next card (`setLinePop(null);
+advance();`) — specifically when this confirm was the one that completed its line.
+
+**Cross-reference UIL-117** (PR 4/#392 is what added this step-through; sequenced after PR 5a per the
+Senior BA, so this doesn't collide with in-flight line-popup work) — no other entry covers this
+mechanism.
+
+**Note, not logged as its own entry per the Senior BA's explicit instruction:** a second, related note
+from Karvi (choosing which card to chase to complete a line, and whether to complete it) is being held
+until the Senior BA has explained the current line rules to her — deliberately not written up yet.
