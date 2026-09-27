@@ -35,6 +35,7 @@ import type { Locale } from "@/lib/sync/types";
 import { lineLocaleOf, effectiveType, isPlaced, type Role } from "@/lib/engine";
 import {
   applyWriteOps,
+  lineSlotRepo,
   type DbClient,
   type Row,
   type WriteOp,
@@ -55,6 +56,7 @@ import type { MoveDestination } from "@/lib/line/types";
 import type { LineChoice } from "@/lib/line/popup";
 import { buildBackHalfLineOps } from "@/lib/line/write";
 import { isLineCard } from "./line-proposal";
+import { lineDoneFor } from "./line-done";
 
 /**
  * `applyMove`'s exact wording (lib/line/write.ts) for the same refusals on this path (UIL-070 part 1).
@@ -169,20 +171,17 @@ export interface CommitResult {
    */
   alreadyCommitted?: boolean;
   /**
-   * True when this write COMPLETED a line: it inserted a line that reads `complete`, or set one to `complete`
-   * (UIL-120). Read off the write set the server built from fresh state, never from the browser. The Haul Plan's
-   * step-through stops there: once her confirm completes a line, the next line card's popup does not open by itself.
+   * True when the line her line-popup confirm concerned (the one she started, joined, swapped into, or kept) is DONE
+   * once the write has landed: nothing in it left to chase (`lineDoneFor`, UIL-120). Read from the database after the
+   * write, never from the browser. The Haul Plan's step-through stops there. False for a card with no line choice.
    */
-  completedLine?: boolean;
+  lineDone?: boolean;
 }
 
-/** Whether a write set completes a line (UIL-120): a line inserted as `complete`, or one set to `complete`. */
-export function completesALine(ops: readonly WriteOp[]): boolean {
-  return ops.some(
-    (o) =>
-      (o.op === "insert_line" && o.status === "complete") ||
-      (o.op === "update_line" && o.patch.status === "complete"),
-  );
+/** The one rule (./line-done) over the line as it is now: read AFTER her confirm's write. */
+async function lineDoneAfterWrite(db: DbClient, lineId: string): Promise<boolean> {
+  const slots = await lineSlotRepo.listByLine(db, lineId);
+  return lineDoneFor(slots.map((s) => s.state));
 }
 
 /**
@@ -360,6 +359,8 @@ export async function commitCardPlacement(
    */
   let override = input.override ?? null;
   let overrideReason: string | null = null;
+  /** A Keep writes no line, but it concerned one: the step-through asks whether that line is done (UIL-120). */
+  let keptLineId: string | null = null;
   const lead = planned[0];
   if (lead && isLineCard(lead.result) && !override) {
     const choice = input.lineChoice;
@@ -368,6 +369,11 @@ export async function commitCardPlacement(
       // Keep means "the card already in the line stays". Only a card that could replace one has that choice; sent
       // for any other line card it would fall through to the cascade, which writes the line itself (TL review).
       if (!lead.result.filledStage && !lead.result.swap) throw new Error(LINE_CHOICE.missing);
+      // The line it concerned, from the server's own derivation, not the browser's choice (QA on #410).
+      const heldSlot = lead.result.swap?.incomingInherits.lineSlotId ?? null;
+      keptLineId =
+        lead.result.filledStage?.lineId ??
+        (heldSlot ? (pc.lookups.lines?.lineOfSlot(heldSlot) ?? null) : null);
       if (choice.incoming) {
         if (!isMoveDestinationComplete(choice.incoming)) throw new Error(REFUSE.incomplete);
         override = choice.incoming;
@@ -438,7 +444,7 @@ export async function commitCardPlacement(
   });
   assertPlacementBandsConfigured(payload, pc);
   await applyWriteOps(db, payload);
-  return { counts, completedLine: completesALine(payload.ops) };
+  return { counts, lineDone: keptLineId ? await lineDoneAfterWrite(db, keptLineId) : false };
 }
 
 /** How her line-popup choice is named in the decision history (UIL-117). */
@@ -525,7 +531,9 @@ async function commitLineChoice(
   const payload: WritePayload = { ops };
   assertPlacementBandsConfigured(payload, pc);
   await applyWriteOps(db, payload);
-  return { counts, completedLine: completesALine(ops) };
+  const lineId =
+    choice.mode === "start" ? (started?.op === "insert_line" ? started.id : null) : choice.lineId;
+  return { counts, lineDone: lineId ? await lineDoneAfterWrite(db, lineId) : false };
 }
 
 /**
