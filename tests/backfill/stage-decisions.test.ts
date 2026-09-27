@@ -132,6 +132,7 @@ async function refusedWithNothingWritten(
   message: RegExp | string,
   kind: typeof BackLineRefused | typeof StageChoiceRefusal = BackLineRefused,
 ) {
+  const before = await roles();
   const err = await save(input).then(
     () => null,
     (e: unknown) => e,
@@ -139,7 +140,9 @@ async function refusedWithNothingWritten(
   expect(err).toBeInstanceOf(kind);
   expect((err as Error).message).toMatch(message);
   expect(await tallies()).toEqual(NOTHING);
-  expect(await roles()).toEqual(["haul", "haul", "haul", "haul"]);
+  // Every copy where it was: her haul copies still wait (and a bulk box one is still in the bulk box).
+  expect(await roles()).toEqual(before);
+  expect(before.filter((r) => r === "haul")).toHaveLength(4);
 }
 
 const statusOfLine = async () =>
@@ -230,6 +233,72 @@ describe("UIL-117 C · each stage choice writes what the shared rule says", () =
       ]),
     ).toEqual([{ name: "Charmeleon", dex_id: [5], stage: "Stage1", source: "user" }]);
     expect(await tallies()).toMatchObject({ wishlist_item: 1 });
+  });
+});
+
+describe("the Senior BA's ruling · a spare card fills a pocket from her bulk box first, or her haul", () => {
+  const BULK_SCZ = "b0000000-0000-4000-8000-0000000000b1";
+  const bulkCard = (copyId = BULK_SCZ) =>
+    ({ kind: "filler", filler: { material: "card", from: "bulk", copyId } }) as const;
+  beforeEach(async () => {
+    await asSuperuser(db);
+    await db.query(
+      `insert into copy (id, owner_id, catalog_card_id, variant, role) values ($1, $2, $3, 'normal', 'bulk')`,
+      [BULK_SCZ, OWNER, SCIZOR_SV03_141.tcgdexId],
+    );
+    await asOwner(db);
+  });
+  const roleOf = async (id: string) =>
+    (await read<{ role: string }>(`select role from copy where id = $1`, [id]))[0]?.role;
+
+  it("a bulk box card: THAT copy leaves the bulk box and becomes the block, and no haul card is taken", async () => {
+    await save(line([basic(), stage1(bulkCard())]));
+    expect(await read(`select role, binder_half from copy where id = $1`, [BULK_SCZ])).toEqual([
+      { role: "block", binder_half: "back" },
+    ]);
+    expect(await read(`select copy_id, purpose from binder_block`)).toEqual([
+      { copy_id: BULK_SCZ, purpose: "line-filler" },
+    ]);
+    expect(
+      await read(`select decision from placement_decision where copy_id = $1`, [BULK_SCZ]),
+    ).toEqual([{ decision: "line-filler" }]);
+    // Her haul Scizor still waits: only the Charmander she has left the haul.
+    expect(await roleOf(SCZ)).toBe("haul");
+  });
+
+  it("the third pocket takes one too", async () => {
+    await save(
+      line(
+        [
+          basic(),
+          stage1({ kind: "have", tcgdexId: CHARMELEON_SV03_027.tcgdexId, dexVariantRaw: "Normal" }),
+        ],
+        { thirdPocket: { material: "card", from: "bulk", copyId: BULK_SCZ } },
+      ),
+    );
+    expect(await read(`select extra_pocket from evolution_line`)).toEqual([
+      { extra_pocket: "card" },
+    ]);
+    expect(await roleOf(BULK_SCZ)).toBe("block");
+  });
+
+  it("one bulk box copy fills one pocket: the same copy twice is refused, with nothing written", async () => {
+    await refusedWithNothingWritten(
+      line([basic(bulkCard()), stage1(bulkCard())]),
+      STAGE_REFUSAL.fillerNotInBulk,
+      StageChoiceRefusal,
+    );
+    expect(await roleOf(BULK_SCZ)).toBe("bulk");
+  });
+
+  it("a card that is not in her bulk box is refused in its words, with nothing written", async () => {
+    // Her haul Scizor, named as if it were in the bulk box.
+    await refusedWithNothingWritten(
+      line([basic(), stage1(bulkCard(SCZ))]),
+      STAGE_REFUSAL.fillerNotInBulk,
+      StageChoiceRefusal,
+    );
+    expect(await roleOf(BULK_SCZ)).toBe("bulk");
   });
 });
 

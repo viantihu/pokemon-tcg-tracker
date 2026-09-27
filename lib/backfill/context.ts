@@ -89,6 +89,8 @@ export function stageStateFor(
   ctx: BackfillContext,
   pool: WaitingPool,
   newId: () => string,
+  /** Her bulk box copies, for a filler card picked from it (the Senior BA's ruling: bulk box first, then haul). */
+  bulkIds: ReadonlySet<string> = new Set(),
 ): StageState {
   const waitingIds = new Set([...pool.values()].flatMap((k) => k.copyIds));
   const toStage = (c: CatalogCard): StageCatalogCard => ({
@@ -107,7 +109,8 @@ export function stageStateFor(
       const c = ctx.catalogById.get(id);
       return c ? toStage(c) : null;
     },
-    copy: (id) => (waitingIds.has(id) ? { id, role: "haul" } : null),
+    copy: (id) =>
+      waitingIds.has(id) ? { id, role: "haul" } : bulkIds.has(id) ? { id, role: "bulk" } : null,
     standIns: all.filter((c) => isStandInId(c.tcgdexId)).map(toStage),
     mirrorCandidates: (draft) => all.filter((c) => norm(c.name) === norm(draft.name)).map(toStage),
     newId,
@@ -121,11 +124,12 @@ export function planDeps(
   ownerId: string,
   takeCopy: PlanDeps["takeCopy"],
   pool: WaitingPool = new Map(),
+  bulkIds: ReadonlySet<string> = new Set(),
 ): PlanDeps {
   // A real uuid: every id column it names is uuid-typed (TL review of #422).
   const newId = () => crypto.randomUUID();
   return {
-    stageState: stageStateFor(ctx, pool, newId),
+    stageState: stageStateFor(ctx, pool, newId, bulkIds),
     takeCopy,
     ownerId,
     catalogById: ctx.catalogById,

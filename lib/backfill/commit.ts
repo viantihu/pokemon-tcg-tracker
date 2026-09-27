@@ -24,7 +24,13 @@
  * save asks for a card that is not waiting — naming each card and its variant — and only then plans.
  */
 
-import { applyWriteOps, type DbClient, type WriteOp, type WritePayload } from "@/lib/repo";
+import {
+  applyWriteOps,
+  copyRepo,
+  type DbClient,
+  type WriteOp,
+  type WritePayload,
+} from "@/lib/repo";
 import { loadBackfillContext, planDeps, type BackfillContext } from "./context";
 import { planBackLine, planFrontHalf, planSpecialty } from "./plan";
 import { validateBackLine } from "./validate";
@@ -32,6 +38,7 @@ import { NO_BINDER } from "@/lib/plan/no-binder";
 import { demandsOf, loadWaiting, NotWaitingError, shortagesOf, takerFor } from "./waiting";
 import {
   countWrites,
+  type BackfillThirdPocket,
   type BackfillWrites,
   type BackLineCommit,
   type CommitCounts,
@@ -180,22 +187,28 @@ async function commitWaiting(
     plan: (deps: ReturnType<typeof planDeps>) => BackfillWrites;
   },
 ): Promise<CommitCounts> {
-  const [ctx, pool] = await Promise.all([loadBackfillContext(db), loadWaiting(db)]);
+  const [ctx, pool, bulk] = await Promise.all([
+    loadBackfillContext(db),
+    loadWaiting(db),
+    // A line's filler card can come from her bulk box (the Senior BA's ruling); a flat entry takes none.
+    scope === "line" ? copyRepo.listBulk(db) : Promise.resolve([]),
+  ]);
   const { picks, plan } = prepare(ctx);
   const short = shortagesOf(demandsOf(picks), pool);
   if (short.length > 0) throw new NotWaitingError(short, nameIn(ctx), scope);
-  return applyWrites(db, plan(planDeps(ctx, ownerId, takerFor(pool), pool)));
+  const bulkIds = new Set(bulk.map((c) => c.id));
+  return applyWrites(db, plan(planDeps(ctx, ownerId, takerFor(pool), pool, bulkIds)));
 }
 
 const nameIn = (ctx: BackfillContext) => (tcgdexId: string) =>
   ctx.catalogById.get(tcgdexId)?.name ?? tcgdexId;
 
-/** The waiting copies a line takes: each card she has, each filler card, and a third-pocket card. */
+/** The waiting copies a line takes: each card she has, and each filler card from her haul (a bulk box one is not). */
 function linePicks(input: BackLineCommit): { tcgdexId: string; dexVariantRaw: string }[] {
   const picks: { tcgdexId: string; dexVariantRaw: string }[] = [];
-  const card = (f: { material: string; tcgdexId?: string; dexVariantRaw?: string } | undefined) => {
-    if (f?.material === "card" && f.tcgdexId) {
-      picks.push({ tcgdexId: f.tcgdexId, dexVariantRaw: f.dexVariantRaw ?? "" });
+  const card = (f: BackfillThirdPocket | undefined) => {
+    if (f?.material === "card" && "tcgdexId" in f) {
+      picks.push({ tcgdexId: f.tcgdexId, dexVariantRaw: f.dexVariantRaw });
     }
   };
   for (const s of input.stages) {

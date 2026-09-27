@@ -9,7 +9,13 @@
  * (`await getOwnerContext()` — RLS-scoped client + session owner id; see lib/plan/session.ts).
  */
 
-import { availableVariants, getOwnerContext, toCardVariants, toCatalogCard } from "@/lib/plan";
+import {
+  availableVariants,
+  getOwnerContext,
+  loadCatalogCached,
+  toCardVariants,
+  toCatalogCard,
+} from "@/lib/plan";
 import {
   commitBackLine,
   commitFrontHalf,
@@ -23,7 +29,10 @@ import {
   type ResolvedBackLine,
   type SpecialtyCommit,
 } from "@/lib/backfill";
+import { formsALine } from "@/lib/engine";
 import { catalogCardRepo, type Row } from "@/lib/repo";
+import { loadBulkFillers } from "@/lib/line/stage-options-load";
+import type { FillerCardOption } from "@/lib/line/popup";
 import { errorMessage } from "@/lib/errors";
 import type { LookupCard } from "../plan/plan-types";
 import type { BackfillContextPayload, CommitResult, WaitingCard } from "./backfill-types";
@@ -70,6 +79,19 @@ export async function searchWaiting(query: string): Promise<WaitingCard[]> {
   }
 }
 
+/**
+ * The spare copies in her bulk box that could fill a pocket, image first (the Senior BA's ruling: Backfill offers her
+ * bulk box first, then her haul). Throws on failure, so the picker says so rather than showing an empty bulk box.
+ */
+export async function bulkSpares(): Promise<FillerCardOption[]> {
+  try {
+    const { db } = await getOwnerContext();
+    return await loadBulkFillers(db);
+  } catch (err) {
+    throw new Error(`Could not read your bulk box: ${errorMessage(err)}`);
+  }
+}
+
 /** Type-ahead against the local mirror. Returns [] on error so typing never breaks. */
 export async function lookupCatalog(query: string): Promise<LookupCard[]> {
   const q = query.trim();
@@ -82,6 +104,30 @@ export async function lookupCatalog(query: string): Promise<LookupCard[]> {
     // Throws rather than returning [] (UIL-035): an empty result must mean "the mirror had nothing",
     // not "the request failed". See lookupCatalog in ../plan/actions.ts for why a throw and not a
     // result union.
+    throw new Error(`Could not search the catalog: ${errorMessage(err)}`);
+  }
+}
+
+/**
+ * The back half's species picker: the catalog search, offering only a species that forms a LINE (`formsALine`, the one
+ * predicate; Karvi, 2026-09-27: "A basic with no evolution should not be allowed to get put in the 'lines' area").
+ * Throws on failure, like `lookupCatalog` (UIL-035).
+ */
+export async function lookupLineSpecies(query: string): Promise<LookupCard[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  try {
+    const { db } = await getOwnerContext();
+    const [rows, catalogRows] = await Promise.all([
+      catalogCardRepo.search(db, q, 24),
+      loadCatalogCached(db),
+    ]);
+    const catalog = catalogRows.map(toCatalogCard);
+    return rows
+      .filter((r) => formsALine(toCatalogCard(r), catalog))
+      .slice(0, 12)
+      .map(toLookupCard);
+  } catch (err) {
     throw new Error(`Could not search the catalog: ${errorMessage(err)}`);
   }
 }

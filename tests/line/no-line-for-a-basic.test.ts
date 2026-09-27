@@ -202,16 +202,12 @@ describe("every writer refuses a line for it, with nothing written", () => {
       bandKey: "red",
       seedTcgdexId: LONER.tcgdexId,
       rootDexId: 9128,
-      requiredType: "Fire",
-      terminated: false,
       stages: [
         {
           stageIndex: 0,
           stage: "Basic",
           dexId: 9128,
-          decision: "filled",
-          filledTcgdexId: LONER.tcgdexId,
-          filledDexVariantRaw: "Normal",
+          choice: { kind: "have", tcgdexId: LONER.tcgdexId, dexVariantRaw: "Normal" },
         },
       ],
     }).then(

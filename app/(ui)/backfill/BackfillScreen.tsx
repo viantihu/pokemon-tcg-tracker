@@ -27,7 +27,13 @@ import { band } from "@/lib/engine";
 import type { BackLineStageInfo, BackLineStageInput, ResolvedBackLine } from "@/lib/backfill";
 import { mixedLanguageNote } from "@/lib/backfill/language";
 import { localeOfId } from "@/lib/catalog/locale";
-import { LINE_ROW_POCKETS, lineStatusOf, stageLabel } from "@/lib/line/popup";
+import {
+  LINE_ROW_POCKETS,
+  lineStatusOf,
+  NOT_A_LINE,
+  stageLabel,
+  type FillerCardOption,
+} from "@/lib/line/popup";
 import { BandChip } from "../_components/BandChip";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
@@ -37,11 +43,12 @@ import { isUnreached, LOST, reach } from "../_components/reach";
 import { NoBinderNotice } from "../_components/NoBinderNotice";
 import type { LookupCard } from "../plan/plan-types";
 import {
+  bulkSpares,
   commitFrontAction,
   commitLineAction,
   commitSpecialtyAction,
   loadContext,
-  lookupCatalog,
+  lookupLineSpecies,
   resolveLine,
   searchWaiting,
 } from "./actions";
@@ -386,9 +393,20 @@ interface StageEntry {
   haveCard: WaitingCard | null;
   /** Null until she picks: a filler is her choice too (UX review of #422). */
   fillerMaterial: "energy" | "card" | null;
-  /** A filler card is a spare she has too, so it is picked from her haul as well. */
-  fillerCard: WaitingCard | null;
+  /** A filler card: a spare from her bulk box, or one waiting in her haul (the Senior BA's ruling). */
+  fillerCard: SpareCard | null;
 }
+
+/** A spare card for a pocket: one of her bulk box copies (offered first), or a card waiting in her haul. */
+type SpareCard = { from: "bulk"; option: FillerCardOption } | { from: "haul"; card: WaitingCard };
+
+/** A spare card as the server takes it: that bulk box copy, or the next waiting copy of the haul printing. */
+function spareFiller(s: SpareCard) {
+  return s.from === "bulk"
+    ? { material: "card" as const, from: "bulk" as const, copyId: s.option.copyId }
+    : { material: "card" as const, tcgdexId: s.card.tcgdexId, dexVariantRaw: s.card.dexVariantRaw };
+}
+const spareName = (s: SpareCard) => (s.from === "bulk" ? s.option.card.name : s.card.name);
 
 function defaultEntry(info: BackLineStageInfo): StageEntry {
   return { info, choice: null, haveCard: null, fillerMaterial: null, fillerCard: null };
@@ -408,7 +426,7 @@ function previewStatus(entries: StageEntry[]): "open" | "closed" {
 /** What fills a complete short line's third pocket (UIL-121 Q4), until she picks. */
 interface ThirdPocketEntry {
   material: "energy" | "card" | "empty" | null;
-  card: WaitingCard | null;
+  card: SpareCard | null;
 }
 
 function BackHalfPanel({
@@ -442,6 +460,12 @@ function BackHalfPanel({
       }
       if (!r) {
         onResult({ kind: "err", text: "Could not find that species' evolution line." });
+        return;
+      }
+      // A basic with no evolution is not a line (Karvi, 2026-09-27); the picker does not offer one, and this holds
+      // if one ever arrives.
+      if (r.stages.length < 2) {
+        onResult({ kind: "err", text: NOT_A_LINE });
         return;
       }
       setResolved(r);
@@ -535,11 +559,7 @@ function BackHalfPanel({
                 kind: "filler",
                 filler:
                   e.fillerMaterial === "card" && e.fillerCard
-                    ? {
-                        material: "card",
-                        tcgdexId: e.fillerCard.tcgdexId,
-                        dexVariantRaw: e.fillerCard.dexVariantRaw,
-                      }
+                    ? spareFiller(e.fillerCard)
                     : { material: "energy" },
               },
             };
@@ -558,11 +578,7 @@ function BackHalfPanel({
               ? {
                   thirdPocket:
                     third.material === "card" && third.card
-                      ? {
-                          material: "card" as const,
-                          tcgdexId: third.card.tcgdexId,
-                          dexVariantRaw: third.card.dexVariantRaw,
-                        }
+                      ? spareFiller(third.card)
                       : { material: third.material === "card" ? "energy" : third.material },
                 }
               : {}),
@@ -582,10 +598,20 @@ function BackHalfPanel({
     }
   }
 
-  const allPicks = (except: StageEntry | null) => [
+  const thirdSpare = third.material === "card" ? third.card : null;
+  /** The haul cards the line's OTHER pickers have taken, so each picker counts what is really left. */
+  const allPicks = (except: StageEntry | null, withThird = true) => [
     ...entries.filter((o) => o !== except).flatMap(stagePicks),
-    ...(third.material === "card" && third.card ? [third.card] : []),
+    ...(withThird && thirdSpare?.from === "haul" ? [thirdSpare.card] : []),
   ];
+  /** The bulk box copies the OTHER pockets hold: one copy fills one pocket. */
+  const usedBulk = (except: StageEntry | null, withThird = true) =>
+    new Set([
+      ...entries
+        .filter((o) => o !== except && o.choice === "filler" && o.fillerMaterial === "card")
+        .flatMap((o) => (o.fillerCard?.from === "bulk" ? [o.fillerCard.option.copyId] : [])),
+      ...(withThird && thirdSpare?.from === "bulk" ? [thirdSpare.option.copyId] : []),
+    ]);
 
   return (
     <div className="entry panel">
@@ -615,7 +641,7 @@ function BackHalfPanel({
             </span>
           </div>
           <CardResultsGrid
-            search={lookupCatalog}
+            search={lookupLineSpecies}
             onPick={startLine}
             placeholder="Pick a species in this line (any stage)…"
           />
@@ -644,6 +670,7 @@ function BackHalfPanel({
               key={e.info.stageIndex}
               entry={e}
               otherPicks={allPicks(e)}
+              usedBulk={usedBulk(e)}
               onChoice={(d) => patch(e.info.stageIndex, { choice: d })}
               onHaveCard={(card) => patch(e.info.stageIndex, { haveCard: card })}
               onFillerMaterial={(m) => patch(e.info.stageIndex, { fillerMaterial: m })}
@@ -654,7 +681,8 @@ function BackHalfPanel({
           {needsThird ? (
             <ThirdPocketRow
               value={third}
-              otherPicks={allPicks(null).filter((c) => c !== third.card)}
+              otherPicks={allPicks(null, false)}
+              usedBulk={usedBulk(null, false)}
               onChange={setThird}
             />
           ) : null}
@@ -695,11 +723,119 @@ function BackHalfPanel({
   );
 }
 
-/** The waiting copies a stage takes as entered: the card she has, or its filler card. */
+/** The waiting copies a stage takes as entered: the card she has, or its filler card from her haul. */
 function stagePicks(e: StageEntry): WaitingCard[] {
   if (e.choice === "have" && e.haveCard) return [e.haveCard];
-  if (e.choice === "filler" && e.fillerMaterial === "card" && e.fillerCard) return [e.fillerCard];
+  if (e.choice === "filler" && e.fillerMaterial === "card" && e.fillerCard?.from === "haul") {
+    return [e.fillerCard.card];
+  }
   return [];
+}
+
+/**
+ * The spare cards that can fill a pocket (the Senior BA's ruling): her bulk box first, each copy tagged "Bulk box",
+ * then the cards waiting in this haul. `usedBulk`: bulk box copies another pocket of this line already holds.
+ */
+function SparePicker({
+  search,
+  usedBulk,
+  onPick,
+}: {
+  search: (query: string) => Promise<WaitingCard[]>;
+  usedBulk: ReadonlySet<string>;
+  onPick: (s: SpareCard) => void;
+}) {
+  const [bulk, setBulk] = useState<FillerCardOption[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    bulkSpares().then(
+      (options) => {
+        if (live) setBulk(options);
+      },
+      (e: unknown) => {
+        if (live) setError(e instanceof Error ? e.message : LOST.read);
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  const left = bulk?.filter((o) => !usedBulk.has(o.copyId)) ?? null;
+  const onHaul = (card: WaitingCard) => onPick({ from: "haul", card });
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span className="hint u">Your bulk box</span>
+      {error ? (
+        <div className="hint u" role="alert">
+          {error}
+        </div>
+      ) : left === null ? (
+        <div className="hint u" role="status">
+          Loading your bulk box…
+        </div>
+      ) : left.length === 0 ? (
+        <div className="hint u">No spare card in your bulk box.</div>
+      ) : (
+        <div className="cgrid" role="group" aria-label="Spare cards in your bulk box">
+          {left.map((o) => {
+            const number = formatCollectorNumber(
+              o.card.localId,
+              o.card.setCardCountOfficial ?? null,
+            );
+            return (
+              <button
+                key={o.copyId}
+                type="button"
+                className="ccard"
+                aria-label={`${o.card.name}${number ? ` ${number}` : ""} · Bulk box`}
+                onClick={() => onPick({ from: "bulk", option: o })}
+              >
+                <CardFace
+                  name={o.card.name}
+                  tcgdexId={o.card.tcgdexId}
+                  imageUrl={o.card.imageUrl}
+                  size="m"
+                />
+                <div className="cn u">{o.card.name}</div>
+                {number ? <div className="cno">{number}</div> : null}
+                <div className="cno">{o.where}</div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <span className="hint u">This haul</span>
+      <CardResultsGrid
+        search={search}
+        onPick={onHaul}
+        placeholder="Which spare card fills it?"
+        emptyText={NOT_WAITING_EMPTY}
+      />
+    </div>
+  );
+}
+
+/** A picked spare card: its face and number, where it comes from, and "Change" to pick again. */
+function PickedSpare({ spare, onChange }: { spare: SpareCard; onChange: () => void }) {
+  const c = spare.from === "haul" ? spare.card : spare.option.card;
+  const number = formatCollectorNumber(c.localId, c.setCardCountOfficial ?? null);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <CardFace name={c.name} tcgdexId={c.tcgdexId} imageUrl={c.imageUrl} size="s" />
+        <span className="nm" style={{ fontSize: 12 }}>
+          {c.name}
+          {number ? ` · ${number}` : ""}
+          {spare.from === "bulk" ? ` · ${spare.option.where}` : ""}
+        </span>
+        <button type="button" className="btn sm" onClick={onChange}>
+          Change
+        </button>
+      </div>
+      {spare.from === "haul" ? <WaitingTag card={spare.card} /> : null}
+    </div>
+  );
 }
 
 /** A picked card from her haul: its face, number and Dex variant. */
@@ -719,6 +855,7 @@ function PickedCard({ card }: { card: WaitingCard }) {
 function StageRow({
   entry,
   otherPicks,
+  usedBulk,
   onChoice,
   onHaveCard,
   onFillerMaterial,
@@ -727,10 +864,12 @@ function StageRow({
   entry: StageEntry;
   /** What the line's OTHER stages have picked, so this stage's picker counts what is really left. */
   otherPicks: WaitingCard[];
+  /** The bulk box copies the line's other pockets hold. */
+  usedBulk: ReadonlySet<string>;
   onChoice: (d: StageChoice) => void;
   onHaveCard: (card: WaitingCard) => void;
   onFillerMaterial: (m: "energy" | "card") => void;
-  onFillerCard: (card: WaitingCard) => void;
+  onFillerCard: (card: SpareCard | null) => void;
 }) {
   const { info, choice } = entry;
   const search = useWaitingSearch(otherPicks);
@@ -762,7 +901,7 @@ function StageRow({
             {entry.fillerMaterial === "card" && entry.fillerCard ? (
               <>
                 <br />
-                {entry.fillerCard.name}
+                {spareName(entry.fillerCard)}
               </>
             ) : null}
           </>
@@ -831,14 +970,12 @@ function StageRow({
                 A spare card
               </button>
             </div>
-            {entry.fillerMaterial === "card" && (
-              <CardResultsGrid
-                search={search}
-                onPick={onFillerCard}
-                placeholder="Which spare card fills it?"
-                emptyText={NOT_WAITING_EMPTY}
-              />
-            )}
+            {entry.fillerMaterial === "card" &&
+              (entry.fillerCard ? (
+                <PickedSpare spare={entry.fillerCard} onChange={() => onFillerCard(null)} />
+              ) : (
+                <SparePicker search={search} usedBulk={usedBulk} onPick={onFillerCard} />
+              ))}
           </div>
         )}
       </div>
@@ -888,16 +1025,18 @@ function StageRow({
 function ThirdPocketRow({
   value,
   otherPicks,
+  usedBulk,
   onChange,
 }: {
   value: ThirdPocketEntry;
   otherPicks: WaitingCard[];
+  usedBulk: ReadonlySet<string>;
   onChange: (v: ThirdPocketEntry) => void;
 }) {
   const search = useWaitingSearch(otherPicks);
   const pick = (material: ThirdPocketEntry["material"]) =>
     onChange({ material, card: material === "card" ? value.card : null });
-  const onPickCard = (card: WaitingCard) => onChange({ material: "card", card });
+  const onPickCard = (card: SpareCard | null) => onChange({ material: "card", card });
   return (
     <div className="lf">
       <span className="st">3RD POCKET</span>
@@ -907,14 +1046,9 @@ function ThirdPocketRow({
         </span>
         {value.material === "card" ? (
           value.card ? (
-            <PickedCard card={value.card} />
+            <PickedSpare spare={value.card} onChange={() => onPickCard(null)} />
           ) : (
-            <CardResultsGrid
-              search={search}
-              onPick={onPickCard}
-              placeholder="Which spare card fills it?"
-              emptyText={NOT_WAITING_EMPTY}
-            />
+            <SparePicker search={search} usedBulk={usedBulk} onPick={onPickCard} />
           )
         ) : null}
       </div>

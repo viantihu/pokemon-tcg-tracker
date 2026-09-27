@@ -102,12 +102,14 @@ export type BackfillStageChoice =
   | { kind: "filler"; filler: BackfillFiller };
 
 /**
- * What fills a pocket in Backfill: a basic energy, or a spare card that is still waiting in her haul (she is
- * transcribing a binder, so the physical card has not been placed yet). The server picks WHICH copy of that printing
- * and variant, oldest first, as it does for "have".
+ * What fills a pocket in Backfill: a basic energy, or a spare card, from her bulk box first or her haul (the Senior
+ * BA's ruling). A bulk box card is that copy. A haul card is a printing still waiting (she is transcribing a binder,
+ * so the physical card has not been placed yet): the server picks WHICH copy of it, oldest first, as for "have".
  */
 export type BackfillFiller =
-  { material: "energy" } | { material: "card"; tcgdexId: string; dexVariantRaw: string };
+  | { material: "energy" }
+  | { material: "card"; from: "bulk"; copyId: string }
+  | { material: "card"; tcgdexId: string; dexVariantRaw: string };
 
 /** A complete line shorter than three pockets has a third pocket; she says what fills it (UIL-121 Q4). */
 export type BackfillThirdPocket = BackfillFiller | { material: "empty" };

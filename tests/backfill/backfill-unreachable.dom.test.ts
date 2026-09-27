@@ -57,6 +57,8 @@ vi.mock("@/app/(ui)/backfill/actions", () => ({
   commitLineAction: (...a: unknown[]) => commitLineAction(...a),
   commitSpecialtyAction: (...a: unknown[]) => commitSpecialtyAction(...a),
   lookupCatalog: vi.fn(async () => []),
+  lookupLineSpecies: vi.fn(async () => []),
+  bulkSpares: vi.fn(async () => []),
   searchWaiting: vi.fn(async () => []),
 }));
 
@@ -122,6 +124,16 @@ describe("UIL-109 · Backfill says a failure in the shared words", () => {
           suggestedTargetId: "sv09-088",
           alternateTargetIds: [],
         },
+        {
+          stageIndex: 1,
+          stage: "Stage1",
+          dexId: 9482,
+          name: "Toedscruel",
+          sameColorPrintingExists: true,
+          specialtyOnly: false,
+          suggestedTargetId: "sv09-089",
+          alternateTargetIds: [],
+        },
       ],
     });
     commitLineAction.mockRejectedValue(new TypeError("Failed to fetch"));
@@ -132,6 +144,11 @@ describe("UIL-109 · Backfill says a failure in the shared words", () => {
     // Every stage opens undecided (UIL-117 PR 5); Save waits for her decision.
     const basic = await screen.findByRole("group", { name: "Basic decision" });
     await user.click(within(basic).getByRole("button", { name: "Leave empty" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Stage1 decision" })).getByRole("button", {
+        name: "Leave empty",
+      }),
+    );
     await user.click(screen.getByRole("button", { name: "Save line" }));
     await waitFor(() => expect(text()).toContain(LOST.action));
     expect(commitLineAction).toHaveBeenCalledTimes(1);

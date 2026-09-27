@@ -17,8 +17,15 @@
  */
 
 import type { CatalogCard, TypeColorMap } from "@/lib/engine";
-import { lineStatusOf, type StageDecision, type ThirdPocketChoice } from "@/lib/line/popup";
 import {
+  lineStatusOf,
+  type FillerChoice,
+  type StageDecision,
+  type ThirdPocketChoice,
+} from "@/lib/line/popup";
+import {
+  STAGE_REFUSAL,
+  StageChoiceRefusal,
   stageWriteOps,
   thirdPocketWriteOps,
   validateStageDecision,
@@ -30,6 +37,7 @@ import { bandKeyForTypes } from "./resolve";
 import type { ValidatedBackLine } from "./validate";
 import {
   emptyWrites,
+  type BackfillFiller,
   type BackfillStageChoice,
   type BackfillThirdPocket,
   type BackfillWrites,
@@ -127,7 +135,9 @@ export function planBackLine(line: ValidatedBackLine, deps: PlanDeps): BackfillW
   const bd = bandDisplay(line.bandKey, deps);
   const bn = binderName(line.binderId, deps);
   const st = deps.stageState;
-  const fillerFrom = ["haul"] as const;
+  // A spare card comes from her bulk box or her haul (the Senior BA's ruling); each pick is held to its own source.
+  const fillerFrom = ["bulk", "haul"] as const;
+  const spare = spareCards(deps);
   const finals: { state: string; stageChoice?: string | null }[] = [];
   const choiceOps: WriteOp[] = [];
 
@@ -193,7 +203,7 @@ export function planBackLine(line: ValidatedBackLine, deps: PlanDeps): BackfillW
         binderId: line.binderId,
         requiredType: line.requiredType,
       },
-      sharedChoice(choice, deps),
+      sharedChoice(choice, spare),
       { fillerFrom },
     );
     choiceOps.push(...stageWriteOps(slotId, decided));
@@ -223,7 +233,7 @@ export function planBackLine(line: ValidatedBackLine, deps: PlanDeps): BackfillW
       slotCount: line.stages.length,
       completeAfterWrite: finals.length > 0 && finals.every((f) => f.state === "filled"),
     },
-    line.thirdPocket ? sharedFiller(line.thirdPocket, deps) : undefined,
+    line.thirdPocket ? sharedThirdPocket(line.thirdPocket, spare) : undefined,
     { fillerFrom },
   );
   if (third) choiceOps.push(...thirdPocketWriteOps(lineId, third));
@@ -232,24 +242,38 @@ export function planBackLine(line: ValidatedBackLine, deps: PlanDeps): BackfillW
   return w;
 }
 
-/** Her Backfill choice as the shared rule's, with a filler card resolved to the waiting copy it takes. */
+/** Her Backfill choice as the shared rule's, with a filler card resolved to the copy it takes. */
 function sharedChoice(
   choice: BackfillStageChoice | undefined,
-  deps: PlanDeps,
+  spare: (f: BackfillFiller) => FillerChoice,
 ): StageDecision | undefined {
   if (!choice || choice.kind === "have") return undefined;
-  if (choice.kind === "filler") {
-    const filler = sharedFiller(choice.filler, deps);
-    return filler.material === "empty" ? undefined : { kind: "filler", filler };
-  }
+  if (choice.kind === "filler") return { kind: "filler", filler: spare(choice.filler) };
   return choice;
 }
 
-function sharedFiller<T extends BackfillThirdPocket>(f: T, deps: PlanDeps): ThirdPocketChoice {
-  if (f.material === "card") {
-    return { material: "card", copyId: deps.takeCopy(f.tcgdexId, f.dexVariantRaw) };
-  }
-  return f;
+function sharedThirdPocket(
+  t: BackfillThirdPocket,
+  spare: (f: BackfillFiller) => FillerChoice,
+): ThirdPocketChoice {
+  return t.material === "empty" ? t : spare(t);
+}
+
+/**
+ * A spare card as the shared rule takes it, held to where she picked it. A haul card takes the next waiting copy of
+ * that printing (`from: "haul"`); a bulk box card is that copy (the default source), and one copy fills one pocket.
+ */
+function spareCards(deps: PlanDeps): (f: BackfillFiller) => FillerChoice {
+  const usedBulk = new Set<string>();
+  return (f) => {
+    if (f.material === "energy") return f;
+    if ("copyId" in f) {
+      if (usedBulk.has(f.copyId)) throw new StageChoiceRefusal(STAGE_REFUSAL.fillerNotInBulk);
+      usedBulk.add(f.copyId);
+      return { material: "card", copyId: f.copyId };
+    }
+    return { material: "card", copyId: deps.takeCopy(f.tcgdexId, f.dexVariantRaw), from: "haul" };
+  };
 }
 
 /**

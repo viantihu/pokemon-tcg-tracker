@@ -10,7 +10,10 @@ import { languageName, type Language } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
 
 /** "This line mixes English and Japanese cards; it will read as Japanese." Null when the line does not mix. */
-export function mixedLanguageNote(cardLocales: readonly Locale[], lineLocale: Locale): string | null {
+export function mixedLanguageNote(
+  cardLocales: readonly Locale[],
+  lineLocale: Locale,
+): string | null {
   const distinct = [...new Set(cardLocales)];
   if (distinct.length < 2) return null;
   const names = distinct.map((l) => languageName(l as Language));
