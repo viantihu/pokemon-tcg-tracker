@@ -3891,6 +3891,14 @@ html.tour-open .app {
 .tour-actions .tour-hide {
   margin-right: auto;
 }
+/* Hidden, on a wide screen the pill moves bottom-left, above Sign out and over the scrolling list, off the
+   sticky spotlight's bottom row (the UX Dev's 1280x720 measurement: its corner sat on "Leave for later"). */
+.tour-dock.is-hidden {
+  left: 14px;
+  right: auto;
+  bottom: 60px;
+  justify-content: flex-start;
+}
 .tour-pill {
   font-size: 11px;
   box-shadow: 5px 5px 0 rgba(60, 60, 59, 0.2);
@@ -3912,11 +3920,13 @@ html.tour-open .app {
 }
 /* The phone frame (`.app` padding 120px from 720px down): the dock spans the width above Sign out. */
 @media (max-width: 720px) {
-  .tour-dock {
+  .tour-dock,
+  .tour-dock.is-hidden {
     left: 10px;
     right: 10px;
     bottom: 64px;
     width: auto;
+    justify-content: flex-end;
   }
   html.tour-open .app {
     padding-bottom: max(120px, calc(var(--tour-h, 0px) + 64px + 24px));

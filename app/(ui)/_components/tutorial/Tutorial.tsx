@@ -108,7 +108,7 @@ export function TutorialProvider({
     <TutorialContext.Provider value={value}>
       {children}
       {step !== null ? (
-        <TutorialDock>
+        <TutorialDock hidden={hidden}>
           {hidden ? (
             <TutorialPill step={step} onShow={() => setHidden(false)} />
           ) : (
@@ -199,7 +199,7 @@ export function TutorialCard(props: {
  * left under the tour. ResizeObserver and a viewport listener both, as the haul bar learned (a wrap on a phone can
  * be missed by the observer alone). Both are removed on close, so no stale padding is left behind.
  */
-function TutorialDock({ children }: { children: ReactNode }) {
+function TutorialDock({ hidden, children }: { hidden: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -223,7 +223,7 @@ function TutorialDock({ children }: { children: ReactNode }) {
     };
   }, []);
   return (
-    <div ref={ref} className="tour-dock">
+    <div ref={ref} className={"tour-dock" + (hidden ? " is-hidden" : "")}>
       {children}
     </div>
   );
