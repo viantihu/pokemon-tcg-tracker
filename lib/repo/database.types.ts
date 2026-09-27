@@ -372,6 +372,12 @@ export type Database = {
         };
         Relationships: [];
       };
+      onboarding: {
+        Row: { owner_id: string; tutorial_done_at: string };
+        Insert: { owner_id?: string; tutorial_done_at?: string };
+        Update: { owner_id?: string; tutorial_done_at?: string };
+        Relationships: [];
+      };
       presence_group: {
         Row: {
           id: string;

@@ -18,6 +18,8 @@ import { createClient } from "@/lib/supabase/server";
 import { TopBar } from "./_components/TopBar";
 import { SessionProvider } from "./_components/SessionProvider";
 import { SignOutButton } from "./_components/SignOutButton";
+import { TutorialProvider } from "./_components/tutorial/Tutorial";
+import { onboardingRepo } from "@/lib/repo";
 
 export default async function UiLayout({ children }: { children: ReactNode }) {
   const supabase = await createClient();
@@ -26,12 +28,18 @@ export default async function UiLayout({ children }: { children: ReactNode }) {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
+  // First-run tutorial (UIL-128): opens by itself until this account finishes or skips it. A failed read counts
+  // as done: the app can deploy before its migration applies, and a tour is never worth a broken page.
+  const tutorialDone = await onboardingRepo.tutorialDone(supabase).catch(() => true);
+
   return (
     <SessionProvider value={{ userId: user.id, email: user.email ?? null }}>
-      <div className="app">
-        <TopBar />
-        {children}
-      </div>
+      <TutorialProvider startOpen={!tutorialDone}>
+        <div className="app">
+          <TopBar />
+          {children}
+        </div>
+      </TutorialProvider>
       <SignOutButton email={user.email ?? null} />
     </SessionProvider>
   );

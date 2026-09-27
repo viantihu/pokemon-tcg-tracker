@@ -15,6 +15,7 @@ import { BandChip } from "../_components/BandChip";
 import { isUnreached, LOST, reach } from "../_components/reach";
 import { deleteBinder, loadSettings, reorderBands, saveBinder, setTypeBand } from "./actions";
 import type { BandRow, BinderInput, SettingsData } from "./settings-types";
+import { ReplayTutorialButton } from "../_components/tutorial/Tutorial";
 
 const BLANK_BINDER: BinderInput = {
   id: null,
@@ -288,6 +289,17 @@ export function SettingsScreen() {
         <div className="hint u">
           White absorbs Colorless, Metal, and every Trainer / Supporter / Item.
         </div>
+      </section>
+
+      {/* ---- Tutorial (UIL-128) ---- */}
+      <section className="setpanel panel">
+        <div className="sethead">
+          <span className="hk u">Tutorial</span>
+          <span className="hv u" style={{ marginLeft: "auto", fontSize: 10 }}>
+            The tour of the app from your first sign-in
+          </span>
+        </div>
+        <ReplayTutorialButton />
       </section>
     </div>
   );

@@ -9,6 +9,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTutorial } from "./tutorial/Tutorial";
 
 const TABS = [
   { href: "/plan", label: "Haul Plan", n: "1" },
@@ -23,6 +24,8 @@ const TABS = [
 
 export function TopBar() {
   const pathname = usePathname();
+  // The tabs the open tutorial step points at (UIL-128); none while it is closed.
+  const { targets } = useTutorial();
   return (
     <div className="topbar">
       <div className="brand">
@@ -36,11 +39,12 @@ export function TopBar() {
       <nav className="menu" aria-label="Primary">
         {TABS.map((t) => {
           const active = pathname === t.href || pathname.startsWith(`${t.href}/`);
+          const pointed = targets.includes(t.href);
           return (
             <Link
               key={t.href}
               href={t.href}
-              className={"tab u" + (active ? " on" : "")}
+              className={"tab u" + (active ? " on" : "") + (pointed ? " tour-target" : "")}
               aria-current={active ? "page" : undefined}
             >
               <span className="n">{t.n}</span> {t.label}
