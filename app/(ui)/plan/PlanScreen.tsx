@@ -59,6 +59,9 @@ import {
   mergeReroute,
   type MovedCard,
 } from "./reroute";
+import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
+import { lineModelAction } from "../_components/line-popup-actions";
+import { PlanLinePopup } from "./PlanLinePopup";
 
 /* ------------------------- resuming a plan in progress (UIL-006) ------------------------- */
 
@@ -108,6 +111,18 @@ interface ResumeState {
 }
 
 /** Stable fold key for one sub-group. A band key is `[a-z_]+`, so a `:` cannot collide with one. */
+/**
+ * The row badge for a card headed into a back half (UIL-117, v3 section 1): green, yellow, pink. It names the line by
+ * its top stage, as v3 and the popup do ("＋ Starts Charizard line"); a replace stays generic.
+ */
+function lineBadgeText(kind: LineProposal["kind"], lineName: string | null): string {
+  // The symbol and its verb never part (a no-break space): on a phone the badge wraps after the verb (UX review).
+  if (kind === "start")
+    return lineName ? `＋\u00a0Starts ${lineName} line` : "＋\u00a0Starts a line";
+  if (kind === "add") return lineName ? `◆\u00a0Adds to ${lineName} line` : "◆\u00a0Adds to a line";
+  return "⇄\u00a0Could replace a card";
+}
+
 /** The worklist row's element id, so "Search haul" can scroll to it (UIL-115). */
 function planRowDomId(incomingId: string): string {
   return `plan-row-${incomingId}`;
@@ -143,6 +158,20 @@ interface ParkedRun {
   stampMatches: boolean;
 }
 
+/** A parked plan from before UIL-117: a back-half card on it carries no line proposal. */
+function predatesLineProposals(plan: RunPlanResult | null | undefined): boolean {
+  if (!plan) return false;
+  return plan.groups.some((g) =>
+    g.subgroups.some((s) =>
+      s.rows.some(
+        (r) =>
+          (r.action === "FILL" || r.action === "NEWLINE" || r.action === "SWAP") &&
+          !("lineProposal" in r),
+      ),
+    ),
+  );
+}
+
 function readResume(stamp: string): ParkedRun | null {
   if (typeof window === "undefined") return null;
   try {
@@ -155,7 +184,12 @@ function readResume(stamp: string): ParkedRun | null {
       window.sessionStorage.removeItem(RESUME_KEY);
       return null;
     }
-    return { state: parsed, stampMatches: parsed.stamp === stamp };
+    // A plan parked before UIL-117 has back-half cards with no line proposal, so it cannot ask her about them:
+    // route it again (the Senior BA's ruling: once, on deploy; nothing she shelved is lost, it is written).
+    return {
+      state: parsed,
+      stampMatches: parsed.stamp === stamp && !predatesLineProposals(parsed.plan),
+    };
   } catch {
     // Corrupt entry, quota error, or storage disabled — never break the screen over a cache.
     return null;
@@ -323,23 +357,12 @@ export function PlanScreen({
     bandMismatch: BandMismatchChoice | null;
   } | null>(null);
   /**
-   * Pulls she has ticked, per draft id (UIL-061). Starts EMPTY for every card and is never
-   * pre-populated: starting a line must move nothing she has not explicitly agreed to, and a
-   * pre-checked box is not agreement. Cleared with the plan, like the overrides map.
-   */
-  const [confirmedPulls, setConfirmedPulls] = useState<Record<string, string[]>>({});
-  /**
-   * Her resolution of a colour mismatch, per draft id (UIL-069). Starts unset for every card —
-   * neither option is a default, so there is nothing to pre-populate. "own-color" also sets
-   * `overrides` in the same click (that IS the resolution); this only has to carry "line", the one
-   * choice with no override to prove it happened.
-   */
-  const [bandChoice, setBandChoice] = useState<Record<string, "line" | "own-color">>({});
-  /**
    * Her collection for a specialty card whose binder holds collections (UIL-053), by draft id. Starts
    * empty: no collection is a default, except a binder's only one (`pickedCollection`).
    */
   const [collectionChoice, setCollectionChoice] = useState<Record<string, string>>({});
+  /** The card whose line popup is open (UIL-117), by draft id; nothing is written until she confirms. */
+  const [linePop, setLinePop] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /**
    * Cards she typed by hand on a build before UIL-098 part 2, found in her parked sitting. They cannot be
@@ -476,12 +499,6 @@ export function PlanScreen({
   function onMoveConfirm(dest: MoveDestination) {
     if (!moveTarget) return;
     setOverrides((prev) => ({ ...prev, [moveTarget.copyId]: dest }));
-    // A manual Move is her OWN third choice, superseding whatever the mismatch radios held (UIL-069).
-    setBandChoice((prev) => {
-      const next = { ...prev };
-      delete next[moveTarget.copyId];
-      return next;
-    });
     flashToast(`Placement override set · ${moveTarget.name}`);
     setMoveTarget(null);
   }
@@ -537,8 +554,6 @@ export function PlanScreen({
       // A new run is new work: nothing is finished yet, so nothing should arrive folded.
       setCollapsed(new Set());
       setCollapsedSubgroups(new Set());
-      setConfirmedPulls({});
-      setBandChoice({});
       setCollectionChoice({});
       setMoved(null);
       // A fresh route is fresh work: nothing on it is "new" against anything.
@@ -603,8 +618,6 @@ export function PlanScreen({
     setCur(at2 >= 0 ? at2 : Math.min(now.cur, Math.max(flat.length - 1, 0)));
     // Anything she ticked was against a derivation that no longer exists (UIL-061, UIL-069).
     setFresh(null);
-    setConfirmedPulls({});
-    setBandChoice({});
     if (!isUnreached(stamp)) setLiveStamp(stamp);
     setMoved(changed.length > 0 ? changed : null);
     // Arrivals (UIL-114 part C): badged, and named with where they go, so none joins silently.
@@ -689,8 +702,6 @@ export function PlanScreen({
       return out;
     };
     setOverrides(omit);
-    setConfirmedPulls(omit);
-    setBandChoice(omit);
     setCollectionChoice(omit);
     takenOff.current.add(id);
     scheduleReroute();
@@ -711,7 +722,11 @@ export function PlanScreen({
    * A card that fails stays unshelved and stays on the page, which is the correct end state: "any card
    * that has not received a location should still appear on that haul plan page".
    */
-  async function shelveCard(item: PlanItem): Promise<boolean> {
+  async function shelveCard(
+    item: PlanItem,
+    /** From the line popup (UIL-117): her line choice, or her "file by its own colour" destination. */
+    extra?: { lineChoice?: LineChoice; override?: MoveDestination },
+  ): Promise<boolean> {
     if (done.has(item.incomingId) || shelving) return false;
     const entry = draft.find((d) => d.id === item.incomingId);
     if (!entry) return false;
@@ -728,7 +743,7 @@ export function PlanScreen({
               variant: entry.variant,
               existingCopyId: entry.existingCopyId,
             },
-            override: overrides[item.incomingId] ?? null,
+            override: extra?.override ?? overrides[item.incomingId] ?? null,
             // Everything not yet shelved stays queued, so the returned stamp describes what we hold next.
             pendingCopyIds: draft
               .filter((d) => !done.has(d.id) && d.id !== item.incomingId)
@@ -736,13 +751,9 @@ export function PlanScreen({
             // Only when we hold a fresh derivation FOR THIS CARD (UIL-045). Sending the stale forecast's
             // digest would conflict on every interacting card; sending none keeps the old behaviour.
             expectedDigest: fresh?.id === item.incomingId ? fresh.digest : null,
-            // Only what she ticked FOR THIS CARD, and only while the derivation it was ticked against is
-            // still the current one — consent is specific to a placement, not to a card (UIL-061).
-            confirmedPulls:
-              fresh?.id === item.incomingId ? (confirmedPulls[item.incomingId] ?? []) : [],
-            // Only her pick FOR THIS CARD's current derivation, same rule as confirmedPulls (UIL-069).
-            bandChoice:
-              fresh?.id === item.incomingId ? (bandChoice[item.incomingId] ?? null) : null,
+            // Her choice in the line popup for a card headed into a line (UIL-117). Pulls, a colour question and
+            // a replace all live in the popup now; an override names its own destination and needs none.
+            lineChoice: overrides[item.incomingId] ? null : (extra?.lineChoice ?? null),
             // Her collection for a specialty card (UIL-053). An override names its own destination.
             collectionChoice: overrides[item.incomingId]
               ? null
@@ -771,12 +782,6 @@ export function PlanScreen({
             digest: res.freshDigest,
             proposedPulls: [],
             bandMismatch: null,
-          });
-          setConfirmedPulls((prev) => ({ ...prev, [item.incomingId]: [] }));
-          setBandChoice((prev) => {
-            const next = { ...prev };
-            delete next[item.incomingId];
-            return next;
           });
           setError(res.error);
           return false;
@@ -826,8 +831,6 @@ export function PlanScreen({
     setCur(0);
     setError(null);
     setOverrides({});
-    setConfirmedPulls({});
-    setBandChoice({});
     setCollectionChoice({});
     setMoveTarget(null);
     setPlanIsResumed(false);
@@ -850,6 +853,25 @@ export function PlanScreen({
     flatItems.forEach((it, i) => m.set(it.incomingId, i));
     return m;
   }, [flatItems]);
+
+  // UIL-117: the line card whose popup is open, its place among the haul's line cards, and its model loader.
+  const lineCards = flatItems.filter((it) => it.lineProposal);
+  const popItem = linePop ? (flatItems.find((it) => it.incomingId === linePop) ?? null) : null;
+  // The card's FRESH derivation once it is in (UIL-045): the popup opens on its proposal, never the forecast's.
+  // A refresh that failed leaves `item` null, and the forecast stands in.
+  const popFresh = popItem && fresh?.id === popItem.incomingId ? fresh : null;
+  const popLive = popFresh ? (popFresh.item ?? popItem) : null;
+  const popCopyId = popItem
+    ? (draft.find((d) => d.id === popItem.incomingId)?.existingCopyId ?? null)
+    : null;
+  const loadLineModelFor = useCallback(
+    async (copyId: string, proposal: LineProposal): Promise<LinePopupModel> => {
+      const res = await reach(() => lineModelAction(copyId, proposal), LOST.action);
+      if (!res.ok) throw new Error(res.error);
+      return res.model;
+    },
+    [],
+  );
 
   /** What "Search haul" matches on beyond the plan item: the set's name and her Dex's variant (UIL-115). */
   const cardInfo = useMemo(
@@ -919,11 +941,14 @@ export function PlanScreen({
    * cannot show one card's pocket on another card.
    */
   const spotlightId = flatItems[cur]?.incomingId ?? null;
+  const spotIsLineCard = !!flatItems[cur]?.lineProposal;
   useEffect(() => {
     // No setState on this path, deliberately: a stale entry is IGNORED at the point of use (it is
     // keyed by draft id and every reader checks the key), so clearing it here would be a cascading
     // render for no observable difference.
-    if (!spotlightId || done.size === 0 || overrides[spotlightId]) return;
+    // A line card is re-derived from the very first card (UIL-117): its pulls and colour question live on the
+    // fresh derivation, and before this the first card of a sitting was shelved with neither on screen.
+    if (!spotlightId || (done.size === 0 && !spotIsLineCard) || overrides[spotlightId]) return;
     const entry = draft.find((d) => d.id === spotlightId);
     if (!entry) return;
     let live = true;
@@ -966,7 +991,8 @@ export function PlanScreen({
     // `done` in full rather than `done.size`: its identity changes on every shelve, and re-deriving
     // then is exactly right — a card was just written, which is the event that can move this card's
     // pocket. The guard above still skips the whole thing before the first Done.
-  }, [spotlightId, done, draft, overrides]);
+    // `plan` too: a re-route clears `fresh` (UIL-061/069), so the card in her hand is re-derived against it.
+  }, [spotlightId, spotIsLineCard, done, draft, overrides, plan]);
 
   /** Fold / unfold one band (UIL-018). Same shape as `toggleDone` — a set of keys, not a flag map. */
   function toggleCollapse(bandKey: string) {
@@ -991,39 +1017,51 @@ export function PlanScreen({
       return next;
     });
   }
-  /** Tick or untick one proposed pull for one card (UIL-061). */
-  function onTogglePull(draftId: string, copyId: string) {
-    setConfirmedPulls((prev) => {
-      const cur = prev[draftId] ?? [];
-      return {
-        ...prev,
-        [draftId]: cur.includes(copyId) ? cur.filter((c) => c !== copyId) : [...cur, copyId],
-      };
-    });
+  /** The next line card after this one that is not shelved yet, wrapping round; the step-through's one rule. */
+  function nextLineCard(afterId: string): PlanItem | undefined {
+    const after = flatItems.slice((flatIndex.get(afterId) ?? -1) + 1);
+    return [...after, ...flatItems].find(
+      (it) => it.lineProposal && it.incomingId !== afterId && !done.has(it.incomingId),
+    );
   }
 
   /**
-   * Her resolution of a colour mismatch (UIL-069). "Own colour" also sets `overrides` in the same
-   * click — that IS the resolution, reusing the manual-override write path verbatim (drift-proof by
-   * construction) rather than a second write mechanism. "Line" sets no override: it is the cascade's
-   * own placement, confirmed instead by sending `bandChoice: "line"` at Done alongside the digest.
+   * UIL-117: open a line card's popup. The spotlight follows it, so the card she is deciding is the one in her hand,
+   * and its fresh derivation (which carries any colour question) is the one the popup reads. The move options load
+   * once, for the replace view's pickers.
    */
-  function onPickBandChoice(draftId: string, choice: "line" | "own-color") {
-    setBandChoice((prev) => ({ ...prev, [draftId]: choice }));
-    if (choice === "own-color" && fresh?.id === draftId && fresh.bandMismatch) {
-      setOverrides((prev) => ({
-        ...prev,
-        [draftId]: fresh.bandMismatch!.ownColorMoveDestination,
-      }));
-    } else if (choice === "line") {
-      // Switching back from a previously-picked "own colour" must drop that override, or Done would
-      // still send it and silently win over her new pick.
-      setOverrides((prev) => {
-        if (!(draftId in prev)) return prev;
-        const next = { ...prev };
-        delete next[draftId];
-        return next;
-      });
+  function openLinePopup(item: PlanItem) {
+    const i = flatIndex.get(item.incomingId);
+    if (i !== undefined) setCur(i);
+    setError(null);
+    setLinePop(item.incomingId);
+    if (!moveOptions) {
+      getMoveOptions()
+        .then(setMoveOptions)
+        .catch(() => {
+          /* the replace pickers fall back to the bulk box and the front half */
+        });
+    }
+  }
+
+  /**
+   * Her confirm in the line popup, then "Confirm & next": the next line card in the plan that is not shelved yet
+   * opens straight away, so a big haul is one pass rather than a hunt (v3 section 1). A refusal keeps the popup
+   * open with the reason in it.
+   */
+  async function confirmLinePopup(
+    item: PlanItem,
+    extra: { lineChoice?: LineChoice; override?: MoveDestination },
+  ) {
+    if (!(await shelveCard(item, extra))) return;
+    // A line write can change what the other cards would do (a card that would have started this line now joins
+    // it), so the rest re-route and their badges follow; the batch runs a moment later, as for any change.
+    if (extra.lineChoice) scheduleReroute();
+    const next = nextLineCard(item.incomingId);
+    if (next) openLinePopup(next);
+    else {
+      setLinePop(null);
+      advance();
     }
   }
 
@@ -1076,10 +1114,7 @@ export function PlanScreen({
           shelveCard={shelveCard}
           shelving={shelving}
           fresh={fresh}
-          confirmedPulls={confirmedPulls}
-          onTogglePull={onTogglePull}
-          bandChoice={bandChoice}
-          onPickBandChoice={onPickBandChoice}
+          onOpenLine={openLinePopup}
           collectionChoice={collectionChoice}
           onPickCollection={(draftId, collectionId) =>
             setCollectionChoice((prev) => ({ ...prev, [draftId]: collectionId }))
@@ -1107,6 +1142,44 @@ export function PlanScreen({
           toggleSubgroupCollapse={toggleSubgroupCollapse}
         />
       )}
+
+      {popItem && popCopyId && !popLive ? (
+        // Until the card's fresh derivation is in: the plan's forecast is per card, so it can be stale by now
+        // (Charmander just started the line Charmeleon's forecast would start again), and the fresh one also
+        // carries any colour question.
+        <div className="lp-overlay">
+          <div className="lp-pop panel" role="dialog" aria-label="Line">
+            <div className="u rp-hint" role="status">
+              Opening its line…
+            </div>
+            <button type="button" className="btn" onClick={() => setLinePop(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {popLive?.lineProposal && popCopyId ? (
+        <PlanLinePopup
+          // A changed proposal is a different popup (UX review of #392).
+          key={`${popLive.incomingId}:${JSON.stringify(popLive.lineProposal)}`}
+          item={{ ...popLive, lineProposal: popLive.lineProposal }}
+          copyId={popCopyId}
+          moveOptions={moveOptions}
+          loadModelFor={loadLineModelFor}
+          bandMismatch={popFresh?.bandMismatch ?? null}
+          position={{
+            index: lineCards.findIndex((it) => it.incomingId === popLive.incomingId) + 1,
+            total: lineCards.length,
+            // " · next ▶" only when confirming really opens another one (UX review of #392).
+            next: !!nextLineCard(popLive.incomingId),
+          }}
+          busy={shelving === popLive.incomingId}
+          error={error}
+          onConfirm={(choice) => void confirmLinePopup(popLive, { lineChoice: choice })}
+          onConfirmOwnColour={(dest) => void confirmLinePopup(popLive, { override: dest })}
+          onCancel={() => setLinePop(null)}
+        />
+      ) : null}
 
       {moveTarget && moveOptions ? (
         <MoveOverlay
@@ -1300,12 +1373,8 @@ function PlanView(props: {
     proposedPulls: ProposedPull[];
     bandMismatch: BandMismatchChoice | null;
   } | null;
-  /** Pulls she has ticked, by draft id (UIL-061). */
-  confirmedPulls: Record<string, string[]>;
-  onTogglePull: (draftId: string, copyId: string) => void;
-  /** Her colour-mismatch pick, by draft id (UIL-069). */
-  bandChoice: Record<string, "line" | "own-color">;
-  onPickBandChoice: (draftId: string, choice: "line" | "own-color") => void;
+  /** Open a line card's popup (UIL-117): from its badge, its row box, or Done in the spotlight. */
+  onOpenLine: (item: PlanItem) => void;
   /** Her collection for a specialty card whose binder holds collections, by draft id (UIL-053). */
   collectionChoice: Record<string, string>;
   onPickCollection: (draftId: string, collectionId: string) => void;
@@ -1353,10 +1422,7 @@ function PlanView(props: {
     shelveCard,
     shelving,
     fresh,
-    confirmedPulls,
-    onTogglePull,
-    bandChoice,
-    onPickBandChoice,
+    onOpenLine,
     collectionChoice,
     onPickCollection,
     advance,
@@ -1634,13 +1700,16 @@ function PlanView(props: {
               flatIndex={flatIndex}
               done={done}
               onSelect={setCur}
-              // UIL-053: a card that joins a collection is shelved from the spotlight, where she can see
-              // which collection; its row box brings it there instead of shelving it unseen.
+              // UIL-053 / UIL-117: a card that joins a collection, or goes into a line, is shelved from the
+              // spotlight, where she can see which; its row box brings it there instead of shelving it unseen.
               onShelve={(it) =>
-                it.collectionPick && !overrides[it.incomingId]
-                  ? setCur(flatIndex.get(it.incomingId) ?? cur)
-                  : void shelveCard(it)
+                it.lineProposal && !overrides[it.incomingId]
+                  ? onOpenLine(it) // ticked only when she confirms in the popup (the UX Dev's guard)
+                  : it.collectionPick && !overrides[it.incomingId]
+                    ? setCur(flatIndex.get(it.incomingId) ?? cur)
+                    : void shelveCard(it)
               }
+              onOpenLine={onOpenLine}
               shelving={shelving}
               overrides={overrides}
               overrideNames={overrideNames}
@@ -1664,10 +1733,21 @@ function PlanView(props: {
               busy={flatItems[cur] ? shelving === flatItems[cur].incomingId : false}
               onShelve={async () => {
                 const item = flatItems[cur];
+                if (!item) return;
+                // UIL-117: a card headed into a line is decided in its popup, never shelved from here unseen. The
+                // fresh derivation decides that when it is in: the plan's forecast is per card and can be stale.
+                const live = (fresh?.id === item.incomingId && fresh.item) || item;
+                if (live.lineProposal && !overrides[item.incomingId]) return onOpenLine(item);
                 // Advance only on a successful write: a card that failed still needs a location, so
                 // leaving the cursor on it is the correct behaviour rather than skipping past it.
-                if (item && (await shelveCard(item))) advance();
+                if (await shelveCard(item)) advance();
               }}
+              lineCard={
+                !!flatItems[cur] &&
+                !!((fresh?.id === flatItems[cur].incomingId && fresh.item) || flatItems[cur])
+                  .lineProposal &&
+                !overrides[flatItems[cur].incomingId]
+              }
               onBackCard={() => setCur(Math.max(0, cur - 1))}
               onSkip={() => setCur(Math.min(total - 1, cur + 1))}
               onNotMine={() => flatItems[cur] && onNotMine(flatItems[cur])}
@@ -1681,30 +1761,6 @@ function PlanView(props: {
               freshItem={
                 flatItems[cur] && fresh?.id === flatItems[cur].incomingId ? fresh.item : null
               }
-              /* Derived, not stored (UIL-045): a re-derivation is outstanding exactly when one is
-                 expected for this card and we do not hold its answer yet. Keeping this out of state
-                 is also what keeps the effect free of a synchronous setState. */
-              proposedPulls={
-                flatItems[cur] && fresh?.id === flatItems[cur].incomingId ? fresh.proposedPulls : []
-              }
-              confirmedPulls={
-                flatItems[cur] ? (confirmedPulls[flatItems[cur].incomingId] ?? []) : []
-              }
-              onTogglePull={(copyId) => {
-                const id = flatItems[cur]?.incomingId;
-                if (id) onTogglePull(id, copyId);
-              }}
-              // Same rule as proposedPulls (UIL-069): only when the reply belongs to the spotlight card.
-              bandMismatch={
-                flatItems[cur] && fresh?.id === flatItems[cur].incomingId
-                  ? fresh.bandMismatch
-                  : null
-              }
-              bandChoice={flatItems[cur] ? (bandChoice[flatItems[cur].incomingId] ?? null) : null}
-              onPickBandChoice={(choice) => {
-                const id = flatItems[cur]?.incomingId;
-                if (id) onPickBandChoice(id, choice);
-              }}
               collectionChoice={collectionChoice}
               onPickCollection={(collectionId) => {
                 const id = flatItems[cur]?.incomingId;
@@ -1712,7 +1768,7 @@ function PlanView(props: {
               }}
               refreshing={
                 !!flatItems[cur] &&
-                doneCount > 0 &&
+                (doneCount > 0 || !!flatItems[cur].lineProposal) &&
                 !overrides[flatItems[cur].incomingId] &&
                 fresh?.id !== flatItems[cur].incomingId
               }
@@ -1765,6 +1821,8 @@ export function BandSection(props: {
   arrived?: Set<string>;
   /** Her collection picks (UIL-053), so a row can say it still needs one. Optional for the render tests. */
   collectionChoice?: Record<string, string>;
+  /** Open a line card's popup from its badge (UIL-117). Optional for the render tests. */
+  onOpenLine?: (item: PlanItem) => void;
   /**
    * Sub-group keys currently folded away (UIL-075), each `${bandKey}:${kind}`. Same discipline as
    * UIL-018 one level up: a folded sub-group renders NOTHING below its header — rows absent from the
@@ -1790,6 +1848,7 @@ export function BandSection(props: {
     overrideNames,
     arrived,
     collectionChoice,
+    onOpenLine,
     collapsedSubgroups,
     onToggleSubgroupCollapse,
   } = props;
@@ -1869,6 +1928,7 @@ export function BandSection(props: {
                       override={overrides[it.incomingId]}
                       overrideNames={overrideNames}
                       isNew={arrived?.has(it.incomingId) ?? false}
+                      onOpenLine={onOpenLine ? () => onOpenLine(it) : undefined}
                       needsCollection={
                         !!it.collectionPick &&
                         !overrides[it.incomingId] &&
@@ -1901,6 +1961,8 @@ export function PlanRow(props: {
   isNew?: boolean;
   /** A specialty card that still needs her pick of collection (UIL-053). */
   needsCollection?: boolean;
+  /** Open this card's line popup from its badge (UIL-117). */
+  onOpenLine?: () => void;
 }) {
   const {
     item,
@@ -1913,11 +1975,14 @@ export function PlanRow(props: {
     overrideNames,
     isNew = false,
     needsCollection = false,
+    onOpenLine,
   } = props;
   // Show where she MOVED the card, not where the cascade proposed — same source as the spotlight, so
   // the two cannot disagree (UIL-037).
   const disp = displayFor(item, override ?? undefined, overrideNames ?? null);
   const meta = bandMeta(item.bandKey);
+  // UIL-117: a card headed into a line wears its badge instead of the action pill, until shelved or moved.
+  const showBadge = !!item.lineProposal && !done && !override;
   return (
     <div
       id={planRowDomId(item.incomingId)}
@@ -1970,12 +2035,16 @@ export function PlanRow(props: {
         </div>
       </div>
       <div className="actwrap">
-        <span
-          className="act u"
-          style={{ background: disp.color, color: disp.dark ? "var(--panel)" : "var(--ink)" }}
-        >
-          {disp.label}
-        </span>
+        {/* v3 section 1: the badge replaces the action pill on a line card (at 375 the two stacked and pushed the
+            destination onto five lines; UX review of #392). */}
+        {showBadge ? null : (
+          <span
+            className="act u"
+            style={{ background: disp.color, color: disp.dark ? "var(--panel)" : "var(--ink)" }}
+          >
+            {disp.label}
+          </span>
+        )}
         {/* She overrode this one: mark it so she can pick out her own decisions at a glance (UIL-037).
             MOVED MEANS MOVED (UIL-084). `done` is "written to the database", so before it this reads
             "Will move" — a past-tense chip on a placement the server has not accepted yet is the claim
@@ -1984,6 +2053,25 @@ export function PlanRow(props: {
         {override ? <span className="moved u">{done ? "Moved" : "Will move"}</span> : null}
         {item.needsDecision ? <span className="needs u">Decide</span> : null}
         {needsCollection && !done ? <span className="needs u">Pick collection</span> : null}
+        {/* UIL-117 (v3 section 1): every card headed into a back half says what it would do to a line, and needs
+            her OK; the badge opens its popup. Gone once shelved, or once she moved it instead. */}
+        {showBadge && item.lineProposal ? (
+          <button
+            type="button"
+            className={`linebadge ${item.lineProposal.kind} u`}
+            // The same words, spoken with ordinary spaces.
+            aria-label={lineBadgeText(item.lineProposal.kind, item.lineName ?? null).replace(
+              /\u00a0/g,
+              " ",
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenLine?.();
+            }}
+          >
+            {lineBadgeText(item.lineProposal.kind, item.lineName ?? null)}
+          </button>
+        ) : null}
         {/* Arrived while she had the page open (UIL-114 part C); gone once shelved, when it is no news. */}
         {isNew && !done ? <span className="newcard u">New</span> : null}
       </div>
@@ -2020,16 +2108,11 @@ export function Spotlight(props: {
   freshItem?: PlanItem | null;
   /** A re-derivation is in flight, so the destination shown may be about to change. */
   refreshing?: boolean;
-  /** Cards of hers this placement would relocate, each needing an explicit tick (UIL-061). */
-  proposedPulls?: ProposedPull[];
-  /** Which of them she has ticked. */
-  confirmedPulls?: string[];
-  onTogglePull?: (copyId: string) => void;
-  /** Present only when this card's own colour differs from the line it would join (UIL-069). */
-  bandMismatch?: BandMismatchChoice | null;
-  /** Her pick, if any. Neither is a default — `null` means genuinely unresolved, not "line". */
-  bandChoice?: "line" | "own-color" | null;
-  onPickBandChoice?: (choice: "line" | "own-color") => void;
+  /**
+   * A card headed into a line (UIL-117): Done opens its line popup, where the line, any pulls and any colour
+   * question are decided, instead of shelving it from here.
+   */
+  lineCard?: boolean;
   /** Her collection picks, by draft id (UIL-053); read for this card through `pickedCollection`. */
   collectionChoice?: Record<string, string>;
   onPickCollection?: (collectionId: string) => void;
@@ -2050,12 +2133,7 @@ export function Spotlight(props: {
     onMove,
     freshItem,
     refreshing = false,
-    proposedPulls = [],
-    confirmedPulls = [],
-    onTogglePull,
-    bandMismatch,
-    bandChoice,
-    onPickBandChoice,
+    lineCard = false,
     collectionChoice = {},
     onPickCollection,
   } = props;
@@ -2066,14 +2144,6 @@ export function Spotlight(props: {
    * not use — and she reads this panel to decide which pocket to physically use.
    */
   const item = freshItem ?? forecast;
-  /**
-   * A mismatch with no pick yet and no override (UIL-069) — the moment `bandChoice` becomes "line" or
-   * she picks "own colour" (which sets `override` in the same click), this goes false and the ordinary
-   * destination display below is already correct for whichever she chose. Neither option is shown as
-   * decided until then: `item.destination` alone would read as "line wins", which is the silent
-   * default her ruling rejects.
-   */
-  const pendingBandChoice = !!bandMismatch && !override && bandChoice == null;
   /**
    * A specialty card bound for a binder that holds collections (UIL-053): it joins the one she picks, and
    * Done waits for the pick, as the server does. Her override names its own destination instead.
@@ -2138,67 +2208,17 @@ export function Spotlight(props: {
       </div>
 
       <div className="doit">
-        <b>
-          {pendingBandChoice
-            ? "Colour mismatch — pick one below"
-            : pendingCollection
-              ? "Which collection? Pick one below"
-              : disp.big}
-        </b>
+        <b>{pendingCollection ? "Which collection? Pick one below" : disp.big}</b>
         <span className="sg u">
-          {pendingBandChoice
-            ? ""
-            : pickedName
-              ? `${disp.destination} · ${pickedName}`
-              : disp.destination}
+          {pickedName ? `${disp.destination} · ${pickedName}` : disp.destination}
         </span>
       </div>
 
-      {/* UIL-069 — her ruling reverses UIL-065's "the line's band wins" default: neither option is
-          shown as decided, and Done stays disabled until she picks one. Reuses the `.pullrow` row
-          styling (a labelled control + name + location) rather than a new shape for one radio pair. */}
-      {bandMismatch ? (
-        <div
-          className="pulls"
-          role="radiogroup"
-          aria-label="Colour mismatch — choose a destination"
-        >
-          <div className="pullhead u">
-            <b>Colour mismatch — choose</b>
-            <span>
-              This card&apos;s own colour differs from the line it would join. Neither wins by
-              default.
-            </span>
-          </div>
-          {(
-            [
-              {
-                value: "line" as const,
-                label: `Join ${bandMismatch.lineSpeciesLabel}`,
-                where: bandMismatch.lineDestination,
-              },
-              {
-                value: "own-color" as const,
-                label: "File by its own colour",
-                where: bandMismatch.ownColorDestination,
-              },
-            ] as const
-          ).map((opt) => {
-            const on = bandChoice === opt.value;
-            return (
-              <label key={opt.value} className={"pullrow" + (on ? " on" : "")}>
-                <input
-                  type="radio"
-                  name={`bandmismatch-${item.incomingId}`}
-                  checked={on}
-                  onChange={() => onPickBandChoice?.(opt.value)}
-                  disabled={done || busy}
-                />
-                <span className="pullnm">{opt.label}</span>
-                <span className="pullfrom u">{opt.where}</span>
-              </label>
-            );
-          })}
+      {/* UIL-117: a card headed into a line is decided in its line popup (its pulls, never ticked for her, and any
+          colour question), so this panel shows no controls of its own for it. */}
+      {lineCard && !done ? (
+        <div className="hk u" style={{ marginTop: 8 }}>
+          Confirm its line in the line popup.
         </div>
       ) : null}
 
@@ -2224,49 +2244,6 @@ export function Spotlight(props: {
               </button>
             ))}
           </div>
-        </div>
-      ) : null}
-
-      {/* UIL-061 — every card of HERS this would move, named, each an explicit opt-in.
-          Unticked by default and never pre-checked: "the user must validate each and every single
-          line", and a pre-ticked box is not validation. An unticked stage stays a placeholder, so
-          declining costs her nothing but the line does not pretend to hold a card still in her binder. */}
-      {proposedPulls.length > 0 ? (
-        <div className="pulls">
-          <div className="pullhead u">
-            <b>Also move your own cards?</b>
-            <span>
-              Starting this line can pull {proposedPulls.length} card
-              {proposedPulls.length === 1 ? "" : "s"} you already own. Nothing moves unless you tick
-              it.
-              {proposedPulls.some((p) => p.needsFetching)
-                ? " One or more is in the bulk box rather than on a page, so dig the card out before you" +
-                  " press Done."
-                : ""}
-            </span>
-          </div>
-          {proposedPulls.map((pull) => {
-            const on = confirmedPulls.includes(pull.copyId);
-            return (
-              <label key={pull.copyId} className={"pullrow" + (on ? " on" : "")}>
-                <input
-                  type="checkbox"
-                  checked={on}
-                  onChange={() => onTogglePull?.(pull.copyId)}
-                  disabled={done || busy}
-                />
-                <span className="pullnm">{pull.name}</span>
-                <span className="pullfrom u">from {pull.fromLabel}</span>
-                {/* Worth saying on its own: taking it leaves the OTHER line a card short. */}
-                {pull.fromLine ? <span className="pullwarn u">in another line</span> : null}
-                {/* UIL-087: this card is shelved nowhere, so ticking it is also a job for HER — the
-                    line will record it as shelved in the back half, and it has to actually be there. */}
-                {pull.needsFetching ? (
-                  <span className="pullwarn u">in the bulk box — dig it out first</span>
-                ) : null}
-              </label>
-            );
-          })}
         </div>
       ) : null}
 
@@ -2346,13 +2323,12 @@ export function Spotlight(props: {
             the card into. Sub-second, but it is the whole wrong-shelf hazard in miniature, so the
             correct answer is to not accept the click rather than to accept it unguarded.
 
-            Also disabled while a colour mismatch is unresolved (UIL-069): a default here is exactly
-            what her ruling rejects, so the button simply will not fire until she has picked one. */}
+            On a card headed into a line it opens the line popup instead (UIL-117). */}
         <button
           type="button"
           className="btn btn-primary go"
           onClick={onShelve}
-          disabled={done || busy || refreshing || pendingBandChoice || pendingCollection}
+          disabled={done || busy || refreshing || pendingCollection}
         >
           {done
             ? "Shelved ✓"
@@ -2360,10 +2336,10 @@ export function Spotlight(props: {
               ? "Shelving…"
               : refreshing
                 ? "Checking…"
-                : pendingBandChoice
-                  ? "Pick one above"
-                  : pendingCollection
-                    ? "Pick a collection above"
+                : pendingCollection
+                  ? "Pick a collection above"
+                  : lineCard
+                    ? "Confirm its line ▶"
                     : "Done, next card"}
         </button>
         <button type="button" className="btn" onClick={onBackCard}>

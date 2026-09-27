@@ -134,6 +134,7 @@ describe("UIL-063 — a Basic checks for an existing line before falling to the 
       stageIndex: 0,
     });
     expect(res.filledExistingSlot).toEqual({ lineId: "line-dratini", stageIndex: 0 });
+    expect(res.filledStage ?? null).toBeNull(); // an OPEN slot is filled, not a replace offer (UIL-117)
     // The reason must be true in both worlds — it names the line, not "no line yet" (UIL-063's
     // second half of the report).
     expect(res.reason).not.toMatch(/no line/i);
@@ -190,5 +191,9 @@ describe("UIL-063 — a Basic checks for an existing line before falling to the 
     expect(res.target).toMatchObject({ kind: "front-half", band: "olive" });
     expect(res.reason).not.toMatch(/no line/i);
     expect(res.reason).toMatch(/already holds/i);
+    // UIL-117: the placement is unchanged, but the slot it matched is named, so the Haul Plan can offer
+    // to replace the card in it (the pink "could replace", opening on "keep").
+    expect(res.filledStage).toEqual({ lineId: "line-dratini", stageIndex: 0 });
+    expect(res.filledExistingSlot ?? null).toBeNull();
   });
 });

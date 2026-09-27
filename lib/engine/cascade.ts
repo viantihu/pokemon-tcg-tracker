@@ -127,6 +127,13 @@ export interface CascadeResult {
   /** An existing line slot the incoming fills (step 4a). */
   filledExistingSlot?: { lineId: string; stageIndex: number } | null;
   /**
+   * The existing line stage this card matched but found ALREADY FILLED ("lines tracked once", step 4a).
+   * The placement is unchanged, the front half in the card's own band; this only names the slot, so the
+   * Haul Plan can offer to replace the card in it (UIL-117's pink "could replace", opening on "keep").
+   * Optional and absent everywhere else.
+   */
+  filledStage?: { lineId: string; stageIndex: number } | null;
+  /**
    * Set when `target` (the existing line's own band) differs from the incoming card's own natural
    * band (UIL-069). Karvi ruled that "the line's band wins" (UIL-065) must not be a SILENT default
    * when the two disagree — she is asked, every time, with neither option pre-selected. `target`
@@ -471,6 +478,7 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
         step: "line-existing",
         reason: `The ${lineBand} line already holds this stage; the extra copy goes to the front half (lines tracked once).`,
         target: { kind: "front-half", binderId: frontHalfBinderId(ctx, b), band: b },
+        filledStage: { lineId: existing.line.id, stageIndex: existing.slot.stageIndex },
       };
     }
   }

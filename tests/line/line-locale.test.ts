@@ -33,6 +33,7 @@ import {
 } from "@/lib/plan";
 import { applyMove } from "@/lib/line";
 import { candidateKey } from "@/lib/line/join-options";
+import { defaultChoiceFor } from "@/lib/line/popup";
 import {
   OWNER,
   applyOps,
@@ -328,7 +329,15 @@ describe("UIL-090 · D2 through the CASCADE and the Lines screen, not only the p
     await seedJaBasicCopy();
 
     await asOwner(db);
-    await commitCardPlacement(pgliteClient(db), { card: JA_CRUEL });
+    // What the plan proposes is never "add to the English line" (pre-fix it was, and the cascade filled it).
+    const spot = await deriveSpotlightPlacement(pgliteClient(db), JA_CRUEL);
+    const proposal = spot?.item.lineProposal ?? null;
+    expect(proposal?.kind === "add" && proposal.lineId === LINE).toBe(false);
+    // Since UIL-117 a line card waits for her choice: confirm whatever the plan proposes, as she would.
+    await commitCardPlacement(pgliteClient(db), {
+      card: JA_CRUEL,
+      lineChoice: proposal ? defaultChoiceFor(proposal) : null,
+    });
     await asSuperuser(db);
 
     // The English line's slot is untouched — pre-fix the Japanese card filled it.
@@ -356,19 +365,22 @@ describe("UIL-090 · D2 through the CASCADE and the Lines screen, not only the p
     await asSuperuser(db);
     expect(placement!.proposedPulls).toEqual([]);
 
-    // And confirming it moves nothing, because the engine never claimed that stage was filled.
+    // And ticking it anyway moves nothing: since UIL-117 the one line builder refuses a pull the line never
+    // proposed, so no line is written and the Japanese copy stays exactly where it was.
     await asOwner(db);
-    await commitCardPlacement(pgliteClient(db), {
-      card: EN_CRUEL,
-      confirmedPulls: [JA_ROOT],
-    });
+    const proposal = placement!.item.lineProposal!;
+    const start = defaultChoiceFor(proposal);
+    await expect(
+      commitCardPlacement(pgliteClient(db), {
+        card: EN_CRUEL,
+        lineChoice: start.mode === "start" ? { ...start, pulls: [JA_ROOT] } : start,
+      }),
+    ).rejects.toThrow(/no longer one this line can take/);
     await asSuperuser(db);
     const slots = await db.query<{ stage_index: number; state: string; copy_id: string | null }>(
       `select stage_index, state, copy_id from line_slot order by stage_index`,
     );
-    const root = slots.rows.find((r) => r.stage_index === 0)!;
-    expect(root.state).not.toBe("filled"); // pre-fix: "filled", naming the Japanese copy
-    expect(root.copy_id).toBeNull();
+    expect(slots.rows).toEqual([]); // pre-fix: a line whose Basic was "filled" by the Japanese copy
     // The Japanese copy is still where it was, in the front half.
     const ja = await db.query<{ binder_half: string | null; line_slot_id: string | null }>(
       `select binder_half, line_slot_id from copy where id = $1`,

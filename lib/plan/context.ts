@@ -201,9 +201,20 @@ export async function loadPlanContext(
     blockRows.filter((b) => b.purpose === "line-terminated" && b.line_id).map((b) => b.line_id),
   );
   const lineRowById = new Map(lineRows.map((l) => [l.id, l]));
+  /** A species' card name by dex id, as the catalog spells it ("Charizard"), for the Haul Plan's badges (UIL-117). */
+  // Built once per load (TL review of #392: a scan per call was ~25M comparisons at her size). The English printing's
+  // name wins when there is one, so a badge never reads in another script by accident.
+  const nameByDex = new Map<number, { name: string; en: boolean }>();
+  for (const r of catalogRows) {
+    const d = (r.dex_id ?? [])[0];
+    if (d === undefined || !r.name) continue;
+    const en = r.locale === "en";
+    const had = nameByDex.get(d);
+    if (!had || (en && !had.en)) nameByDex.set(d, { name: r.name, en });
+  }
+  const dexNameOf = (dexId: number): string | null => nameByDex.get(dexId)?.name ?? null;
   const speciesName = (rootDexId: number) =>
-    catalogRows.find((r) => (r.dex_id ?? [])[0] === rootDexId)?.name?.toUpperCase() ??
-    `SPECIES #${rootDexId}`;
+    nameByDex.get(rootDexId)?.name.toUpperCase() ?? `SPECIES #${rootDexId}`;
   const blockNeeds: BlockNeedCandidate[] = slotRows
     .filter((s) => s.state === "block" && !backedLineIds.has(s.line_id))
     .flatMap((s) => {
@@ -240,7 +251,26 @@ export async function loadPlanContext(
     copyRowById,
     slotRowsByLine: slotsByLine,
     orderedBandKeys,
-    lookups: { binderNameById, bandDisplayByKey, collectionNameById, imageUrlByTcgdexId },
+    lookups: {
+      binderNameById,
+      bandDisplayByKey,
+      collectionNameById,
+      imageUrlByTcgdexId,
+      lines: {
+        slotIdAt: (lineId, stageIndex) =>
+          slotsByLine.get(lineId)?.find((s) => s.stage_index === stageIndex)?.id ?? null,
+        lineOfSlot: (slotId) =>
+          [...slotsByLine.values()].flat().find((s) => s.id === slotId)?.line_id ?? null,
+        lineName: (lineId) => {
+          const top = [...(slotsByLine.get(lineId) ?? [])].sort(
+            (a, b) => b.stage_index - a.stage_index,
+          )[0];
+          const dexId = top ? dexIdForSlot(top) : null;
+          return dexId === null ? null : dexNameOf(dexId);
+        },
+        dexName: (dexId) => dexNameOf(dexId),
+      },
+    },
   };
 }
 

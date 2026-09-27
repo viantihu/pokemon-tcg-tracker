@@ -4,11 +4,11 @@
  * she is shown both options on the Haul Plan spotlight (a manually-created line, in a band she chose
  * herself, most likely) with neither pre-selected, and picks one every time.
  *
- * Composes two mechanisms that already exist rather than inventing a third:
- *   - "join the line" is the cascade's own placement (no override) — confirmed via `bandChoice: "line"`
- *     riding alongside the ordinary UIL-045 `expectedDigest` check.
- *   - "file by its own colour" arrives as `override`, reusing `writeOverriddenCard` verbatim — that
- *     path is drift-proof by construction, so nothing further has to check it.
+ * Since UIL-117 every card headed into a line waits for her explicit choice in the line popup, so the two
+ * options arrive as:
+ *   - "join the line": her `lineChoice` (join), written by the one line builder over fresh state. The older
+ *     `bandChoice: "line"` + digest is superseded, and on its own no longer places anything;
+ *   - "file by its own colour": `override`, reusing `writeOverriddenCard` verbatim, as before.
  *
  * Run against the REAL `apply_write_ops` RPC on real Postgres (PGlite), as the authenticated owner —
  * the pattern `spotlight-drift.test.ts`/`confirm-line-pulls.test.ts` already established for exactly
@@ -20,6 +20,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import {
   clearCatalogCache,
   commitCardPlacement,
+  LINE_CHOICE,
   deriveSpotlightPlacement,
   type DraftItem,
 } from "@/lib/plan";
@@ -179,8 +180,9 @@ describe("UIL-069 · commitCardPlacement refuses an unresolved mismatch", () => 
     const client = pgliteClient(db);
     await asOwner(db);
 
+    // Refused by UIL-117's rule, which subsumes UIL-069's: no line card is placed without her choice.
     await expect(commitCardPlacement(client, { card: INCOMING })).rejects.toThrow(
-      /pick which one wins/i,
+      LINE_CHOICE.missing,
     );
 
     await asSuperuser(db);
@@ -198,7 +200,7 @@ describe("UIL-069 · commitCardPlacement refuses an unresolved mismatch", () => 
         card: INCOMING,
         expectedDigest: placement!.digest,
       }),
-    ).rejects.toThrow(/pick which one wins/i);
+    ).rejects.toThrow(LINE_CHOICE.missing);
 
     await asSuperuser(db);
     expect(await chargedCopyRow()).toMatchObject(UNPLACED);
@@ -214,8 +216,7 @@ describe('UIL-069 · picking "join the line"', () => {
 
     await commitCardPlacement(client, {
       card: INCOMING,
-      expectedDigest: placement!.digest,
-      bandChoice: "line",
+      lineChoice: { mode: "join", lineId: LINE, slotId: SLOT_STAGE1 },
     });
 
     await asSuperuser(db);
@@ -243,7 +244,7 @@ describe('UIL-069 · picking "join the line"', () => {
     expect(decision?.reason).not.toBe(placement!.item.reason); // not the generic "Fills the open…" text
   });
 
-  it('REFUSES bandChoice "line" alone with no digest — the flag alone is an unbacked assertion', async () => {
+  it('REFUSES bandChoice "line" with no line choice — the old flag places nothing on its own now', async () => {
     await seedMismatchedLine();
     const client = pgliteClient(db);
     await asOwner(db);
@@ -253,7 +254,7 @@ describe('UIL-069 · picking "join the line"', () => {
     // with THIS mismatch, is the one she looked at.
     await expect(
       commitCardPlacement(client, { card: INCOMING, bandChoice: "line" }),
-    ).rejects.toThrow(/pick which one wins/i);
+    ).rejects.toThrow(LINE_CHOICE.missing);
 
     await asSuperuser(db);
     expect(await chargedCopyRow()).toMatchObject(UNPLACED);
