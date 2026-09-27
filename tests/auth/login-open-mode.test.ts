@@ -38,9 +38,14 @@ describe("UIL-127c · the sign-in screen, by mode", () => {
   });
 
   it("open: says an account is created, and labels the field Email", async () => {
-    const html = await page({ SIGNUP_MODE: "open", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "" });
+    const html = await page({ SIGNUP_MODE: "open", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "site-key" });
     expect(html).toContain("Enter your email to sign in or create an account.");
     expect(html).toContain(">Email<");
+  });
+
+  it("'open' with no site key is invite (the Tech Lead's review): today's words, no bot check", async () => {
+    const html = await page({ SIGNUP_MODE: "open", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "" });
+    expect(html).toContain("This binder is private. Enter the owner email");
     expect(html).not.toContain("cf-turnstile");
   });
 

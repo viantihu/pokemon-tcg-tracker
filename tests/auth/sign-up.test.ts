@@ -54,10 +54,26 @@ afterEach(() => {
 describe("UIL-127c · D3: the mode fails closed", () => {
   it("only the exact value 'open' opens sign-up; unset, empty, a typo or another case is invite", async () => {
     const { parseSignupMode } = await import("@/lib/auth/signup-mode");
-    expect(parseSignupMode("open")).toBe("open");
+    expect(parseSignupMode("open", "site-key")).toBe("open");
     for (const raw of [undefined, "", "invite", "OPEN", "Open", "opne", " open"]) {
-      expect(parseSignupMode(raw), String(raw)).toBe("invite");
+      expect(parseSignupMode(raw, "site-key"), String(raw)).toBe("invite");
     }
+  });
+
+  it("D1 + D3: 'open' without a Turnstile site key is invite, so sign-up never opens with no bot check", async () => {
+    const { parseSignupMode } = await import("@/lib/auth/signup-mode");
+    expect(parseSignupMode("open", "")).toBe("invite");
+    expect(parseSignupMode("open", "  ")).toBe("invite");
+    const { signIn } = await signInWith({
+      SIGNUP_MODE: "open",
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: "",
+      ALLOWED_OWNER_EMAIL: "owner@example.com",
+    });
+    expect(await signIn(idle, form("stranger@example.com", "a-token"))).toEqual({
+      status: "error",
+      message: "That email is not authorised for this binder.",
+    });
+    expect(otp).not.toHaveBeenCalled();
   });
 
   it("with SIGNUP_MODE unset, a stranger is refused", async () => {
@@ -117,9 +133,9 @@ describe("UIL-127c · open mode (Production at launch)", () => {
   it("any valid address gets a link, and the first one creates the account; the answer does not say which", async () => {
     const { signIn } = await signInWith({
       SIGNUP_MODE: "open",
-      NEXT_PUBLIC_TURNSTILE_SITE_KEY: "",
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: "site-key",
     });
-    expect(await signIn(idle, form("new.person@example.com"))).toEqual({
+    expect(await signIn(idle, form("new.person@example.com", "turnstile-token"))).toEqual({
       status: "sent",
       email: "new.person@example.com",
     });

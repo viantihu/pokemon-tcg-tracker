@@ -71,10 +71,10 @@ export async function signIn(_prev: SignInState, formData: FormData): Promise<Si
     return { status: "error", message: "That email is not authorised for this binder." };
   }
 
-  // The bot check (the Tech Lead's D1): in open mode, where the Turnstile widget is shown, its token must come with
-  // the form, and Supabase Auth's CAPTCHA verifies it. Refused here in her words rather than as Supabase's error.
+  // The bot check (the Tech Lead's D1): open mode always shows the Turnstile widget (it cannot be open without a site
+  // key), and its token must come with the form; Supabase Auth's CAPTCHA verifies it. Refused here in her words.
   const captchaToken = String(formData.get("cf-turnstile-response") ?? "").trim() || undefined;
-  if (signupMode() === "open" && publicEnv.turnstileSiteKey && !captchaToken) {
+  if (signupMode() === "open" && !captchaToken) {
     return { status: "error", message: CAPTCHA_NEEDED };
   }
 
