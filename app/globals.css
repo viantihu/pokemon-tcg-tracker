@@ -3840,6 +3840,12 @@ button.subhead.folded:hover {
   width: min(380px, calc(100vw - 28px));
   display: flex;
   justify-content: flex-end;
+  /* Only the card or the pill takes taps; the dock's empty width beside the pill must not (the UX Dev's
+     re-check: at 375 it swallowed "Leave for later"). */
+  pointer-events: none;
+}
+.tour-dock > * {
+  pointer-events: auto;
 }
 html.tour-open .app {
   padding-bottom: max(90px, calc(var(--tour-h, 0px) + 14px + 24px));
