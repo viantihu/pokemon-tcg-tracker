@@ -13,10 +13,14 @@
 import { Fragment, useEffect, useRef } from "react";
 import {
   IN_THE_HAUL,
+  LINE_ROW_POCKETS,
   leavesLineText,
+  type FillerCardOption,
   type LineChoice,
   type LinePopupProps,
   type LinePopupReplace,
+  type LinePopupStage,
+  type StageOption,
 } from "@/lib/line/popup";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { BandChip } from "./BandChip";
@@ -31,6 +35,16 @@ import {
   ReplaceChoice,
   stageName,
 } from "./LinePopupParts";
+import { bulkFillerAction, stageOptionsAction } from "./line-popup-actions";
+import { StageChoice, ThirdPocketChoice } from "./StageChoice";
+
+/** A loader's answer, or its refusal thrown in her words (the part shows it in place). */
+async function unwrap<T>(p: Promise<{ ok: true; options: T[] } | { ok: false; error: string }>) {
+  const r = await p;
+  if (!r.ok) throw new Error(r.error);
+  return r.options;
+}
+const loadBulk = (): Promise<FillerCardOption[]> => unwrap(bulkFillerAction());
 
 export function LinePopup({
   model,
@@ -67,7 +81,69 @@ export function LinePopup({
   const foreignConfirmed =
     (value.mode === "join" || (value.mode === "replace" && !value.keep)) &&
     value.foreignLocale === true;
-  const canConfirm = !busy && (!foreign || foreignConfirmed) && (!cc || cc.picked !== null);
+  // UIL-121: on a START, every stage the line leaves unfilled (an open slot, or an owned card she did not tick) waits
+  // for HER choice; nothing is decided for her. A confirm that completes a line shorter than LINE_ROW_POCKETS asks
+  // what fills its third pocket (once: an existing line whose pocket she already chose does not ask again).
+  const undecided: LinePopupStage[] =
+    value.mode === "start"
+      ? model.stages.filter(
+          (s) =>
+            s.state === "wanted" ||
+            s.state === "blocked" ||
+            (s.state === "pullable" && !!s.pull && !pulls.includes(s.pull.copyId)),
+        )
+      : [];
+  const stagesDecided =
+    value.mode !== "start" || undecided.every((s) => value.stages?.[s.stageIndex] !== undefined);
+  const pocketAsked =
+    !filingOwn &&
+    line.total < LINE_ROW_POCKETS &&
+    ((value.mode === "start" &&
+      undecided.length === 0 &&
+      !model.stages.some((s) => s.state === "coming")) ||
+      (value.mode === "join" && line.thirdPocketOpen === true && line.filledAfter === line.total));
+  const pocketValue =
+    value.mode === "start" || value.mode === "join" ? value.thirdPocket : undefined;
+  const canConfirm =
+    !busy &&
+    (!foreign || foreignConfirmed) &&
+    (!cc || cc.picked !== null) &&
+    stagesDecided &&
+    (!pocketAsked || pocketValue !== undefined);
+  /** The pockets she fills by hand, for "What moves": an energy or a spare card in a stage's pocket or the third one. */
+  const fillerMoves: { key: string; verb: string; what: string; where: string }[] = [];
+  const fillerMove = (key: string, f: { material: string }, where: string) => {
+    if (f.material === "energy")
+      fillerMoves.push({ key, verb: "Put in", what: "A basic energy", where });
+    if (f.material === "card")
+      fillerMoves.push({ key, verb: "Take out", what: "A card from your bulk box", where });
+  };
+  if (value.mode === "start") {
+    for (const st of undecided) {
+      const d = value.stages?.[st.stageIndex];
+      if (d?.kind === "filler")
+        fillerMove(`s${st.stageIndex}`, d.filler, `the ${stageName(st.stage)} pocket`);
+    }
+  }
+  if (pocketAsked && pocketValue) fillerMove("third", pocketValue, "the third pocket");
+
+  /** The choice as sent: a third-pocket answer only when the pocket is asked, and stage answers only for open stages. */
+  function finalChoice(): LineChoice {
+    if (value.mode === "start") {
+      const open = new Set(undecided.map((s) => s.stageIndex));
+      const stages = Object.fromEntries(
+        Object.entries(value.stages ?? {}).filter(([k]) => open.has(Number(k))),
+      );
+      const { thirdPocket, ...rest } = value;
+      return pocketAsked && thirdPocket ? { ...rest, stages, thirdPocket } : { ...rest, stages };
+    }
+    if (value.mode === "join" && !pocketAsked && value.thirdPocket) {
+      const { thirdPocket: _drop, ...rest } = value;
+      void _drop;
+      return rest;
+    }
+    return value;
+  }
   const lineName = model.stages.at(-1)?.card?.name ?? card.name;
   const title =
     model.mode === "start"
@@ -182,6 +258,38 @@ export function LinePopup({
         ) : null}
         {cc ? <ColourChoiceSection {...cc} busy={busy} /> : null}
 
+        {value.mode === "start" && undecided.length > 0 ? (
+          <>
+            <div className="lp-lbl u">Your choice for each empty stage</div>
+            {undecided.map((s) => (
+              <StageChoice
+                key={s.stageIndex}
+                stage={s}
+                lineLocale={line.locale}
+                value={value.stages?.[s.stageIndex] ?? null}
+                onChange={(d) =>
+                  onChange({ ...value, stages: { ...(value.stages ?? {}), [s.stageIndex]: d } })
+                }
+                loadOptions={(): Promise<StageOption[]> =>
+                  s.dexId === undefined
+                    ? Promise.resolve([])
+                    : unwrap(stageOptionsAction(s.dexId, line.locale, line.bandKey))
+                }
+                loadBulk={loadBulk}
+                busy={busy}
+              />
+            ))}
+          </>
+        ) : null}
+        {pocketAsked && (value.mode === "start" || value.mode === "join") ? (
+          <ThirdPocketChoice
+            value={value.thirdPocket ?? null}
+            onChange={(t) => onChange({ ...value, thirdPocket: t })}
+            loadBulk={loadBulk}
+            busy={busy}
+          />
+        ) : null}
+
         <div className="lp-lbl u">What moves</div>
         {rep && value.mode === "replace" ? (
           <ReplaceMoves
@@ -268,6 +376,15 @@ export function LinePopup({
                   </div>
                 ),
               )}
+            {/* UIL-121: a filler is something she physically puts in a pocket, so it is on the to-do list too. */}
+            {fillerMoves.map((m) => (
+              <div className="lp-mrow" key={m.key}>
+                <span className="lp-verb u">{m.verb}</span>
+                <span>
+                  {m.what} <span className="lp-where">→ {m.where}</span>
+                </span>
+              </div>
+            ))}
           </div>
         )}
 
@@ -285,11 +402,9 @@ export function LinePopup({
                 disabled={busy}
                 onChange={(e) => {
                   if (value.mode === "join") {
-                    onChange(
-                      e.target.checked
-                        ? { ...value, foreignLocale: true }
-                        : { mode: "join", lineId: value.lineId, slotId: value.slotId },
-                    );
+                    const { foreignLocale: _was, ...rest } = value;
+                    void _was;
+                    onChange(e.target.checked ? { ...rest, foreignLocale: true } : rest);
                   } else if (value.mode === "replace" && !value.keep) {
                     const { foreignLocale: _drop, ...rest } = value;
                     void _drop;
@@ -342,7 +457,7 @@ export function LinePopup({
             onClick={() => {
               if (!canConfirm) return;
               if (filingOwn && cc) cc.onConfirmOwn();
-              else onConfirm(value);
+              else onConfirm(finalChoice());
             }}
           >
             {label}

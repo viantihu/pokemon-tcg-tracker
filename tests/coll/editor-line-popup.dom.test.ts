@@ -16,7 +16,7 @@ import { CollectionEditor } from "@/app/(ui)/coll/CollHub";
 
 const DEST: MoveDestination = { kind: "shelf", binderId: "b1", half: "back", band: "red" };
 const PROPOSAL: LineProposal = { kind: "start", binderId: "b1", band: "red" };
-const CHOICE: LineChoice = { mode: "start", binderId: "b1", band: "red", pulls: [] };
+const CHOICE: LineChoice = { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} };
 
 vi.mock("next/navigation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/navigation")>()),

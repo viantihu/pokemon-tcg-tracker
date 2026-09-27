@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import { applyMove, placementForMove, type MoveNameLookups } from "@/lib/line";
 import type { WriteOp } from "@/lib/repo";
+import type { LineChoice, StageDecision, ThirdPocketChoice } from "@/lib/line/popup";
 import {
   applyOps,
   asOwner,
@@ -44,6 +45,25 @@ const SLOT_NEXT = "50000000-0000-0000-0000-0000000000e2";
 const EMBERLING_DEX = 9101;
 const EMBERDRAKE_DEX = 9102;
 const ONLYMON_DEX = 9201; // single-stage: nothing evolves from it, nothing it evolves from
+
+/**
+ * UIL-121: her choice when she starts a line. Every stage the line leaves unfilled is hers to decide, and a complete
+ * line shorter than three cards asks what fills its third pocket.
+ */
+const startChoice = (
+  binderId: string,
+  band: string,
+  stages: Record<number, StageDecision>,
+  thirdPocket?: ThirdPocketChoice,
+): LineChoice => ({
+  mode: "start",
+  binderId,
+  band,
+  pulls: [],
+  stages,
+  ...(thirdPocket ? { thirdPocket } : {}),
+});
+const EMPTY_POCKET: ThirdPocketChoice = { material: "empty" };
 
 const names: MoveNameLookups = {
   binderName: (id) => (id === GEN2 ? "Binder 2" : "Binder 1"),
@@ -146,7 +166,9 @@ describe("CONTROL — the pre-fix back-half move (no line resolved)", () => {
 /* ==================== starting a new line (manual, below viability) ==================== */
 
 describe("applyMove: shelf → back half → start a new line (real Postgres, real RPC)", () => {
-  it("a single-stage Basic starts a one-slot line — allowed below the engine's own >= 2 threshold", async () => {
+  it("a single-stage Basic never starts a line (Karvi, 2026-09-27): refused, and nothing is written", async () => {
+    // "A basic with no evolution should not be allowed to get put in the 'lines' area." The database refuses a new
+    // line of one stage (0032), whichever writer asks.
     await seedCard({
       id: "onlymon",
       name: "Onlymon",
@@ -157,35 +179,20 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     await seedShelvedFront(CARD, "onlymon");
     await asOwner(db);
 
-    await applyMove(
-      pgliteClient(db),
-      {
-        copyId: CARD,
-        destination: {
-          kind: "shelf",
-          binderId: GEN,
-          half: "back",
-          band: "red",
-          lineJoin: { mode: "new" },
+    await expect(
+      applyMove(
+        pgliteClient(db),
+        {
+          copyId: CARD,
+          destination: { kind: "shelf", binderId: GEN, half: "back", band: "red" },
+          lineChoice: startChoice(GEN, "red", {}, EMPTY_POCKET),
         },
-      },
-      names,
-    );
-
+        names,
+      ),
+    ).rejects.toThrow();
     await asSuperuser(db);
-    const row = await copyRow(CARD);
-    expect(row.line_slot_id).not.toBeNull(); // the assertion the assignment is pinned on
-
-    const lines = await q<{ root_dex_id: number; color_band: string; status: string }>(
-      `select root_dex_id, color_band, status from evolution_line`,
-    );
-    // UIL-121: every slot filled reads CLOSED (was "complete").
-    expect(lines).toEqual([{ root_dex_id: ONLYMON_DEX, color_band: "red", status: "closed" }]);
-
-    const slots = await q<{ stage_index: number; state: string; copy_id: string | null }>(
-      `select stage_index, state, copy_id from line_slot order by stage_index`,
-    );
-    expect(slots).toEqual([{ stage_index: 0, state: "filled", copy_id: CARD }]);
+    expect(await q(`select id from evolution_line`)).toEqual([]);
+    expect((await copyRow(CARD)).binder_half).toBe("front");
   });
 
   it("a two-stage family gets a placeholder for the sibling stage it does not own", async () => {
@@ -217,6 +224,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
           band: "red",
           lineJoin: { mode: "new" },
         },
+        lineChoice: startChoice(GEN, "red", { 1: { kind: "chase", catalogCardId: "emberdrake" } }),
       },
       names,
     );
@@ -255,6 +263,14 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
       stage: "Basic",
       evolveFrom: null,
     });
+    // UIL-121: a line has two stages or more, so Onlymon's family gets its Stage 1 here.
+    await seedCard({
+      id: "onlyvolve",
+      name: "Onlyvolve",
+      dexId: ONLYMON_DEX + 1,
+      stage: "Stage1",
+      evolveFrom: "Onlymon",
+    });
     await seedShelvedFront(CARD, "onlymon");
     await seedShelvedFront(OTHER, "onlymon");
     await db.exec(`
@@ -277,6 +293,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
           band: "red",
           lineJoin: { mode: "new" },
         },
+        lineChoice: startChoice(GEN, "red", { 1: { kind: "empty" } }),
       },
       names,
     );
@@ -297,6 +314,14 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
       dexId: ONLYMON_DEX,
       stage: "Basic",
       evolveFrom: null,
+    });
+    // UIL-121: a line has two stages or more, so Onlymon's family gets its Stage 1 here.
+    await seedCard({
+      id: "onlyvolve",
+      name: "Onlyvolve",
+      dexId: ONLYMON_DEX + 1,
+      stage: "Stage1",
+      evolveFrom: "Onlymon",
     });
     await seedShelvedFront(CARD, "onlymon");
     await seedShelvedFront(OTHER, "onlymon");
@@ -320,6 +345,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
           band: "red",
           lineJoin: { mode: "new" },
         },
+        lineChoice: startChoice(GEN2, "red", { 1: { kind: "empty" } }),
       },
       names,
     );
@@ -392,6 +418,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
           band: "red",
           lineJoin: { mode: "new" },
         },
+        lineChoice: startChoice(GEN, "red", { 0: { kind: "chase", catalogCardId: "emberling" } }),
       },
       names,
     );
@@ -416,6 +443,14 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
       stage: "Basic",
       evolveFrom: null,
     });
+    // UIL-121: a line has two stages or more, so Onlymon's family gets its Stage 1 here.
+    await seedCard({
+      id: "onlyvolve",
+      name: "Onlyvolve",
+      dexId: ONLYMON_DEX + 1,
+      stage: "Stage1",
+      evolveFrom: "Onlymon",
+    });
     await seedShelvedFront(CARD, "onlymon");
     await asOwner(db);
 
@@ -430,6 +465,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
           band: "green",
           lineJoin: { mode: "new" },
         },
+        lineChoice: startChoice(GEN, "green", { 1: { kind: "empty" } }),
       },
       names,
     );
@@ -478,6 +514,9 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
           band: "light_blue",
           lineJoin: { mode: "new" },
         },
+        lineChoice: startChoice(GEN, "light_blue", {
+          1: { kind: "chase", catalogCardId: "emberdrake" },
+        }),
       },
       names,
     );
@@ -538,6 +577,12 @@ describe("applyMove: shelf → back half → join an existing line's open slot",
           half: "back",
           band: "red",
           lineJoin: { mode: "existing", lineId: LINE, slotId: SLOT_NEXT },
+        },
+        lineChoice: {
+          mode: "join",
+          lineId: LINE,
+          slotId: SLOT_NEXT,
+          thirdPocket: { material: "empty" },
         },
       },
       names,

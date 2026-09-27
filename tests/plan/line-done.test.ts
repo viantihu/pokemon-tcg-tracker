@@ -212,7 +212,11 @@ describe("UIL-120 (a) · a join or a start that leaves the line done", () => {
     await seedLine({ stage1: "open" });
     await seedHaulRows(db, [CML]);
     await asOwner(db);
-    const res = await commit({ card: CML, lineChoice: { mode: "join", lineId: LINE, slotId: S1 } });
+    // UIL-121: it completes the two-card line, so she says what fills its third pocket.
+    const res = await commit({
+      card: CML,
+      lineChoice: { mode: "join", lineId: LINE, slotId: S1, thirdPocket: { material: "empty" } },
+    });
     expect(res.lineDone).toBe(true);
   });
 
@@ -228,7 +232,14 @@ describe("UIL-120 (a) · a join or a start that leaves the line done", () => {
     if (start?.kind !== "start") throw new Error(`expected a start, got ${start?.kind}`);
     const first = await commit({
       card: CML,
-      lineChoice: { mode: "start", binderId: KB1, band: "red", pulls: [OWNED_CMD] },
+      // UIL-121: she chases the Charizard for its stage.
+      lineChoice: {
+        mode: "start",
+        binderId: KB1,
+        band: "red",
+        pulls: [OWNED_CMD],
+        stages: { 2: { kind: "chase", catalogCardId: CHARIZARD_BASE1_4.tcgdexId } },
+      },
     });
     expect(first.lineDone).toBe(false); // the Charizard stage is still open: it steps on
     const add = await proposalFor(CZD);
@@ -255,7 +266,14 @@ describe("UIL-120 (a) · a join or a start that leaves the line done", () => {
     if (start?.kind !== "start") throw new Error(`expected a start, got ${start?.kind}`);
     const res = await commit({
       card: CML,
-      lineChoice: { mode: "start", binderId: KB1, band: "red", pulls: [OWNED_CMD] },
+      lineChoice: {
+        mode: "start",
+        binderId: KB1,
+        band: "red",
+        pulls: [OWNED_CMD],
+        stages: {},
+        thirdPocket: { material: "energy" },
+      },
     });
     expect(res.lineDone).toBe(true);
   });
@@ -266,7 +284,7 @@ describe("UIL-120 (a) · a join or a start that leaves the line done", () => {
     await asOwner(db);
     const res = await shelveCardAction({
       card: { id: CML.id, tcgdexId: CML.tcgdexId, variant: CML.variant, existingCopyId: CML.id },
-      lineChoice: { mode: "join", lineId: LINE, slotId: S1 },
+      lineChoice: { mode: "join", lineId: LINE, slotId: S1, thirdPocket: { material: "empty" } },
     });
     expect(res).toMatchObject({ ok: true, lineDone: true });
   });
@@ -322,9 +340,20 @@ describe("UIL-120 (d) · a line whose only unfilled stage is a block", () => {
     if (start?.kind !== "start") throw new Error(`expected a start, got ${start?.kind}`);
     const first = await commit({
       card: vib,
-      lineChoice: { mode: "start", binderId: KB1, band: start.band, pulls: [] },
+      // UIL-121: Trapinch has no Olive printing, so she records the energy that fills its pocket, and she chases the
+      // Flygon.
+      lineChoice: {
+        mode: "start",
+        binderId: KB1,
+        band: start.band,
+        pulls: [],
+        stages: {
+          0: { kind: "filler", filler: { material: "energy" } },
+          2: { kind: "chase", catalogCardId: FLYGON_XY5_110.tcgdexId },
+        },
+      },
     });
-    expect(first.lineDone).toBe(false); // [block, filled, placeholder]: the Flygon stage is open
+    expect(first.lineDone).toBe(false); // [filler, filled, chased]: the Flygon stage is open
     clearCatalogCache();
     const add = await proposalFor(fly);
     if (add?.kind !== "add") throw new Error(`expected an add, got ${add?.kind}`);
@@ -332,9 +361,10 @@ describe("UIL-120 (d) · a line whose only unfilled stage is a block", () => {
       card: fly,
       lineChoice: { mode: "join", lineId: add.lineId, slotId: add.slotId },
     });
-    // PRE-FIX (#402): false, because the status stays `open` with a block slot.
+    // PRE-FIX (#402): false, because the status stayed `open` with a block slot. Since UIL-121 a filler stage is
+    // decided, so the line reads closed.
     expect(last.lineDone).toBe(true);
-    expect(await statusOf(add.lineId)).toBe("open");
+    expect(await statusOf(add.lineId)).toBe("closed");
   });
 });
 
@@ -365,7 +395,14 @@ describe("UIL-120 (e)(f) · it keeps stepping while a stage is still open", () =
     if (start?.kind !== "start") throw new Error(`expected a start, got ${start?.kind}`);
     const res = await commit({
       card: CZD,
-      lineChoice: { mode: "start", binderId: KB1, band: "red", pulls: [OWNED_CMD] },
+      // UIL-121: she chases a Charmeleon for the new line's Stage 1 (hers stays in the old line).
+      lineChoice: {
+        mode: "start",
+        binderId: KB1,
+        band: "red",
+        pulls: [OWNED_CMD],
+        stages: { 1: { kind: "chase", catalogCardId: CML.tcgdexId } },
+      },
     });
     expect(await statusOf(LINE)).toBe("open"); // the other line was demoted
     expect(res.lineDone).toBe(false);

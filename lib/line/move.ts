@@ -340,8 +340,8 @@ export function buildNewLineJoinOps(ctx: NewLineContext): {
       color_band: ctx.destinationBand,
       binder_id: ctx.binderId,
       half: "back",
-      // UIL-121: open or closed only; nothing is capped for her.
-      status: gen.status === "complete" ? "closed" : "open",
+      // UIL-121: open or closed only; nothing is capped for her. Every stage but hers waits for her choice.
+      status: gen.slots.length === 1 ? "closed" : "open",
     },
   ];
   let ownSlotId: string | null = null;
@@ -349,16 +349,19 @@ export function buildNewLineJoinOps(ctx: NewLineContext): {
     const slotId = crypto.randomUUID();
     const isIncoming = slot.stageIndex === gen.incomingStageIndex;
     if (isIncoming) ownSlotId = slotId;
+    // UIL-121: nothing is written for her. This older path (a Move destination's "new line", with no line popup)
+    // carries no stage choices, so every other stage is an open slot she has not decided: no block, no chosen
+    // card, no wish. Lines' "Choose" asks her. (The line popup's start writes her choices: ./line-choice.)
     ops.push({
       op: "insert_slot",
       id: slotId,
       line_id: lineId,
       stage_index: slot.stageIndex,
       stage: slot.stage,
-      state: slot.state,
+      state: isIncoming ? "filled" : "placeholder",
       copy_id: isIncoming ? ctx.incoming.id : null,
-      target_catalog_card_id: slot.targetCatalogCardId,
-      note: slot.note ?? null,
+      target_catalog_card_id: isIncoming ? slot.targetCatalogCardId : null,
+      note: isIncoming ? (slot.note ?? null) : null,
     });
   }
   return { ops, slotId: ownSlotId, rootDexId };

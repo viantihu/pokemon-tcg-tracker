@@ -44,6 +44,9 @@ import {
   type LineProposal,
 } from "./popup";
 import type { CardIdentity } from "./types";
+import { LINE_ROW_POCKETS } from "./popup";
+import { stageOptionsFrom, stageSuggestion } from "./stage-options";
+import { printingFromRow } from "./stage-options-load";
 
 export async function loadLinePopupModel(
   db: DbClient,
@@ -147,6 +150,18 @@ export async function loadLinePopupModel(
       viable: true,
     };
     const gen = generateSlots(incoming, viability, owned, catalog, typeColorMap);
+    // UIL-121: each stage she may leave unfilled carries its species and its suggestion (shown, never selected).
+    const decidable = (dexId: number) => ({
+      dexId,
+      suggestion: stageSuggestion(
+        stageOptionsFrom(
+          catalogRows
+            .filter((r) => r.dex_id.includes(dexId))
+            .map((r) => printingFromRow(r, typeColorMap)),
+          { locale: cardLocale, bandKey: hereBand },
+        ),
+      ),
+    });
     const stages: LinePopupStage[] = gen.slots.map((s) => {
       if (s.stageIndex === gen.incomingStageIndex) {
         return {
@@ -165,6 +180,8 @@ export async function loadLinePopupModel(
           stage: s.stage,
           state: "pullable",
           card: identity(pullCard, hereBand),
+          // Left unticked, the stage is unfilled and hers to decide.
+          ...decidable(s.dexId),
           pull: {
             copyId: pullRow.id,
             fromLabel: whereIs(pullRow),
@@ -172,12 +189,33 @@ export async function loadLinePopupModel(
           },
         };
       }
-      const target = s.targetCatalogCardId ? catalogById.get(s.targetCatalogCardId) : undefined;
+      // Its card still waiting in THIS haul: not asked about now; it joins when she places that card (Karvi's ruling:
+      // she is asked about a missing stage only after the last card she has for the line).
+      const waiting = copies.find(
+        (c) =>
+          c.id !== copy.id &&
+          c.role === "haul" &&
+          (catalogById.get(c.catalog_card_id)?.dexId ?? []).includes(s.dexId) &&
+          localeOfId(c.catalog_card_id) === cardLocale,
+      );
+      const waitingCard = waiting ? catalogById.get(waiting.catalog_card_id) : undefined;
+      if (waiting && waitingCard) {
+        return {
+          stageIndex: s.stageIndex,
+          stage: s.stage,
+          state: "coming",
+          card: identity(waitingCard, hereBand),
+          dexId: s.dexId,
+          coming: { copyId: waiting.id },
+        };
+      }
+      // Nothing is chosen for her: the stage shows no card until she decides (the suggestion rides alongside).
       return {
         stageIndex: s.stageIndex,
         stage: s.stage,
-        state: s.state === "block" ? "blocked" : "wanted",
-        card: target ? identity(target, hereBand) : null,
+        state: "wanted",
+        card: null,
+        ...decidable(s.dexId),
       };
     });
     model = {
@@ -234,14 +272,19 @@ export async function loadLinePopupModel(
           copyId: here.id,
         };
       }
-      const target = s.target_catalog_card_id
-        ? catalogById.get(s.target_catalog_card_id)
-        : undefined;
+      // UIL-121: a card shows on an open stage only when she is chasing it. A card the engine stored before her
+      // choices existed is never shown as hers (the Senior BA's condition 2).
+      const choice = (s.stage_choice ?? null) as LinePopupStage["choice"];
+      const target =
+        choice === "chase" && s.target_catalog_card_id
+          ? catalogById.get(s.target_catalog_card_id)
+          : undefined;
       return {
         stageIndex: s.stage_index,
         stage: s.stage,
         state: s.state === "block" ? "blocked" : "wanted",
         card: target ? identity(target, hereBand) : null,
+        choice,
       };
     });
     const filledBefore = lineSlots.filter((s) => s.state === "filled").length;
@@ -261,6 +304,7 @@ export async function loadLinePopupModel(
         filledAfter: replacing ? filledBefore : filledBefore + 1,
         total: lineSlots.length,
         status: line.status,
+        thirdPocketOpen: lineSlots.length < LINE_ROW_POCKETS && line.extra_pocket == null,
       },
       stages,
       ...(replacing && current && currentCard

@@ -32,7 +32,7 @@ import {
   type OwnedCopy,
   type TypeColorMap,
 } from "@/lib/engine";
-import { localeOfId } from "@/lib/catalog/locale";
+import { isStandInId, localeOfId, standInIdFor } from "@/lib/catalog/locale";
 import type { Row, WriteOp } from "@/lib/repo";
 import {
   buildExistingLineJoinOps,
@@ -40,7 +40,15 @@ import {
   placementForMove,
   releaseSlotOps,
 } from "./move";
-import { lineReadsClosed, lineStatusFor, type LineChoice } from "./popup";
+import { lineReadsClosed, lineStatusOf, type LineChoice } from "./popup";
+import {
+  stageWriteOps,
+  thirdPocketWriteOps,
+  validateStageDecision,
+  validateThirdPocket,
+  type StageCatalogCard,
+  type StageState,
+} from "./stage-choice";
 
 /** Everything `buildLineChoiceOps` reads, loaded fresh by the server just before the write. */
 export interface LineWriteState {
@@ -57,6 +65,8 @@ export interface LineWriteState {
   /** The lines this write may touch: the one joined, and any line a pulled copy leaves. */
   lines: Map<string, Row<"evolution_line">>;
   slotsByLine: Map<string, Row<"line_slot">[]>;
+  /** UIL-121: the blocks on each line, for a stage filler a joining card replaces. */
+  blocksByLine: Map<string, Row<"binder_block">[]>;
   /** REPLACE into another back half: the same state for the card coming out, which `outgoingLine` places. */
   outgoing?: LineWriteState;
 }
@@ -80,15 +90,21 @@ export function buildLineChoiceOps(
   state: LineWriteState,
   copyId: string,
   choice: LineChoice,
+  /**
+   * UIL-121: an older request with no line popup (a Move destination's `lineJoin`) carries no stage choices. Its
+   * unfilled stages are written UNDECIDED (an open slot, nothing chosen for her) rather than refused, so a card
+   * always moves; Lines' "Choose" asks her later. The popup's choices are always checked.
+   */
+  opts: { undecidedOk?: boolean } = {},
 ): LineChoiceWrite {
   if (state.copy.id !== copyId || state.incoming.id !== copyId) {
     throw new Error("That card changed while the line was open — reload the screen and try again.");
   }
   switch (choice.mode) {
     case "start":
-      return startLine(state, choice);
+      return startLine(state, choice, opts.undecidedOk === true);
     case "join":
-      return joinLine(state, choice);
+      return joinLine(state, choice, opts.undecidedOk === true);
     case "replace":
       if (choice.keep) {
         // A Keep leaves the line as it is; the screen places the card. Refused so no caller thinks it wrote one.
@@ -105,6 +121,7 @@ export function buildLineChoiceOps(
 function startLine(
   state: LineWriteState,
   choice: Extract<LineChoice, { mode: "start" }>,
+  undecidedOk: boolean,
 ): LineChoiceWrite {
   if (!choice.binderId) throw new Error("Pick the binder the line goes in.");
   const owned = state.owned.filter((o) => o.id !== state.copy.id);
@@ -130,17 +147,21 @@ function startLine(
   const rootDexId = viability.chain[0]?.dexId ?? state.incoming.card.dexId[0];
   const slotOps: WriteOp[] = [];
   const pullOps: WriteOp[] = [];
-  const finalStates: string[] = [];
   let ownSlotId: string | null = null;
 
+  // UIL-121: every stage the line leaves unfilled is HER choice (chase a card, leave it empty, or a filler), checked
+  // here on fresh state. Nothing is blocked, capped or wishlisted for her: an unfilled stage is inserted as an open
+  // slot and then written as she chose.
+  const st = stageStateOf(state);
+  const requiredType = typeOfBand(choice.band, state.typeColorMap);
+  const stageOps: WriteOp[] = [];
+  const finalStages: { state: string; stageChoice?: string | null }[] = [];
   for (const slot of gen.slots) {
     const slotId = crypto.randomUUID();
     const isIncoming = slot.stageIndex === gen.incomingStageIndex;
     const proposedPull = !isIncoming && slot.copyId ? slot.copyId : null;
     const pulled = proposedPull !== null && ticked.has(proposedPull);
-    const declined = proposedPull !== null && !pulled;
-    const state_ = isIncoming || pulled ? "filled" : declined ? "placeholder" : slot.state;
-    finalStates.push(state_);
+    const filled = isIncoming || pulled;
     if (isIncoming) ownSlotId = slotId;
     slotOps.push({
       op: "insert_slot",
@@ -148,14 +169,58 @@ function startLine(
       line_id: lineId,
       stage_index: slot.stageIndex,
       stage: slot.stage,
-      state: state_,
+      state: filled ? "filled" : "placeholder",
       copy_id: isIncoming ? state.copy.id : pulled ? proposedPull : null,
-      target_catalog_card_id: slot.targetCatalogCardId,
-      note: declined ? "left in place (not confirmed)" : (slot.note ?? null),
+      target_catalog_card_id: filled ? slot.targetCatalogCardId : null,
+      note: filled ? (slot.note ?? null) : null,
     });
     if (pulled) pullOps.push(...pullInto(state, proposedPull!, slotId, choice));
+    if (filled) {
+      finalStages.push({ state: "filled" });
+      continue;
+    }
+    // Not asked about yet: an older request with no popup, or a stage whose card is still waiting in her haul (she is
+    // asked about a missing stage only after the last card she has for the line: Karvi's ruling).
+    if (
+      choice.stages?.[slot.stageIndex] === undefined &&
+      (undecidedOk || waitingInHaul(state, slot.dexId))
+    ) {
+      finalStages.push({ state: "placeholder", stageChoice: null });
+      continue;
+    }
+    const write = validateStageDecision(
+      st,
+      {
+        lineId,
+        slotId,
+        stageIndex: slot.stageIndex,
+        stage: slot.stage,
+        dexId: slot.dexId,
+        speciesName: viability.chain[slot.stageIndex]?.name ?? "that card",
+        lineLocale: localeOfId(state.incoming.card.tcgdexId),
+        binderId: choice.binderId,
+        requiredType,
+      },
+      choice.stages?.[slot.stageIndex],
+    );
+    stageOps.push(...stageWriteOps(slotId, write));
+    finalStages.push({
+      state: write.slotPatch.state ?? "placeholder",
+      stageChoice: write.slotPatch.stage_choice,
+    });
   }
   if (!ownSlotId) throw new Error("That card has no stage in this line — pick another line.");
+  const pocket = validateThirdPocket(
+    st,
+    {
+      lineId,
+      binderId: choice.binderId,
+      slotCount: gen.slots.length,
+      completeAfterWrite:
+        finalStages.every((f) => f.state === "filled") && !(undecidedOk && !choice.thirdPocket),
+    },
+    choice.thirdPocket,
+  );
 
   const ops: WriteOp[] = [
     {
@@ -165,10 +230,12 @@ function startLine(
       color_band: choice.band,
       binder_id: choice.binderId,
       half: "back",
-      status: lineStatusFor(finalStates, gen.status === "capped"),
+      status: lineStatusOf(finalStages),
     },
     ...slotOps,
     ...pullOps,
+    ...stageOps,
+    ...(pocket ? thirdPocketWriteOps(lineId, pocket) : []),
   ];
   return {
     ops,
@@ -229,6 +296,7 @@ function pullInto(
 function joinLine(
   state: LineWriteState,
   choice: Extract<LineChoice, { mode: "join" }>,
+  undecidedOk: boolean,
 ): LineChoiceWrite {
   const line = state.lines.get(choice.lineId);
   const slots = state.slotsByLine.get(choice.lineId) ?? [];
@@ -252,14 +320,39 @@ function joinLine(
   const cardOf = (id: string) => state.copiesById.get(id)?.catalog_card_id ?? null;
   assertLanguageHolds(state, slots, slot, cardOf, choice.foreignLocale === true);
 
-  const slotIsLastOpen = slots.every((s) => s.id === slot.id || s.state === "filled");
-  return {
-    ops: buildExistingLineJoinOps({
-      copyId: state.copy.id,
+  // UIL-121: the line reads closed once no stage waits (filled, left empty, or a filler), and a card that completes a
+  // short line asks what fills its third pocket, unless she has already said.
+  const after = slots.map((s) =>
+    s.id === slot.id ? { state: "filled" } : { state: s.state, stageChoice: s.stage_choice },
+  );
+  const closes = lineStatusOf(after) === "closed" && !lineReadsClosed(line.status);
+  const pocket = validateThirdPocket(
+    stageStateOf(state),
+    {
       lineId: line.id,
-      slotId: slot.id,
-      slotIsLastOpen,
-    }).ops,
+      binderId: line.binder_id ?? "",
+      slotCount: slots.length,
+      // An older request with no popup leaves the pocket for Lines to ask about.
+      completeAfterWrite:
+        line.extra_pocket == null &&
+        after.every((a) => a.state === "filled") &&
+        !(undecidedOk && !choice.thirdPocket),
+    },
+    choice.thirdPocket,
+  );
+  return {
+    ops: [
+      // A stage that held a filler: the card takes its pocket, so the filler comes out (a spare card back to the
+      // bulk box), in the same write.
+      ...fillerOutOps(state, line.id, slot),
+      ...buildExistingLineJoinOps({
+        copyId: state.copy.id,
+        lineId: line.id,
+        slotId: slot.id,
+        slotIsLastOpen: closes,
+      }).ops,
+      ...(pocket ? thirdPocketWriteOps(line.id, pocket) : []),
+    ],
     lineId: line.id,
     slotId: slot.id,
     placement: { binder_id: line.binder_id, binder_half: "back", color_band: line.color_band },
@@ -412,4 +505,80 @@ function describePatch(p: ReturnType<typeof placementForMove>): string {
   if (p.binder_half === "back") return `in a ${p.color_band} line, back half`;
   if (p.binder_half === "front") return `in the front half · ${p.color_band}`;
   return "in a collection's binder";
+}
+
+/* ----------------------------------------------- UIL-121 ----------------------------------------------- */
+
+/** Fresh state as her stage choices are checked against (lib/line/stage-choice). */
+function stageStateOf(state: LineWriteState): StageState {
+  const asStage = (c: CatalogCard): StageCatalogCard => ({
+    tcgdexId: c.tcgdexId,
+    name: c.name,
+    dexId: c.dexId,
+    cardClass: c.cardClass,
+    setName: c.setName ?? null,
+    localId: c.localId,
+    locale: localeOfId(c.tcgdexId),
+  });
+  const byId = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
+  const norm = (v: string) => v.trim().toLowerCase();
+  return {
+    card: (id) => {
+      const c = byId.get(id);
+      return c ? asStage(c) : null;
+    },
+    copy: (id) => {
+      const r = state.copiesById.get(id);
+      return r ? { id: r.id, role: r.role } : null;
+    },
+    standIns: state.catalog.filter((c) => isStandInId(c.tcgdexId)).map(asStage),
+    mirrorCandidates: (d) =>
+      state.catalog
+        .filter((c) => !isStandInId(c.tcgdexId) && norm(c.name) === norm(d.name))
+        .map(asStage),
+    newId: () => crypto.randomUUID(),
+    newStandInId: standInIdFor,
+  };
+}
+
+/** The line colour's representative type, for her wishlist's `required_type` and a placeholder card's type. */
+function typeOfBand(bandKey: string, map: TypeColorMap): string | null {
+  return Object.entries(map).find(([, b]) => b === bandKey)?.[0] ?? null;
+}
+
+/** A card joining a stage that held a filler: the filler's block comes out, and a spare card goes back to bulk. */
+function fillerOutOps(state: LineWriteState, lineId: string, slot: Row<"line_slot">): WriteOp[] {
+  if (slot.state !== "block") return [];
+  const ops: WriteOp[] = [];
+  for (const b of state.blocksByLine.get(lineId) ?? []) {
+    if (b.line_slot_id !== slot.id) continue;
+    ops.push({ op: "delete_binder_block", id: b.id, line_id: lineId });
+    if (b.copy_id) {
+      ops.push({
+        op: "update_copy",
+        id: b.copy_id,
+        patch: {
+          role: "bulk",
+          binder_id: null,
+          binder_half: null,
+          color_band: null,
+          line_slot_id: null,
+        },
+      });
+    }
+  }
+  return ops;
+}
+
+/** A copy of this stage's species still waiting in her haul, in the line's language: its stage is not asked yet. */
+function waitingInHaul(state: LineWriteState, dexId: number): boolean {
+  const locale = localeOfId(state.incoming.card.tcgdexId);
+  const cardOf = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
+  return [...state.copiesById.values()].some(
+    (c) =>
+      c.id !== state.copy.id &&
+      c.role === "haul" &&
+      (cardOf.get(c.catalog_card_id)?.dexId ?? []).includes(dexId) &&
+      localeOfId(c.catalog_card_id) === locale,
+  );
 }

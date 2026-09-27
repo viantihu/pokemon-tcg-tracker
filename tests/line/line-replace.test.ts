@@ -183,7 +183,14 @@ describe("SWAP · one write, the line never shows a gap", () => {
     const other: MoveDestination = { kind: "shelf", binderId: GEN2, half: "back", band: "red" };
     await move(
       swap(other, {
-        outgoingLine: { mode: "start", binderId: GEN2, band: "red", pulls: [] },
+        // UIL-121: the line the old card starts leaves its Basic empty, her choice.
+        outgoingLine: {
+          mode: "start",
+          binderId: GEN2,
+          band: "red",
+          pulls: [],
+          stages: { 0: { kind: "empty" } },
+        },
       } as Partial<LineChoice>),
     );
     const moved = await copyRow(OLD);
@@ -212,6 +219,7 @@ describe("the builder itself (for a caller that goes straight to it)", () => {
       copiesById: new Map(),
       lines: new Map(),
       slotsByLine: new Map(),
+      blocksByLine: new Map(),
     };
     expect(() =>
       buildLineChoiceOps(state, NEW, { mode: "replace", lineId: LINE, slotId: SLOT1, keep: true }),

@@ -105,13 +105,22 @@ describe("UIL-117 · Lines: a card on no line gets one through the popup", () =>
       band: "orange",
     });
 
+    // UIL-121: a one-card line is complete, so she says what fills the rest of its row.
+    await user.click(screen.getByRole("button", { name: /Leave it empty/ }));
     await user.click(screen.getByRole("button", { name: /Start line/ }));
     await waitFor(() => expect(moveCardAction).toHaveBeenCalledTimes(1));
     expect(moveCardAction).toHaveBeenCalledWith(
       "c9",
       { kind: "shelf", binderId: "kb1", half: "back", band: "orange" },
       "color",
-      { mode: "start", binderId: "kb1", band: "orange", pulls: [] },
+      {
+        mode: "start",
+        binderId: "kb1",
+        band: "orange",
+        pulls: [],
+        stages: {},
+        thirdPocket: { material: "empty" },
+      },
     );
   });
 

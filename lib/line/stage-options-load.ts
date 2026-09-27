@@ -6,10 +6,27 @@
 
 import { band, type TypeColorMap } from "@/lib/engine";
 import { toCatalogCard } from "@/lib/plan/adapt";
-import { catalogCardRepo, copyRepo, typeColorMapRepo, type DbClient } from "@/lib/repo";
+import { catalogCardRepo, copyRepo, typeColorMapRepo, type DbClient, type Row } from "@/lib/repo";
 import type { Locale } from "@/lib/sync/types";
 import type { FillerCardOption, StageOption } from "./popup";
-import { stageOptionsFrom } from "./stage-options";
+import { stageOptionsFrom, type StagePrinting } from "./stage-options";
+
+/** A catalog row as a stage option reads it, coloured by her map. */
+export function printingFromRow(r: Row<"catalog_card">, map: TypeColorMap): StagePrinting {
+  return {
+    tcgdexId: r.tcgdex_id,
+    name: r.name,
+    setId: r.set_id,
+    setName: r.set_name,
+    localId: r.local_id,
+    setCardCountOfficial: r.set_card_count_official,
+    imageUrl: r.image_url,
+    cardClass: r.card_class,
+    isDigitalOnly: r.is_digital_only,
+    priceMarket: r.price_market,
+    bandKey: band(toCatalogCard(r), map),
+  };
+}
 
 async function colourMap(db: DbClient): Promise<TypeColorMap> {
   const map: TypeColorMap = {};
@@ -26,19 +43,7 @@ export async function loadStageOptions(
 ): Promise<StageOption[]> {
   const [rows, map] = await Promise.all([catalogCardRepo.findByDexId(db, dexId), colourMap(db)]);
   return stageOptionsFrom(
-    rows.map((r) => ({
-      tcgdexId: r.tcgdex_id,
-      name: r.name,
-      setId: r.set_id,
-      setName: r.set_name,
-      localId: r.local_id,
-      setCardCountOfficial: r.set_card_count_official,
-      imageUrl: r.image_url,
-      cardClass: r.card_class,
-      isDigitalOnly: r.is_digital_only,
-      priceMarket: r.price_market,
-      bandKey: band(toCatalogCard(r), map),
-    })),
+    rows.map((r) => printingFromRow(r, map)),
     { locale, bandKey: lineBandKey },
   );
 }

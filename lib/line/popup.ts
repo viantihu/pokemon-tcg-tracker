@@ -20,10 +20,30 @@ import type { CardIdentity, ExistingLineBlock, MoveDestination, MoveOptions } fr
 
 /** Her choice in the popup: the ONE input every back-half write takes. */
 export type LineChoice =
-  /** Start a new line here. `pulls` are the owned copies she TICKED to move into it (UIL-061; empty = none). */
-  | { mode: "start"; binderId: string; band: string; pulls: string[] }
-  /** Join an existing line's open slot. `foreignLocale` is her second confirm for a line in another language. */
-  | { mode: "join"; lineId: string; slotId: string; foreignLocale?: true }
+  /**
+   * Start a new line here. `pulls` are the owned copies she TICKED to move into it (UIL-061; empty = none).
+   * `stages` is her choice for EVERY stage left unfilled, by stage index (UIL-121: nothing is decided for her), and
+   * `thirdPocket` what fills the last pocket when the line is complete with fewer than LINE_ROW_POCKETS cards.
+   */
+  | {
+      mode: "start";
+      binderId: string;
+      band: string;
+      pulls: string[];
+      stages: Record<number, StageDecision>;
+      thirdPocket?: ThirdPocketChoice;
+    }
+  /**
+   * Join an existing line's open slot. `foreignLocale` is her second confirm for a line in another language;
+   * `thirdPocket` her choice when this card completes a short line whose last pocket she has not decided.
+   */
+  | {
+      mode: "join";
+      lineId: string;
+      slotId: string;
+      foreignLocale?: true;
+      thirdPocket?: ThirdPocketChoice;
+    }
   /**
    * A copy for a filled slot: keep the one that's there (nothing in the line moves). NOT a line write: the builder
    * refuses it, and the incoming card's placement is the screen's. `incoming` is where she sent it on Keep when the
@@ -131,8 +151,11 @@ export type LineBadge = LineProposal["kind"];
  *   pullable  a card she owns elsewhere that could fill it: shown UNTICKED, "Pull it into this line"
  *   wanted    an open slot with no card yet (a placeholder; on her wishlist only if SHE adds it: Karvi, UIL-119)
  *   blocked   a slot no card can fill
+ *   coming    UIL-121: an open slot whose card is still waiting in THIS haul. She is not asked about it now; it joins
+ *             when she places that card (Karvi's ruling: she is asked about a missing stage only after the last card
+ *             she has for the line)
  */
-export type LineStageState = "incoming" | "here" | "pullable" | "wanted" | "blocked";
+export type LineStageState = "incoming" | "here" | "pullable" | "wanted" | "blocked" | "coming";
 
 export interface LinePopupStage {
   stageIndex: number;
@@ -154,6 +177,13 @@ export interface LinePopupStage {
   };
   /** The stage's species (UIL-121): what her choice for an unfilled stage is checked against. */
   dexId?: number;
+  /**
+   * An existing line's open stage (UIL-121): what she chose for it, or null when she has not yet. The card shown is
+   * her chase's only when she chose one; an engine's stored pick is never shown as hers.
+   */
+  choice?: "chase" | "empty" | "filler" | null;
+  /** `coming`: the copy waiting in this haul that will fill it. */
+  coming?: { copyId: string };
   /**
    * An unfilled stage's suggestion (UIL-121): the cheapest same-colour printing in the line's language, else the
    * special one when that is all there is (`special`). SHOWN, never selected: she chooses.
@@ -179,6 +209,11 @@ export interface LinePopupLine {
    * forecast of whether her confirm leaves the line done. Null while the line is only being started.
    */
   status?: string | null;
+  /**
+   * UIL-121: the line is shorter than LINE_ROW_POCKETS and she has not yet said what fills its third pocket, so a
+   * confirm that completes it asks. Absent on a new line (its pocket is always undecided).
+   */
+  thirdPocketOpen?: boolean;
 }
 
 /** UIL-096: every line this family already has, anywhere, so she sees it before starting a second one. */
@@ -360,7 +395,13 @@ export function lineStatusShown(status: string | null | undefined): "open" | "cl
 export function defaultChoiceFor(proposal: LineProposal): LineChoice {
   switch (proposal.kind) {
     case "start":
-      return { mode: "start", binderId: proposal.binderId ?? "", band: proposal.band, pulls: [] };
+      return {
+        mode: "start",
+        binderId: proposal.binderId ?? "",
+        band: proposal.band,
+        pulls: [],
+        stages: {},
+      };
     case "add":
       return { mode: "join", lineId: proposal.lineId, slotId: proposal.slotId };
     case "replace":

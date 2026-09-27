@@ -34,6 +34,7 @@ import {
 import { applyMove } from "@/lib/line";
 import { candidateKey } from "@/lib/line/join-options";
 import { defaultChoiceFor } from "@/lib/line/popup";
+import { loadLinePopupModel } from "@/lib/line/popup-load";
 import {
   OWNER,
   applyOps,
@@ -334,9 +335,14 @@ describe("UIL-090 · D2 through the CASCADE and the Lines screen, not only the p
     const proposal = spot?.item.lineProposal ?? null;
     expect(proposal?.kind === "add" && proposal.lineId === LINE).toBe(false);
     // Since UIL-117 a line card waits for her choice: confirm whatever the plan proposes, as she would.
+    // UIL-121: a start takes her choice for each other stage; she leaves them empty.
+    const chosen = proposal ? defaultChoiceFor(proposal) : null;
     await commitCardPlacement(pgliteClient(db), {
       card: JA_CRUEL,
-      lineChoice: proposal ? defaultChoiceFor(proposal) : null,
+      lineChoice:
+        chosen?.mode === "start"
+          ? { ...chosen, stages: { 0: { kind: "empty" }, 2: { kind: "empty" } } }
+          : chosen,
     });
     await asSuperuser(db);
 
@@ -402,6 +408,18 @@ describe("UIL-090 · D2 through the CASCADE and the Lines screen, not only the p
     const enCool = haulRow("d0000000-0000-4000-8000-00000000f0e3", "sv09-088");
     await seedHaulRows(db, [enCool]);
     await asOwner(db);
+    // UIL-121: nothing is chosen for her, so the stage's printing is the popup's SUGGESTION, and it is English.
+    const model = await loadLinePopupModel(pgliteClient(db), enCool.existingCopyId!, {
+      kind: "start",
+      binderId: KB2,
+      band: "orange",
+    });
+    // Its Toedscruel may be waiting in this haul (then shown as coming, not asked) or not (then suggested): either
+    // way the card shown is the ENGLISH printing.
+    const st1 = model.stages.find((st) => st.stageIndex === 1);
+    expect(st1?.state === "coming" ? st1.card?.tcgdexId : st1?.suggestion?.card.tcgdexId).toBe(
+      "sv09-089",
+    ); // pre-fix: "ja:SV9-089"
     await commitCardPlacement(pgliteClient(db), {
       card: enCool,
       override: { ...BACK_ORANGE, lineJoin: { mode: "new" } },
@@ -410,7 +428,8 @@ describe("UIL-090 · D2 through the CASCADE and the Lines screen, not only the p
     const ph = await db.query<{ target_catalog_card_id: string | null }>(
       `select target_catalog_card_id from line_slot where state = 'placeholder' order by stage_index`,
     );
-    expect(ph.rows.map((r) => r.target_catalog_card_id)).toEqual(["sv09-089"]); // pre-fix: "ja:SV9-089"
+    // And the older no-popup path writes no card for her at all: the stage is open and undecided.
+    expect(ph.rows.map((r) => r.target_catalog_card_id)).toEqual([null]);
   });
 });
 

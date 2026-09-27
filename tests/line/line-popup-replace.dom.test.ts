@@ -223,8 +223,10 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
     await user.click(radio(/Swap in/));
     await user.click(screen.getByRole("button", { name: "Another line…" }));
     // The line popup opens with the sheet: the back half IS her choice, no second tap (UX review of #391).
-    await screen.findByRole("dialog", { name: "Start a line" });
+    const nested = await screen.findByRole("dialog", { name: "Start a line" });
     expect(outgoingLineModel).toHaveBeenCalledWith({ kind: "start", binderId: "b1", band: "red" });
+    // UIL-121: the one-card line it starts is complete, so she says what fills the rest of its row.
+    await user.click(within(nested).getByRole("button", { name: /Leave it empty/ }));
     await user.click(screen.getByRole("button", { name: /Start line/ }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Start a line" })).toBeNull());
     expect(movesText()).toMatch(/027\/197.*→ KB-001 · Back · Red, new line/);
@@ -235,7 +237,14 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
       slotId: "S1",
       keep: false,
       outgoing: { kind: "shelf", binderId: "b1", half: "back", band: "red" },
-      outgoingLine: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+      outgoingLine: {
+        mode: "start",
+        binderId: "b1",
+        band: "red",
+        pulls: [],
+        stages: {},
+        thirdPocket: { material: "empty" },
+      },
     });
   });
 

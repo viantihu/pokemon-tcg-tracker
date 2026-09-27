@@ -17,7 +17,7 @@ import { LookupScreen } from "@/app/(ui)/look/LookupScreen";
 
 const DEST: MoveDestination = { kind: "shelf", binderId: "b1", half: "back", band: "red" };
 const PROPOSAL: LineProposal = { kind: "start", binderId: "b1", band: "red" };
-const CHOICE: LineChoice = { mode: "start", binderId: "b1", band: "red", pulls: [] };
+const CHOICE: LineChoice = { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} };
 
 vi.mock("@/app/(ui)/_components/CardResultsGrid", async () => {
   const { createElement: h } = await import("react");

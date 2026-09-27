@@ -78,11 +78,18 @@ const move = (choice: LineChoice, copyId = MOVING) =>
     },
     names,
   );
+/**
+ * UIL-121: her choice for each stage the line leaves unfilled, and for a complete short line's third pocket. Unticked,
+ * her Emberling's stage is unfilled, so she chases the Emberling printing; ticked, the two-card line is complete and
+ * she leaves its third pocket empty.
+ */
 const start = (pulls: string[] = []): LineChoice => ({
   mode: "start",
   binderId: GEN,
   band: "red",
   pulls,
+  stages: pulls.length > 0 ? {} : { 0: { kind: "chase", catalogCardId: "emberling" } },
+  ...(pulls.length > 0 ? { thirdPocket: { material: "empty" as const } } : {}),
 });
 
 describe("START · only what she ticked moves, and the status is the slots'", () => {
@@ -92,14 +99,24 @@ describe("START · only what she ticked moves, and the status is the slots'", ()
     await asOwner(db);
   });
 
-  it("unticked: her Emberling stays put, its stage is a placeholder, and the line is open, not complete", async () => {
+  it("unticked: her Emberling stays put, its stage is a placeholder she chose to chase, and the line is open", async () => {
     await move(start());
-    const slots = await q<{ stage_index: number; state: string; note: string | null }>(
-      `select stage_index, state, note from line_slot order by stage_index`,
+    const slots = await q<{
+      stage_index: number;
+      state: string;
+      stage_choice: string | null;
+      target_catalog_card_id: string | null;
+    }>(
+      `select stage_index, state, stage_choice, target_catalog_card_id from line_slot order by stage_index`,
     );
     expect(slots).toEqual([
-      { stage_index: 0, state: "placeholder", note: "left in place (not confirmed)" },
-      { stage_index: 1, state: "filled", note: expect.anything() },
+      {
+        stage_index: 0,
+        state: "placeholder",
+        stage_choice: "chase",
+        target_catalog_card_id: "emberling",
+      },
+      { stage_index: 1, state: "filled", stage_choice: null, target_catalog_card_id: "emberdrake" },
     ]);
     expect((await q<{ status: string }>(`select status from evolution_line`))[0].status).toBe(
       "open",
@@ -163,7 +180,7 @@ describe("START · only what she ticked moves, and the status is the slots'", ()
   it.each([
     [
       "colour band",
-      { mode: "start", binderId: GEN, band: "dark_blue", pulls: [] } as LineChoice,
+      { mode: "start", binderId: GEN, band: "dark_blue", pulls: [], stages: {} } as LineChoice,
       /another colour band than the one this card is moving to/,
     ],
     [
@@ -173,6 +190,7 @@ describe("START · only what she ticked moves, and the status is the slots'", ()
         binderId: "b0000000-0000-4000-8000-0000000117b2",
         band: "red",
         pulls: [],
+        stages: {},
       } as LineChoice,
       /another binder than the one this card is moving to/,
     ],
@@ -279,7 +297,14 @@ describe("JOIN · a line in another language (the Senior BA's Q1 ruling)", () =>
     await shelvedFront(MOVING, "emberdrake");
     await asOwner(db);
     expect(await derivedLocale()).toBe("ja");
-    await move({ mode: "join", lineId: LINE, slotId: SLOT1, foreignLocale: true });
+    // It completes the two-card line, so she says what fills its third pocket (UIL-121).
+    await move({
+      mode: "join",
+      lineId: LINE,
+      slotId: SLOT1,
+      foreignLocale: true,
+      thirdPocket: { material: "energy" },
+    });
     expect((await q(`select state, copy_id from line_slot where id = $1`, [SLOT1]))[0]).toEqual({
       state: "filled",
       copy_id: MOVING,

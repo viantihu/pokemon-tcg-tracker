@@ -111,7 +111,7 @@ describe("UIL-117 · the step-through label", () => {
   it("'· next' while another line card follows, and a plain confirm on the last one", () => {
     const props = {
       model: START,
-      value: { mode: "start", binderId: "b1", band: "red", pulls: [] } as LineChoice,
+      value: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} } as LineChoice,
       onChange: () => {},
       onConfirm: () => {},
       onCancel: () => {},
@@ -130,7 +130,7 @@ describe("UIL-117 · the step-through label", () => {
   it("the screen's own word wins: Confirm & next wraps to a skipped card, so 2 of 2 can still have a next", () => {
     const props = {
       model: START,
-      value: { mode: "start", binderId: "b1", band: "red", pulls: [] } as LineChoice,
+      value: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} } as LineChoice,
       onChange: () => {},
       onConfirm: () => {},
       onCancel: () => {},
@@ -151,7 +151,7 @@ describe("UIL-117 · the line popup", () => {
     render(
       createElement(Harness, {
         model: START,
-        initial: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} },
         onConfirm: vi.fn(),
       }),
     );
@@ -175,7 +175,7 @@ describe("UIL-117 · the line popup", () => {
     render(
       createElement(Harness, {
         model: START,
-        initial: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} },
         onConfirm: vi.fn(),
       }),
     );
@@ -194,7 +194,7 @@ describe("UIL-117 · the line popup", () => {
     render(
       createElement(LinePopup, {
         model: START,
-        value: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+        value: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} },
         onChange: () => {},
         onConfirm: () => {},
         onCancel: () => {},
@@ -218,7 +218,7 @@ describe("UIL-117 · the line popup", () => {
     render(
       createElement(Harness, {
         model: START,
-        initial: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} },
         onConfirm: vi.fn(),
       }),
     );
@@ -231,19 +231,23 @@ describe("UIL-117 · the line popup", () => {
     render(
       createElement(Harness, {
         model: START,
-        initial: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} },
         onConfirm,
       }),
     );
     await user.click(screen.getByRole("checkbox", { name: /Pull it into this line/ }));
     expect(screen.getByText("Take out")).toBeTruthy();
     expect(screen.queryByText("Stays put")).toBeNull();
+    // UIL-121: with the pull ticked the two-card line is complete, so she says what fills its third pocket first.
+    await user.click(screen.getByRole("button", { name: /Leave it empty/ }));
     await user.click(screen.getByRole("button", { name: /Start line/ }));
     expect(onConfirm).toHaveBeenCalledWith({
       mode: "start",
       binderId: "b1",
       band: "red",
       pulls: ["owned-cmd"],
+      stages: {},
+      thirdPocket: { material: "empty" },
     });
   });
 
@@ -266,7 +270,7 @@ describe("UIL-117 · the line popup", () => {
     render(
       createElement(Harness, {
         model: fromLine,
-        initial: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} },
         onConfirm: vi.fn(),
       }),
     );
@@ -285,7 +289,7 @@ describe("UIL-117 · the line popup", () => {
     render(
       createElement(Harness, {
         model: START,
-        initial: { mode: "start", binderId: "b1", band: "red", pulls: [] },
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} },
         onConfirm: vi.fn(),
         onSwitch,
       }),
@@ -318,5 +322,130 @@ describe("UIL-117 · the line popup", () => {
       slotId: "slot-ja-1",
       foreignLocale: true,
     });
+  });
+});
+
+describe("UIL-121 · her choice for each empty stage and the third pocket", () => {
+  const initial: LineChoice = { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} };
+  const confirmButton = () =>
+    screen.getByRole("button", { name: /Start line/ }) as HTMLButtonElement;
+
+  it("an unticked stage waits for her choice: Confirm stays off until she picks, and her pick is what is sent", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    render(createElement(Harness, { model: START, initial, onConfirm }));
+    expect(screen.getByText(/Your choice for each empty stage/)).toBeTruthy();
+    expect(screen.getByText(/Basic · Choose/)).toBeTruthy();
+    expect(confirmButton().disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Leave empty" }));
+    expect(confirmButton().disabled).toBe(false);
+    await user.click(confirmButton());
+    expect(onConfirm).toHaveBeenCalledWith({ ...initial, stages: { 0: { kind: "empty" } } });
+  });
+
+  it("ticking the pull fills that stage: its choice is dropped from what is sent, and the third pocket is asked", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    render(createElement(Harness, { model: START, initial, onConfirm }));
+    await user.click(screen.getByRole("button", { name: "Leave empty" }));
+    await user.click(screen.getByRole("checkbox", { name: /Pull it into this line/ }));
+    expect(screen.queryByText(/Your choice for each empty stage/)).toBeNull();
+    expect(screen.getByText(/Third pocket · Choose/)).toBeTruthy();
+    expect(confirmButton().disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: /A basic energy/ }));
+    // It is on her to-do list: an energy in the third pocket.
+    const rows = Array.from(document.querySelectorAll(".lp-moves .lp-mrow")).map(
+      (r) => r.textContent,
+    );
+    expect(rows.some((t) => /Put in.*A basic energy.*→ the third pocket/.test(t ?? ""))).toBe(true);
+    await user.click(confirmButton());
+    expect(onConfirm).toHaveBeenCalledWith({
+      ...initial,
+      pulls: ["owned-cmd"],
+      stages: {},
+      thirdPocket: { material: "energy" },
+    });
+  });
+
+  it("unticking again drops the third pocket from what is sent: the line is no longer complete", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    render(createElement(Harness, { model: START, initial, onConfirm }));
+    await user.click(screen.getByRole("checkbox", { name: /Pull it into this line/ }));
+    await user.click(screen.getByRole("button", { name: /A basic energy/ }));
+    await user.click(screen.getByRole("checkbox", { name: /Pull it into this line/ }));
+    expect(screen.queryByText(/Third pocket/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Leave empty" }));
+    await user.click(confirmButton());
+    expect(onConfirm).toHaveBeenCalledWith({ ...initial, stages: { 0: { kind: "empty" } } });
+  });
+
+  it("an Add that completes a short line whose pocket she has not decided asks it; one already decided does not", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    const english: LinePopupModel = {
+      ...FOREIGN_ADD,
+      line: { ...FOREIGN_ADD.line, locale: "en", thirdPocketOpen: true },
+      stages: FOREIGN_ADD.stages.map((st) =>
+        st.state === "here" ? { ...st, card: identity("sv03-026", "Charmander") } : st,
+      ),
+    };
+    const join: LineChoice = { mode: "join", lineId: "line-ja", slotId: "slot-1" };
+    const { unmount } = render(
+      createElement(Harness, { model: english, initial: join, onConfirm }),
+    );
+    const add = () => screen.getByRole("button", { name: /Add to line/ }) as HTMLButtonElement;
+    expect(add().disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: /Leave it empty/ }));
+    await user.click(add());
+    expect(onConfirm).toHaveBeenLastCalledWith({ ...join, thirdPocket: { material: "empty" } });
+    unmount();
+    render(
+      createElement(Harness, {
+        model: { ...english, line: { ...english.line, thirdPocketOpen: false } },
+        initial: join,
+        onConfirm,
+      }),
+    );
+    expect(screen.queryByText(/Third pocket/)).toBeNull();
+    await user.click(add());
+    expect(onConfirm).toHaveBeenLastCalledWith(join);
+  });
+});
+
+describe("UIL-121 · a stage whose card is still in this haul is not asked about", () => {
+  it("it shows as coming in this haul; she is asked only about the other stages, and no third pocket yet", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    const coming: LinePopupModel = {
+      ...START,
+      line: { ...START.line, total: 3 },
+      stages: [
+        {
+          stageIndex: 0,
+          stage: "Basic",
+          state: "coming",
+          card: identity("sv03-026", "Charmander"),
+          coming: { copyId: "haul-cmd" },
+        },
+        START.stages[1],
+        { stageIndex: 2, stage: "Stage2", state: "wanted", card: null, dexId: 6 },
+      ],
+    };
+    const initial: LineChoice = {
+      mode: "start",
+      binderId: "b1",
+      band: "red",
+      pulls: [],
+      stages: {},
+    };
+    render(createElement(Harness, { model: coming, initial, onConfirm }));
+    expect(screen.getByText("In this haul")).toBeTruthy();
+    expect(screen.queryByText(/Basic · Choose/)).toBeNull();
+    expect(screen.getByText(/Stage 2 · Choose/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Leave empty" }));
+    expect(screen.queryByText(/Third pocket/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: /Start line/ }));
+    expect(onConfirm).toHaveBeenCalledWith({ ...initial, stages: { 2: { kind: "empty" } } });
   });
 });

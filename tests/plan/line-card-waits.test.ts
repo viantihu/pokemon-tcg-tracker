@@ -154,7 +154,16 @@ describe("UIL-117 · ADD: a card for an open slot waits for her", () => {
   });
 
   it("her join fills the slot, both pointers, and the decision is hers", async () => {
-    await commit({ card: CML, lineChoice: { mode: "join", lineId: LINE, slotId: S_STAGE1 } });
+    // UIL-121: it completes the two-card line, so she says what fills its third pocket.
+    await commit({
+      card: CML,
+      lineChoice: {
+        mode: "join",
+        lineId: LINE,
+        slotId: S_STAGE1,
+        thirdPocket: { material: "empty" },
+      },
+    });
     expect(await copyRow(CML.existingCopyId!)).toEqual({
       role: "shelved",
       binder_half: "back",
@@ -226,7 +235,7 @@ describe("UIL-126 · a PLAIN extra copy (a second Charmeleon, other art) is no l
 
   it.each([
     ["a join", { mode: "join", lineId: LINE, slotId: S_STAGE1 }],
-    ["a start", { mode: "start", binderId: KB1, band: "red", pulls: [] }],
+    ["a start", { mode: "start", binderId: KB1, band: "red", pulls: [], stages: {} }],
     ["a Keep", { mode: "replace", lineId: LINE, slotId: S_STAGE1, keep: true }],
     [
       "a swap into another slot",
