@@ -8,7 +8,7 @@
  * with the card pickers stood in for so a pick reaches the handler under test directly.
  */
 import { createElement } from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LOST } from "@/app/(ui)/_components/reach";
@@ -129,7 +129,10 @@ describe("UIL-109 · Backfill says a failure in the shared words", () => {
     render(createElement(BackfillScreen));
     await user.click(await screen.findByRole("button", { name: "Back half" }));
     await user.click(screen.getByRole("button", { name: /^Pick · Pick a species/ }));
-    await user.click(await screen.findByRole("button", { name: "Save line" }));
+    // Every stage opens undecided (UIL-117 PR 5); Save waits for her decision.
+    const basic = await screen.findByRole("group", { name: "Basic decision" });
+    await user.click(within(basic).getByRole("button", { name: "Leave empty" }));
+    await user.click(screen.getByRole("button", { name: "Save line" }));
     await waitFor(() => expect(text()).toContain(LOST.action));
     expect(commitLineAction).toHaveBeenCalledTimes(1);
   });

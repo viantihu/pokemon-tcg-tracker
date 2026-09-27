@@ -174,7 +174,13 @@ describe("UIL-098 · a refused line keeps what she entered", () => {
     expect(m.lookupCatalog).toHaveBeenCalled();
     await user.click(tiles()[0]);
 
-    // …then pick the Basic she owns from her HAUL, in the stage's own picker.
+    // …then mark the Basic Filled (every stage opens undecided, UIL-117 PR 5) and pick the one she owns from her
+    // HAUL, in the stage's own picker.
+    await user.click(
+      within(await screen.findByRole("group", { name: "Basic decision" })).getByRole("button", {
+        name: "Filled",
+      }),
+    );
     const stageBox = await screen.findByLabelText("Card lookup");
     await typeInto(user, stageBox, "Char");
     await waitFor(() => expect(tiles()).toHaveLength(2));

@@ -87,7 +87,10 @@ export interface FrontHalfCommit {
   cards: FrontHalfCard[];
 }
 
-/** One stage's decision in the back-half line walk. */
+/**
+ * One stage's decision in the back-half line walk. Every stage is HER decision (UIL-117 PR 5): the screen opens each
+ * one undecided and the server refuses a line with a stage she has not decided (`validateBackLine`).
+ */
 export interface BackLineStageInput {
   stageIndex: number;
   stage: string;
@@ -96,9 +99,16 @@ export interface BackLineStageInput {
   /** FILLED: the printing she owns + its Dex variant — a copy waiting in her haul (UIL-098). */
   filledTcgdexId?: string | null;
   filledDexVariantRaw?: string | null;
+  /**
+   * placeholder: REQUIRED. True is a wishlist hunt (the slot and a wishlist row); false is "Leave empty" (the slot,
+   * and NO wishlist row). A stage goes on her wishlist only when she adds it (UIL-119, Karvi's ruling), so a
+   * placeholder that does not say is refused, never read as a hunt.
+   */
+  hunt?: boolean;
   /** placeholder: wishlist target + ranked alternates + specialty-only flag. */
   targetCatalogCardId?: string | null;
   alternateCatalogCardIds?: string[];
+  /** Derived again on the server from the resolved chain (`validateBackLine`); what the browser sends is not used. */
   specialtyOnly?: boolean;
   /** block: how the pocket run was filled, and — for a repurposed duplicate — WHICH card. */
   blockMaterial?: "basicEnergy" | "repurposedDuplicate";
@@ -111,7 +121,13 @@ export interface BackLineStageInput {
 export interface BackLineCommit {
   binderId: string;
   bandKey: string;
+  /**
+   * The card she picked the species by. The server re-resolves the chain from it (`validateBackLine`), so the
+   * stages she decided are checked against the same chain she saw.
+   */
+  seedTcgdexId: string;
   rootDexId: number;
+  /** Derived again on the server from the band (`validateBackLine`); what the browser sends is not used. */
   requiredType: string | null;
   /** When true the line is terminated: the strip is read-only and offers no fillable slot. */
   terminated: boolean;

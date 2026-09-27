@@ -112,6 +112,7 @@ function buildWrites(): BackfillWrites {
     {
       binderId: BINDER,
       bandKey: "red",
+      seedTcgdexId: CHARMANDER_SV03_026.tcgdexId,
       rootDexId: 4,
       requiredType: "Fire",
       terminated: false,
@@ -129,6 +130,7 @@ function buildWrites(): BackfillWrites {
           stage: "Stage1",
           dexId: 5,
           decision: "placeholder",
+          hunt: true,
           targetCatalogCardId: CHARMELEON_SV03_027.tcgdexId,
           alternateCatalogCardIds: [],
           specialtyOnly: false,

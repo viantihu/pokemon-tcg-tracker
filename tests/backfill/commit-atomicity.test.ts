@@ -318,6 +318,7 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
       {
         binderId: B1,
         bandKey: "red",
+        seedTcgdexId: CHARMANDER_SV03_026.tcgdexId,
         rootDexId: 4,
         requiredType: "Fire",
         terminated: false,
@@ -335,6 +336,7 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
             stage: "Stage1",
             dexId: 5,
             decision: "placeholder",
+            hunt: true,
             targetCatalogCardId: CHARMELEON_SV03_027.tcgdexId,
             alternateCatalogCardIds: [CHARIZARD_BASE1_4.tcgdexId],
             specialtyOnly: false,

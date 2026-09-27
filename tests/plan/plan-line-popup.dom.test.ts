@@ -519,6 +519,15 @@ describe("UIL-117 4b · the popup", () => {
     expect((runHaulPlan.mock.calls.at(-1)![0] as DraftPayloadItem[]).map((d) => d.id)).toEqual([
       "id-Charmeleon",
     ]);
+    // Settle before reading the screen (QA): the re-route and the spotlight's fresh check are both still in flight
+    // when runHaulPlan is called. Its answer here files Charmeleon in a front half, so its badge goes with it.
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "＋ Starts a line" })).toBeNull();
+      expect(screen.queryByText("Checking this card against your shelves…")).toBeNull();
+    });
+    expect(
+      document.getElementById("plan-row-id-Charmeleon")?.querySelector(".linebadge"),
+    ).toBeNull();
   });
 
   it("a refusal keeps the popup open with the reason in it", async () => {

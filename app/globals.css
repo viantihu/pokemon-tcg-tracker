@@ -1769,6 +1769,17 @@ nav.menu .tab .n {
   background: var(--dead);
   color: #3c3c3b;
 }
+/* UIL-117 PR 5: a stage she left empty (a slot on no wishlist), and one not decided yet. */
+.lineform .f.em {
+  background: var(--panel-2);
+  border-style: dashed;
+  color: var(--ink-2);
+}
+.lineform .f.und {
+  background: var(--panel);
+  border-style: dotted;
+  color: var(--ink-2);
+}
 .seg3 {
   display: flex;
 }
@@ -1798,6 +1809,10 @@ nav.menu .tab .n {
 .seg3 button.on.blk {
   background: #5f5035;
   color: #f1d6af;
+}
+.seg3 button.on.em {
+  background: var(--lo);
+  color: var(--ink);
 }
 .seg3 button:disabled {
   opacity: 0.45;
