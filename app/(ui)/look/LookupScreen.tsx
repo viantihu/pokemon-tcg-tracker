@@ -56,6 +56,7 @@ export function lookupMoveTarget(answer: LookupAnswer, copy: LookupMovableCopy):
     imageUrl: answer.card.imageUrl,
     bandKey: answer.bandKey,
     currentLabel: copy.currentLabel,
+    ...(copy.leaves ? { leaves: copy.leaves } : {}),
     initial: copy.initial,
   };
 }

@@ -3698,6 +3698,15 @@ button.subhead.folded:hover {
   height: 12px;
   border-width: 2px;
 }
+/* The Move sheet: a card in a line says which line a move leaves one short (UIL-061, QA on #394). */
+.moveleaves {
+  margin-top: 6px;
+  padding: 4px 6px;
+  border: 2px solid var(--ink);
+  background: var(--note);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
 /* "Replace this card" (UIL-117 PR 3): pick one of her copies, image first (her visual-search rule). */
 .rp-hint {
   font-size: 11px;

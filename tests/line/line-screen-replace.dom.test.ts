@@ -230,6 +230,17 @@ describe("UIL-117 PR 3 · Lines: replace the card in a filled slot", () => {
     );
   });
 
+  it("↔ Move on a filled slot says which line the move leaves one short (UIL-061, QA on #394)", async () => {
+    const user = userEvent.setup();
+    render(createElement(LineScreen));
+    await waitFor(() => expect(screen.queryByText("Loading lines…")).toBeNull());
+    await user.click(screen.getByRole("button", { name: /↔ Move/ }));
+    await screen.findByRole("dialog", { name: "Move Toedscruel" });
+    expect(screen.getByRole("note").textContent).toBe(
+      "Moving it leaves the TOEDSCOOL LINE one short (its Stage 1 goes empty)",
+    );
+  });
+
   it("no other copy outside a line: it says so, and offers nothing to pick", async () => {
     replaceCandidatesAction.mockResolvedValue({
       ok: true,

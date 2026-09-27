@@ -42,7 +42,12 @@ import {
 } from "./actions";
 import { DeleteLineButton } from "./DeleteLineButton";
 import { ReplaceSlotFlow } from "./ReplaceSlotFlow";
-import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
+import {
+  stageLabel,
+  type LineChoice,
+  type LinePopupModel,
+  type LineProposal,
+} from "@/lib/line/popup";
 import type { ReplaceCandidates } from "@/lib/line/replace-candidates";
 import { lineModelAction } from "../_components/line-popup-actions";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
@@ -93,6 +98,8 @@ export function slotMoveTarget(line: LineView, slot: SlotView): MoveTargetCard |
     imageUrl: slot.card.imageUrl,
     bandKey: line.bandKey,
     currentLabel: `${line.binderLabel} · ${bandMeta(line.bandKey).display}`,
+    // Any move releases its slot (UIL-061, QA on #394): say which line loses it, and which stage.
+    leaves: { lineName: line.speciesLabel, stage: stageLabel(slot.stage) },
     initial: initialDest,
   };
 }

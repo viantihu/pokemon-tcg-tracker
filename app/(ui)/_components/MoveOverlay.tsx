@@ -6,7 +6,13 @@
  * the card being moved and its current home, then the placement picker. Escape / backdrop closes.
  */
 
-import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
+import {
+  leavesLineText,
+  type LeavesLine,
+  type LineChoice,
+  type LinePopupModel,
+  type LineProposal,
+} from "@/lib/line/popup";
 import { useEffect } from "react";
 import type {
   BlockNeedCandidate,
@@ -30,6 +36,11 @@ export interface MoveTargetCard {
   imageUrl: string | null;
   bandKey: string;
   currentLabel: string;
+  /**
+   * The line this card fills now, which ANY move leaves one short (its slot is released): said under "NOW · …",
+   * the same words as the line popup's pulls (UIL-061, QA on #394). Absent for a card in no line.
+   */
+  leaves?: LeavesLine;
   initial?: MoveDestination;
   /** Line screen only (UIL-056/064): existing lines this card could join, flat across every band —
    *  present (even if empty) turns the picker's line-first flow on; absent (a card already filling a
@@ -136,6 +147,11 @@ export function MoveOverlay({
               >
                 NOW · {card.currentLabel}
               </div>
+              {card.leaves ? (
+                <div className="u moveleaves" role="note">
+                  Moving it {leavesLineText(card.leaves)}
+                </div>
+              ) : null}
             </div>
           </div>
           <MovePanel

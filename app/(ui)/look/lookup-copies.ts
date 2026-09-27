@@ -9,6 +9,7 @@
  */
 import { isPlaced } from "@/lib/engine";
 import type { MoveDestination } from "@/lib/line/types";
+import { stageLabel, type LeavesLine } from "@/lib/line/popup";
 
 /** One physical copy of the looked-up printing, with what the move overlay needs to move it. */
 export interface LookupMovableCopy {
@@ -19,6 +20,8 @@ export interface LookupMovableCopy {
   currentLabel: string;
   /** Its present home as a destination; absent when it has none the picker can express (a block). */
   initial?: MoveDestination;
+  /** The line it fills now, which a move leaves one short (UIL-061). */
+  leaves?: LeavesLine;
 }
 
 /** The slice of an owned copy + name lookups this module needs. Matches `OwnedCopy` + PlanContext. */
@@ -36,6 +39,8 @@ export interface HomeNames {
   bandDisplay: (key: string) => string | undefined;
   /** The collection living in `binderId` that claims `tcgdexId`, if any — a specialty copy's home. */
   collectionIn: (binderId: string) => string | null;
+  /** The line a copy fills through `lineSlotId`, when that slot really holds it (UIL-061). */
+  leavesOf?: (lineSlotId: string, copyId: string) => LeavesLine | null;
 }
 
 /** The Line screen's label shape for a copy's current home (lib/line/load.ts `currentLabel`). */
@@ -73,11 +78,53 @@ export function copyHomeDestination(c: CopyHome, names: HomeNames): MoveDestinat
   return collectionId ? { kind: "collection", binderId: c.binderId, collectionId } : undefined;
 }
 
+/** The slot fields `leavesFromSlots` reads. */
+interface SlotLite {
+  id: string;
+  line_id: string;
+  stage_index: number;
+  stage: string;
+  copy_id: string | null;
+  target_catalog_card_id: string | null;
+}
+
+/**
+ * The line a copy fills through `slotId`, named as the Lines page names it (its lowest named stage: "CHARMANDER
+ * LINE"), and the stage a move leaves empty. Null unless the slot really holds this copy (UIL-087). Pure.
+ */
+export function leavesFromSlots(
+  lines: Iterable<readonly SlotLite[]>,
+  cardOfCopy: (copyId: string) => string | undefined,
+  nameOfCard: (tcgdexId: string) => string | undefined,
+  slotId: string,
+  copyId: string,
+): LeavesLine | null {
+  for (const slots of lines) {
+    const slot = slots.find((s) => s.id === slotId);
+    if (!slot) continue;
+    if (slot.copy_id !== copyId) return null;
+    const named = [...slots]
+      .sort((a, b) => a.stage_index - b.stage_index)
+      .map((s) => {
+        const id = s.copy_id ? cardOfCopy(s.copy_id) : s.target_catalog_card_id;
+        return id ? nameOfCard(id) : undefined;
+      })
+      .find((n): n is string => !!n);
+    return {
+      lineName: named ? `${named.toUpperCase()} LINE` : "EVOLUTION LINE",
+      stage: stageLabel(slot.stage),
+    };
+  }
+  return null;
+}
+
 export function toMovableCopy(c: CopyHome, names: HomeNames): LookupMovableCopy {
+  const leaves = c.lineSlotId && names.leavesOf ? names.leavesOf(c.lineSlotId, c.id) : null;
   return {
     copyId: c.id,
     role: c.role,
     currentLabel: copyHomeLabel(c, names),
     initial: copyHomeDestination(c, names),
+    ...(leaves ? { leaves } : {}),
   };
 }

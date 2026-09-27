@@ -13,6 +13,7 @@
 import { Fragment, useEffect, useRef } from "react";
 import {
   IN_THE_HAUL,
+  leavesLineText,
   type LineChoice,
   type LinePopupProps,
   type LinePopupReplace,
@@ -261,13 +262,7 @@ export function LinePopup({
                       {s.card!.name}{" "}
                       <span className="lp-where">
                         from {s.pull!.fromLabel} → into this line
-                        {s.pull!.leaves ? (
-                          <>
-                            {" "}
-                            · leaves the {s.pull!.leaves.lineName} one short (its{" "}
-                            {s.pull!.leaves.stage} goes empty)
-                          </>
-                        ) : null}
+                        {s.pull!.leaves ? <> · {leavesLineText(s.pull!.leaves)}</> : null}
                       </span>
                     </span>
                   </div>

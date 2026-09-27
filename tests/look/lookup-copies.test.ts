@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   copyHomeDestination,
   copyHomeLabel,
+  leavesFromSlots,
   toMovableCopy,
   type CopyHome,
   type HomeNames,
@@ -104,5 +105,53 @@ describe("UIL-051 · a copy's present home, labelled and as a destination", () =
       currentLabel: "Main · Back · Red",
       initial: { kind: "shelf", binderId: "b1", half: "back", band: "red" },
     });
+  });
+});
+
+describe("UIL-061 · a copy in a line says which line a move leaves one short (QA on #394)", () => {
+  const withLines: HomeNames = {
+    ...NAMES,
+    leavesOf: (slotId, copyId) =>
+      slotId === "s1" && copyId === "c1" ? { lineName: "EEVEE LINE", stage: "Basic" } : null,
+  };
+  it("a copy filling a slot carries the line and the stage", () => {
+    expect(toMovableCopy(home({ lineSlotId: "s1" }), withLines).leaves).toEqual({
+      lineName: "EEVEE LINE",
+      stage: "Basic",
+    });
+  });
+  it("a copy in no line, or a pointer the slot does not agree with, carries nothing", () => {
+    expect(toMovableCopy(home({}), withLines).leaves).toBeUndefined();
+    expect(toMovableCopy(home({ lineSlotId: "s9" }), withLines).leaves).toBeUndefined();
+  });
+});
+
+describe("leavesFromSlots · the line a copy fills, named as the Lines page names it", () => {
+  const slot = (
+    id: string,
+    stage_index: number,
+    stage: string,
+    copy_id: string | null,
+    target: string | null,
+  ) => ({
+    id,
+    line_id: "L1",
+    stage_index,
+    stage,
+    copy_id,
+    target_catalog_card_id: target,
+  });
+  const LINE = [slot("s1", 1, "Stage1", "c2", null), slot("s0", 0, "Basic", null, "sv03-004")];
+  const cardOf = (id: string) => ({ c2: "sv03-005" })[id];
+  const nameOf = (id: string) => ({ "sv03-004": "Charmander", "sv03-005": "Charmeleon" })[id];
+  it("its lowest named stage names the line; the stage it leaves is in her words", () => {
+    expect(leavesFromSlots([LINE], cardOf, nameOf, "s1", "c2")).toEqual({
+      lineName: "CHARMANDER LINE",
+      stage: "Stage 1",
+    });
+  });
+  it("null when the slot names another copy, or no slot matches", () => {
+    expect(leavesFromSlots([LINE], cardOf, nameOf, "s1", "c9")).toBeNull();
+    expect(leavesFromSlots([LINE], cardOf, nameOf, "s7", "c2")).toBeNull();
   });
 });
