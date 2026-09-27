@@ -168,3 +168,49 @@ describe("the claims last one write", () => {
     expect(await q(`select count(*)::int n from evolution_line`)).toEqual([{ n: 1 }]);
   });
 });
+
+describe("a JOIN cannot fill a stage and the third pocket with one card: it has no third pocket then", () => {
+  // QA's K3 case. A third pocket exists only once every stage holds a CARD; a filler makes its stage a block, so a
+  // join that fills one stage with a spare card leaves no third pocket to fill, and that is what refuses it.
+  const SHORT = "10000000-0000-4000-8000-0000000435e1";
+  const ASH = "c0000000-0000-4000-8000-0000000435e2";
+  beforeEach(async () => {
+    await q(
+      `insert into catalog_card (tcgdex_id, name, dex_id, types, stage, evolve_from, card_class) values
+         ('ashling', 'Ashling', '{9311}', '{Fire}', 'Basic', null, 'standard'),
+         ('ashdrake', 'Ashdrake', '{9312}', '{Fire}', 'Stage1', 'Ashling', 'standard')`,
+    );
+    await q(
+      `insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band)
+         values ($1, $2, 'ashdrake', 'shelved', $3, 'front', 'red')`,
+      [ASH, OWNER, GEN],
+    );
+    await q(
+      `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+         values ($1, $2, 9311, 'red', $3, 'back', 'open')`,
+      [SHORT, OWNER, GEN],
+    );
+    await q(
+      `insert into line_slot (id, owner_id, line_id, stage_index, stage, state) values
+         ($1, $3, $4, 0, 'Basic', 'placeholder'), ($2, $3, $4, 1, 'Stage1', 'placeholder')`,
+      [SLOT(8), SLOT(9), OWNER, SHORT],
+    );
+  });
+
+  it("the spare card for the Basic AND the third pocket is refused, and nothing is written", async () => {
+    await expect(
+      move(ASH, HERE, {
+        mode: "join",
+        lineId: SHORT,
+        slotId: SLOT(9),
+        stages: { 0: spare },
+        thirdPocket: { material: "card", copyId: SPARE },
+      } as LineChoice),
+    ).rejects.toThrow(STAGE_REFUSAL.noThirdPocket);
+    expect(await q(`select role from copy where id = $1`, [SPARE])).toEqual([{ role: "bulk" }]);
+    expect(await q(`select count(*)::int n from binder_block`)).toEqual([{ n: 0 }]);
+    expect(
+      await q(`select state from line_slot where line_id = $1 order by stage_index`, [SHORT]),
+    ).toEqual([{ state: "placeholder" }, { state: "placeholder" }]);
+  });
+});
