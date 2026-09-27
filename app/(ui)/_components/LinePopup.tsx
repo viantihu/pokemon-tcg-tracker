@@ -259,7 +259,16 @@ export function LinePopup({
                     />
                     <span>
                       {s.card!.name}{" "}
-                      <span className="lp-where">from {s.pull!.fromLabel} → into this line</span>
+                      <span className="lp-where">
+                        from {s.pull!.fromLabel} → into this line
+                        {s.pull!.leaves ? (
+                          <>
+                            {" "}
+                            · leaves the {s.pull!.leaves.lineName} one short (its{" "}
+                            {s.pull!.leaves.stage} goes empty)
+                          </>
+                        ) : null}
+                      </span>
                     </span>
                   </div>
                 ) : (
@@ -501,6 +510,9 @@ function Stage({
           <>
             <span className="lp-src lp-binder">
               In <Segments label={stage.pull.fromLabel} />
+              {stage.pull.leaves ? (
+                <span className="lp-seg"> · leaves the {stage.pull.leaves.lineName} one short</span>
+              ) : null}
             </span>
             <label className="lp-pull u">
               <input type="checkbox" checked={ticked} onChange={onTogglePull} disabled={busy} />{" "}
