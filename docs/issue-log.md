@@ -9299,3 +9299,43 @@ Senior BA as adjacent to this design, not re-derived here.
 **Cross-reference UIL-121** (the line work this is sequenced after) and **UIL-117** (C1-C2, the same
 sequencing dependency) and **UIL-098** (the Dex-only-creates-copies principle this design has to keep
 holding once bulk becomes a real container).
+
+## UIL-131 — Invite-only is enforced by the app only; the Supabase Auth API itself will still create an account if Supabase's own "Allow new users to sign up" switch is on
+
+- **Reported:** 2026-09-27 (not from Karvi — the Tech Lead's finding while building UIL-127c, #428).
+- **Status:** Open, Low priority, not blocking go-live. Owner: Tech Lead / onboarding session.
+- **Priority:** Low.
+- **Area:** Auth
+- **Env:** Testing, `develop` `da3db6e`
+
+**Confirmed the mechanism exactly.** `signIn`'s call to `supabase.auth.signInWithOtp`
+([`app/login/actions.ts:72`](../app/login/actions.ts:72)) passes `shouldCreateUser: true` — this app's
+own invite gate (whatever it checks before calling this) is the only thing standing between a random
+email and a new account, because with Supabase's project-level "Allow new users to sign up" switch ON,
+anyone holding the public anon key can call the Auth API directly and create an account, bypassing this
+app's own logic entirely. Since migration 0033 ([`supabase/migrations/0033_owner_scoped_shared_data.sql`](../supabase/migrations/0033_owner_scoped_shared_data.sql),
+"every account's own data is its own," UIL-127b) such an account would see only its own empty data — no
+route to Karvi's real data — but the account itself still gets created, which invite-only is supposed to
+prevent.
+
+**Confirmed the interim failure mode too.** With the switch OFF instead, an invited new address hits
+Supabase's own raw rejection. `signIn`'s final fallback
+([`app/login/actions.ts:98`](../app/login/actions.ts:98)): `return { status: "error", message:
+error.message };` — passes Supabase's error text straight through with no translation, so she'd see
+"Signups not allowed for otp" verbatim rather than anything this app wrote.
+
+**Interim, in place now, not a fix.** Karvi turns the switch OFF on Testing and adds invitees herself
+from the Supabase dashboard (Authentication → Users → Add user) — this closes the gap for as long as
+every real invitee is added that way, but doesn't fix the underlying app-only enforcement.
+
+**Follow-up, not decided further here:**
+
+1. Map "Signups not allowed" to her own words when this ships — e.g. "This address hasn't been invited
+   yet. Ask the owner to add you." Goes with the next auth change, not a standalone fix.
+2. Optional, only needed if invite mode gets real invitees beyond Testing: invite mode creates the
+   allowed account server-side (service-role `admin.createUser`, then OTP with `shouldCreateUser:
+   false`), so the Supabase-level switch can stay OFF in any invite environment without her needing to
+   hand-add every invitee from the dashboard.
+
+**Cross-reference UIL-127** (the multi-user sign-up feature this gap was found while building, PR #428
+specifically) and **UIL-097** (the same `signIn` action's other auth edge cases).
