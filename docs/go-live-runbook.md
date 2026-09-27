@@ -422,6 +422,11 @@ Testing diagnostic read (counts only, `ops/read-band-config`). Then run it for r
 TESTING_DB_URL='postgres://...testing...' PROD_DB_URL='postgres://...prod...' ALLOWED_OWNER_EMAIL='...' node scripts/promote-collection.mjs
 ```
 
+**Sign-up stays OFF on Production until B6 is verified.** The script refuses a Production
+that already holds owner rows, and it copies the shared tables (`catalog_card`, `set_alias`)
+over Production's, so a second user signing up first would block or be overwritten by the
+promotion. Karvi turns on "Allow new users to sign up" for Production only after B6.
+
 **Once the app is multi-user** (sign-up open, the single-owner allow-list gone), name both
 owners by email rather than relying on `ALLOWED_OWNER_EMAIL`:
 `--owner-email=<her address>` for Production, and `--source-owner-email=<her address>` for
