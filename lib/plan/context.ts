@@ -9,6 +9,7 @@ import type { BlockNeedCandidate } from "@/lib/line/types";
  * dexId neighbourhoods. Flagged, not premature-optimised.
  */
 
+import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import {
   assertBandConfig,
   band,
@@ -213,6 +214,14 @@ export async function loadPlanContext(
     if (!had || (en && !had.en)) nameByDex.set(d, { name: r.name, en });
   }
   const dexNameOf = (dexId: number): string | null => nameByDex.get(dexId)?.name ?? null;
+  /** A copy as she would name it, "Charmeleon 027/197", with its variant (UIL-126). */
+  const copyLabelOf = (copyId: string): { label: string; variant: string } | null => {
+    const row = copyRowById.get(copyId);
+    const card = row ? catalogById.get(row.catalog_card_id) : undefined;
+    if (!row || !card) return null;
+    const number = formatCollectorNumber(card.localId, card.setCardCountOfficial);
+    return { label: number ? `${card.name} ${number}` : card.name, variant: row.variant };
+  };
   const speciesName = (rootDexId: number) =>
     nameByDex.get(rootDexId)?.name.toUpperCase() ?? `SPECIES #${rootDexId}`;
   const blockNeeds: BlockNeedCandidate[] = slotRows
@@ -269,7 +278,21 @@ export async function loadPlanContext(
           return dexId === null ? null : dexNameOf(dexId);
         },
         dexName: (dexId) => dexNameOf(dexId),
+        lineWhere: (lineId) => {
+          const line = lineRowById.get(lineId);
+          if (!line) return null;
+          return [
+            line.binder_id ? (binderNameById.get(line.binder_id) ?? "A binder") : "No binder",
+            "Back",
+            bandDisplayByKey.get(line.color_band) ?? line.color_band,
+          ].join(" · ");
+        },
+        heldAt: (slotId) => {
+          const slot = [...slotsByLine.values()].flat().find((s) => s.id === slotId);
+          return slot?.copy_id ? (copyLabelOf(slot.copy_id)?.label ?? null) : null;
+        },
       },
+      copyLabel: (copyId) => copyLabelOf(copyId),
     },
   };
 }

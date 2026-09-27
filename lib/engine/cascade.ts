@@ -24,7 +24,7 @@
 
 import { localeOfId } from "@/lib/catalog/locale";
 import { band, type Band } from "./bands";
-import { resolveDuplicate, type HoloSwap } from "./duplicate";
+import { isUpgradeOver, resolveDuplicate, type HoloSwap } from "./duplicate";
 import {
   generateSlots,
   rankAlternates,
@@ -367,7 +367,7 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
     return {
       ...head,
       step: "duplicate",
-      reason: `Holo duplicate of a shelved normal; the holo takes the normal's exact place${inherit.lineSlotId ? " including its line slot" : ""} and the normal goes to bulk.`,
+      reason: `${incoming.variant === "reverse" ? "Reverse holo" : "Holo"} duplicate of a shelved normal; it takes the normal's exact place${inherit.lineSlotId ? " including its line slot" : ""} and the normal goes to bulk.`,
       target,
       swap: dup.swap,
       displacedToBulkCopyId: dup.swap.displacedCopyId,
@@ -468,6 +468,57 @@ export function placeCard(incoming: IncomingCard, ctx: EngineContext): CascadeRe
                 lineRootDexId: existing.line.rootDexId,
               }
             : null,
+        };
+      }
+      /**
+       * An UPGRADE of the card in the line (UIL-126): this card is a holo or a reverse holo, of ANY printing of the
+       * species (Karvi: "Yes, any holo or reverse holo counts"), and the one in the slot is neither. The same shape as
+       * STEP 2's holo-swap over a line slot, so everything downstream reads it as one: the line popup opens pre-set to
+       * Swap, the card in the line to the bulk box, and a Keep has to say where this one goes. The same art or printing
+       * never reaches here; STEP 2 took it.
+       */
+      const held = existing.slot.copyId
+        ? ctx.owned.find((o) => o.id === existing.slot.copyId)
+        : undefined;
+      // Only in the line's OWN colour (TL review): a printing of another type is another band, and a colour mismatch
+      // is surfaced, never silently decided (UIL-069). Otherwise it stays a plain extra copy, whose swap goes through
+      // the popup, where the replace path's colour choice applies.
+      if (
+        held &&
+        held.lineSlotId === existing.slot.id &&
+        b === lineBand &&
+        isUpgradeOver(incoming.variant, held.variant)
+      ) {
+        const swap: HoloSwap = {
+          incomingInherits: {
+            binderId: held.binderId,
+            binderHalf: held.binderHalf,
+            colorBand: held.colorBand,
+            lineSlotId: existing.slot.id,
+          },
+          displacedCopyId: held.id,
+        };
+        return {
+          ...head,
+          step: "duplicate",
+          reason: `A ${incoming.variant === "reverse" ? "reverse holo" : "holo"} ${incoming.card.name} over the ${held.variant} one in the ${lineBand} line: it can take that slot, and the one there goes to the bulk box (her call).`,
+          target: {
+            kind: "back-half-line",
+            binderId: held.binderId,
+            band: lineBand,
+            lineId: "inherited",
+            stageIndex: -1,
+          },
+          swap,
+          displacedToBulkCopyId: held.id,
+          proposals: [
+            {
+              kind: "holo-swap",
+              reason:
+                "Swap confirmed by the collector: the incoming upgrade takes the line slot; the card it replaces moves to the bulk box.",
+              displacedCopyId: held.id,
+            },
+          ],
         };
       }
       // Slot already filled → this stage is tracked once; the extra copy goes to the front half,

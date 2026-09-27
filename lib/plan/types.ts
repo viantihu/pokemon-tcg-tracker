@@ -62,6 +62,23 @@ export interface PlanItem {
   lineProposal?: LineProposal | null;
   /** The line's name for the badge ("Charizard"), its top stage; null for a replace or when it cannot be named. */
   lineName?: string | null;
+  /**
+   * UIL-126: a PLAIN extra copy of a stage a line already holds. Not a line card (no badge, no popup required, a
+   * front-half Done), so the spotlight names the line and offers "⇄ Swap this one into the line…". Null otherwise.
+   */
+  extraCopyOf?: ExtraCopyOf | null;
+}
+
+/** The line a plain extra copy duplicates, in her words (UIL-126). */
+export interface ExtraCopyOf {
+  lineId: string;
+  slotId: string;
+  /** "Charizard", the line's top stage; null when it cannot be named. */
+  lineName: string | null;
+  /** "KB-003 · Back · Red". */
+  where: string;
+  /** The card in the slot now: "Charmeleon 027/197". */
+  held: string;
 }
 
 /** A planned card paired with its full cascade result — the commit input (not sent to the client). */

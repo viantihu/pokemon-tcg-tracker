@@ -85,7 +85,6 @@ const waiting = (name: string): DraftCard => ({
 const START: LineProposal = { kind: "start", binderId: "kb1", band: "red" };
 const ADD: LineProposal = { kind: "add", lineId: "L1", slotId: "S1" };
 const HOLO: LineProposal = { kind: "replace", lineId: "L1", slotId: "S1", defaultKeep: false };
-const EXTRA: LineProposal = { kind: "replace", lineId: "L1", slotId: "S1", defaultKeep: true };
 
 const LINE = {
   binderId: "kb1",
@@ -253,6 +252,134 @@ async function mount(
   await screen.findAllByText(rows[0].name);
   return user;
 }
+
+/** UIL-126: the spotlight's line for a plain extra copy, as the plan context names it. */
+const EXTRA_OF = {
+  lineId: "L1",
+  slotId: "S1",
+  lineName: "Charizard",
+  where: "KB-003 · Back · Red",
+  held: "Charmeleon 027/197",
+};
+/** A parked sitting whose named rows are PLAIN extra copies (no proposal, the line they duplicate). */
+async function mountExtra(
+  names: string[],
+  lineCards: { name: string; proposal: LineProposal }[] = [],
+) {
+  const draft = [...names, ...lineCards.map((c) => c.name)].map(waiting);
+  const base = routedPlan(draft.map((d) => ({ ...d, tcgdexId: d.card.tcgdexId })));
+  const byName = new Map(lineCards.map((c) => [c.name, c.proposal]));
+  const items: PlanItem[] = flattenPlan(base).map((it) =>
+    names.includes(it.name)
+      ? { ...it, action: "FRONT", lineProposal: null, extraCopyOf: EXTRA_OF }
+      : { ...it, action: "FILL", lineProposal: byName.get(it.name) ?? null },
+  );
+  const plan: RunPlanResult = { ...base, groups: groupPlan(items, ["orange"]) };
+  window.sessionStorage.setItem(
+    "binderops.plan.v1",
+    JSON.stringify({
+      stamp: "s",
+      draft,
+      plan,
+      done: [],
+      cur: 0,
+      overrides: {},
+      collapsed: [],
+      collapsedSubgroups: [],
+    }),
+  );
+  refreshSpotlightAction.mockImplementation(async ({ card: c }: { card: { id: string } }) => ({
+    ok: true,
+    item: items.find((it) => it.incomingId === c.id),
+    digest: "dg",
+    proposedPulls: [],
+    bandMismatch: null,
+  }));
+  const user = userEvent.setup();
+  render(createElement(PlanScreen, { stateStamp: "s" }));
+  await screen.findAllByText(names[0]);
+  return user;
+}
+
+describe("UIL-126 · a PLAIN extra copy is not a line card", () => {
+  it("wears no badge, Done reads as a normal Done, and the spotlight names the line it duplicates", async () => {
+    await mountExtra(["Charmeleon"]);
+    // PRE-FIX (#392): "⇄ Could replace a card", and Done opened the popup.
+    expect(screen.queryByRole("button", { name: "⇄ Could replace a card" })).toBeNull();
+    expect(
+      await screen.findByText(
+        "ⓘ Your Charizard line (KB-003 · Back · Red) already has Charmeleon 027/197.",
+      ),
+    ).toBeTruthy();
+    const done = screen.getByRole("button", { name: "Done, next card" });
+    await waitFor(() => expect((done as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("Done shelves it with no line choice: the front half, no popup", async () => {
+    const user = await mountExtra(["Charmeleon"]);
+    const done = await screen.findByRole("button", { name: "Done, next card" });
+    await waitFor(() => expect((done as HTMLButtonElement).disabled).toBe(false));
+    await user.click(done);
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
+    expect(shelveCardAction.mock.calls[0][0].lineChoice).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("'⇄ Swap this one into the line…' opens the replace popup with Swap picked, bulk for the one coming out", async () => {
+    const user = await mountExtra(["Charmeleon"], [{ name: "Kadabra", proposal: ADD }]);
+    await user.click(await screen.findByRole("button", { name: "⇄ Swap this one into the line…" }));
+    const pop = await screen.findByRole("dialog", { name: "A copy for a filled slot" });
+    expect(lineModelAction).toHaveBeenLastCalledWith("id-Charmeleon", {
+      kind: "replace",
+      lineId: "L1",
+      slotId: "S1",
+      defaultKeep: false,
+    });
+    expect(
+      within(pop)
+        .getByRole("radio", { name: /Swap in/ })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    // Not a line card, so not in the step-through: no "Line card k of N", no "· next".
+    expect(within(pop).queryByText(/Line card/)).toBeNull();
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    expect(confirmIn().textContent).not.toContain("next");
+    await user.click(confirmIn());
+    await waitFor(() =>
+      expect(shelveCardAction.mock.calls[0]?.[0].lineChoice).toEqual({
+        mode: "replace",
+        lineId: "L1",
+        slotId: "S1",
+        keep: false,
+        outgoing: { kind: "bulk" },
+      }),
+    );
+    // Nothing opens after it, though a line card (Kadabra) is still waiting.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(lineModelAction.mock.calls.map((c) => c[0])).toEqual(["id-Charmeleon"]);
+  });
+
+  it("Keep in that popup is her normal Done (no line choice); Cancel returns to the spotlight", async () => {
+    const user = await mountExtra(["Charmeleon"]);
+    await user.click(await screen.findByRole("button", { name: "⇄ Swap this one into the line…" }));
+    let pop = await screen.findByRole("dialog", { name: "A copy for a filled slot" });
+    await user.click(within(pop).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(shelveCardAction).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "⇄ Swap this one into the line…" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "⇄ Swap this one into the line…" }));
+    pop = await screen.findByRole("dialog", { name: "A copy for a filled slot" });
+    await user.click(within(pop).getByRole("radio", { name: /Keep/ }));
+    // It says where Keep sends it: where her Done would, the front half, with no picker to point anywhere else.
+    expect(within(pop).getAllByText(/KB-001 · Front · Orange/).length).toBeGreaterThan(0);
+    expect(within(pop).queryByRole("button", { name: "Bulk box" })).toBeNull();
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    await user.click(confirmIn());
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
+    expect(shelveCardAction.mock.calls[0][0].lineChoice).toBeNull();
+  });
+});
 
 describe("UIL-117 4b · the badges", () => {
   it("every card headed into a back half wears its badge; a front-half card wears none", async () => {
@@ -443,19 +570,22 @@ describe("UIL-117 4b · the popup", () => {
       ok: true,
       model: withNothingLeft(modelFor(copyId.replace(/^id-/, ""), proposal)),
     }));
+    // An upgrade's Keep (since UIL-126 a plain extra copy is no line card, so this is the only Keep there is).
     const user = await mount([
-      { name: "Charmeleon", proposal: EXTRA },
-      { name: "Kadabra", proposal: EXTRA },
+      { name: "Charmeleon", proposal: HOLO },
+      { name: "Kadabra", proposal: HOLO },
     ]);
     await user.click(screen.getAllByRole("button", { name: "⇄ Could replace a card" })[0]);
     await screen.findByRole("dialog", { name: "A copy for a filled slot" });
+    const stays = within(popup()).getByRole("radiogroup", { name: "Which card stays in the line" });
+    await user.click(within(stays).getAllByRole("radio")[0]); // Keep the one there now
     await waitFor(() => expect(confirmIn().disabled).toBe(false));
     // Nothing is left to chase in that line, so the button promises no next card.
     expect(confirmIn().textContent).not.toContain("next");
     await user.click(confirmIn());
     await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
     expect(shelveCardAction.mock.calls[0][0]).toMatchObject({
-      lineChoice: { mode: "replace", keep: true },
+      lineChoice: { mode: "replace", keep: true, incoming: { kind: "bulk" } },
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(lineModelAction.mock.calls.map((c) => c[0])).toEqual(["id-Charmeleon"]);
@@ -552,24 +682,6 @@ describe("UIL-117 4b · the popup", () => {
       outgoing: { kind: "shelf", half: "back" },
       outgoingLine: { mode: "start" },
     });
-  });
-
-  it("an extra copy's Keep says where it is shelved: the front half, as an extra copy goes today", async () => {
-    const user = await mount([{ name: "Charmeleon", proposal: EXTRA }]);
-    await user.click(screen.getByRole("button", { name: "⇄ Could replace a card" }));
-    await screen.findByRole("dialog", { name: "A copy for a filled slot" });
-    // PRE-FIX (UX review): the row said "Stays put", though the card is shelved from the haul to the front half.
-    expect(within(popup()).getByText(/from this haul → KB-001 · Front · Orange/)).toBeTruthy();
-    await waitFor(() => expect(confirmIn().disabled).toBe(false));
-    await user.click(confirmIn());
-    await waitFor(() =>
-      expect(shelveCardAction.mock.calls[0]?.[0].lineChoice).toEqual({
-        mode: "replace",
-        lineId: "L1",
-        slotId: "S1",
-        keep: true,
-      }),
-    );
   });
 
   it("a KEPT holo gets where it goes, the bulk box pre-selected, and nothing in the line moves", async () => {

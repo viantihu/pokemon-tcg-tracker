@@ -363,6 +363,11 @@ export function PlanScreen({
   const [collectionChoice, setCollectionChoice] = useState<Record<string, string>>({});
   /** The card whose line popup is open (UIL-117), by draft id; nothing is written until she confirms. */
   const [linePop, setLinePop] = useState<string | null>(null);
+  /**
+   * UIL-126: "⇄ Swap this one into the line…" on a plain extra copy opens the popup on THIS replace, Swap picked. Not a
+   * line card, so it is not in the step-through: set only by that button, cleared whenever the popup closes.
+   */
+  const [swapInto, setSwapInto] = useState<LineProposal | null>(null);
   const [error, setError] = useState<string | null>(null);
   /**
    * Cards she typed by hand on a build before UIL-098 part 2, found in her parked sitting. They cannot be
@@ -861,6 +866,7 @@ export function PlanScreen({
   // A refresh that failed leaves `item` null, and the forecast stands in.
   const popFresh = popItem && fresh?.id === popItem.incomingId ? fresh : null;
   const popLive = popFresh ? (popFresh.item ?? popItem) : null;
+  const popProposal = popLive ? (swapInto ?? popLive.lineProposal ?? null) : null;
   const popCopyId = popItem
     ? (draft.find((d) => d.id === popItem.incomingId)?.existingCopyId ?? null)
     : null;
@@ -941,7 +947,8 @@ export function PlanScreen({
    * cannot show one card's pocket on another card.
    */
   const spotlightId = flatItems[cur]?.incomingId ?? null;
-  const spotIsLineCard = !!flatItems[cur]?.lineProposal;
+  // A plain extra copy too (UIL-126): its "Swap this one into the line…" opens on the fresh derivation.
+  const spotIsLineCard = !!flatItems[cur]?.lineProposal || !!flatItems[cur]?.extraCopyOf;
   useEffect(() => {
     // No setState on this path, deliberately: a stale entry is IGNORED at the point of use (it is
     // keyed by draft id and every reader checks the key), so clearing it here would be a cascading
@@ -1030,11 +1037,12 @@ export function PlanScreen({
    * and its fresh derivation (which carries any colour question) is the one the popup reads. The move options load
    * once, for the replace view's pickers.
    */
-  function openLinePopup(item: PlanItem) {
+  function openLinePopup(item: PlanItem, swap: LineProposal | null = null) {
     const i = flatIndex.get(item.incomingId);
     if (i !== undefined) setCur(i);
     setError(null);
     setLinePop(item.incomingId);
+    setSwapInto(swap);
     if (!moveOptions) {
       getMoveOptions()
         .then(setMoveOptions)
@@ -1042,6 +1050,23 @@ export function PlanScreen({
           /* the replace pickers fall back to the bulk box and the front half */
         });
     }
+  }
+
+  function closeLinePopup() {
+    setLinePop(null);
+    setSwapInto(null);
+  }
+
+  /** UIL-126: the spotlight's "⇄ Swap this one into the line…" on a plain extra copy, off its fresh derivation. */
+  function openSwapIntoLine(item: PlanItem) {
+    const x = ((fresh?.id === item.incomingId && fresh.item) || item).extraCopyOf;
+    if (!x) return;
+    openLinePopup(item, {
+      kind: "replace",
+      lineId: x.lineId,
+      slotId: x.slotId,
+      defaultKeep: false,
+    });
   }
 
   /**
@@ -1057,22 +1082,32 @@ export function PlanScreen({
   async function confirmLinePopup(
     item: PlanItem,
     extra: { lineChoice?: LineChoice; override?: MoveDestination },
-    /** The line's name as the popup shows it (its top stage), for the "Line complete" toast. */
-    lineName?: string | null,
+    /**
+     * `lineName`: the line's name as the popup shows it (its top stage), for the "Line complete" toast. `stepOn` false:
+     * the swap on a plain extra copy (UIL-126), never in the step-through, so nothing opens after it and no stop needs
+     * explaining.
+     */
+    opts: { lineName?: string | null; stepOn?: boolean } = {},
   ) {
     const shelved = await shelveCard(item, extra);
     if (!shelved) return;
+    if (opts.stepOn === false) {
+      if (extra.lineChoice) scheduleReroute();
+      closeLinePopup();
+      advance();
+      return;
+    }
     // A line write can change what the other cards would do (a card that would have started this line now joins
     // it), so the rest re-route and their badges follow; the batch runs a moment later, as for any change.
     if (extra.lineChoice) scheduleReroute();
     const next = shelved.lineDone ? undefined : nextLineCard(item.incomingId);
     // The one time a confirm does not lead on, say why, so the popup closing reads as a finish (UX review of #402).
     if (shelved.lineDone) {
-      flashToast(lineName ? `Line complete · ${lineName} line` : "Line complete");
+      flashToast(opts.lineName ? `Line complete · ${opts.lineName} line` : "Line complete");
     }
     if (next) openLinePopup(next);
     else {
-      setLinePop(null);
+      closeLinePopup();
       advance();
     }
   }
@@ -1127,6 +1162,7 @@ export function PlanScreen({
           shelving={shelving}
           fresh={fresh}
           onOpenLine={openLinePopup}
+          onSwapIntoLine={openSwapIntoLine}
           collectionChoice={collectionChoice}
           onPickCollection={(draftId, collectionId) =>
             setCollectionChoice((prev) => ({ ...prev, [draftId]: collectionId }))
@@ -1164,34 +1200,46 @@ export function PlanScreen({
             <div className="u rp-hint" role="status">
               Opening its line…
             </div>
-            <button type="button" className="btn" onClick={() => setLinePop(null)}>
+            <button type="button" className="btn" onClick={closeLinePopup}>
               Cancel
             </button>
           </div>
         </div>
       ) : null}
-      {popLive?.lineProposal && popCopyId ? (
+      {popLive && popProposal && popCopyId ? (
         <PlanLinePopup
           // A changed proposal is a different popup (UX review of #392).
-          key={`${popLive.incomingId}:${JSON.stringify(popLive.lineProposal)}`}
-          item={{ ...popLive, lineProposal: popLive.lineProposal }}
+          key={`${popLive.incomingId}:${JSON.stringify(popProposal)}`}
+          item={{ ...popLive, lineProposal: popProposal }}
+          extraCopy={!!swapInto}
           copyId={popCopyId}
           moveOptions={moveOptions}
           loadModelFor={loadLineModelFor}
           bandMismatch={popFresh?.bandMismatch ?? null}
-          position={{
-            index: lineCards.findIndex((it) => it.incomingId === popLive.incomingId) + 1,
-            total: lineCards.length,
-            // " · next ▶" only when confirming really opens another one (UX review of #392).
-            next: !!nextLineCard(popLive.incomingId),
-          }}
+          position={
+            swapInto
+              ? undefined
+              : {
+                  index: lineCards.findIndex((it) => it.incomingId === popLive.incomingId) + 1,
+                  total: lineCards.length,
+                  // " · next ▶" only when confirming really opens another one (UX review of #392).
+                  next: !!nextLineCard(popLive.incomingId),
+                }
+          }
           busy={shelving === popLive.incomingId}
           error={error}
           onConfirm={(choice, lineName) =>
-            void confirmLinePopup(popLive, { lineChoice: choice }, lineName)
+            // On the swap for a plain extra copy (UIL-126), Keep is her normal Done: the front half, no line choice.
+            swapInto && choice.mode === "replace" && choice.keep
+              ? void confirmLinePopup(popLive, {}, { stepOn: false })
+              : void confirmLinePopup(
+                  popLive,
+                  { lineChoice: choice },
+                  swapInto ? { stepOn: false } : { lineName },
+                )
           }
           onConfirmOwnColour={(dest) => void confirmLinePopup(popLive, { override: dest })}
-          onCancel={() => setLinePop(null)}
+          onCancel={closeLinePopup}
         />
       ) : null}
 
@@ -1390,6 +1438,8 @@ function PlanView(props: {
   } | null;
   /** Open a line card's popup (UIL-117): from its badge, its row box, or Done in the spotlight. */
   onOpenLine: (item: PlanItem) => void;
+  /** UIL-126: "⇄ Swap this one into the line…" on a plain extra copy. */
+  onSwapIntoLine: (item: PlanItem) => void;
   /** Her collection for a specialty card whose binder holds collections, by draft id (UIL-053). */
   collectionChoice: Record<string, string>;
   onPickCollection: (draftId: string, collectionId: string) => void;
@@ -1438,6 +1488,7 @@ function PlanView(props: {
     shelving,
     fresh,
     onOpenLine,
+    onSwapIntoLine,
     collectionChoice,
     onPickCollection,
     advance,
@@ -1788,6 +1839,7 @@ function PlanView(props: {
               overrideNames={overrideNames}
               blockNeeds={plan.blockNeeds}
               onMove={() => flatItems[cur] && onMove(flatItems[cur])}
+              onSwapIntoLine={() => flatItems[cur] && onSwapIntoLine(flatItems[cur])}
               // Only when the reply belongs to the card actually in the spotlight (UIL-045).
               freshItem={
                 flatItems[cur] && fresh?.id === flatItems[cur].incomingId ? fresh.item : null
@@ -1799,7 +1851,7 @@ function PlanView(props: {
               }}
               refreshing={
                 !!flatItems[cur] &&
-                (doneCount > 0 || !!flatItems[cur].lineProposal) &&
+                (doneCount > 0 || !!flatItems[cur].lineProposal || !!flatItems[cur].extraCopyOf) &&
                 !overrides[flatItems[cur].incomingId] &&
                 fresh?.id !== flatItems[cur].incomingId
               }
@@ -2132,6 +2184,8 @@ export function Spotlight(props: {
   /** UIL-030: the plan's open block needs, so the offer can say what is open and lead to the sheet. */
   blockNeeds?: BlockNeedCandidate[];
   onMove: () => void;
+  /** UIL-126: a plain extra copy's "⇄ Swap this one into the line…". Absent: not offered. */
+  onSwapIntoLine?: () => void;
   /**
    * This card re-derived against current state (UIL-045), when it differs from the forecast row.
    * Undefined means "the forecast is current" — before the first Done, nothing has moved.
@@ -2162,6 +2216,7 @@ export function Spotlight(props: {
     overrideNames,
     blockNeeds,
     onMove,
+    onSwapIntoLine,
     freshItem,
     refreshing = false,
     lineCard = false,
@@ -2244,6 +2299,27 @@ export function Spotlight(props: {
           {pickedName ? `${disp.destination} · ${pickedName}` : disp.destination}
         </span>
       </div>
+
+      {/* UIL-126: a PLAIN extra copy of a stage her line holds. Done files it in the front half; the swap is hers to
+          ask for (Karvi's pick from the UX Dev's mockup). */}
+      {item.extraCopyOf && !done && !override ? (
+        <div className="extracopy" role="note">
+          <span>
+            ⓘ Your {item.extraCopyOf.lineName ? `${item.extraCopyOf.lineName} line` : "line"} (
+            {item.extraCopyOf.where}) already has {item.extraCopyOf.held}.
+          </span>
+          {onSwapIntoLine ? (
+            <button
+              type="button"
+              className="btn sm"
+              onClick={onSwapIntoLine}
+              disabled={busy || refreshing}
+            >
+              ⇄ Swap this one into the line…
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* UIL-117: a card headed into a line is decided in its line popup (its pulls, never ticked for her, and any
           colour question), so this panel shows no controls of its own for it. */}

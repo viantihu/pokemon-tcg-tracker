@@ -82,14 +82,15 @@ describe("duplicate: holo-swap (cascade step 3)", () => {
     expect(out.swap.displacedCopyId).toBe("normal-copy"); // the normal is displaced (→ bulk)
   });
 
-  it("a non-holo duplicate goes to bulk, and offers a block repurpose when a need is open", () => {
+  it("a duplicate that is not an upgrade goes to bulk, and offers a block repurpose when a need is open", () => {
+    // A normal over a normal. (A reverse over a normal used to be this case; since UIL-126 it swaps in.)
     const owned = [copy({ id: "normal-copy", card: CHARMANDER_SV03_026, variant: "normal" })];
 
-    const plain = resolveDuplicate(CHARMANDER_SV03_026, "reverse", owned);
+    const plain = resolveDuplicate(CHARMANDER_SV03_026, "normal", owned);
     expect(plain.kind).toBe("bulk");
     if (plain.kind === "bulk") expect(plain.offerBlockRepurpose).toBe(false);
 
-    const withNeed = resolveDuplicate(CHARMANDER_SV03_026, "reverse", owned, 1);
+    const withNeed = resolveDuplicate(CHARMANDER_SV03_026, "normal", owned, 1);
     if (withNeed.kind === "bulk") expect(withNeed.offerBlockRepurpose).toBe(true);
   });
 

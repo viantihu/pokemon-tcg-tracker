@@ -5,11 +5,12 @@
  *
  *   NEWLINE (step "line-new")                          start    green   "Starts X line"
  *   FILL (an existing line's open slot)                add      yellow  "Adds to X line"
- *   a copy for a FILLED stage ("lines tracked once")   replace  pink    "Could replace a card", opens on Keep
- *   a holo over a copy that sits in a line slot        replace  pink    pre-set to Swap, the old copy to bulk
+ *   an UPGRADE of the card in a line slot              replace  pink    pre-set to Swap, the old copy to bulk
+ *     (a holo or reverse holo over one that is neither, any printing of the species: UIL-126)
  *
- * Everything else (front half, bulk, specialty, a holo over a front-half copy) has no line and no proposal, and
- * behaves as it does today.
+ * A PLAIN extra copy of a stage a line already holds is NOT a line card any more (UIL-126, Karvi's ruling): no badge,
+ * no popup required, a front-half Done; the spotlight names the line (`extraCopyOfFor`) and offers her the swap.
+ * Everything else (front half, bulk, specialty, an upgrade over a front-half copy) has no line and no proposal.
  *
  * PURE: the slot lookups come in as functions over the plan context's line rows, so this is pinned without a
  * database.
@@ -17,8 +18,13 @@
 
 import type { CascadeResult } from "@/lib/engine";
 import type { LineProposal } from "@/lib/line/popup";
+import type { ExtraCopyOf } from "./types";
 
 export interface LineLookups {
+  /** "KB-003 · Back · Red", where a line lives. Optional for hand-built lookups. */
+  lineWhere?(lineId: string): string | null;
+  /** The card filling a slot, "Charmeleon 027/197". Optional for hand-built lookups. */
+  heldAt?(slotId: string): string | null;
   /** The slot at this stage of this line, or null when the line (or the stage) is gone. */
   slotIdAt(lineId: string, stageIndex: number): string | null;
   /** The line a slot belongs to, or null when the slot is gone. */
@@ -39,11 +45,7 @@ export function lineProposalFor(result: CascadeResult, l: LineLookups): LineProp
       const slotId = l.slotIdAt(open.lineId, open.stageIndex);
       return slotId ? { kind: "add", lineId: open.lineId, slotId } : null;
     }
-    const filled = result.filledStage;
-    if (filled) {
-      const slotId = l.slotIdAt(filled.lineId, filled.stageIndex);
-      return slotId ? { kind: "replace", lineId: filled.lineId, slotId, defaultKeep: true } : null;
-    }
+    // A plain extra copy for a filled stage has no proposal (UIL-126): see `extraCopyOfFor`.
     return null;
   }
   const inherited = result.step === "duplicate" ? result.swap?.incomingInherits.lineSlotId : null;
@@ -55,14 +57,31 @@ export function lineProposalFor(result: CascadeResult, l: LineLookups): LineProp
 }
 
 /**
- * A card that waits for her OK before it is written (UIL-117): its placement is in a line, or it could replace the
- * card in one. Read off the cascade result itself, NOT off the proposal, so a line or slot the proposal could not
- * name still counts: the rule fails safe.
+ * A card that waits for her OK before it is written (UIL-117): its placement is in a line. Read off the cascade
+ * result itself, NOT off the proposal, so a line or slot the proposal could not name still counts: the rule fails
+ * safe. An upgrade of a card in a line slot targets that slot (`back-half-line`, lineId "inherited"), so it counts;
+ * a PLAIN extra copy is placed in a front half and no longer does (UIL-126).
  */
 export function isLineCard(result: CascadeResult): boolean {
-  // A holo over a copy in a line slot targets that slot (`back-half-line`, lineId "inherited"), so the first test
-  // covers it; a copy for a filled stage is placed in a front half, so it needs the second.
-  return result.target.kind === "back-half-line" || !!result.filledStage;
+  return result.target.kind === "back-half-line";
+}
+
+/**
+ * The line a PLAIN extra copy duplicates, for the spotlight's note and its "Swap this one into the line…" (UIL-126).
+ * Null for every other card, and when the slot cannot be found.
+ */
+export function extraCopyOfFor(result: CascadeResult, l: LineLookups): ExtraCopyOf | null {
+  const filled = result.step === "line-existing" && !result.swap ? result.filledStage : null;
+  if (!filled) return null;
+  const slotId = l.slotIdAt(filled.lineId, filled.stageIndex);
+  if (!slotId) return null;
+  return {
+    lineId: filled.lineId,
+    slotId,
+    lineName: l.lineName?.(filled.lineId) ?? null,
+    where: l.lineWhere?.(filled.lineId) ?? "its line",
+    held: l.heldAt?.(slotId) ?? "a card",
+  };
 }
 
 /**

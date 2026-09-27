@@ -5,8 +5,8 @@
  *
  * Her Charmander line in KB-001 · Back · Red. Pinned, for each kind of line card:
  *   - ADD (an open slot): refused with no choice; her join fills it, both pointers, as her decision;
- *   - REPLACE, KEEP (a second Charmeleon, other art, for a filled stage): no line write; it goes to the front half;
- *     her swap puts it in the slot and sends the old one where she chose;
+ *   - a PLAIN extra copy (a second Charmeleon, other art, for a filled stage): no line card since UIL-126; a Done
+ *     files it in the front half, and her "Swap this one into the line…" puts it in the slot;
  *   - the HOLO UPGRADE (a holo over the normal in the slot): no longer automatic; Keep must name where the holo
  *     goes (bulk suggested); Swap is the old automatic result, now her call;
  *   - her Move (an override) still places any line card with no line choice: a card must always be movable.
@@ -21,6 +21,7 @@ import {
   LINE_CHOICE,
   type DraftItem,
 } from "@/lib/plan";
+import type { LineChoice } from "@/lib/line/popup";
 import { CHARMANDER_SV03_026, CHARMELEON_SV03_027, CHARMELEON_SV035_005 } from "../engine/fixtures";
 import {
   asOwner,
@@ -191,33 +192,29 @@ describe("UIL-117 · ADD: a card for an open slot waits for her", () => {
   });
 });
 
-describe("UIL-117 · REPLACE: a second Charmeleon for a filled stage", () => {
+describe("UIL-126 · a PLAIN extra copy (a second Charmeleon, other art) is no line card", () => {
   beforeEach(async () => {
     await seedLine("filled");
     await seedHaulRows(db, [CML_ALT]);
     await asOwner(db);
   });
 
-  it("proposes the pink replace, opening on Keep", async () => {
-    expect(await proposalFor(CML_ALT)).toEqual({
-      kind: "replace",
+  it("has no proposal (no badge), and the spotlight names the line it duplicates", async () => {
+    // PRE-FIX (#392): a pink replace, opening on Keep.
+    const item = (await deriveSpotlightPlacement(pgliteClient(db), CML_ALT))?.item;
+    expect(item?.lineProposal).toBeNull();
+    expect(item?.extraCopyOf).toEqual({
       lineId: LINE,
       slotId: S_STAGE1,
-      defaultKeep: true,
+      lineName: "Charmeleon",
+      where: "KB-001 · Back · Red",
+      held: "Charmeleon 027", // the fixture carries no set total, so the number stands alone
     });
   });
 
-  it("is refused with no choice", async () => {
-    // PRE-FIX: it went to the front half with no question ("lines tracked once").
-    await expect(commit({ card: CML_ALT })).rejects.toThrow(LINE_CHOICE.missing);
-    expect(await copyRow(CML_ALT.existingCopyId!)).toEqual(UNPLACED);
-  });
-
-  it("Keep writes no line: the slot keeps her card, and this one goes to the front half", async () => {
-    await commit({
-      card: CML_ALT,
-      lineChoice: { mode: "replace", lineId: LINE, slotId: S_STAGE1, keep: true },
-    });
+  it("a normal Done files it in the front half: no choice asked, nothing in the line moves", async () => {
+    // PRE-FIX (#392): refused with no choice.
+    await commit({ card: CML_ALT });
     expect(await slot1()).toEqual({ state: "filled", copy_id: OWNED_CML });
     expect(await copyRow(CML_ALT.existingCopyId!)).toMatchObject({
       role: "shelved",
@@ -225,14 +222,29 @@ describe("UIL-117 · REPLACE: a second Charmeleon for a filled stage", () => {
       color_band: "red",
       line_slot_id: null,
     });
-    expect((await decisionsFor(CML_ALT.existingCopyId!))[0]).toMatchObject({
-      resolved_by: "user",
-      reason:
-        "Kept the card already in the line (her call, UIL-117); this copy goes to the front half, as an extra copy does.",
-    });
   });
 
-  it("Swap puts it in the slot in one write, and the old one goes where she sent it", async () => {
+  it.each([
+    ["a join", { mode: "join", lineId: LINE, slotId: S_STAGE1 }],
+    ["a start", { mode: "start", binderId: KB1, band: "red", pulls: [] }],
+    ["a Keep", { mode: "replace", lineId: LINE, slotId: S_STAGE1, keep: true }],
+    [
+      "a swap into another slot",
+      { mode: "replace", lineId: LINE, slotId: S_BASIC, keep: false, outgoing: { kind: "bulk" } },
+    ],
+  ] as const)(
+    "any line choice but her swap into THAT slot is refused, not ignored: %s (TL review)",
+    async (_name, lineChoice) => {
+      await expect(commit({ card: CML_ALT, lineChoice: lineChoice as LineChoice })).rejects.toThrow(
+        LINE_CHOICE.notALineCard,
+      );
+      expect(await copyRow(CML_ALT.existingCopyId!)).toEqual(UNPLACED);
+      expect(await slot1()).toEqual({ state: "filled", copy_id: OWNED_CML });
+      expect(await decisionsFor(CML_ALT.existingCopyId!)).toEqual([]);
+    },
+  );
+
+  it("⇄ Swap this one into the line…: it takes the slot in one write, and the old one goes where she sent it", async () => {
     await commit({
       card: CML_ALT,
       lineChoice: {
