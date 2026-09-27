@@ -158,6 +158,23 @@ describe("UIL-118 · refused, in her words, with nothing written", () => {
     expect(await n(`select count(*)::int n from evolution_line where id = '${LINE}'`)).toBe(1);
   });
 
+  it("a card that goes into it between her two taps: refused by the database, and told in her words", async () => {
+    const inner = client();
+    // Another tab, between the check and the write: a card goes into the line.
+    const racing = new Proxy(inner, {
+      get(target, prop, recv) {
+        if (prop !== "rpc") return Reflect.get(target, prop, recv);
+        return async (...args: Parameters<typeof inner.rpc>) => {
+          await seed(`update copy set line_slot_id = '${S1}' where id = '${C0}';`);
+          return target.rpc(...args);
+        };
+      },
+    });
+    // PRE-FIX (of this follow-up): the raw "apply_write_ops: delete_line refused…" reached her.
+    expect(await deleteLine(racing, LINE)).toEqual({ ok: false, error: DELETE_LINE.holdsCards(1) });
+    expect(await n(`select count(*)::int n from evolution_line where id = '${LINE}'`)).toBe(1);
+  });
+
   it("a line that is already gone", async () => {
     await deleteLine(client(), LINE);
     expect(await deleteLine(client(), LINE)).toEqual({ ok: false, error: DELETE_LINE.gone });

@@ -16,6 +16,7 @@
  * Fresh state every time: the counts she confirms are read when she asks, not taken from the page.
  */
 
+import { errorMessage } from "@/lib/errors";
 import { applyWriteOps, evolutionLineRepo, lineSlotRepo, type DbClient } from "@/lib/repo";
 
 export const DELETE_LINE = {
@@ -66,7 +67,17 @@ export async function checkLineDeletion(db: DbClient, lineId: string): Promise<L
 export async function deleteLine(db: DbClient, lineId: string): Promise<LineDeletionCheck> {
   const check = await checkLineDeletion(db, lineId);
   if (!check.ok) return check;
-  await applyWriteOps(db, { ops: [{ op: "delete_line", line_id: lineId }] });
+  try {
+    await applyWriteOps(db, { ops: [{ op: "delete_line", line_id: lineId }] });
+  } catch (err) {
+    // The database refused it: the line changed between her two taps (a card went into it from another tab, or
+    // another tab deleted it). Nothing was written; say why in her words, from the state as it is now.
+    if (/delete_line (refused|found no such line)/.test(errorMessage(err))) {
+      const now = await checkLineDeletion(db, lineId);
+      if (!now.ok) return now;
+    }
+    throw err;
+  }
   return check;
 }
 
