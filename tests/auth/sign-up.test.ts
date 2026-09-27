@@ -196,3 +196,38 @@ describe("UIL-127c · open mode (Production at launch)", () => {
     expect(res).toEqual({ status: "error", message: messages.CAPTCHA_NEEDED });
   });
 });
+
+describe("UIL-127c · the bot check wherever a site key is set, so CAPTCHA can go on BEFORE sign-up opens", () => {
+  const INVITE_WITH_KEY = {
+    SIGNUP_MODE: "invite",
+    NEXT_PUBLIC_TURNSTILE_SITE_KEY: "site-key",
+    ALLOWED_OWNER_EMAIL: "owner@example.com",
+  };
+
+  it("invite + key: her own sign-in needs the check's token, and sends it to Supabase", async () => {
+    const { signIn, messages } = await signInWith(INVITE_WITH_KEY);
+    expect(await signIn(idle, form("owner@example.com"))).toEqual({
+      status: "error",
+      message: messages.CAPTCHA_NEEDED,
+    });
+    expect(otp).not.toHaveBeenCalled();
+    expect(await signIn(idle, form("owner@example.com", "turnstile-token"))).toEqual({
+      status: "sent",
+      email: "owner@example.com",
+    });
+    expect(otp.mock.calls[0][0].options.captchaToken).toBe("turnstile-token");
+  });
+
+  it("invite + key: the deploy smoke's probes still need no token (malformed, then a stranger, before the check)", async () => {
+    const { signIn } = await signInWith(INVITE_WITH_KEY);
+    expect(await signIn(idle, form("not-an-email"))).toEqual({
+      status: "error",
+      message: "Enter a valid email address.",
+    });
+    expect(await signIn(idle, form("stranger@example.com"))).toEqual({
+      status: "error",
+      message: "That email is not authorised for this binder.",
+    });
+    expect(otp).not.toHaveBeenCalled();
+  });
+});

@@ -30,7 +30,9 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const params = await searchParams;
   const errorKey = typeof params.error === "string" ? params.error : null;
   const errorMessage = errorKey ? ERROR_MESSAGES[errorKey] : null;
-  // UIL-127c: an environment open to sign-up says so, and shows the bot check where one is configured.
+  // UIL-127c: an environment open to sign-up says so. The bot check shows WHEREVER a site key is set, in either mode,
+  // so CAPTCHA can be switched on in Supabase while the environment is still invite-only, and sign-up opened only
+  // once it is verifying (the safe go-live order; with CAPTCHA on, a sign-in with no token is refused).
   const open = signupMode() === "open";
 
   return (
@@ -57,7 +59,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
             ? "Enter your email to sign in or create an account. We'll send you a one-time sign-in link."
             : "This binder is private. Enter the owner email to receive a one-time sign-in link."}
         </p>
-        <LoginForm open={open} siteKey={open ? publicEnv.turnstileSiteKey : ""} />
+        <LoginForm open={open} siteKey={publicEnv.turnstileSiteKey} />
         {/* UIL-097's safety net: a link sent to the Site URL arrives here, fragment intact. */}
         <FragmentSignIn onEmpty="ignore" />
       </div>
