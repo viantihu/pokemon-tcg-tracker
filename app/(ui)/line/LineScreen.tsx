@@ -37,10 +37,13 @@ import {
   loadLine,
   moveCardAction,
   removeSlotCopyAction,
+  replaceCandidatesAction,
   resolveDecisionAction,
 } from "./actions";
 import { DeleteLineButton } from "./DeleteLineButton";
+import { ReplaceSlotFlow } from "./ReplaceSlotFlow";
 import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
+import type { ReplaceCandidates } from "@/lib/line/replace-candidates";
 import { lineModelAction } from "../_components/line-popup-actions";
 import { RemoveCopyButton } from "../_components/RemoveCopyButton";
 import { LOST, reach } from "../_components/reach";
@@ -170,6 +173,19 @@ export function LineScreen() {
   const [resolved, setResolved] = useState<Record<string, string>>({});
   const [activeDecisionId, setActiveDecisionId] = useState<string | null>(null);
   const [move, setMove] = useState<MoveTargetCard | null>(null);
+  /** UIL-117 PR 3: the filled slot whose card she is replacing. */
+  const [replaceFor, setReplaceFor] = useState<{
+    line: LineView;
+    slotId: string;
+    name: string;
+  } | null>(null);
+  const replaceSlotId = replaceFor?.slotId ?? null;
+  // Stable per slot, so the flow asks for the copies once; an unreachable call reads as a refusal.
+  const loadReplaceCandidates = useCallback(async (): Promise<ReplaceCandidates> => {
+    if (!replaceSlotId) return { ok: false, error: LOST.read };
+    const res = await reach(() => replaceCandidatesAction(replaceSlotId), LOST.read);
+    return "unreached" in res ? { ok: false, error: res.error } : res;
+  }, [replaceSlotId]);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -298,6 +314,37 @@ export function LineScreen() {
       setData(res.data);
       setCurId(null);
       flashToast(`Deleted · the ${label}`);
+    } else {
+      setError(res.error);
+    }
+  }
+
+  /** UIL-117 PR 3: her swap into a filled slot is a Move of the incoming copy into that line, with her choice. */
+  async function onReplaceSwap(incomingCopyId: string, choice: LineChoice) {
+    if (!replaceFor) return;
+    const { line, name } = replaceFor;
+    if (!line.binderId) {
+      setReplaceFor(null);
+      setError("That line has no binder, so nothing can be swapped into it.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const res = await reach(
+      () =>
+        moveCardAction(
+          incomingCopyId,
+          { kind: "shelf", binderId: line.binderId!, half: "back", band: line.bandKey },
+          view,
+          choice,
+        ),
+      LOST.action,
+    );
+    setBusy(false);
+    setReplaceFor(null);
+    if (res.ok) {
+      setData(res.data);
+      flashToast(`Swapped · a new ${name} in the ${line.speciesLabel}`);
     } else {
       setError(res.error);
     }
@@ -483,6 +530,13 @@ export function LineScreen() {
                 slot={slot}
                 onMove={() => openMove(curLine, slot)}
                 onRemoveCopy={onRemoveSlotCopy}
+                onReplace={() =>
+                  setReplaceFor({
+                    line: curLine,
+                    slotId: slot.slotId,
+                    name: slot.card?.name ?? slot.stage,
+                  })
+                }
               />
             </div>
           ))}
@@ -543,6 +597,20 @@ export function LineScreen() {
           lineModel={lineModelFor(move.copyId)}
           onConfirm={onMoveConfirm}
           onClose={() => setMove(null)}
+        />
+      ) : null}
+
+      {replaceFor ? (
+        <ReplaceSlotFlow
+          lineId={replaceFor.line.lineId}
+          slotId={replaceFor.slotId}
+          slotName={replaceFor.name}
+          moveOptions={data.moveOptions}
+          loadCandidates={loadReplaceCandidates}
+          loadModel={(copyId, proposal) => lineModelFor(copyId)(proposal)}
+          onSwap={onReplaceSwap}
+          onClose={() => setReplaceFor(null)}
+          busy={busy}
         />
       ) : null}
 
@@ -644,12 +712,15 @@ export function Slot({
   slot,
   onMove,
   onRemoveCopy,
+  onReplace,
 }: {
   line: LineView;
   slot: SlotView;
   onMove: () => void;
   /** UIL-089: remove the copy filling this slot. Absent on a screen that does not offer it. */
   onRemoveCopy?: (copyId: string) => void;
+  /** UIL-117 PR 3: swap another copy she owns into this filled slot. */
+  onReplace?: () => void;
 }) {
   const meta = bandMeta(line.bandKey);
   const topBg =
@@ -744,6 +815,11 @@ export function Slot({
           {slot.moveable ? (
             <button type="button" className="movebtn u" onClick={onMove}>
               ↔ Move
+            </button>
+          ) : null}
+          {onReplace && slot.state === "filled" && slot.copyId && !slot.copyNotShelved ? (
+            <button type="button" className="movebtn u" onClick={onReplace}>
+              ⇄ Replace this card
             </button>
           ) : null}
           {/* UIL-089: the card in this pocket can be gone — traded, lost, or never really here. Removing it

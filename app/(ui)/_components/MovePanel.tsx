@@ -31,7 +31,8 @@
  * predicate `applyMove` throws on — so the chip and the refusal cannot drift apart.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useEscapeLayer } from "./escape-layer";
 import type {
   BlockNeedCandidate,
   ExistingLineBlock,
@@ -64,6 +65,7 @@ export function MovePanel({
   cardLocale,
   blockNeeds,
   lineModel,
+  openLineOnMount = false,
   onConfirm,
 }: {
   options: MoveOptions;
@@ -98,6 +100,11 @@ export function MovePanel({
    * Absent (the Haul Plan until UIL-117 PR 4), the inline picker below works as before.
    */
   lineModel?: (proposal: LineProposal) => Promise<LinePopupModel>;
+  /**
+   * Open the line popup as soon as the sheet opens (on its `initial` back half): the popup's "Another line…" for a
+   * card coming out of a line (UIL-117 PR 3, UX review of #391), where the back half IS the choice she made.
+   */
+  openLineOnMount?: boolean;
   onConfirm: (dest: MoveDestination, lineChoice?: LineChoice) => void;
 }) {
   const firstGeneral = options.binders.find((b) => b.type === "general");
@@ -212,18 +219,16 @@ export function MovePanel({
   const [linePopError, setLinePopError] = useState<string | null>(null);
 
   // Escape closes the popup, not the whole sheet: her binder and band picks behind it stay (UX review of #385).
-  // Capture phase on window, so it runs before the sheet's own document listener and stops it there.
-  const popupOpen = linePop !== null;
+  // The top layer only (escape-layer.ts), so a popup opened over a popup closes one at a time.
+  useEscapeLayer(linePop !== null, () => setLinePop(null));
+
+  // "Another line…" (UX review of #391): the back half is already her choice, so the popup opens with the sheet.
+  const openedOnMount = useRef(false);
   useEffect(() => {
-    if (!popupOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.stopPropagation();
-      setLinePop(null);
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [popupOpen]);
+    if (openedOnMount.current || !openLineOnMount || !lineModel) return;
+    openedOnMount.current = true;
+    void openLinePopup();
+  });
 
   /** Open the popup on this binder and band: an open slot for this card here is added to, else a line is started. */
   async function openLinePopup(proposal?: LineProposal) {

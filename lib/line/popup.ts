@@ -13,7 +13,7 @@
  */
 
 import type { Locale } from "@/lib/sync/types";
-import type { CardIdentity, ExistingLineBlock, MoveDestination } from "./types";
+import type { CardIdentity, ExistingLineBlock, MoveDestination, MoveOptions } from "./types";
 
 /* --------------------------------------- what she chooses --------------------------------------- */
 
@@ -23,10 +23,30 @@ export type LineChoice =
   | { mode: "start"; binderId: string; band: string; pulls: string[] }
   /** Join an existing line's open slot. `foreignLocale` is her second confirm for a line in another language. */
   | { mode: "join"; lineId: string; slotId: string; foreignLocale?: true }
-  /** A copy for a filled slot: keep the one that's there (nothing in the line moves) … */
-  | { mode: "replace"; lineId: string; slotId: string; keep: true }
-  /** … or swap it in, sending the card coming out to `outgoing` (anywhere; bulk is the suggestion). */
-  | { mode: "replace"; lineId: string; slotId: string; keep: false; outgoing: MoveDestination };
+  /**
+   * A copy for a filled slot: keep the one that's there (nothing in the line moves). NOT a line write: the builder
+   * refuses it, and the incoming card's placement is the screen's. `incoming` is where she sent it on Keep when the
+   * popup offered her the picker (the Senior BA: a holo kept out of a line gets it, bulk suggested); absent, the
+   * screen's own default (the Haul Plan: today's front half).
+   */
+  | { mode: "replace"; lineId: string; slotId: string; keep: true; incoming?: MoveDestination }
+  /**
+   * … or swap it in, in one write with no gap, sending the card coming out to `outgoing` (anywhere; bulk is the
+   * suggestion). An `outgoing` back half needs `outgoingLine`, the line the card coming out joins or starts.
+   * `foreignLocale` is her second confirm when the incoming card is in another language than the line.
+   */
+  | {
+      mode: "replace";
+      lineId: string;
+      slotId: string;
+      keep: false;
+      outgoing: MoveDestination;
+      outgoingLine?: OutgoingLineChoice;
+      foreignLocale?: true;
+    };
+
+/** Where a card coming out of a line goes when that is another back half: a line it starts or joins. */
+export type OutgoingLineChoice = Extract<LineChoice, { mode: "start" } | { mode: "join" }>;
 
 /* --------------------------------------- what a screen proposes --------------------------------------- */
 
@@ -94,6 +114,27 @@ export interface LinePopupExistingLine extends ExistingLineBlock {
   face?: CardIdentity | null;
 }
 
+/** One side of a replace: a card, its copy, and where it is now in her words ("KB-003 · Back · Red"). */
+export interface LinePopupReplaceCard {
+  copyId: string;
+  card: CardIdentity;
+  where: string;
+}
+
+/** A replace (v3 section 5): the two cards for the one slot, side by side, and where the one coming out goes. */
+export interface LinePopupReplace {
+  slotId: string;
+  stageIndex: number;
+  /** The card in the slot now. */
+  current: LinePopupReplaceCard;
+  /** The card that could take its place. */
+  incoming: LinePopupReplaceCard;
+  /** Opens on Keep unless false (the holo upgrade). */
+  defaultKeep: boolean;
+  /** Where the card coming out goes unless she picks elsewhere: the bulk box. */
+  suggestedOutgoing: MoveDestination;
+}
+
 /** Everything the popup renders. Built server-side from fresh state (`loadLinePopupModel`), never trusted back. */
 export interface LinePopupModel {
   mode: "start" | "add" | "replace";
@@ -102,6 +143,8 @@ export interface LinePopupModel {
   line: LinePopupLine;
   stages: LinePopupStage[];
   existingLines: LinePopupExistingLine[];
+  /** Present exactly when `mode` is "replace". */
+  replace?: LinePopupReplace;
 }
 
 /* --------------------------------------- the popup's own props --------------------------------------- */
@@ -129,6 +172,38 @@ export interface LinePopupProps {
    */
   bands?: readonly { key: string; display: string }[];
   onBand?(band: string): void;
+  /**
+   * A replace: the choices for where a card goes (the same as the Move sheet's). ONE prop for both pickers: the card
+   * coming out on Swap, and the incoming card on Keep when `keepDestination` is set too.
+   */
+  moveOptions?: MoveOptions;
+  /** A replace, on Keep: offer the picker for the incoming card, pre-set here (a holo kept out of a line: bulk). */
+  keepDestination?: MoveDestination;
+  /** A replace, on Keep: the screen's words for where the incoming card goes ("… KB-003 · Front · Red, same as today"). */
+  keepLabel?: string;
+  /** A replace: "Another line…" for the card coming out; absent, that choice is greyed. */
+  outgoingLineModel?(proposal: LineProposal): Promise<LinePopupModel>;
+  /**
+   * An Add whose card is another colour than the line (UIL-069, v3 section 5's two-option pattern, UX Dev + Senior
+   * BA). Neither option is picked at first and Confirm waits for one; "What moves", the Confirm label and the
+   * incoming slot's tag follow the pick. Absent: today's Add.
+   */
+  colourChoice?: LinePopupColourChoice;
+}
+
+/** UIL-069 inside the popup: add to the line in ITS colour, or file the card by its own colour, not in a line. */
+export interface LinePopupColourChoice {
+  cardBand: { key: string; display: string };
+  lineBand: { key: string; display: string };
+  /** The screen's sub-lines: "takes the line's colour · KB-004 · Back · Green, into its Stage 1 slot". */
+  addSub: string;
+  /** "KB-001 · Front · Red · not in a line". */
+  ownSub: string;
+  /** Controlled; null until she picks. */
+  picked: "line" | "own" | null;
+  onPick(pick: "line" | "own"): void;
+  /** Her confirm on "own": the screen's front-half write, not a LineChoice (the popup's onConfirm is not called). */
+  onConfirmOwn(): void;
 }
 
 /* --------------------------------------- small shared rules --------------------------------------- */

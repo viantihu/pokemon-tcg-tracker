@@ -10,11 +10,17 @@
  * owns the stepping ("Confirm & next") and the write; this component only reports her choice.
  */
 
-import { Fragment } from "react";
-import type { LineChoice, LinePopupProps, LinePopupStage } from "@/lib/line/popup";
+import { Fragment, useEffect, useRef } from "react";
+import type {
+  LineChoice,
+  LinePopupProps,
+  LinePopupReplace,
+  LinePopupStage,
+} from "@/lib/line/popup";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { BandChip } from "./BandChip";
 import { CardFace } from "./CardFace";
+import { ColourChoiceSection, destinationLabel, lineNote, ReplaceChoice } from "./LinePopupParts";
 
 const LANGUAGE: Record<string, { name: string; flag: string }> = {
   en: { name: "English", flag: "🇬🇧" },
@@ -55,12 +61,27 @@ export function LinePopup({
   onSwitch,
   bands,
   onBand,
+  moveOptions,
+  keepLabel,
+  keepDestination,
+  outgoingLineModel,
+  colourChoice,
 }: LinePopupProps) {
   const { line, card } = model;
-  const foreign = model.mode === "add" && card.locale !== line.locale;
+  const rep = model.mode === "replace" && value.mode === "replace" ? model.replace : undefined;
+  const swapping = value.mode === "replace" && !value.keep;
+  // UIL-069 on an Add: neither colour is picked until she picks, and "own" is the screen's write, not a line.
+  const cc = model.mode === "add" ? colourChoice : undefined;
+  const filingOwn = cc?.picked === "own";
+  const foreign =
+    (model.mode === "add" && !filingOwn) || (model.mode === "replace" && swapping)
+      ? card.locale !== line.locale
+      : false;
   const pulls = value.mode === "start" ? value.pulls : [];
-  const foreignConfirmed = value.mode === "join" && value.foreignLocale === true;
-  const canConfirm = !busy && (!foreign || foreignConfirmed);
+  const foreignConfirmed =
+    (value.mode === "join" || (value.mode === "replace" && !value.keep)) &&
+    value.foreignLocale === true;
+  const canConfirm = !busy && (!foreign || foreignConfirmed) && (!cc || cc.picked !== null);
   const lineName = model.stages.at(-1)?.card?.name ?? card.name;
   const title =
     model.mode === "start"
@@ -70,8 +91,28 @@ export function LinePopup({
         : "A copy for a filled slot";
   const label =
     confirmLabel ??
-    (model.mode === "start" ? "Start line" : model.mode === "add" ? "Add to line" : "Confirm");
+    (model.mode === "start"
+      ? "Start line"
+      : model.mode === "add"
+        ? cc && cc.picked === null
+          ? "Confirm"
+          : filingOwn
+            ? "File in front half"
+            : "Add to line"
+        : swapping
+          ? "Swap them"
+          : "Keep");
   const where = `${line.binderName} · Back · ${line.bandDisplay}`;
+  // A replace's one-row strip scrolls sideways on a phone: start it on the slot being decided (UX review of #391).
+  const stripRef = useRef<HTMLDivElement>(null);
+  const isReplace = model.mode === "replace";
+  useEffect(() => {
+    const strip = stripRef.current;
+    const two = strip?.querySelector<HTMLElement>(".lp-two");
+    if (!isReplace || !strip || !two || strip.scrollWidth <= strip.clientWidth) return;
+    const offset = two.getBoundingClientRect().left - strip.getBoundingClientRect().left;
+    strip.scrollLeft += offset - (strip.clientWidth - two.offsetWidth) / 2;
+  }, [isReplace]);
   const goingIn = 1 + pulls.length;
 
   function togglePull(copyId: string) {
@@ -119,13 +160,16 @@ export function LinePopup({
             </div>
           </>
         ) : null}
-        <div className="lp-strip">
+        <div ref={stripRef} className={"lp-strip" + (isReplace ? " lp-scroll" : "")}>
           {model.stages.map((s, i) => (
             <Stage
               key={s.stageIndex}
               stage={s}
               first={i === 0}
-              incomingLabel={incomingLabel}
+              incomingLabel={cc && cc.picked !== "line" ? "If you add it" : incomingLabel}
+              asWanted={filingOwn && s.state === "incoming"}
+              replace={rep && rep.stageIndex === s.stageIndex ? rep : undefined}
+              swapping={swapping}
               ticked={!!s.pull && pulls.includes(s.pull.copyId)}
               onTogglePull={() => s.pull && togglePull(s.pull.copyId)}
               busy={busy}
@@ -133,61 +177,110 @@ export function LinePopup({
           ))}
         </div>
 
+        {rep && value.mode === "replace" ? (
+          <ReplaceChoice
+            replace={rep}
+            value={value}
+            onChange={onChange}
+            stageLabel={stageName(model.stages.find((s) => s.stageIndex === rep.stageIndex)?.stage)}
+            moveOptions={moveOptions}
+            keepLabel={keepLabel}
+            keepDestination={keepDestination}
+            outgoingLineModel={outgoingLineModel}
+            busy={busy}
+          />
+        ) : null}
+        {cc ? <ColourChoiceSection {...cc} busy={busy} /> : null}
+
         <div className="lp-lbl u">What moves</div>
-        <div className="lp-moves">
-          <div className="lp-mrow">
-            <span className="lp-verb u">Shelve</span>
-            <CardFace name={card.name} tcgdexId={card.tcgdexId} imageUrl={card.imageUrl} size="s" />
-            <span>
-              {card.name}{" "}
-              <span className="lp-where">
-                → {where}
-                {model.mode === "start" ? ", new line" : ", into its slot"}
-              </span>
-            </span>
+        {rep && value.mode === "replace" ? (
+          <ReplaceMoves
+            replace={rep}
+            value={value}
+            where={where}
+            keepLabel={keepLabel}
+            moveOptions={moveOptions}
+          />
+        ) : cc && cc.picked === null ? (
+          <div className="lp-moves">
+            <div className="lp-mrow lp-muted">Pick one above.</div>
           </div>
-          {model.stages
-            .filter((s) => s.state === "pullable" && s.pull && s.card)
-            .map((s) =>
-              pulls.includes(s.pull!.copyId) ? (
-                <div className="lp-mrow" key={s.pull!.copyId}>
-                  <span className="lp-verb u">Take out</span>
-                  <CardFace
-                    name={s.card!.name}
-                    tcgdexId={s.card!.tcgdexId}
-                    imageUrl={s.card!.imageUrl}
-                    size="s"
-                  />
-                  <span>
-                    {s.card!.name}{" "}
-                    <span className="lp-where">from {s.pull!.fromLabel} → into this line</span>
-                  </span>
-                </div>
-              ) : (
-                <div className="lp-mrow lp-muted" key={s.pull!.copyId}>
-                  <span className="lp-verb u">Stays put</span>
-                  <CardFace
-                    name={s.card!.name}
-                    tcgdexId={s.card!.tcgdexId}
-                    imageUrl={s.card!.imageUrl}
-                    size="s"
-                  />
-                  <span>
-                    {s.card!.name}{" "}
-                    <span className="lp-where">
-                      stays in {s.pull!.fromLabel} unless you tick &quot;Pull it into this
-                      line&quot; above
+        ) : filingOwn && cc ? (
+          <div className="lp-moves">
+            <div className="lp-mrow">
+              <span className="lp-verb u">Shelve</span>
+              <CardFace
+                name={card.name}
+                tcgdexId={card.tcgdexId}
+                imageUrl={card.imageUrl}
+                size="s"
+              />
+              <span>
+                {card.name} <span className="lp-where">→ {cc.ownSub}</span>
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="lp-moves">
+            <div className="lp-mrow">
+              <span className="lp-verb u">Shelve</span>
+              <CardFace
+                name={card.name}
+                tcgdexId={card.tcgdexId}
+                imageUrl={card.imageUrl}
+                size="s"
+              />
+              <span>
+                {card.name}{" "}
+                <span className="lp-where">
+                  → {where}
+                  {model.mode === "start" ? ", new line" : ", into its slot"}
+                </span>
+              </span>
+            </div>
+            {model.stages
+              .filter((s) => s.state === "pullable" && s.pull && s.card)
+              .map((s) =>
+                pulls.includes(s.pull!.copyId) ? (
+                  <div className="lp-mrow" key={s.pull!.copyId}>
+                    <span className="lp-verb u">Take out</span>
+                    <CardFace
+                      name={s.card!.name}
+                      tcgdexId={s.card!.tcgdexId}
+                      imageUrl={s.card!.imageUrl}
+                      size="s"
+                    />
+                    <span>
+                      {s.card!.name}{" "}
+                      <span className="lp-where">from {s.pull!.fromLabel} → into this line</span>
                     </span>
-                  </span>
-                </div>
-              ),
-            )}
-        </div>
+                  </div>
+                ) : (
+                  <div className="lp-mrow lp-muted" key={s.pull!.copyId}>
+                    <span className="lp-verb u">Stays put</span>
+                    <CardFace
+                      name={s.card!.name}
+                      tcgdexId={s.card!.tcgdexId}
+                      imageUrl={s.card!.imageUrl}
+                      size="s"
+                    />
+                    <span>
+                      {s.card!.name}{" "}
+                      <span className="lp-where">
+                        stays in {s.pull!.fromLabel} unless you tick &quot;Pull it into this
+                        line&quot; above
+                      </span>
+                    </span>
+                  </div>
+                ),
+              )}
+          </div>
+        )}
 
         {foreign ? (
           <div className="lp-also" role="alert">
             <b className="u">
-              This is a {language(line.locale).name} line, and this card is{" "}
+              This line is {language(line.locale).name} and this card is{" "}
               {language(card.locale).name}
             </b>
             It won&apos;t join a line in another language by default. You can still choose to.
@@ -196,14 +289,19 @@ export function LinePopup({
                 type="checkbox"
                 checked={foreignConfirmed}
                 disabled={busy}
-                onChange={(e) =>
-                  value.mode === "join" &&
-                  onChange(
-                    e.target.checked
-                      ? { ...value, foreignLocale: true }
-                      : { mode: "join", lineId: value.lineId, slotId: value.slotId },
-                  )
-                }
+                onChange={(e) => {
+                  if (value.mode === "join") {
+                    onChange(
+                      e.target.checked
+                        ? { ...value, foreignLocale: true }
+                        : { mode: "join", lineId: value.lineId, slotId: value.slotId },
+                    );
+                  } else if (value.mode === "replace" && !value.keep) {
+                    const { foreignLocale: _drop, ...rest } = value;
+                    void _drop;
+                    onChange(e.target.checked ? { ...rest, foreignLocale: true } : rest);
+                  }
+                }}
               />{" "}
               Join the {language(line.locale).name} line anyway
             </label>
@@ -267,9 +365,16 @@ export function LinePopup({
         <div className="lp-foot">
           <span className="lp-sum u">
             {position ? `Line card ${position.index} of ${position.total} · ` : ""}
-            {goingIn} card{goingIn === 1 ? "" : "s"} go{goingIn === 1 ? "es" : ""} in ·{" "}
-            {line.filledAfter + pulls.length}/{line.total} filled · nothing is written until you
-            confirm
+            {model.mode === "replace"
+              ? swapping
+                ? `Line stays ${line.filledAfter}/${line.total} the whole time · one step, no gap · `
+                : "Nothing in the line moves · "
+              : cc && cc.picked === null
+                ? "Pick one above · "
+                : filingOwn
+                  ? "Filed by its own colour, not in a line · "
+                  : `${goingIn} card${goingIn === 1 ? "" : "s"} go${goingIn === 1 ? "es" : ""} in · ${line.filledAfter + pulls.length}/${line.total} filled · `}
+            nothing is written until you confirm
           </span>
           <button type="button" className="btn" onClick={onCancel} disabled={busy}>
             Cancel
@@ -278,7 +383,11 @@ export function LinePopup({
             type="button"
             className="btn btn-primary"
             disabled={!canConfirm}
-            onClick={() => canConfirm && onConfirm(value)}
+            onClick={() => {
+              if (!canConfirm) return;
+              if (filingOwn && cc) cc.onConfirmOwn();
+              else onConfirm(value);
+            }}
           >
             {label}
             {position ? " · next ▶" : " ▶"}
@@ -289,10 +398,18 @@ export function LinePopup({
   );
 }
 
+/** "Stage 1" for the engine's "Stage1". */
+function stageName(stage: string | undefined): string {
+  return stage === "Stage1" ? "Stage 1" : stage === "Stage2" ? "Stage 2" : (stage ?? "");
+}
+
 function Stage({
   stage,
   first,
   incomingLabel,
+  asWanted,
+  replace,
+  swapping,
   ticked,
   onTogglePull,
   busy,
@@ -300,30 +417,67 @@ function Stage({
   stage: LinePopupStage;
   first: boolean;
   incomingLabel: string;
+  /** UIL-069, filing by its own colour: the slot is wanted again, with no ring. */
+  asWanted: boolean;
+  /** A replace: this stage shows the card there now beside the one that could take its place. */
+  replace?: LinePopupReplace;
+  swapping: boolean;
   ticked: boolean;
   onTogglePull: () => void;
   busy: boolean;
 }) {
-  const c = stage.card;
+  const c = asWanted ? null : stage.card;
   const number = c ? formatCollectorNumber(c.localId, c.setCardCountOfficial ?? null) : null;
+  const arrow = first ? null : (
+    <div className="lp-arrow" aria-hidden>
+      ▶
+    </div>
+  );
+  if (replace) {
+    const side = (who: "now" | "new") => {
+      const it = who === "now" ? replace.current : replace.incoming;
+      const no = formatCollectorNumber(it.card.localId, it.card.setCardCountOfficial ?? null);
+      const staying = who === "now" ? !swapping : swapping;
+      return (
+        <div
+          className={
+            "lp-side" + (who === "new" && swapping ? " lp-in" : "") + (staying ? "" : " lp-out")
+          }
+          data-side={who}
+        >
+          <CardFace
+            name={it.card.name}
+            tcgdexId={it.card.tcgdexId}
+            imageUrl={it.card.imageUrl}
+            size="l"
+            zoomable
+          />
+          <div className="lp-no">
+            {no ?? it.card.name} · {who === "now" ? "now" : "new"}
+          </div>
+        </div>
+      );
+    };
+    return (
+      <>
+        {arrow}
+        <div className="lp-slot lp-two" data-stage-state="replace">
+          <div className="lp-stage u">{stageName(stage.stage)} · pick one</div>
+          <div className="lp-pair">
+            {side("now")}
+            {side("new")}
+          </div>
+          <div className="lp-nm u">{replace.current.card.name}</div>
+        </div>
+      </>
+    );
+  }
+  const state = asWanted ? "wanted" : stage.state;
   return (
     <>
-      {first ? null : (
-        <div className="lp-arrow" aria-hidden>
-          ▶
-        </div>
-      )}
-      <div
-        className={"lp-slot" + (stage.state === "incoming" ? " lp-in" : "")}
-        data-stage-state={stage.state}
-      >
-        <div className="lp-stage u">
-          {stage.stage === "Stage1"
-            ? "Stage 1"
-            : stage.stage === "Stage2"
-              ? "Stage 2"
-              : stage.stage}
-        </div>
+      {arrow}
+      <div className={"lp-slot" + (state === "incoming" ? " lp-in" : "")} data-stage-state={state}>
+        <div className="lp-stage u">{stageName(stage.stage)}</div>
         {c ? (
           <CardFace name={c.name} tcgdexId={c.tcgdexId} imageUrl={c.imageUrl} size="l" zoomable />
         ) : (
@@ -331,13 +485,11 @@ function Stage({
         )}
         <div className="lp-nm u">{c?.name ?? "No card yet"}</div>
         {number ? <div className="lp-no">{number}</div> : null}
-        {stage.state === "incoming" ? (
-          <span className="lp-src lp-haul">{incomingLabel}</span>
-        ) : null}
-        {stage.state === "here" ? <span className="lp-src lp-binder">Already here</span> : null}
-        {stage.state === "wanted" ? <span className="lp-src lp-want">Wanted</span> : null}
-        {stage.state === "blocked" ? <span className="lp-src lp-want">Blocked</span> : null}
-        {stage.state === "pullable" && stage.pull ? (
+        {state === "incoming" ? <span className="lp-src lp-haul">{incomingLabel}</span> : null}
+        {state === "here" ? <span className="lp-src lp-binder">Already here</span> : null}
+        {state === "wanted" ? <span className="lp-src lp-want">Wanted</span> : null}
+        {state === "blocked" ? <span className="lp-src lp-want">Blocked</span> : null}
+        {state === "pullable" && stage.pull ? (
           <>
             <span className="lp-src lp-binder">
               In <Segments label={stage.pull.fromLabel} />
@@ -350,5 +502,107 @@ function Stage({
         ) : null}
       </div>
     </>
+  );
+}
+
+/** "from this haul" rather than "from Still in the haul" (a Haul Plan card, UX review of #391). */
+function fromWhere(where: string): string {
+  return where === "Still in the haul" ? "this haul" : where;
+}
+
+/** "What moves" for a replace: the swap as three physical steps, or the Keep as nothing in the line moving. */
+function ReplaceMoves({
+  replace,
+  value,
+  where,
+  keepLabel,
+  moveOptions,
+}: {
+  replace: LinePopupReplace;
+  value: Extract<LineChoice, { mode: "replace" }>;
+  where: string;
+  keepLabel?: string;
+  moveOptions?: LinePopupProps["moveOptions"];
+}) {
+  const { current, incoming } = replace;
+  const face = (it: LinePopupReplace["current"]) => (
+    <CardFace
+      name={it.card.name}
+      tcgdexId={it.card.tcgdexId}
+      imageUrl={it.card.imageUrl}
+      size="s"
+    />
+  );
+  const no = (it: LinePopupReplace["current"]) =>
+    formatCollectorNumber(it.card.localId, it.card.setCardCountOfficial ?? null) ?? "";
+  if (value.keep) {
+    return (
+      <div className="lp-moves">
+        <div className="lp-mrow lp-muted">
+          <span className="lp-verb u">Stays put</span>
+          {face(current)}
+          <span>
+            {current.card.name} {no(current)} <span className="lp-where">stays in the line</span>
+          </span>
+        </div>
+        {value.incoming ? (
+          <div className="lp-mrow">
+            <span className="lp-verb u">
+              {value.incoming.kind === "bulk" ? "To bulk" : "Shelve"}
+            </span>
+            {face(incoming)}
+            <span>
+              {incoming.card.name} {no(incoming)}{" "}
+              <span className="lp-where">
+                from {fromWhere(incoming.where)} → {destinationLabel(value.incoming, moveOptions)}
+              </span>
+            </span>
+          </div>
+        ) : (
+          // Nothing moves for it either (the Lines page): it stays where it is.
+          <div className="lp-mrow lp-muted">
+            <span className="lp-verb u">Stays put</span>
+            {face(incoming)}
+            <span>
+              {incoming.card.name} {no(incoming)}{" "}
+              <span className="lp-where">{keepLabel ?? `stays in ${incoming.where}`}</span>
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  }
+  const bulk = value.outgoing.kind === "bulk";
+  return (
+    <div className="lp-moves">
+      <div className="lp-mrow">
+        <span className="lp-verb u">Take out</span>
+        {face(current)}
+        <span>
+          {current.card.name} {no(current)} <span className="lp-where">from {current.where}</span>
+        </span>
+      </div>
+      <div className="lp-mrow">
+        <span className="lp-verb u">Shelve</span>
+        {face(incoming)}
+        <span>
+          {incoming.card.name} {no(incoming)}{" "}
+          <span className="lp-where">
+            from {fromWhere(incoming.where)} → {where}, into its spot
+          </span>
+        </span>
+      </div>
+      <div className="lp-mrow">
+        <span className="lp-verb u">{bulk ? "To bulk" : "Move"}</span>
+        {face(current)}
+        <span>
+          {current.card.name} {no(current)}{" "}
+          <span className="lp-where">
+            → {destinationLabel(value.outgoing, moveOptions)}
+            {lineNote(value.outgoingLine)}
+          </span>
+        </span>
+      </div>
+    </div>
   );
 }

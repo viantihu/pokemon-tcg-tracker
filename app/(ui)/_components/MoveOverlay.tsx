@@ -50,6 +50,7 @@ export function MoveOverlay({
   options,
   allowLineJoin,
   lineModel,
+  openLineOnMount,
   onConfirm,
   onClose,
 }: {
@@ -65,6 +66,8 @@ export function MoveOverlay({
   allowLineJoin?: boolean;
   /** UIL-117: the line popup's model loader; with it, BACK HALF opens the one line popup (see MovePanel). */
   lineModel?: (proposal: LineProposal) => Promise<LinePopupModel>;
+  /** Open the line popup with the sheet (see MovePanel). */
+  openLineOnMount?: boolean;
   onConfirm: (dest: MoveDestination, lineChoice?: LineChoice) => void;
   onClose: () => void;
 }) {
@@ -144,6 +147,7 @@ export function MoveOverlay({
             naturalBandKey={card.naturalBandKey}
             blockNeeds={card.blockNeeds}
             lineModel={lineModel}
+            openLineOnMount={openLineOnMount}
             onConfirm={onConfirm}
           />
           <div className="hint">Pick a new home. No rule applies here — it is your call.</div>

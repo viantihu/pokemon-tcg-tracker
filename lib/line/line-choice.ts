@@ -10,7 +10,11 @@
  *   - JOIN fills an existing line's open slot, checked against that slot: the card must be its species, and a
  *     line in another language takes her second confirm AND a same-language card already on a LOWER stage, so the
  *     line's derived language (UIL-090: lowest filled stage) never flips (the Senior BA's ruling).
- *   - REPLACE arrives in UIL-117 PR 3.
+ *   - REPLACE (PR 3) swaps the card into a FILLED slot in one write, so the line never shows a gap: the card coming
+ *     out goes to her `outgoing` destination (anywhere; bulk suggested), or into another line when that is a back
+ *     half (`outgoingLine`, built by these same rules), and gets its own audit row. Checked like a join: the card
+ *     must be the slot's species, and one in another language takes her confirm and a same-language card below.
+ *     A Keep writes nothing for the line, so it never reaches here.
  *
  * Returns the line-side ops and the slot the moving card lands in. The caller writes the moving copy itself
  * (`buildMoveOps` for a Move, `emitIncomingCopy` for the Haul Plan) using `placement`, which is the LINE's binder and
@@ -30,7 +34,12 @@ import {
 } from "@/lib/engine";
 import { localeOfId } from "@/lib/catalog/locale";
 import type { Row, WriteOp } from "@/lib/repo";
-import { buildExistingLineJoinOps, releaseSlotOps } from "./move";
+import {
+  buildExistingLineJoinOps,
+  collectionTargetJoinOp,
+  placementForMove,
+  releaseSlotOps,
+} from "./move";
 import { lineStatusFor, type LineChoice } from "./popup";
 
 /** Everything `buildLineChoiceOps` reads, loaded fresh by the server just before the write. */
@@ -48,6 +57,8 @@ export interface LineWriteState {
   /** The lines this write may touch: the one joined, and any line a pulled copy leaves. */
   lines: Map<string, Row<"evolution_line">>;
   slotsByLine: Map<string, Row<"line_slot">[]>;
+  /** REPLACE into another back half: the same state for the card coming out, which `outgoingLine` places. */
+  outgoing?: LineWriteState;
 }
 
 export interface LineChoiceWrite {
@@ -79,7 +90,13 @@ export function buildLineChoiceOps(
     case "join":
       return joinLine(state, choice);
     case "replace":
-      throw new Error("Replacing a card in a line is not available here yet.");
+      if (choice.keep) {
+        // A Keep leaves the line as it is; the screen places the card. Refused so no caller thinks it wrote one.
+        throw new Error(
+          "Keeping the card that's there writes nothing to the line — place this card where it goes instead.",
+        );
+      }
+      return replaceInLine(state, choice);
   }
 }
 
@@ -232,42 +249,8 @@ function joinLine(
       );
   }
 
-  // UIL-090's derivation: the line's language is its lowest filled stage's (else its lowest target's).
-  const cardLocale = localeOfId(state.incoming.card.tcgdexId);
   const cardOf = (id: string) => state.copiesById.get(id)?.catalog_card_id ?? null;
-  const lineLocale = lineLocaleOf(
-    slots.map((s) => ({
-      id: s.id,
-      stageIndex: s.stage_index,
-      stage: s.stage,
-      state: s.state as LineSlotRecord["state"],
-      copyId: s.copy_id,
-      dexId: null,
-      targetCatalogCardId: s.target_catalog_card_id,
-    })),
-    cardOf,
-  );
-  if (cardLocale !== lineLocale) {
-    if (!choice.foreignLocale) {
-      throw new Error(
-        `That line is in another language (${languageName(lineLocale)}) than this card (${languageName(cardLocale)}). ` +
-          "Confirm joining it anyway, or start a line in the card's own language.",
-      );
-    }
-    // Only where it cannot flip the line: a card of the LINE's language already fills a lower stage.
-    const anchored = slots.some(
-      (s) =>
-        s.state === "filled" &&
-        s.stage_index < slot.stage_index &&
-        s.copy_id !== null &&
-        localeOfId(cardOf(s.copy_id) ?? "") === lineLocale,
-    );
-    if (!anchored) {
-      throw new Error(
-        `This would make the line read as ${languageName(cardLocale)}. Start ${withArticle(cardLocale)} line instead.`,
-      );
-    }
-  }
+  assertLanguageHolds(state, slots, slot, cardOf, choice.foreignLocale === true);
 
   const slotIsLastOpen = slots.every((s) => s.id === slot.id || s.state === "filled");
   return {
@@ -281,4 +264,152 @@ function joinLine(
     slotId: slot.id,
     placement: { binder_id: line.binder_id, binder_half: "back", color_band: line.color_band },
   };
+}
+
+/**
+ * UIL-090's derivation: a line's language is its lowest filled stage's (else its lowest target's). A card in another
+ * language takes her second confirm, and even then only where a card of the LINE's language already fills a LOWER
+ * stage, so the line's language never flips (the Senior BA's ruling on Q1). Shared by join and replace.
+ */
+function assertLanguageHolds(
+  state: LineWriteState,
+  slots: Row<"line_slot">[],
+  slot: Row<"line_slot">,
+  cardOf: (copyId: string) => string | null,
+  confirmed: boolean,
+): void {
+  const cardLocale = localeOfId(state.incoming.card.tcgdexId);
+  const lineLocale = lineLocaleOf(
+    slots.map((s) => ({
+      id: s.id,
+      stageIndex: s.stage_index,
+      stage: s.stage,
+      state: s.state as LineSlotRecord["state"],
+      copyId: s.copy_id,
+      dexId: null,
+      targetCatalogCardId: s.target_catalog_card_id,
+    })),
+    cardOf,
+  );
+  if (cardLocale === lineLocale) return;
+  if (!confirmed) {
+    throw new Error(
+      `That line is in another language (${languageName(lineLocale)}) than this card (${languageName(cardLocale)}). ` +
+        "Confirm joining it anyway, or start a line in the card's own language.",
+    );
+  }
+  const anchored = slots.some(
+    (s) =>
+      s.state === "filled" &&
+      s.stage_index < slot.stage_index &&
+      s.copy_id !== null &&
+      localeOfId(cardOf(s.copy_id) ?? "") === lineLocale,
+  );
+  if (!anchored) {
+    throw new Error(
+      `This would make the line read as ${languageName(cardLocale)}. Start ${withArticle(cardLocale)} line instead.`,
+    );
+  }
+}
+
+/* ----------------------------------------------- replace ----------------------------------------------- */
+
+function replaceInLine(
+  state: LineWriteState,
+  choice: Extract<LineChoice, { mode: "replace"; keep: false }>,
+): LineChoiceWrite {
+  const line = state.lines.get(choice.lineId);
+  const slots = state.slotsByLine.get(choice.lineId) ?? [];
+  const slot = slots.find((s) => s.id === choice.slotId);
+  if (!line || !slot)
+    throw new Error("That line slot no longer exists — reload the screen and pick again.");
+  if (slot.state !== "filled" || !slot.copy_id) {
+    throw new Error("That slot is no longer filled — add this card to it instead of replacing.");
+  }
+  const outgoingId = slot.copy_id;
+  if (outgoingId === state.copy.id) throw new Error("That card is already in this slot.");
+  const outgoingRow = state.copiesById.get(outgoingId);
+  if (!outgoingRow)
+    throw new Error("The card in that slot is no longer in the collection — reload the screen.");
+
+  const catalogById = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
+  const slotCard =
+    catalogById.get(slot.target_catalog_card_id ?? "") ??
+    catalogById.get(outgoingRow.catalog_card_id);
+  if (!slotCard || !state.incoming.card.dexId.some((d) => slotCard.dexId.includes(d))) {
+    throw new Error("That slot is for a different card — pick the slot for this card's own stage.");
+  }
+
+  const cardOf = (id: string) => state.copiesById.get(id)?.catalog_card_id ?? null;
+  assertLanguageHolds(state, slots, slot, cardOf, choice.foreignLocale === true);
+
+  // Where the card coming out goes: anywhere she picked, or into another line built by these same rules.
+  const out = choice.outgoing;
+  if (out.kind === "block")
+    throw new Error("A card coming out of a line can't become a binder block here.");
+  const intoBackHalf = out.kind === "shelf" && out.half === "back";
+  if (intoBackHalf !== !!choice.outgoingLine) {
+    throw new Error(
+      intoBackHalf
+        ? "The card coming out is going into a back half — pick the line it goes into."
+        : "The card coming out isn't going into a back half — reload the screen and pick again.",
+    );
+  }
+  const outOps: WriteOp[] = [];
+  let outPatch = placementForMove(out);
+  if (choice.outgoingLine) {
+    if (!state.outgoing || state.outgoing.copy.id !== outgoingId) {
+      throw new Error("The card coming out changed while the line was open — reload the screen.");
+    }
+    if (choice.outgoingLine.mode === "start" && choice.outgoingLine.pulls.includes(state.copy.id)) {
+      throw new Error("The card going into this line can't also be pulled into the other one.");
+    }
+    const nested = buildLineChoiceOps(state.outgoing, outgoingId, choice.outgoingLine);
+    outOps.push(...nested.ops);
+    outPatch = { role: "shelved", ...nested.placement, line_slot_id: nested.slotId };
+  }
+
+  const ops: WriteOp[] = [
+    // The other line (if any) first, so the pointer below names a slot that exists; then the card coming out
+    // lets go of this slot BEFORE the incoming card is named in it, so the slot never names two cards.
+    ...outOps,
+    {
+      op: "update_copy",
+      id: outgoingId,
+      patch: {
+        role: outPatch.role,
+        binder_id: outPatch.binder_id,
+        binder_half: outPatch.binder_half,
+        color_band: outPatch.color_band,
+        line_slot_id: outPatch.line_slot_id,
+      },
+    },
+    { op: "update_slot", id: slot.id, patch: { copy_id: state.copy.id } },
+  ];
+  const joinList = collectionTargetJoinOp(out, outgoingRow.catalog_card_id);
+  if (joinList) ops.push(joinList);
+  ops.push({
+    op: "insert_decision",
+    haul_id: null,
+    copy_id: outgoingId,
+    decision: "line-replaced-out",
+    reason:
+      `Swapped out of its ${line.color_band} line at your confirmation, for ${state.incoming.card.name}; ` +
+      `now ${describePatch(outPatch)}.`,
+    resolved_by: "user",
+  });
+  return {
+    ops,
+    lineId: line.id,
+    slotId: slot.id,
+    placement: { binder_id: line.binder_id, binder_half: "back", color_band: line.color_band },
+  };
+}
+
+/** Her words for where a card went, for its audit row. */
+function describePatch(p: ReturnType<typeof placementForMove>): string {
+  if (p.role === "bulk") return "in the bulk box";
+  if (p.binder_half === "back") return `in a ${p.color_band} line, back half`;
+  if (p.binder_half === "front") return `in the front half · ${p.color_band}`;
+  return "in a collection's binder";
 }

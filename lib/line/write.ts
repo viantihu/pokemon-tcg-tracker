@@ -120,8 +120,10 @@ function assertStartMatchesDestination(
 
 /**
  * The line ops for one copy moving into a back half (UIL-117), shared by every server path that can do it (a Move,
- * a Collections removal). A join is checked against its line, a start against the destination; then the ONE line
- * builder runs on fresh state.
+ * a Collections removal, the Haul Plan). A join or a replace is checked against its line, a start against the
+ * destination; then the ONE line builder runs on fresh state. A replace's card coming out is checked like any move
+ * (a collection that still exists), and when it goes into another back half, its own line choice is checked and
+ * built by the same rules, from the same fresh read.
  *
  * NO "a line already exists" refusal on START (UIL-096). Karvi overruled it: "Instead of blocking the creation of an
  * evolution line, I want a warning that there is a line existing in my ENTIRE collection." The warning is the popup's,
@@ -135,7 +137,26 @@ export async function buildBackHalfLineOps(
 ): Promise<{ ops: WriteOp[]; slotId: string }> {
   if (choice.mode === "join") await assertJoinMatchesLine(db, choice.lineId, destination);
   if (choice.mode === "start") assertStartMatchesDestination(choice, destination);
+  if (choice.mode === "replace") {
+    if (choice.keep) {
+      throw new Error(
+        "Keeping the card that's there means this one doesn't go into the line — pick where it goes instead.",
+      );
+    }
+    await assertJoinMatchesLine(db, choice.lineId, destination);
+    await assertCollectionDestinationLives(db, choice.outgoing);
+  }
   const state = await loadLineWriteState(db, copy, choice);
+  if (choice.mode === "replace" && !choice.keep && choice.outgoingLine) {
+    const slot = [...state.slotsByLine.values()].flat().find((sl) => sl.id === choice.slotId);
+    const outgoing = slot?.copy_id ? state.copiesById.get(slot.copy_id) : undefined;
+    if (!outgoing)
+      throw new Error("That slot is no longer filled — reload the screen and pick again.");
+    const next = choice.outgoingLine;
+    if (next.mode === "join") await assertJoinMatchesLine(db, next.lineId, choice.outgoing);
+    else assertStartMatchesDestination(next, choice.outgoing);
+    state.outgoing = await loadLineWriteState(db, outgoing, next);
+  }
   const built = buildLineChoiceOps(state, copy.id, choice);
   return { ops: built.ops, slotId: built.slotId };
 }

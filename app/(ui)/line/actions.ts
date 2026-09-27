@@ -23,6 +23,7 @@ import {
 import { getOwnerContext } from "@/lib/plan/session";
 import { applyCopyRemoval } from "@/lib/copy";
 import { checkLineDeletion, deleteLine, type LineDeletionCheck } from "@/lib/line/delete";
+import { listReplaceCandidates, type ReplaceCandidates } from "@/lib/line/replace-candidates";
 import { errorMessage } from "@/lib/errors";
 import type { LineChoice } from "@/lib/line/popup";
 
@@ -30,6 +31,19 @@ import type { LineChoice } from "@/lib/line/popup";
 export async function loadLine(view: LineViewMode = "color"): Promise<LineScreenData> {
   const { db } = await getOwnerContext();
   return loadLineScreen(db, { view });
+}
+
+/**
+ * "Replace this card" (UIL-117 PR 3): the copies she owns that could take this filled slot's place, from fresh state.
+ * Reads only; the swap itself is `moveCardAction` with her replace choice.
+ */
+export async function replaceCandidatesAction(slotId: string): Promise<ReplaceCandidates> {
+  try {
+    const { db } = await getOwnerContext();
+    return await listReplaceCandidates(db, slotId);
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
 }
 
 export type MoveActionResult =
