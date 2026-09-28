@@ -8727,7 +8727,13 @@ touches).
 - **Reported:** 2026-09-26 (Karvi). In her words: "I want to rework adding lines from the haul from a
   UX perspective. This will be a larger lift that requires mock ups from the UX chat that I approve
   before we implement. (this can be worked on in parallel to testing)."
-- **Status:** Open — **APPROVED by Karvi 2026-09-26 ("Approved!"); being built.** The approved mockup (v3)
+- **Status:** **Built, awaiting Karvi's test** (2026-09-28). The one line popup now takes every move into a back half
+  on every screen: Lines, Lookup and Collections (#385, #390); Replace (#391); every Haul Plan line card waits for her
+  OK (#392); the Haul Plan's own Move sheet (#434, `1886515`); Backfill on her UIL-121 stage choices (#422,
+  `13bdffe`); the pull warnings (#394, #396). Still to come: C2, Backfill's popup-as-builder sheet (Full Stack Dev -
+  2). Rulings recorded 2026-09-27: Backfill's filler list offers her bulk box first, then this haul (a Senior BA
+  ruling extending Karvi's words, #424); a Basic with no evolutions is never a line (Karvi, #431).
+- **Status (before 2026-09-28):** Open — **APPROVED by Karvi 2026-09-26 ("Approved!"); being built.** The approved mockup (v3)
   is on `develop` as `docs/design/prototype-uil117-lines.html` (PR [#379](https://github.com/viantihu/pokemon-tcg-tracker/pull/379)). **Her three answers:**
   (1) ANY card moving into a back half is assigned to a line or starts one, through ONE popup, on EVERY
   screen (the Haul Plan, the Move sheet on Lines, Lookup and Collections, Backfill's back half, and a filled
@@ -8768,7 +8774,10 @@ collides with it).
 - **Reported:** 2026-09-26 (Karvi). In her words: "Before I asked the DE to take a snapshot, I need the
   ability to delete lines. I accidentally added cards in the wrong place. I moved the cards, but the
   lines still created placeholders. I want to get rid of them, and users should be able to as well."
-- **Status:** Open, assigned to Full Stack Dev - 2, plan first, coordinating with the Tech Lead's UIL-117
+- **Status:** **Fixed**: PR #389 (migration 0029, `16d90bd`), live on Testing. Karvi used it 2026-09-27 to delete the
+  3 lines she had started in the wrong place, and the Senior BA verified all three gone (diagnostic run 36328931837).
+  Awaiting her close.
+- **Status (before 2026-09-28):** Open, assigned to Full Stack Dev - 2, plan first, coordinating with the Tech Lead's UIL-117
   line work.
 - **Priority:** High (Senior BA's read; it blocks her next baseline snapshot, and she needs these lines
   gone first; Karvi to confirm).
@@ -8827,7 +8836,10 @@ now enforced database-side by migration 0028, which a delete path has to satisfy
 - **Reported:** 2026-09-27 (Karvi). Asked "Should an empty line stage go on your wishlist
   automatically?" (whether a new line's missing cards, or a stage left empty when a card is pulled
   away), she ruled: "No, only when I add it."
-- **Status:** Open, unassigned, scoping first.
+- **Status:** **Fixed, awaiting Karvi's test.** #397 (`a181336`): a Haul Plan line never wishes an empty stage; #400
+  (`1662296`): the same in Backfill. Since UIL-121 (#429, `94c84a5`) a new stage stores no engine target, and only her
+  own Chase writes a wish.
+- **Status (before 2026-09-28):** Open, unassigned, scoping first.
 - **Priority:** Medium (Senior BA's read; wrong wishlist contents, not lost data).
 - **Area:** Lines / Haul Plan / Backfill / Wishlist
 - **Env:** Testing, `develop` `f5d4234`
@@ -8882,7 +8894,14 @@ these same wishlist rows, so a narrower auto-wish rule changes what a future del
 
 - **Reported:** 2026-09-27 (Karvi). In her words: "Once the line is complete, it should not open the
   popup again for the next card automatically."
-- **Status:** Open, assigned to Full Stack Dev - 2, after UIL-117 PR 5a.
+- **Status:** **Fixed, awaiting Karvi's retest** (it failed her test three times: #402, #410, #423). Her rulings,
+  2026-09-27, in direct answers to the Senior BA: (1) "Confirm & next" never opens another line's card by itself; (2)
+  after the last card she has for a line, a stage still missing is asked about (a card she picks, nothing pre-picked;
+  Leave empty; Filler; or "Decide later", which she confirmed: "Keep Decide later"), then the popup stops; (3) within
+  a line the popup steps in evolution order, Basic then Stage 1 then Stage 2. Built in #430 (`7ff0ebc`: this line's
+  next card only, evolution order, routed ids) and #429 (`94c84a5`: the ask), on top of #423 and #427 (a closed line
+  stops, "Line closed · X line", the forecast).
+- **Status (before 2026-09-28):** Open, assigned to Full Stack Dev - 2, after UIL-117 PR 5a.
 - **Priority:** High (Karvi, 2026-09-27).
 - **Area:** Haul Plan / line popup
 - **Env:** Testing, `develop` `a181336`
@@ -8924,7 +8943,15 @@ until the Senior BA has explained the current line rules to her — deliberately
 
 - **Reported:** 2026-09-27 (not from Karvi — verified by the Tech Lead on `develop` `a181336`, source
   reading plus PGlite through the real paths).
-- **Status:** Open, design pending Karvi; the builder is to be assigned.
+- **Status:** **Built except D, awaiting Karvi's test.** A1 open or closed (#412, migration 0030, `42831ad`); A2a the
+  server rule (#420); A2b her choice for every empty stage in the popup, plus 0032's third-pocket rule (#421, #424,
+  #429 `94c84a5`); A2c Lines' Choose and Change, every decision card retired except collection-vs-line (#432,
+  `ae738dd`). Follow-ups: #435 (one bulk copy per pocket), #439 (a filled filler stage is never offered as a block),
+  #441 (`eb7f1ad`: a card for an undecided stage ADDS to her line). Still to come: D (migration 0034, Tech Lead):
+  legacy statuses converted, leftover engine targets on undecided stages cleared, one card per pocket as a unique
+  index. Ruling recorded: a Basic with no evolutions is never a line (Karvi 2026-09-27, #431), so only a 2-card line
+  is ever asked its third pocket.
+- **Status (before 2026-09-28):** Open, design pending Karvi; the builder is to be assigned.
 - **Priority:** High (Senior BA's read; it breaks a rule she set).
 - **Area:** Lines / line popup / Backfill
 - **Env:** Testing, `develop` `a181336`
@@ -8980,7 +9007,10 @@ collide.
 ## UIL-122 — A Haul Plan card that cannot form a line points her at the Lines screen, but no line exists there to confirm or override
 
 - **Reported:** 2026-09-27 (not from Karvi — verified by the Tech Lead on `develop` `a181336`).
-- **Status:** Open, unassigned; the fix waits on UIL-121's design (the termination needs a home: the
+- **Status:** Open, assigned to Full Stack Dev - 2 (2026-09-28), Medium. UIL-121's design is settled: #432 retired
+  every decision card except collection-vs-line, so the banner now almost always points at nothing. The fix shows it
+  only for a real collection-vs-line decision.
+- **Status (before 2026-09-28):** Open, unassigned; the fix waits on UIL-121's design (the termination needs a home: the
   spotlight, or dropped).
 - **Priority:** Medium (Senior BA's read; misleading, no data harm).
 - **Area:** Haul Plan
@@ -9063,7 +9093,9 @@ ask).
 ## UIL-125 — On a phone, the Haul Plan's spotlight panel covers more than half the screen, leaving little room to work the card list
 
 - **Reported:** 2026-09-27 (Karvi, confirmed "Yes, log it" via the UX Dev session's relay).
-- **Status:** Open, assigned to the UX Dev to build (it found it): a CSS/layout change around
+- **Status:** **Fixed, awaiting Karvi's test.** PR #409 (`cf67d5c`), with QA's pin #415 (`f63920b`): on a phone the
+  Haul Plan spotlight no longer covers more than half the screen.
+- **Status (before 2026-09-28):** Open, assigned to the UX Dev to build (it found it): a CSS/layout change around
   `app/globals.css:1670-1677`'s `56vh` rule, with a DOM or layout check at 375 and 390.
 - **Priority:** Medium (Senior BA's read: usability on a phone, no data risk).
 - **Area:** Haul Plan
@@ -9112,7 +9144,10 @@ same mechanism, noted only to distinguish the two).
   prompting the user to potentially consider adding to a line." She picked "Normal card + prompt" over
   keeping the popup. Scope, confirmed to the Senior BA: "Yes, any holo or reverse holo counts" (any
   printing of that species, whichever set).
-- **Status:** Open, assigned to Full Stack Dev - 2 (the Tech Lead reviews the engine and server rule; the
+- **Status:** **Fixed, awaiting Karvi's test.** PR #416 (`74ad93b`). Karvi ruled 2026-09-27, "Keep 1st Edition and W
+  Promo as built": a holo or reverse holo over a 1st Edition or W Promo in a line is not an upgrade, and the manual "⇄
+  Swap this one into the line…" stays.
+- **Status (before 2026-09-28):** Open, assigned to Full Stack Dev - 2 (the Tech Lead reviews the engine and server rule; the
   UX Dev reviews the UI), after the UIL-120 fix.
 - **Priority:** High (Senior BA's read: it changes her Haul Plan flow, and plain duplicates currently
   trap her in the popup step-through, related to UIL-120).
@@ -9168,7 +9203,12 @@ system, for context on how many special cases it already carries).
   three rulings also confirmed directly to the Senior BA the same day — "Yes, all three": Testing
   invite-only until go-live, per-user colour settings, and the banner on every non-production
   environment). Feature entry (like UIL-039/071/110), not a bug.
-- **Status:** Open, design approved, building (banner → tutorial → ownership → sign-up).
+- **Status:** **Built on Testing; Production sign-up not opened.** 127a no-binder guards (#419, `6318aae`); 127b
+  ownership (#426, migration 0033, `d1ba6ae`, live-proven and AFTER-verified); 127c sign-up, invite-only by default
+  (#428, `da3db6e`), the bot check wherever a site key is set (#436, `deaeced`), and Production runbook C1 (#440,
+  `9eb3e20`). Pending: Karvi's spare-account test on Testing (a dashboard-created user, removed the same day), and
+  opening Production per runbook C1. Follow-up: UIL-131.
+- **Status (before 2026-09-28):** Open, design approved, building (banner → tutorial → ownership → sign-up).
 - **Priority:** Go-live feature (Karvi: opens at launch).
 - **Area:** Auth, Ownership, App-wide
 - **Env:** n/a — design approved, nothing built yet.
@@ -9219,7 +9259,9 @@ change rather than precede it).
 ## UIL-128 — First-run tutorial for new users
 
 - **Reported:** 2026-09-27 (Karvi, approved via the "Multi-user app onboarding" session). Feature entry.
-- **Status:** Open, design approved (part of UIL-127's build sequence).
+- **Status:** **Fixed, awaiting Karvi's test.** PR #414 (migration 0031, `52ae216`): the tour never opens by itself on
+  her account, and Settings, Replay tutorial runs 8 steps.
+- **Status (before 2026-09-28):** Open, design approved (part of UIL-127's build sequence).
 - **Priority:** Go-live feature (tied to UIL-127's launch).
 - **Area:** App-wide, Onboarding
 - **Env:** n/a — design approved, nothing built yet.
@@ -9242,7 +9284,9 @@ ownership → sign-up — and depends on accounts existing at all).
 ## UIL-129 — Environment banner: which environment she's looking at, always visible
 
 - **Reported:** 2026-09-27 (Karvi, approved via the "Multi-user app onboarding" session). Feature entry.
-- **Status:** Open, design approved (part of UIL-127's build sequence).
+- **Status:** **Fixed, awaiting Karvi's test.** PR #413 (`41ca86b`): a banner and a tab-title prefix on every
+  deployment but Production.
+- **Status (before 2026-09-28):** Open, design approved (part of UIL-127's build sequence).
 - **Priority:** Go-live feature (tied to UIL-127's launch).
 - **Area:** App-wide
 - **Env:** n/a — design approved, nothing built yet.
@@ -9343,7 +9387,9 @@ specifically) and **UIL-097** (the same `signIn` action's other auth edge cases)
 ## UIL-132 — An open slot past a family branch (Eevee, Charcadet, Applin, Wurmple) is never offered as a join target, so she could start a second line for a species she already has one for
 
 - **Reported:** 2026-09-27 (not from Karvi — the Tech Lead's finding, no data risk yet).
-- **Status:** Open, Medium, owner Full Stack Dev - 2, after PR #434.
+- **Status:** **Fixed, awaiting Karvi's test.** PR #441 (`eb7f1ad`): a stage past a branch is offered as a join target
+  on every screen, through the one shared stageFit rule.
+- **Status (before 2026-09-28):** Open, Medium, owner Full Stack Dev - 2, after PR #434.
 - **Priority:** Medium.
 - **Area:** Lines
 - **Env:** Testing, `develop` `866d99c`
