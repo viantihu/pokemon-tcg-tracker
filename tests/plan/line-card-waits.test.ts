@@ -89,7 +89,7 @@ async function seedLine(stage1: "open" | "filled"): Promise<void> {
         values ('${OWNED_CML}', '${OWNER}', '${CHARMELEON_SV03_027.tcgdexId}', 'normal', 'shelved',
                 '${KB1}', 'back', 'red', '${S_STAGE1}');
       update line_slot set state = 'filled', copy_id = '${OWNED_CML}' where id = '${S_STAGE1}';
-      update evolution_line set status = 'complete' where id = '${LINE}';
+      update evolution_line set status = 'closed' where id = '${LINE}';
     `);
   }
 }

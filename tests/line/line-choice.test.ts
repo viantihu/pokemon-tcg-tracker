@@ -152,7 +152,7 @@ describe("START · only what she ticked moves, and the status is the slots'", ()
     const OLD_SLOT = "20000000-0000-4000-8000-0000000117ff";
     await db.query(
       `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-         values ($1, $2, $3, 'red', $4, 'back', 'complete')`,
+         values ($1, $2, $3, 'red', $4, 'back', 'closed')`,
       [OLD_LINE, OWNER, EMBERLING, GEN],
     );
     await db.query(
@@ -406,7 +406,7 @@ describe("the popup's model (loadLinePopupModel), built from fresh state", () =>
     const OTHER_SLOT = "20000000-0000-4000-8000-0000000117e1";
     await db.query(
       `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-         values ($1, $2, $3, 'red', $4, 'back', 'complete')`,
+         values ($1, $2, $3, 'red', $4, 'back', 'closed')`,
       [OTHER_LINE, OWNER, EMBERLING, GEN],
     );
     await db.query(

@@ -140,7 +140,7 @@ async function seedOnCompleteLine(): Promise<void> {
   await seedShelved();
   await db.exec(`
     insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-      values ('${LINE}', '${OWNER}', 4, 'red', '${GEN}', 'back', 'complete');
+      values ('${LINE}', '${OWNER}', 4, 'red', '${GEN}', 'back', 'closed');
     insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
       values ('${SLOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${CARD}');
     update copy set line_slot_id = '${SLOT}', binder_half = 'back' where id = '${CARD}';
@@ -414,7 +414,7 @@ describe("applyMove into a collection (real modules, real Postgres, real RPC)", 
     expect(
       (await q<{ status: string }>(`select status from evolution_line where id = '${LINE}'`))[0]
         .status,
-    ).toBe("complete");
+    ).toBe("closed"); // UIL-121 (0034): was "complete"
   });
 
   it("refuses a copy that no longer exists rather than writing a decision for nothing", async () => {
@@ -481,7 +481,7 @@ describe("a move cannot half-apply (UIL-023)", () => {
     expect(
       (await q<{ status: string }>(`select status from evolution_line where id = '${LINE}'`))[0]
         .status,
-    ).toBe("complete");
+    ).toBe("closed"); // UIL-121 (0034): was "complete"
     expect(await targetsOf(COL2)).toEqual([]);
     expect(await q(`select 1 from placement_decision`)).toHaveLength(0);
   });

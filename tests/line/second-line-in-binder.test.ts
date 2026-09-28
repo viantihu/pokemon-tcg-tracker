@@ -80,7 +80,7 @@ beforeEach(async () => {
   );
   await db.exec(`
     insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-      values ('${LINE}', '${OWNER}', ${ROOT_DEX}, 'orange', '${KB1}', 'back', 'complete');
+      values ('${LINE}', '${OWNER}', ${ROOT_DEX}, 'orange', '${KB1}', 'back', 'closed');
     insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
       values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OWNED_ROOT}'),
              ('${SLOT_S1}',  '${OWNER}', '${LINE}', 1, 'Stage1', 'filled', '${OWNED_S1}');
@@ -116,7 +116,7 @@ async function firstLineUntouched() {
     [LINE],
   );
   await asOwner(db);
-  expect(line.rows[0].status).toBe("complete");
+  expect(line.rows[0].status).toBe("closed"); // UIL-121 (0034): was "complete"
   expect(slots.rows).toEqual([
     { id: SLOT_ROOT, state: "filled", copy_id: OWNED_ROOT },
     { id: SLOT_S1, state: "filled", copy_id: OWNED_S1 },

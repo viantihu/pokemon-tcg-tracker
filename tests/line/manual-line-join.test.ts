@@ -320,7 +320,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     await seedShelvedFront(OTHER, "onlymon");
     await db.exec(`
       insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-        values ('${LINE}', '${OWNER}', ${ONLYMON_DEX}, 'red', '${GEN}', 'back', 'complete');
+        values ('${LINE}', '${OWNER}', ${ONLYMON_DEX}, 'red', '${GEN}', 'back', 'closed');
       insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
         values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OTHER}');
       update copy set line_slot_id = '${SLOT_ROOT}', binder_half = 'back' where id = '${OTHER}';
@@ -372,7 +372,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     await seedShelvedFront(OTHER, "onlymon");
     await db.exec(`
       insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-        values ('${LINE}', '${OWNER}', ${ONLYMON_DEX}, 'red', '${GEN}', 'back', 'complete');
+        values ('${LINE}', '${OWNER}', ${ONLYMON_DEX}, 'red', '${GEN}', 'back', 'closed');
       insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
         values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OTHER}');
       update copy set line_slot_id = '${SLOT_ROOT}', binder_half = 'back' where id = '${OTHER}';
@@ -442,7 +442,7 @@ describe("applyMove: shelf → back half → start a new line (real Postgres, re
     await seedShelvedFront(CARD, "emberdrake"); // the SECOND Emberdrake being moved
     await db.exec(`
       insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-        values ('${LINE}', '${OWNER}', ${EMBERLING_DEX}, 'red', '${GEN}', 'back', 'complete');
+        values ('${LINE}', '${OWNER}', ${EMBERLING_DEX}, 'red', '${GEN}', 'back', 'closed');
       insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
         values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OTHER}');
       insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
@@ -820,7 +820,7 @@ describe("applyMove: moving OFF a line into bulk or a front-half shelf releases 
     await seedShelvedFront(CARD, "emberdrake");
     await db.exec(`
       insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-        values ('${LINE}', '${OWNER}', ${EMBERLING_DEX}, 'red', '${GEN}', 'back', 'complete');
+        values ('${LINE}', '${OWNER}', ${EMBERLING_DEX}, 'red', '${GEN}', 'back', 'closed');
       insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
         values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OTHER}');
       insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)

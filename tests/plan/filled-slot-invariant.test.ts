@@ -378,8 +378,8 @@ describe("UIL-087 · V2 through its real path: undoing a sync that created a now
     const lineId = (
       await db.query<{ line_id: string }>(`select line_id from line_slot where id = $1`, [slotId])
     ).rows[0].line_id;
-    // Pretend the line had been completed, so the demotion is observable.
-    await db.query(`update evolution_line set status = 'complete' where id = $1`, [lineId]);
+    // Pretend the line had been closed, so the demotion is observable.
+    await db.query(`update evolution_line set status = 'closed' where id = $1`, [lineId]);
 
     // The snapshot that undo inverts: this sync created the copy she has since shelved.
     await db.query(`insert into last_sync_snapshot (owner_id, snapshot) values ($1, $2::jsonb)`, [
