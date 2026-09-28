@@ -2579,10 +2579,12 @@ export function Spotlight(props: {
       ) : null}
 
       {item.needsDecision ? (
+        // UIL-122: the one decision the Lines screen still shows (collection-vs-line), named as its card names it.
         <div className="doit" style={{ background: "var(--note)" }}>
-          <b style={{ fontSize: 13 }}>Needs a decision</b>
+          <b style={{ fontSize: 13 }}>Needs a decision: collection claim vs line slot</b>
           <span style={{ fontSize: 11, color: "var(--ink-2)" }}>
-            Confirm or override it on the Lines screen. The proposal is recorded when you shelve it.
+            This is the card a line needs, and a collection claims it. It goes to the collection
+            now; on the Lines screen, decide whether the collection still wins.
           </span>
         </div>
       ) : null}

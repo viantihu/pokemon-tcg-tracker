@@ -45,7 +45,12 @@ export function actionForResult(result: CascadeResult): PlanActionKind {
   }
 }
 
-/** Whether the cascade attached any proposal (cap / block / termination / swap / collection-vs-line). */
+/**
+ * Whether this card leaves her a decision to make on the Lines screen (UIL-122). Since UIL-121 A2c (#432) the Lines
+ * screen shows one decision card only, collection-vs-line (a collection claims the card a line needs); the others
+ * (caps, blocks, terminations, swaps) retired. So only that one is a decision: a banner for any other proposal sent her
+ * to a screen with nothing for the card (a Scizor that cannot form a line, the TL's case).
+ */
 export function resultNeedsDecision(result: CascadeResult): boolean {
-  return (result.proposals?.length ?? 0) > 0;
+  return result.proposals?.some((p) => p.kind === "collection-vs-line") ?? false;
 }
