@@ -372,6 +372,39 @@ describe("UIL-117 · the line popup", () => {
     expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ mode: "start" }));
   });
 
+  it("with TWO lines that have room, the note at the top names the one in this binder and colour (QA's U3 on #441)", () => {
+    const elsewhere = {
+      ...START.existingLines[0],
+      lineId: "line-elsewhere",
+      binderName: "KB-004",
+      bandDisplay: "Green",
+      locale: "en" as const,
+      joinSlotId: "slot-elsewhere-1",
+      sameHere: false,
+    };
+    const here = {
+      ...START.existingLines[0],
+      lineId: "line-here",
+      binderName: "KB-001",
+      bandDisplay: "Red",
+      locale: "en" as const,
+      joinSlotId: "slot-here-1",
+      sameHere: true,
+    };
+    render(
+      createElement(Harness, {
+        // The one elsewhere comes first, as the loader might list it (oldest first).
+        model: { ...START, existingLines: [elsewhere, here] },
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} },
+        onConfirm: vi.fn(),
+        onSwitch: vi.fn(),
+      }),
+    );
+    expect(screen.getByRole("note").textContent).toContain(
+      "with room for this card · KB-001 · Back · Red",
+    );
+  });
+
   it("with no line that has room, the confirm is the plain 'Start line'", () => {
     render(
       createElement(Harness, {

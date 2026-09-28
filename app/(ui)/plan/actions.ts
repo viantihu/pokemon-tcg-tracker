@@ -186,8 +186,6 @@ export async function shelveCardAction(input: {
    * somewhere she did not read off the screen and physically use.
    */
   expectedDigest?: string | null;
-  /** Copy ids she ticked to move into the line this card starts (UIL-061). Absent ⇒ move nothing. */
-  confirmedPulls?: string[];
   /** Her resolution of a colour mismatch, when the spotlight showed one (UIL-069). Absent ⇒ unresolved. */
   bandChoice?: "line" | "own-color" | null;
   /** The collection she picked for a specialty card whose binder holds collections (UIL-053). */
@@ -219,7 +217,6 @@ export async function shelveCardAction(input: {
       },
       override: input.override ?? null,
       expectedDigest: input.expectedDigest ?? null,
-      confirmedPulls: input.confirmedPulls ?? [],
       bandChoice: input.bandChoice ?? null,
       collectionChoice: input.collectionChoice ?? null,
       lineChoice: input.lineChoice ?? null,
