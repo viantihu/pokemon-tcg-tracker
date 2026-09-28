@@ -300,7 +300,12 @@ describe("UIL-117 · the line popup", () => {
     );
     expect(screen.getByText(/You already have 1 Charmeleon line/)).toBeTruthy();
     expect(screen.getByText(/Japanese · 1\/2 filled/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Add it there instead" }));
+    // The tile's own button (the note at the top has the same one: UX review of #441).
+    await user.click(
+      within(document.querySelector(".lp-also") as HTMLElement).getByRole("button", {
+        name: "Add it there instead",
+      }),
+    );
     expect(onSwitch).toHaveBeenCalledWith({ kind: "add", lineId: "line-ja", slotId: "slot-ja-1" });
   });
 
@@ -339,7 +344,22 @@ describe("UIL-117 · the line popup", () => {
     expect(tiles[0].textContent).toContain("KB-001");
     expect(within(tiles[0]).getByText("Has room for this card")).toBeTruthy();
     expect(within(tiles[1]).queryByText("Has room for this card")).toBeNull();
-    expect(screen.getAllByRole("button", { name: "Add it there instead" })).toHaveLength(1);
+    expect(within(tiles[0]).getByRole("button", { name: "Add it there instead" })).toBeTruthy();
+    expect(within(tiles[1]).queryByRole("button", { name: "Add it there instead" })).toBeNull();
+    // …and named at the TOP, before what moves and the sticky confirm (UX review of #441), with the same one tap.
+    const note = screen.getByRole("note");
+    expect(note.textContent).toContain(
+      "You have a Charmeleon line with room for this card · KB-001 · Back · Red",
+    );
+    const whatMoves = screen.getByText("What moves");
+    expect(note.compareDocumentPosition(whatMoves) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(within(note).getByRole("button", { name: "Add it there instead" }));
+    expect(onSwitch).toHaveBeenCalledWith({
+      kind: "add",
+      lineId: "line-room",
+      slotId: "slot-room-1",
+    });
+    onSwitch.mockClear();
     // Nothing is picked for her: still a START, said as "anyway".
     const start = screen.getByRole("button", {
       name: /Start a new line anyway/,
