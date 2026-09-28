@@ -49,6 +49,7 @@ import {
   buildMoveOps,
   describeMove,
   isMoveDestinationComplete,
+  isOpenBlockNeed,
   lineJoinOf,
   type MoveNameLookups,
 } from "./move";
@@ -312,7 +313,8 @@ async function assertBlockDestinationOpen(
     throw new Error("That line is not in that binder any more — reload the screen and pick again.");
   }
   const blocks = await binderBlockRepo.list(db);
-  if (blocks.some((b) => b.line_id === destination.lineId && b.purpose === "line-terminated")) {
+  // A stage she filled (a filler: an energy or a spare card) is not a need, nor a pocket another block already fills.
+  if (!isOpenBlockNeed(slot, blocks)) {
     throw new Error(
       "That line's block pocket is already filled — reload the screen and pick again.",
     );
