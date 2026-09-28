@@ -18,7 +18,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanItem } from "@/lib/plan";
-import type { LinePopupModel, LineProposal } from "@/lib/line/popup";
+import { JOIN_UNCONFIRMED, type LinePopupModel, type LineProposal } from "@/lib/line/popup";
 import { groupPlan } from "@/lib/plan/group";
 import type {
   DraftCard,
@@ -492,6 +492,37 @@ describe("UIL-117 · the Plan's own Move sheet: BACK HALF opens the one line pop
     await user.click(confirmIn());
     await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("a join the catalog cannot confirm is said in the popup, and she can still move the card anywhere else (QA on #434)", async () => {
+    shelveCardAction.mockResolvedValueOnce({ ok: false, error: JOIN_UNCONFIRMED });
+    const user = await mount([{ name: "Abra", proposal: null }]);
+    await user.click(screen.getByRole("button", { name: "↔ Change position" }));
+    const sheet = await screen.findByRole("dialog", { name: "Move Abra" });
+    await user.click(within(sheet).getByRole("button", { name: "BACK HALF" }));
+    await screen.findByRole("dialog", { name: "Start a line" });
+    await user.click(within(popup()).getByRole("checkbox"));
+    await waitFor(() => expect(confirmIn().disabled).toBe(false));
+    await user.click(confirmIn());
+    // Her words, and why: not "a different card".
+    expect(await within(popup()).findByText(JOIN_UNCONFIRMED)).toBeTruthy();
+    expect((within(popup()).getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+    // A card must always be movable: out of the popup, the front half, a collection and bulk are all still offered…
+    await user.click(within(popup()).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Start a line" })).toBeNull());
+    const still = screen.getByRole("dialog", { name: "Move Abra" });
+    expect(within(still).getByRole("button", { name: "FRONT HALF" })).toBeTruthy();
+    expect(within(still).getByRole("button", { name: /Bulk box|BULK/i })).toBeTruthy();
+    // …and a front-half move is set, then written with her Done.
+    await user.click(within(still).getByRole("button", { name: "FRONT HALF" }));
+    await user.click(within(still).getByRole("button", { name: "Place it here ▶" }));
+    expect(await screen.findByText("Placement override set · Abra")).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: /Done, next card|Done/ }));
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(2));
+    expect(shelveCardAction.mock.calls[1][0]).toMatchObject({
+      override: { kind: "shelf", half: "front" },
+      lineChoice: null,
+    });
   });
 
   it("a card with lines it could join gets NO inline line picker: BACK HALF is the popup, on the line here (QA's M2)", async () => {

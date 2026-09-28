@@ -224,6 +224,78 @@ export function formsALine(card: CatalogCard, catalog: CatalogCard[]): boolean {
 }
 
 /**
+ * A line's open stage, and what is known around it: each a card in the slot, or the card she CHASES there. A target
+ * on a stage she has not decided is an old engine target, and is not known (the TL's rule).
+ */
+export interface LineStageAround {
+  /** The line's root species. */
+  rootDexId: number;
+  stageIndex: number;
+  /** Her chase at this stage, when she chases one. */
+  chased?: CatalogCard | null;
+  before?: CatalogCard | null;
+  after?: CatalogCard | null;
+  /** The line's highest known card: its chain stands in where this card's own language cannot walk back. */
+  seed?: CatalogCard | null;
+}
+
+/** Whether a card fits a line's stage: it does, it is another card, or the catalog cannot tell. */
+export type StageFit = "fits" | "wrong" | "unknown";
+
+/**
+ * Whether a card is a line's own card for a stage: the ONE rule (the Senior BA's ruling and the TL's review of #434),
+ * used by every screen's offer (the cascade's `existingLineSlot`, the line-join index) and by the line builder that
+ * writes a join (`joinLine`), so a screen never proposes an Add the builder refuses.
+ *
+ *   - Her chase at the stage names its card: the same species.
+ *   - Otherwise THIS card's own chain decides, which follows its branch (Charcadet's Stage 1 is Armarouge OR
+ *     Ceruledge; a chain from the line's root has no one species past a branch): its root is the line's root, and
+ *     its species sits at the stage's depth.
+ *   - A chain that walks back to a Basic of another species is another family: `wrong`.
+ *   - Where its own language's catalog cannot walk back to a Basic at all (69 Japanese sets are short upstream), the
+ *     line's own chain stands in, from its highest known card. Where that cannot reach the root or this stage
+ *     either, the catalog cannot tell: `unknown`, never a guess.
+ *   - Its neighbours agree, where known: the stage before holds its parent, and the stage after holds a card whose
+ *     own chain has this species at this stage.
+ */
+export function stageFit(card: CatalogCard, catalog: CatalogCard[], at: LineStageAround): StageFit {
+  const chainOf = (c: CatalogCard) =>
+    buildChain({ id: "stage-fit", card: c, variant: "normal" }, catalog);
+  const dex = card.dexId;
+  const own = chainOf(card);
+  const reachesRoot = own[0]?.dexId === at.rootDexId;
+  // Its own chain is whole when it walks back to a Basic; then another root is another family, not a gap.
+  const whole = own[0]?.cards.some((c) => !c.evolveFrom) ?? false;
+  if (at.chased) {
+    const chased = at.chased;
+    if (!dex.some((d) => chased.dexId.includes(d))) return "wrong";
+  } else if (reachesRoot) {
+    if (!dex.includes(own[at.stageIndex]?.dexId ?? -1)) return "wrong";
+  } else if (whole) {
+    return "wrong";
+  } else {
+    const lineChain = at.seed ? chainOf(at.seed) : [];
+    if (lineChain[0]?.dexId !== at.rootDexId) return "unknown";
+    const wanted = lineChain[at.stageIndex];
+    if (!wanted) return "unknown";
+    if (!dex.includes(wanted.dexId)) return "wrong";
+  }
+  const parent = reachesRoot ? own[at.stageIndex - 1] : undefined;
+  if (at.before && parent && !at.before.dexId.includes(parent.dexId)) return "wrong";
+  if (at.after) {
+    // Its own chain names its parent only where its language's catalog walks back to the line's root.
+    const afterChain = chainOf(at.after);
+    if (
+      afterChain[0]?.dexId === at.rootDexId &&
+      !dex.includes(afterChain[at.stageIndex]?.dexId ?? -1)
+    ) {
+      return "wrong";
+    }
+  }
+  return "fits";
+}
+
+/**
  * The viability test (system-design §6). Counts chain stages that have at least one prospective
  * same-colour member — an owned copy OR a catalog-confirmed printing that could be a placeholder.
  * `< 2` ⇒ not viable ⇒ the caller routes the card to the front half.

@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import { clearCatalogCache, commitCardPlacement, LINE_CHOICE, type DraftItem } from "@/lib/plan";
-import type { LineChoice } from "@/lib/line/popup";
+import { JOIN_UNCONFIRMED, type LineChoice } from "@/lib/line/popup";
 import type { MoveDestination } from "@/lib/line/types";
 import { KEEP_IS_NO_LINE_MOVE } from "@/lib/line/write";
 import { CHARMANDER_SV03_026, CHARMELEON_SV03_027 } from "../engine/fixtures";
@@ -378,5 +378,125 @@ describe("a join into a BRANCHING family's line is held to its own branch and it
   it("the TL's case 2: Thornking is refused after Twigleaf (the stage before is not its parent)", async () => {
     await seedLine(950, [{ card: TWIGLING.tcgdexId }, { card: TWIGLEAF.tcgdexId }, { open: true }]);
     await refusedAt(H.thornking, 2);
+  });
+});
+
+/**
+ * A card whose own language's catalog cannot walk back to a Basic (QA's gate on #434: 69 Japanese sets are short
+ * upstream). The line's own chain stands in, from its highest known card; where that cannot reach the root or this
+ * stage either, the catalog cannot tell, and she is told so in her words (JOIN_UNCONFIRMED), not "a different card".
+ */
+describe("a join the catalog cannot walk back from: the line's own chain stands in, or she is told it can't be confirmed", () => {
+  const LINE = "10000000-0000-0000-0000-0000000000d1";
+  const slotId = (i: number) => `50000000-0000-0000-0000-0000000000d${i}`;
+  const ownedId = (i: number) => `c0000000-0000-0000-0000-0000000000d${i}`;
+  const ja = (tcgdexId: string, name: string, dex: number, stage: string, from: string) => ({
+    ...CHARMELEON_SV03_027,
+    tcgdexId,
+    name,
+    dexId: [dex],
+    stage,
+    evolveFrom: from,
+    artworkGroupId: `art-${tcgdexId}`,
+  });
+  // Japanese printings whose earlier stage is not in the catalog.
+  const JA_CHARMELEON = ja("ja:sv3-027", "リザード", 5, "Stage1", "ヒトカゲ");
+  const JA_CHARIZARD = ja("ja:sv3-028", "リザードン", 6, "Stage2", "リザード-missing");
+  // A family whose Basic is not in the catalog in any language: Blazy (9601) → Blazeon (9602) → Blazking (9603).
+  const BLAZEON = { ...ja("sv09-9602", "Blazeon", 9602, "Stage1", "Blazy"), locale: "en" };
+  const BLAZKING = { ...ja("sv09-9603", "Blazking", 9603, "Stage2", "Blazeon"), locale: "en" };
+  const JA_BLAZKING = ja("ja:sv9-9603", "ブレイズキング", 9603, "Stage2", "ブレイズ-missing");
+  const H = {
+    jaCharmeleon: haulRow("d0000000-0000-4000-8000-0000000000d1", JA_CHARMELEON.tcgdexId),
+    jaCharizard: haulRow("d0000000-0000-4000-8000-0000000000d2", JA_CHARIZARD.tcgdexId),
+    jaBlazking: haulRow("d0000000-0000-4000-8000-0000000000d3", JA_BLAZKING.tcgdexId),
+  };
+  beforeEach(async () => {
+    await asSuperuser(db);
+    for (const c of [JA_CHARMELEON, JA_CHARIZARD, JA_BLAZKING]) {
+      await db.query(
+        `insert into catalog_card (tcgdex_id, name, dex_id, set_id, local_id, types, stage, evolve_from, card_class, locale)
+           values ($1, $2, $3, 'ja:sv3', '027', '{Fire}', $4, $5, 'standard', 'ja')`,
+        [c.tcgdexId, c.name, c.dexId, c.stage, c.evolveFrom],
+      );
+    }
+    await seedCatalogCardsFull(db, [BLAZEON, BLAZKING]);
+    await seedHaulRows(db, Object.values(H));
+    clearCatalogCache();
+    await asOwner(db);
+  });
+  async function seedLine(root: number, stages: ({ card: string } | { open: true })[]) {
+    await asSuperuser(db);
+    await db.query(
+      `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
+         values ($1, $2, $3, 'red', $4, 'back', 'open')`,
+      [LINE, OWNER, root, KB1],
+    );
+    for (const [i, st] of stages.entries()) {
+      if ("card" in st) {
+        await db.query(
+          `insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band)
+             values ($1, $2, $3, 'normal', 'shelved', $4, 'back', 'red')`,
+          [ownedId(i), OWNER, st.card, KB1],
+        );
+      }
+      await db.query(
+        `insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
+           values ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          slotId(i),
+          OWNER,
+          LINE,
+          i,
+          ["Basic", "Stage1", "Stage2"][i],
+          "card" in st ? "filled" : "placeholder",
+          "card" in st ? ownedId(i) : null,
+        ],
+      );
+      if ("card" in st) {
+        await db.query(`update copy set line_slot_id = $1 where id = $2`, [slotId(i), ownedId(i)]);
+      }
+    }
+    await asOwner(db);
+  }
+  const joinAt = (card: DraftItem, i: number, extra: Partial<LineChoice> = {}) =>
+    commitCardPlacement(pgliteClient(db), {
+      card,
+      override: BACK,
+      lineChoice: { mode: "join", lineId: LINE, slotId: slotId(i), ...extra } as LineChoice,
+    });
+  const untouched = async (card: DraftItem, i: number) => {
+    expect(await read(`select state from line_slot where id = $1`, [slotId(i)])).toEqual([
+      { state: "placeholder" },
+    ]);
+    expect(await read(`select role from copy where id = $1`, [card.id])).toEqual([
+      { role: "haul" },
+    ]);
+  };
+
+  it("accepts from the line's own chain: a Japanese Charmeleon into an English Charmander line's Stage 1, with her OK for the language", async () => {
+    await seedLine(4, [{ card: CHARMANDER_SV03_026.tcgdexId }, { open: true }]);
+    await joinAt(H.jaCharmeleon, 1, {
+      foreignLocale: true,
+      thirdPocket: { material: "empty" },
+    } as Partial<LineChoice>);
+    expect(await read(`select copy_id from line_slot where id = $1`, [slotId(1)])).toEqual([
+      { copy_id: H.jaCharmeleon.id },
+    ]);
+  });
+
+  it("a slot above every card the line's chain knows: the catalog cannot tell, and she is told so", async () => {
+    // The English catalog here has no Charizard, so the line's chain stops at the Stage 1.
+    await seedLine(4, [{ card: CHARMANDER_SV03_026.tcgdexId }, { open: true }, { open: true }]);
+    await expect(joinAt(H.jaCharizard, 2)).rejects.toThrow(JOIN_UNCONFIRMED);
+    await untouched(H.jaCharizard, 2);
+  });
+
+  it("the line's chain must reach the line's root: one that does not is no stand-in (QA's Jf)", async () => {
+    // Blazy's line, with only its Blazking known: that chain starts at Blazeon, one stage off the line's own.
+    // Without the root check, its Stage 1 (Blazking at index 1) would take her Japanese Blazking.
+    await seedLine(9601, [{ open: true }, { open: true }, { card: BLAZKING.tcgdexId }]);
+    await expect(joinAt(H.jaBlazking, 1)).rejects.toThrow(JOIN_UNCONFIRMED);
+    await untouched(H.jaBlazking, 1);
   });
 });

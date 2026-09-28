@@ -373,6 +373,10 @@ export function leavesLineText(l: LeavesLine): string {
 export const NOT_A_LINE =
   "A Basic with no evolutions can't start a line. Put it in a front half, a collection or the bulk box.";
 
+/** A join the catalog cannot confirm (its earlier stages are not mirrored yet): not a wrong card, so said as such. */
+export const JOIN_UNCONFIRMED =
+  "We can't confirm this card's evolution from the catalog yet, so it can't join this line. Put it in a front half, a collection or the bulk box for now.";
+
 /** Where a card still in her haul is, in her words: produced by the popup's loaders, read by the popup itself. */
 export const IN_THE_HAUL = "Still in the haul";
 
