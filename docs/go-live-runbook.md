@@ -35,6 +35,7 @@ and the irreversible ones (A5, B5) wait for Karvi's explicit go on the day.
 | B5 | `promote-collection.mjs --dry-run`, then the real run | Karvi runs, Tech Lead reviews the dry-run output | dry run: yes. Real run: one transaction, but not idempotent |
 | B6 | Verify in the Production app | Karvi | read-only |
 | C | Post-cutover follow-ups (Testing becomes throwaway, tooling fixes) | Tech Lead / DevOps | see Part C |
+| C1 | Open sign-up on Production, after B6: bot check, then CAPTCHA, then sign-ups, then the app's open mode | Karvi (dashboards), Tech Lead verifies | yes, step by step (rollback in C1) |
 
 ---
 
@@ -425,7 +426,7 @@ TESTING_DB_URL='postgres://...testing...' PROD_DB_URL='postgres://...prod...' AL
 **Sign-up stays OFF on Production until B6 is verified.** The script refuses a Production
 that already holds owner rows, and it copies the shared tables (`catalog_card`, `set_alias`)
 over Production's, so a second user signing up first would block or be overwritten by the
-promotion. Karvi turns on "Allow new users to sign up" for Production only after B6.
+promotion. Opening it is its own procedure, after B6: **C1** below.
 
 **Once the app is multi-user** (sign-up open, the single-owner allow-list gone), name both
 owners by email rather than relying on `ALLOWED_OWNER_EMAIL`:
@@ -483,6 +484,51 @@ count that matters is the one the app sees:
 - **Branch protection on `main`** (A5) stays on. The `Vercel` context on `main` is the
   production deployment, so a "Canceled" (superseded) status on a later merge commit
   means the testable production SHA is the next one that contains it.
+
+## C1. Open sign-up on Production
+
+Karvi's ruling (2026-09-27): Production opens to sign-ups when it launches; Testing stays invite-only. The app
+reads two variables (UIL-127c): `SIGNUP_MODE` (only the exact value `open` opens it; anything else is invite)
+and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` (Cloudflare Turnstile's public key). The app is open only with BOTH set;
+either one missing means invite. Wherever the site key is set, `/login` shows the Turnstile check, in invite mode
+too, and a sign-in needs it solved: its token goes to Supabase with every request (#436).
+
+Two settings in Production's Supabase dashboard (Authentication) are the real gates, because the Auth API can be
+called with the public anon key without going through the app at all:
+
+- **CAPTCHA protection** (provider Turnstile, with its secret key): once on, Supabase refuses every sign-in
+  request that has no valid token, hers included.
+- **Allow new users to sign up**: while off, Supabase creates no new account, whatever asks.
+
+**The order leaves no unsafe moment.** Sign-up is never open without CAPTCHA (which would send a link to any
+address), and CAPTCHA is never on without the check showing (which would break her own sign-in). Do one step at a
+time, and check it before the next.
+
+Vercel binds variables at build time, so steps 1 and 4 each need a redeploy of `main` in Vercel. A redeploy does
+not run the Deploy workflow (it runs on a push), so where a step says "the smoke", the Tech Lead runs Deploy's own
+sign-in probe against Production by hand: `APP_URL=<production URL> node scripts/deploy-smoke-sign-in.mjs` (the
+malformed probe), and `PROBE=stranger` too while the mode is invite. Each is refused before Supabase is called, so
+neither sends an email, and CAPTCHA does not affect them.
+
+**Prerequisites**
+
+- [ ] B6 is verified (the promotion is done). The promotion refuses a Production where other owners have data.
+- [ ] Custom SMTP is live on Production (UIL-097). The built-in sender allows 2 emails an hour.
+- [ ] Karvi has a Cloudflare Turnstile widget for the Production domain: its **site key** and **secret key**.
+
+**Steps**
+
+| # | Step | Runs it | Check before going on | Rollback |
+|---|---|---|---|---|
+| 1 | Set `NEXT_PUBLIC_TURNSTILE_SITE_KEY` on Vercel's **Production** scope only (never Preview: Testing gets none). Leave `SIGNUP_MODE` as it is (invite). Redeploy `main`. | Karvi (Vercel) | Production `/login` shows the Turnstile check and still reads "This binder is private…". She signs in through the check (the app asks for it now; Supabase does not verify it yet). The smoke, both probes, passes. | Remove the variable and redeploy. |
+| 2 | Supabase Production → Authentication → turn on **CAPTCHA protection**, provider Turnstile, with the secret key. | Karvi (dashboard) | She signs out and signs in again through the check: the link arrives. Tech Lead: a sign-in POST with her address and a junk token reads "Complete the check above the button, then send the link again." and sends nothing. | Turn CAPTCHA off (takes effect at once). **Always before undoing step 1**: CAPTCHA on with no check showing refuses her sign-in. |
+| 3 | Supabase Production → Authentication → turn on **Allow new users to sign up**. | Karvi (dashboard) | Nothing visible changes: the app is still invite, and a new account through the API now needs a solved check (step 2). | Turn it off. |
+| 4 | Set `SIGNUP_MODE=open` on Vercel **Production** AND on the GitHub `production` environment, in the same sitting. Redeploy `main`. | Karvi (Vercel, GitHub) | `/login` reads "Enter your email to sign in or create an account." The smoke's malformed probe passes (from now on Deploy skips the stranger probe, because the GitHub variable is `open`). Optionally, a second address of hers, with the check solved, gets a link and an empty account of its own. | Set both back to `invite` (or delete them) and redeploy. Accounts created while it was open stay. |
+
+**Testing never gets any of this**: no site key, no `SIGNUP_MODE=open`, no CAPTCHA. Its invite mode is enforced
+by the app, so the same point applies there: whether Supabase's "Allow new users to sign up" is on decides
+whether the Auth API can create an account for an address the app would refuse. Since 0033 everything an account
+writes is its own (the mirrored card catalog is shared and read-only), so such an account sees no one else's data.
 
 ## Known exposure before cutover
 
