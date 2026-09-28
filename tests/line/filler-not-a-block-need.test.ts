@@ -105,6 +105,27 @@ describe("a pocket a block row already names is filled, whatever the stage says"
   });
 });
 
+describe("a stage she chose to fill is not a need even if its block row is gone", () => {
+  // Every writer keeps a filler stage's row (assert_line_slots, 0032: "a filler stage needs exactly one block row"),
+  // but a row removed outside a checked write (a cascade, direct SQL) must not turn her choice back into an offer.
+  it("is not offered on the Haul Plan, and a Move of a card as its block is refused", async () => {
+    await asOwner(db);
+    await applyStageDecisions(pgliteClient(db), {
+      lineId: LINE,
+      stages: { 1: { kind: "filler", filler: { material: "energy" } } },
+    });
+    await asSuperuser(db);
+    await db.query(`delete from binder_block where line_slot_id = $1`, [S(1)]);
+    await asOwner(db);
+    const pc = await loadPlanContext(pgliteClient(db), { excludeOwnedCopyIds: [] });
+    expect(pc.blockNeeds).toEqual([]);
+    await expect(
+      applyMove(pgliteClient(db), { copyId: C(9), destination: asBlock }, names),
+    ).rejects.toThrow(/already filled/);
+    expect(await blocks()).toEqual([]);
+  });
+});
+
 describe("an older engine block slot, with nothing in its pocket, is still a need (UIL-030)", () => {
   beforeEach(async () => {
     await asSuperuser(db);
