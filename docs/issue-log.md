@@ -9339,3 +9339,37 @@ every real invitee is added that way, but doesn't fix the underlying app-only en
 
 **Cross-reference UIL-127** (the multi-user sign-up feature this gap was found while building, PR #428
 specifically) and **UIL-097** (the same `signIn` action's other auth edge cases).
+
+## UIL-132 — An open slot past a family branch (Eevee, Charcadet, Applin, Wurmple) is never offered as a join target, so she could start a second line for a species she already has one for
+
+- **Reported:** 2026-09-27 (not from Karvi — the Tech Lead's finding, no data risk yet).
+- **Status:** Open, Medium, owner Full Stack Dev - 2, after PR #434.
+- **Priority:** Medium.
+- **Area:** Lines
+- **Env:** Testing, `develop` `866d99c`
+
+**Confirmed the mechanism exactly.** `buildLineJoinIndex`
+([`lib/line/join-options.ts:159-167`](../lib/line/join-options.ts:159)) names every slot in a line from
+one root-seeded chain: `buildChain` walks from the line's root species once, and that single walk is
+what every open slot's species is looked up against
+([`:187`](../lib/line/join-options.ts:187): `if (dexId === undefined) continue;`). For a branching
+family — Eevee, Charcadet, Applin, Wurmple — a chain seeded from the root only follows ONE branch; a slot
+past the branch point on any OTHER branch has no entry in that chain, so `dexId` comes back `undefined`
+and the slot is skipped entirely. It never appears in `openSlotsByDexId`, so it's never offered as a join
+target anywhere this index feeds — Lines, Lookup, Collections, or the Plan's Move sheet.
+
+**What she'd see instead.** With no join target findable for that branch, an incoming card for it makes
+the popup propose START (a new line) rather than ADD (join the existing one) — with UIL-096's
+existing-lines warning attached, which names other lines but still lets her start a second one for the
+same family without necessarily meaning to.
+
+**Confirmed no live data risk from this today.** Her actual Charcadet line isn't affected — its Stage 1
+slot is filled, so this gap only reaches OPEN branch slots, and she doesn't currently have one.
+
+**Sequenced after #434** (open at the time of this entry, "the Haul Plan's Move sheet sends a back half
+through the one line popup," UIL-117), whose branch-aware `isOwnStageOfLine` is reported as the shape
+this fix should follow — reported, not independently checked here since that PR hasn't landed yet.
+
+**Cross-reference UIL-121** (the same line-writing surface this affects) and **UIL-096** (the
+existing-lines warning that currently stands in for the join offer this entry says should exist
+instead).
