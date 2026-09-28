@@ -3655,6 +3655,33 @@ button.subhead.folded:hover {
   margin-top: 6px;
   color: var(--ink-2);
 }
+/* UIL-096's warning, first (UX review of #441): the line with room for this card, above everything else. */
+.lp-room {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background: var(--note);
+  border: 3px solid var(--ink);
+  font-size: 11px;
+}
+.lp-room span {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+/* On a phone the tile's and the note's button sit under the text, full width (UX review of #441). */
+@media (max-width: 420px) {
+  .lp-mini {
+    flex-wrap: wrap;
+  }
+  .lp-mini .btn,
+  .lp-room .btn {
+    flex-basis: 100%;
+    width: 100%;
+  }
+}
 .lp-error {
   margin-top: 12px;
   padding: 8px 10px;

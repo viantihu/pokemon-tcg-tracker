@@ -5,7 +5,7 @@
  * already has are named before she starts another; a line in another language takes a second, explicit tick.
  */
 import { createElement, useState } from "react";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LinePopup } from "@/app/(ui)/_components/LinePopup";
@@ -119,11 +119,13 @@ describe("UIL-117 · the step-through label", () => {
     const { rerender } = render(
       createElement(LinePopup, { ...props, position: { index: 1, total: 2 } }),
     );
-    expect(screen.getByRole("button", { name: /Start line/ }).textContent).toBe(
-      "Start line · next ▶",
+    expect(screen.getByRole("button", { name: /Start (a new )?line/ }).textContent).toBe(
+      "Start a new line anyway · next ▶",
     );
     rerender(createElement(LinePopup, { ...props, position: { index: 2, total: 2 } }));
-    expect(screen.getByRole("button", { name: /Start line/ }).textContent).toBe("Start line ▶");
+    expect(screen.getByRole("button", { name: /Start (a new )?line/ }).textContent).toBe(
+      "Start a new line anyway ▶",
+    );
     expect(screen.getByText(/Line card 2 of 2/)).toBeTruthy();
   });
 
@@ -138,11 +140,13 @@ describe("UIL-117 · the step-through label", () => {
     const { rerender } = render(
       createElement(LinePopup, { ...props, position: { index: 2, total: 2, next: true } }),
     );
-    expect(screen.getByRole("button", { name: /Start line/ }).textContent).toBe(
-      "Start line · next ▶",
+    expect(screen.getByRole("button", { name: /Start (a new )?line/ }).textContent).toBe(
+      "Start a new line anyway · next ▶",
     );
     rerender(createElement(LinePopup, { ...props, position: { index: 1, total: 2, next: false } }));
-    expect(screen.getByRole("button", { name: /Start line/ }).textContent).toBe("Start line ▶");
+    expect(screen.getByRole("button", { name: /Start (a new )?line/ }).textContent).toBe(
+      "Start a new line anyway ▶",
+    );
   });
 });
 
@@ -240,7 +244,7 @@ describe("UIL-117 · the line popup", () => {
     expect(screen.queryByText("Stays put")).toBeNull();
     // UIL-121: with the pull ticked the two-card line is complete, so she says what fills its third pocket first.
     await user.click(screen.getByRole("button", { name: /Leave it empty/ }));
-    await user.click(screen.getByRole("button", { name: /Start line/ }));
+    await user.click(screen.getByRole("button", { name: /Start (a new )?line/ }));
     expect(onConfirm).toHaveBeenCalledWith({
       mode: "start",
       binderId: "b1",
@@ -296,8 +300,92 @@ describe("UIL-117 · the line popup", () => {
     );
     expect(screen.getByText(/You already have 1 Charmeleon line/)).toBeTruthy();
     expect(screen.getByText(/Japanese · 1\/2 filled/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Add to that line" }));
+    // The tile's own button (the note at the top has the same one: UX review of #441).
+    await user.click(
+      within(document.querySelector(".lp-also") as HTMLElement).getByRole("button", {
+        name: "Add it there instead",
+      }),
+    );
     expect(onSwitch).toHaveBeenCalledWith({ kind: "add", lineId: "line-ja", slotId: "slot-ja-1" });
+  });
+
+  it("UIL-096's warning, marked: the line with room for this card comes first, 'Add it there instead' leads, nothing is picked, and starting another is still hers", async () => {
+    // Two lines she already has: one full (listed first as it came), one with room for this card.
+    const full = {
+      ...START.existingLines[0],
+      lineId: "line-full",
+      binderName: "KB-003",
+      locale: "en" as const,
+      filledCount: 2,
+      totalCount: 2,
+      joinSlotId: null,
+    };
+    const withRoom = {
+      ...START.existingLines[0],
+      lineId: "line-room",
+      binderName: "KB-001",
+      locale: "en" as const,
+      joinSlotId: "slot-room-1",
+      sameHere: true,
+    };
+    const onConfirm = vi.fn();
+    const onSwitch = vi.fn();
+    const user = userEvent.setup();
+    render(
+      createElement(Harness, {
+        model: { ...START, existingLines: [full, withRoom] },
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} },
+        onConfirm,
+        onSwitch,
+      }),
+    );
+    const tiles = [...document.querySelectorAll(".lp-also .lp-mini")] as HTMLElement[];
+    // The line with room first, marked, with the one "Add it there instead".
+    expect(tiles[0].textContent).toContain("KB-001");
+    expect(within(tiles[0]).getByText("Has room for this card")).toBeTruthy();
+    expect(within(tiles[1]).queryByText("Has room for this card")).toBeNull();
+    expect(within(tiles[0]).getByRole("button", { name: "Add it there instead" })).toBeTruthy();
+    expect(within(tiles[1]).queryByRole("button", { name: "Add it there instead" })).toBeNull();
+    // …and named at the TOP, before what moves and the sticky confirm (UX review of #441), with the same one tap.
+    const note = screen.getByRole("note");
+    expect(note.textContent).toContain(
+      "You have a Charmeleon line with room for this card · KB-001 · Back · Red",
+    );
+    const whatMoves = screen.getByText("What moves");
+    expect(note.compareDocumentPosition(whatMoves) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(within(note).getByRole("button", { name: "Add it there instead" }));
+    expect(onSwitch).toHaveBeenCalledWith({
+      kind: "add",
+      lineId: "line-room",
+      slotId: "slot-room-1",
+    });
+    onSwitch.mockClear();
+    // Nothing is picked for her: still a START, said as "anyway".
+    const start = screen.getByRole("button", {
+      name: /Start a new line anyway/,
+    }) as HTMLButtonElement;
+    expect(onSwitch).not.toHaveBeenCalled();
+    // Her Basic, which she does not pull, she leaves empty (UIL-121: nothing is decided for her); then she starts.
+    await user.click(screen.getByRole("button", { name: "Leave empty" }));
+    await waitFor(() => expect(start.disabled).toBe(false));
+    await user.click(start);
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ mode: "start" }));
+  });
+
+  it("with no line that has room, the confirm is the plain 'Start line'", () => {
+    render(
+      createElement(Harness, {
+        model: {
+          ...START,
+          stages: START.stages.filter((st) => st.state === "incoming"),
+          existingLines: [{ ...START.existingLines[0], joinSlotId: null }],
+        },
+        initial: { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} },
+        onConfirm: vi.fn(),
+      }),
+    );
+    expect(screen.getByRole("button", { name: /^Start line/ })).toBeTruthy();
+    expect(screen.queryByText("Has room for this card")).toBeNull();
   });
 
   it("ADD to a line in another language: Confirm waits for the second, explicit tick", async () => {
@@ -328,7 +416,7 @@ describe("UIL-117 · the line popup", () => {
 describe("UIL-121 · her choice for each empty stage and the third pocket", () => {
   const initial: LineChoice = { mode: "start", binderId: "b1", band: "red", pulls: [], stages: {} };
   const confirmButton = () =>
-    screen.getByRole("button", { name: /Start line/ }) as HTMLButtonElement;
+    screen.getByRole("button", { name: /Start (a new )?line/ }) as HTMLButtonElement;
 
   it("an unticked stage waits for her choice: Confirm stays off until she picks, and her pick is what is sent", async () => {
     const onConfirm = vi.fn();
@@ -444,7 +532,7 @@ describe("UIL-121 · a stage whose card is still in this haul is not asked about
     // The Senior BA's condition 1: the Stage 2 is asked on the LAST card she has for the line, not on this one.
     expect(screen.queryByText(/Your choice for each empty stage/)).toBeNull();
     expect(screen.queryByText(/Third pocket/)).toBeNull();
-    await user.click(screen.getByRole("button", { name: /Start line/ }));
+    await user.click(screen.getByRole("button", { name: /Start (a new )?line/ }));
     expect(onConfirm).toHaveBeenCalledWith({ ...initial, stages: {} });
   });
 });

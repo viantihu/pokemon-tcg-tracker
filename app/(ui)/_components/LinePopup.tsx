@@ -202,6 +202,12 @@ export function LinePopup({
         })
       : model.stages;
   const lineName = model.stages.at(-1)?.card?.name ?? card.name;
+  /** On a START, the line she already has with room for this card (the one here first), for the note at the top. */
+  const roomy =
+    model.mode === "start"
+      ? (model.existingLines.find((l) => l.joinSlotId && l.sameHere) ??
+        model.existingLines.find((l) => l.joinSlotId))
+      : undefined;
   const title =
     model.mode === "start"
       ? "Start a line"
@@ -211,7 +217,10 @@ export function LinePopup({
   const label =
     confirmLabel ??
     (model.mode === "start"
-      ? "Start line"
+      ? // A line she has already has room for this card: starting another is still hers, said as such (UIL-096).
+        model.existingLines.some((l) => l.joinSlotId)
+        ? "Start a new line anyway"
+        : "Start line"
       : model.mode === "add"
         ? cc && cc.picked === null
           ? "Confirm"
@@ -255,6 +264,26 @@ export function LinePopup({
         </button>
       </div>
       <div className="lp-body">
+        {/* UIL-096's warning, first (UX review of #441): a line she has with room for this card is named at the top,
+            before the sticky "Start a new line anyway", with its one-tap Add. The full list stays below. */}
+        {roomy && onSwitch ? (
+          <div className="lp-room" role="note">
+            <span>
+              You have a {lineName} line with room for this card · {roomy.binderName} · Back ·{" "}
+              {roomy.bandDisplay}
+            </span>
+            <button
+              type="button"
+              className="btn"
+              disabled={busy}
+              onClick={() =>
+                onSwitch({ kind: "add", lineId: roomy.lineId, slotId: roomy.joinSlotId! })
+              }
+            >
+              Add it there instead
+            </button>
+          </div>
+        ) : null}
         {bands && onBand && bands.length > 1 && model.mode !== "replace" ? (
           <>
             <div className="lp-lbl u" style={{ marginTop: 0 }}>

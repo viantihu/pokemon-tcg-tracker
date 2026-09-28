@@ -139,11 +139,13 @@ export async function loadPlanContext(
   }
   const binders = binderRows.map((b) => toBinder(b, { freeBackHalf: freeBackByBinder.get(b.id) }));
 
-  // Resolve each slot's species dexId from its filled copy or its wishlist target.
+  // Resolve each slot's species dexId from its filled copy or the card she CHASES there. A target on a stage she has
+  // not decided is an old engine target (until D) and names nothing: such a stage is matched by the incoming card's
+  // own chain instead (the cascade's `existingLineSlot`), so the other branch is not shut out (the TL's rule).
   const dexIdForSlot = (slot: Row<"line_slot">): number | null => {
     const viaCopy = slot.copy_id && copyRowById.get(slot.copy_id);
     if (viaCopy) return catalogById.get(viaCopy.catalog_card_id)?.dexId[0] ?? null;
-    if (slot.target_catalog_card_id) {
+    if (slot.target_catalog_card_id && slot.stage_choice === "chase") {
       return catalogById.get(slot.target_catalog_card_id)?.dexId[0] ?? null;
     }
     return null;

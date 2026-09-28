@@ -223,6 +223,27 @@ export function formsALine(card: CatalogCard, catalog: CatalogCard[]): boolean {
   return buildChain({ id: "forms-a-line", card, variant: "normal" }, catalog).length >= 2;
 }
 
+/** Each card's chain, once per catalog slice (the TL's review: the cascade asks it per card × line × open stage). */
+const chainCache = new WeakMap<CatalogCard[], Map<string, ChainNode[]>>();
+
+/**
+ * `buildChain` for a card, computed once per catalog slice and card: the cascade and the line-join index ask the ONE
+ * stage rule (`stageFit`) for every card × line × open stage, and a chain is a scan of the whole catalog. A new slice
+ * (a reloaded catalog) is a new cache. Callers must not mutate the chain they get back.
+ */
+export function chainFor(card: CatalogCard, catalog: CatalogCard[]): ChainNode[] {
+  let byCard = chainCache.get(catalog);
+  if (!byCard) {
+    byCard = new Map();
+    chainCache.set(catalog, byCard);
+  }
+  const hit = byCard.get(card.tcgdexId);
+  if (hit) return hit;
+  const chain = buildChain({ id: "chain-for", card, variant: "normal" }, catalog);
+  byCard.set(card.tcgdexId, chain);
+  return chain;
+}
+
 /**
  * A line's open stage, and what is known around it: each a card in the slot, or the card she CHASES there. A target
  * on a stage she has not decided is an old engine target, and is not known (the TL's rule).
@@ -259,8 +280,7 @@ export type StageFit = "fits" | "wrong" | "unknown";
  *     own chain has this species at this stage.
  */
 export function stageFit(card: CatalogCard, catalog: CatalogCard[], at: LineStageAround): StageFit {
-  const chainOf = (c: CatalogCard) =>
-    buildChain({ id: "stage-fit", card: c, variant: "normal" }, catalog);
+  const chainOf = (c: CatalogCard) => chainFor(c, catalog);
   const dex = card.dexId;
   const own = chainOf(card);
   const reachesRoot = own[0]?.dexId === at.rootDexId;

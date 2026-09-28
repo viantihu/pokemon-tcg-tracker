@@ -16,9 +16,11 @@ import {
   band as bandOf,
   buildChain,
   lineLocaleOf,
+  stageFit,
   type CatalogCard,
   type ChainNode,
   type IncomingCard,
+  type LineStageAround,
   type TypeColorMap,
 } from "@/lib/engine";
 import { localeOfId } from "@/lib/catalog/locale";
@@ -43,6 +45,17 @@ export interface JoinIndexSlot {
   target_catalog_card_id?: string | null;
   /** For the line's locale: the filled copy, whose card's namespace wins over any target. */
   copy_id?: string | null;
+  /** Her choice for the stage (UIL-121): a target is her card only when she CHASES it. */
+  stage_choice?: string | null;
+}
+
+/**
+ * An open slot past a branch (Eevee, Charcadet), which the line's root-seeded chain cannot name, and what is known
+ * around it for the ONE rule (`stageFit`): a card in a slot, or the card she chases there.
+ */
+export interface PastBranchSlot {
+  candidate: LineJoinCandidate;
+  around: LineStageAround;
 }
 
 export interface LineJoinIndex {
@@ -57,6 +70,17 @@ export interface LineJoinIndex {
   linesByRoot: Map<number, ExistingLineBlock[]>;
   /** Each line's chain rebuilt from its root, by line id — so the caller never walks it twice. */
   chains: Map<string, ChainNode[]>;
+  /**
+   * The open slots past a branch, by `${locale}:${rootDexId}:${stageIndex}` (the Senior BA's ruling on the TL's
+   * finding). A card is offered one when ITS own chain has that root and puts it at that depth, and its neighbours
+   * agree: the rule the one line builder holds a join to (`isOwnStageOfLine`, lib/line/line-choice.ts).
+   */
+  openSlotsPastBranch: Map<string, PastBranchSlot[]>;
+}
+
+/** An open slot past a branch is offered by the family's root and the slot's depth, per locale. */
+export function pastBranchKey(locale: Locale, rootDexId: number, stageIndex: number): string {
+  return `${locale}:${rootDexId}:${stageIndex}`;
 }
 
 /** What the picker needs for one card. Serialisable: arrays, records and strings only. */
@@ -125,6 +149,17 @@ export function buildLineJoinIndex(
   const openSlotsByDexId = new Map<string, LineJoinCandidate[]>();
   const linesByRoot = new Map<number, ExistingLineBlock[]>();
   const chains = new Map<string, ChainNode[]>();
+  const openSlotsPastBranch = new Map<string, PastBranchSlot[]>();
+  const catalogById = new Map(catalog.map((c) => [c.tcgdexId, c]));
+  /** The card a slot is known to hold: the card in it, or the one she chases there. */
+  const knownAt = (s: JoinIndexSlot | undefined) => {
+    const id = s?.copy_id
+      ? copyCardId(s.copy_id)
+      : s?.stage_choice === "chase"
+        ? s.target_catalog_card_id
+        : null;
+    return (id ? catalogById.get(id) : undefined) ?? null;
+  };
 
   for (const line of lines) {
     const slots = [...(slotsByLine.get(line.id) ?? [])].sort(
@@ -183,10 +218,7 @@ export function buildLineJoinIndex(
     linesByRoot.set(line.rootDexId, forRoot);
     for (const s of slots) {
       if (s.state === "filled") continue;
-      const dexId = chain[s.stage_index]?.dexId;
-      if (dexId === undefined) continue;
-      const list = openSlotsByDexId.get(candidateKey(locale, dexId)) ?? [];
-      list.push({
+      const candidate: LineJoinCandidate = {
         lineId: line.id,
         slotId: s.id,
         binderId: line.binderId,
@@ -195,12 +227,41 @@ export function buildLineJoinIndex(
         stage: s.stage,
         filledCount,
         totalCount,
-      });
+      };
+      const dexId = chain[s.stage_index]?.dexId;
+      if (dexId === undefined) {
+        // Past a branch, the chain from the root names no one species here (an Eevee line's Stage 1 is Vaporeon OR
+        // Jolteon OR …). Offered by the family and the depth instead, with what its neighbours say.
+        if (!chain[0]) continue;
+        const seed =
+          [...slots]
+            .filter((o) => o.id !== s.id)
+            .sort((a, b) => b.stage_index - a.stage_index)
+            .map(knownAt)
+            .find((c) => c !== null) ?? null;
+        const key = pastBranchKey(locale, line.rootDexId, s.stage_index);
+        const list = openSlotsPastBranch.get(key) ?? [];
+        list.push({
+          candidate,
+          around: {
+            rootDexId: line.rootDexId,
+            stageIndex: s.stage_index,
+            chased: s.stage_choice === "chase" ? knownAt(s) : null,
+            before: knownAt(slots.find((o) => o.stage_index === s.stage_index - 1)),
+            after: knownAt(slots.find((o) => o.stage_index === s.stage_index + 1)),
+            seed,
+          },
+        });
+        openSlotsPastBranch.set(key, list);
+        continue;
+      }
+      const list = openSlotsByDexId.get(candidateKey(locale, dexId)) ?? [];
+      list.push(candidate);
       openSlotsByDexId.set(candidateKey(locale, dexId), list);
     }
   }
 
-  return { openSlotsByDexId, linesByRoot, chains };
+  return { openSlotsByDexId, linesByRoot, chains, openSlotsPastBranch };
 }
 
 /**
@@ -217,14 +278,34 @@ export function joinOptionsFor(
   if (dexId === undefined) return null;
   /** This card's own locale: it may only join a line of the same regional variant (UIL-090). */
   const locale = localeOfId(card.tcgdexId);
-  const joinCandidates = sortJoinCandidates(
-    index.openSlotsByDexId.get(candidateKey(locale, dexId)) ?? [],
-  );
 
   // THIS card's own chain root (may differ from its own dexId, e.g. a Stage1 whose Basic exists in the
   // catalog): a family is identified by its root, which is what `linesByRoot` is keyed on.
   const cardChain = buildChain({ id: "u", card, variant: "normal" } as IncomingCard, catalog);
   const cardRootDexId = cardChain[0]?.dexId ?? dexId;
+
+  // An open slot past a branch takes this card by the ONE rule the line builder holds a join to (`stageFit`): its
+  // own chain has the line's root and puts it at that depth, and the neighbours agree. Looked up by the family and
+  // the depth its own chain gives it.
+  const depth = cardChain.findIndex((n) => n.dexId === dexId);
+  // A card whose own language's catalog cannot walk back to a Basic has no family to look up by: every open slot
+  // past a branch in its language is asked, and the rule's own fallback (the line's chain) decides (QA's F7).
+  const whole = cardChain[0]?.cards.some((c) => !c.evolveFrom) ?? false;
+  const pastBranch = (
+    !whole
+      ? [...index.openSlotsPastBranch.entries()]
+          .filter(([key]) => key.startsWith(`${locale}:`))
+          .flatMap(([, slots]) => slots)
+      : depth < 0
+        ? []
+        : (index.openSlotsPastBranch.get(pastBranchKey(locale, cardRootDexId, depth)) ?? [])
+  )
+    .filter((p) => stageFit(card, catalog, p.around) === "fits")
+    .map((p) => p.candidate);
+  const joinCandidates = sortJoinCandidates([
+    ...(index.openSlotsByDexId.get(candidateKey(locale, dexId)) ?? []),
+    ...pastBranch,
+  ]);
 
   return {
     dexId,
@@ -233,6 +314,18 @@ export function joinOptionsFor(
     joinCandidates,
     // Unfiltered on purpose (UIL-096): every binder, band and locale. The panel decides what to say about
     // each; filtering here would decide for it, which is how the old record came to hide lines elsewhere.
-    existingLines: [...(index.linesByRoot.get(cardRootDexId) ?? [])],
+    existingLines: [
+      ...(index.linesByRoot.get(cardRootDexId) ?? []),
+      // A card whose own chain cannot walk back names no family: the lines it can join are its family's (QA's F7).
+      ...(whole
+        ? []
+        : [...index.linesByRoot.values()]
+            .flat()
+            .filter(
+              (l) =>
+                joinCandidates.some((c) => c.lineId === l.lineId) &&
+                !(index.linesByRoot.get(cardRootDexId) ?? []).some((b) => b.lineId === l.lineId),
+            )),
+    ],
   };
 }
