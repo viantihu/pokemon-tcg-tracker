@@ -1,4 +1,5 @@
 import type { BlockNeedCandidate } from "@/lib/line/types";
+import { isOpenBlockNeed } from "@/lib/line/move";
 /**
  * Load the M3 engine context from the DB and run the cascade over a haul draft (dev-spec §5 M6).
  *
@@ -195,13 +196,10 @@ export async function loadPlanContext(
   /**
    * OPEN binder-block needs (UIL-030). The engine decides a stage can never be filled by creating a
    * block slot (lib/engine/line.ts); only Backfill has ever written the binder_block row that physically
-   * fills that pocket run. Every block slot with no line-terminated binder_block on its line is a
-   * reserved pocket with nothing in it — exactly when a bulk-bound duplicate is worth offering as the
-   * block. Only needs with a binder are listed: a line with no binder has nowhere to place anything.
+   * fills that pocket run. A block slot nothing fills (`isOpenBlockNeed`: not her filler stage, and no block row
+   * on it or its line) is a reserved pocket with nothing in it — exactly when a bulk-bound duplicate is worth
+   * offering as the block. Only needs with a binder are listed: a line with no binder has nowhere to place anything.
    */
-  const backedLineIds = new Set(
-    blockRows.filter((b) => b.purpose === "line-terminated" && b.line_id).map((b) => b.line_id),
-  );
   const lineRowById = new Map(lineRows.map((l) => [l.id, l]));
   /** A species' card name by dex id, as the catalog spells it ("Charizard"), for the Haul Plan's badges (UIL-117). */
   // Built once per load (TL review of #392: a scan per call was ~25M comparisons at her size). The English printing's
@@ -226,7 +224,8 @@ export async function loadPlanContext(
   const speciesName = (rootDexId: number) =>
     nameByDex.get(rootDexId)?.name.toUpperCase() ?? `SPECIES #${rootDexId}`;
   const blockNeeds: BlockNeedCandidate[] = slotRows
-    .filter((s) => s.state === "block" && !backedLineIds.has(s.line_id))
+    // Her filler stages are filled pockets, never needs (UIL-121): the same predicate the write checks.
+    .filter((s) => isOpenBlockNeed(s, blockRows))
     .flatMap((s) => {
       const line = lineRowById.get(s.line_id);
       if (!line?.binder_id) return [];

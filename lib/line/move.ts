@@ -80,6 +80,28 @@ export function placementForMove(dest: MoveDestination): CopyPlacementPatch {
 }
 
 /**
+ * An OPEN binder-block need (UIL-030): a block slot whose pocket nothing fills yet. Since UIL-121 a block slot is her
+ * FILLER stage, filled by the block row that names it (`line_slot_id`: a basic energy or a spare card), and that is
+ * never a need: offering it would put a second card in a pocket she already filled. Only an older engine block slot
+ * with no block row on its line is one (0030 turned those into open stages, so none should remain). One predicate for
+ * the Haul Plan's offer and the write's check, so they cannot disagree.
+ */
+export function isOpenBlockNeed(
+  slot: { id: string; line_id: string; state: string; stage_choice?: string | null },
+  blocks: readonly { line_id: string | null; line_slot_id?: string | null; purpose: string }[],
+): boolean {
+  return (
+    slot.state === "block" &&
+    slot.stage_choice !== "filler" &&
+    !blocks.some(
+      (b) =>
+        b.line_slot_id === slot.id ||
+        (b.line_id === slot.line_id && b.purpose === "line-terminated"),
+    )
+  );
+}
+
+/**
  * The writes that make a moved/overridden copy a BINDER BLOCK (UIL-030), emitted right after its copy
  * write by both `buildMoveOps` and the Haul Plan's `writeOverriddenCard` so the two cannot drift: the
  * `binder_block` row (line-terminated, a repurposed duplicate, pointing at the copy and the line) that
