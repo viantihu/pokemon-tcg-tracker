@@ -32,7 +32,7 @@
 
 import { localeOfId } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
-import { buildChain, lineLocaleOf, effectiveType, isPlaced, type Role } from "@/lib/engine";
+import { buildChain, effectiveType, isPlaced, type Role } from "@/lib/engine";
 import {
   applyWriteOps,
   evolutionLineRepo,
@@ -54,7 +54,7 @@ import {
   releaseSlotOps,
 } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
-import { NOT_A_LINE, type LineChoice } from "@/lib/line/popup";
+import type { LineChoice } from "@/lib/line/popup";
 import { lineReadsClosed } from "@/lib/line/popup";
 import { buildBackHalfLineOps, KEEP_IS_NO_LINE_MOVE } from "@/lib/line/write";
 import { isLineCard } from "./line-proposal";
@@ -310,12 +310,6 @@ export async function commitCardPlacement(
     /** Her explicit placement for this card, if she overrode the cascade (M7). */
     override?: MoveDestination | null;
     /**
-     * Copy ids she ticked to relocate into the line this card starts (UIL-061). Absent means MOVE
-     * NOTHING — the default is deliberately the safe one, so a caller that forgets to thread it
-     * through leaves her collection alone rather than relocating it.
-     */
-    confirmedPulls?: string[];
-    /**
      * The `placementDigest` of what the screen was SHOWING when she clicked Done (UIL-045).
      *
      * The write re-derives from current state, so without this it can silently land somewhere other
@@ -399,8 +393,6 @@ export async function commitCardPlacement(
   }
 
   const { planned } = planFromDraft(pc, draft);
-  // Consent rides on the planned card, so `writeNewLine` never has to guess (UIL-061).
-  const withConsent = planned.map((pl) => ({ ...pl, confirmedPulls: input.confirmedPulls ?? [] }));
 
   /**
    * UIL-117: EVERY card headed into a line waits for her OK; the cascade no longer starts, fills or swaps a line on
@@ -506,7 +498,7 @@ export async function commitCardPlacement(
     }
   }
 
-  const { payload, counts } = buildHaulCommitPayload(pc, withConsent, {
+  const { payload, counts } = buildHaulCommitPayload(pc, planned, {
     draft,
     overrides: override ? { [input.card.id]: override } : undefined,
     overrideReasons: overrideReason ? { [input.card.id]: overrideReason } : undefined,
@@ -763,7 +755,11 @@ export function buildHaulCommitPayload(
       counts.decisions += 1;
       continue;
     }
-    const copyId = writeCard(ops, p, pc, slotsByLine, passLines, counts);
+    // A card headed into a line is written only through her line choice (UIL-117: `commitLineChoice`) or her Move
+    // (above). The cascade no longer starts, fills or swaps a line on its own; a line card here would mean the screen
+    // and the server disagree about it, so it is refused, never written.
+    if (isLineCard(p.result)) throw new Error(LINE_CHOICE.missing);
+    const copyId = writeCard(ops, p, pc, counts);
     // UIL-053: the card goes on the list of the collection she picked, in the same transaction as its
     // placement, so it is never in the binder and on no list.
     const picked = p.result.collectionPick?.collections.find(
@@ -776,19 +772,16 @@ export function buildHaulCommitPayload(
         catalog_card_ids: [p.tcgdexId],
       });
     }
-    const reason = mismatch
-      ? "Colour mismatch resolved at intake (her call, UIL-069): joined the existing line over " +
-        "filing by its own colour."
-      : picked
-        ? `Specialty card filed in the "${picked.name}" collection (her pick, UIL-053).`
-        : p.result.reason;
+    const reason = picked
+      ? `Specialty card filed in the "${picked.name}" collection (her pick, UIL-053).`
+      : p.result.reason;
     ops.push({
       op: "insert_decision",
       haul_id: null,
       copy_id: copyId,
-      decision: mismatch ? "colour-mismatch-join-line" : p.result.step,
+      decision: p.result.step,
       reason,
-      resolved_by: mismatch || picked ? "user" : "auto",
+      resolved_by: picked ? "user" : "auto",
     });
     counts.decisions += 1;
   }
@@ -796,18 +789,15 @@ export function buildHaulCommitPayload(
   return { payload: { ops }, counts };
 }
 
-/** Emit the incoming copy with its placement, then the step's line/swap side effects. Returns id. */
-function writeCard(
-  ops: WriteOp[],
-  p: PlannedCard,
-  pc: PlanContext,
-  slotsByLine: Map<string, MutableSlot[]>,
-  passLines: Map<string, { lineId: string }>,
-  counts: CommitCounts,
-): string {
+/**
+ * Emit the incoming copy with its placement, and a swap's displaced copy to the bulk box. Returns its id. Only a card
+ * that is NOT headed into a line reaches here (`buildHaulCommitPayload` refuses one): a line is written by her line
+ * choice alone (UIL-117), so the cascade's own line writes (fill a slot, start a line, a swap inside a line) are gone.
+ */
+function writeCard(ops: WriteOp[], p: PlannedCard, pc: PlanContext, counts: CommitCounts): string {
   const { result } = p;
 
-  // Placement columns. Holo-swap inherits the displaced copy's role wholesale (system-design §3).
+  // Placement columns. An upgrade inherits the displaced copy's role wholesale (system-design §3).
   const swap = result.swap;
   const placement = swap
     ? {
@@ -821,20 +811,7 @@ function writeCard(
   const copyId = emitIncomingCopy(ops, p, placement, counts);
 
   if (swap) {
-    // Incoming holo takes over the line slot, if any; the displaced normal goes to bulk.
-    if (swap.incomingInherits.lineSlotId) {
-      ops.push({
-        op: "update_copy",
-        id: copyId,
-        patch: { line_slot_id: swap.incomingInherits.lineSlotId },
-      });
-      ops.push({
-        op: "update_slot",
-        id: swap.incomingInherits.lineSlotId,
-        patch: { copy_id: copyId },
-      });
-      touchSlot(slotsByLine, swap.incomingInherits.lineSlotId, copyId);
-    }
+    // The displaced normal copy goes to the bulk box.
     const displaced = pc.copyRowById.get(swap.displacedCopyId);
     if (displaced) {
       ops.push({
@@ -849,50 +826,7 @@ function writeCard(
         },
       });
     }
-    return copyId;
   }
-
-  // Fill an existing DB line's open slot (system-design §5 step 4a).
-  if (result.filledExistingSlot) {
-    const { lineId, stageIndex } = result.filledExistingSlot;
-    const slots = slotsByLine.get(lineId) ?? [];
-    const slot = slots.find((s) => s.stage_index === stageIndex);
-    /**
-     * ALL OR NOTHING (UIL-062). The two pointers are one fact stored twice — `slot.copy_id` and
-     * `copy.line_slot_id` — and the app is only correct when they agree.
-     *
-     * This used to be `if (slot) { … }` with no else. When the slot could not be resolved, the cascade
-     * had already decided "fill stage N of line L" and `emitIncomingCopy` had already written the
-     * back-half placement columns with `line_slot_id: null` (`copyPlacementFromTarget` carries no slot
-     * id for any target kind). Neither pointer op then ran, so the commit succeeded having shelved the
-     * card in the back half while the line still showed that stage as wanting a card: Done pressed, card
-     * physically in the binder, that stage still reading as unfilled on the Lines page.
-     *
-     * Described as the PATH, deliberately, and not as the report that prompted the look. The report was
-     * a Dragonair reading HUNTING, and that turned out to be no defect at all — she owns no Dragonair
-     * and the slot was a correct placeholder. Naming it here would hand the next reader a conflation
-     * that already cost two sessions and one spurious re-check request.
-     *
-     * Failing loudly is right rather than harsh. The write is one `apply_write_ops` transaction, so
-     * throwing leaves ZERO rows and she retries against fresh state; the alternative is a silent
-     * half-write that no screen contradicts. If this ever fires it means the context and the cascade
-     * disagree about a line's slots, which is a bug worth surfacing rather than absorbing.
-     */
-    if (!slot) {
-      throw new Error(
-        `Cannot commit: the cascade chose stage ${stageIndex} of line ${lineId} for this card, but ` +
-          `that slot is not in the loaded line state. Re-run the plan so it reflects current lines.`,
-      );
-    }
-    fillLineSlot(ops, lineId, slot, slots, copyId);
-    return copyId;
-  }
-
-  // Create (or dedupe into) a new line.
-  if (result.newLine) {
-    writeNewLine(ops, p, copyId, pc, slotsByLine, passLines, counts);
-  }
-
   return copyId;
 }
 
@@ -1087,210 +1021,6 @@ function emitIncomingCopy(
 }
 
 /** Create the proposed line + its slots + wishlist, or fill the incoming's slot if the line exists. */
-/**
- * Fill one slot of a line she already has: both pointers (UIL-062), and the line `complete` when that was its last
- * open slot (UIL-117 gap 4: the Move path did this and the Haul Plan did not). One shared builder with the Move
- * path, so the two cannot drift again.
- */
-function fillLineSlot(
-  ops: WriteOp[],
-  lineId: string,
-  slot: MutableSlot,
-  siblings: MutableSlot[],
-  copyId: string,
-): void {
-  const slotIsLastOpen = siblings.every((s) => s.id === slot.id || s.state === "filled");
-  slot.state = "filled";
-  slot.copy_id = copyId;
-  ops.push(...buildExistingLineJoinOps({ copyId, lineId, slotId: slot.id, slotIsLastOpen }).ops);
-  ops.push({ op: "update_copy", id: copyId, patch: { line_slot_id: slot.id } });
-}
-
-function writeNewLine(
-  ops: WriteOp[],
-  p: PlannedCard,
-  incomingCopyId: string,
-  pc: PlanContext,
-  slotsByLine: Map<string, MutableSlot[]>,
-  passLines: Map<string, { lineId: string }>,
-  counts: CommitCounts,
-): void {
-  const plan = p.result.newLine!;
-  // Binder-scoped as of UIL-084, like every other reading of the uniqueness key: "the same line"
-  // means the same species and band IN THE SAME BINDER.
-  // The line's locale is the incoming card's: it is the card that starts it (UIL-090).
-  const planLocale = localeOfId(p.tcgdexId);
-  const key = passLineKey(plan.binderId, plan.rootDexId, plan.colorBand, planLocale);
-  const incomingStageIndex =
-    p.result.target.kind === "back-half-line" ? p.result.target.stageIndex : -1;
-
-  // Same line already created this pass, or already in the DB → fill instead of duplicating.
-  const passLine = passLines.get(key);
-  const dbLine = passLine
-    ? null
-    : findLineInBinder(pc, plan.rootDexId, plan.colorBand, plan.binderId, planLocale);
-  if (passLine || dbLine) {
-    const lineId = passLine?.lineId ?? dbLine!;
-    const slots = slotsByLine.get(lineId) ?? [];
-    /**
-     * The incoming card's OWN stage, and only that (UIL-117 gap 5). This used to fall back to "the first still-open
-     * slot" of any stage, so a Basic could fill a Stage 2 slot; and with no open slot at all it wrote nothing,
-     * leaving the card shelved in the back half on no line. Either means the cascade and the loaded lines disagree,
-     * the same disagreement the existing-slot fill above fails loudly on, so this fails the same way: one
-     * transaction, zero rows written, and she re-runs the plan against current lines.
-     */
-    const slot = slots.find((s) => s.stage_index === incomingStageIndex && s.state !== "filled");
-    if (!slot) {
-      throw new Error(
-        "Cannot commit: the line this card would start is already in this binder and already holds this card's " +
-          "stage. Re-run the plan so it reflects current lines.",
-      );
-    }
-    fillLineSlot(ops, lineId, slot, slots, incomingCopyId);
-    return;
-  }
-
-  /**
-   * Pulls she has agreed to. Empty means move nothing (UIL-061) — the cascade's proposal is a
-   * proposal, and every stage it wanted to fill from her collection stays a placeholder instead.
-   */
-  const confirmed = new Set(p.confirmedPulls ?? []);
-  // The cascade plans the line with every proposed pull in it, so it can plan it `complete`. A pull she did not
-  // tick leaves its stage a placeholder, so that line is `open` (UIL-117 gap 6, found by Dev 2).
-  const declinedAnyPull = plan.slots.some(
-    (s) =>
-      s.copyId !== null &&
-      s.copyId !== undefined &&
-      s.copyId !== p.incomingId &&
-      !confirmed.has(s.copyId),
-  );
-  const status = plan.status === "complete" && declinedAnyPull ? "open" : plan.status;
-
-  // A species with no evolutions is never a line (Karvi's ruling, 2026-09-27).
-  if (plan.slots.length < 2) throw new Error(NOT_A_LINE);
-  const lineId = crypto.randomUUID();
-  ops.push({
-    op: "insert_line",
-    id: lineId,
-    root_dex_id: plan.rootDexId,
-    color_band: plan.colorBand,
-    binder_id: plan.binderId,
-    half: "back",
-    status,
-  });
-  counts.lines += 1;
-
-  const mirror: MutableSlot[] = [];
-
-  for (const slot of plan.slots) {
-    const isIncoming = slot.copyId === p.incomingId;
-    const proposedPullId = !isIncoming && slot.copyId ? slot.copyId : null;
-    // A proposed pull she has not confirmed is not written. The slot degrades to a placeholder so the
-    // line still records that the stage exists, without claiming to hold a card that is really still
-    // in her binder. Deliberately NO wishlist row for it: the engine only proposes wishlist entries for
-    // stages it found nothing for, and she already OWNS this card — she just kept it where it was.
-    // Adding one would put a card she owns on a list of cards to acquire.
-    const ownedCopyId = proposedPullId && confirmed.has(proposedPullId) ? proposedPullId : null;
-    const declinedPull = proposedPullId !== null && ownedCopyId === null;
-    const copyIdForSlot = isIncoming ? incomingCopyId : ownedCopyId;
-    const slotState = declinedPull ? "placeholder" : slot.state;
-
-    const slotId = crypto.randomUUID();
-    ops.push({
-      op: "insert_slot",
-      id: slotId,
-      line_id: lineId,
-      stage_index: slot.stageIndex,
-      stage: slot.stage,
-      state: slotState,
-      copy_id: copyIdForSlot,
-      target_catalog_card_id: slot.targetCatalogCardId,
-      // Say WHY it is open, so the Lines screen can distinguish "never owned" from "she kept it where
-      // it was" without inferring it.
-      note: declinedPull ? "left in place (not confirmed)" : (slot.note ?? null),
-    });
-    counts.slots += 1;
-    mirror.push({
-      id: slotId,
-      stage_index: slot.stageIndex,
-      state: slotState,
-      copy_id: copyIdForSlot,
-    });
-
-    // Wire the incoming copy to its slot.
-    if (isIncoming) {
-      ops.push({ op: "update_copy", id: incomingCopyId, patch: { line_slot_id: slotId } });
-    }
-    // A CONFIRMED pull: relocate the copy into this line's back half.
-    if (ownedCopyId) {
-      const owned = pc.copyRowById.get(ownedCopyId);
-      if (owned) {
-        // Release the slot it is leaving, through the SHARED emitter (UIL-062 follow-up).
-        //
-        // This was a fourth inline `update_slot`, which defeats the point of extracting
-        // `releaseSlotOps` in the first place — one emission path is what stops the release op lists
-        // drifting apart, and a path outside it is a path that can drift. It was also missing two
-        // things the sibling `writeOverriddenCard` block has:
-        //
-        //   * the DEMOTE. A line that was `complete` is not complete once a stage empties, and leaving
-        //     the status alone is the same class of lie as the stale slot itself.
-        //   * the POSITIVE-MATCH guard. Releasing on "the copy has a pointer" alone will evict a card
-        //     that never moved, if that pointer was already crossed. I found and fixed exactly this in
-        //     `writeOverriddenCard` while building #151 and did not carry it across — so of the three
-        //     gaps here this is the only one that can CORRUPT rather than under-record.
-        const [vacating, demoting] = slotReleaseFor(owned, pc);
-        if (vacating) {
-          ops.push(...releaseSlotOps(vacating, demoting));
-          touchSlot(slotsByLine, vacating, null);
-        }
-        ops.push({
-          op: "update_copy",
-          id: ownedCopyId,
-          patch: {
-            /**
-             * `role: "shelved"` is the whole of UIL-087's live defect (3 rows on Testing, one of them
-             * Karvi's Toedscruel). This patch set binder, half, band and the slot pointer but NOT the
-             * role, so pulling a copy that was NOT already shelved — a bulk copy, which is exactly what
-             * a sync import leaves — wired it into the line and left its role `bulk`. The slot then read
-             * `filled` for a card that had never been shelved, and her invariant is that a filled slot
-             * points at a SHELVED copy. It stayed invisible because the pull the engine was designed
-             * around is a front-half copy, which is already `shelved`, so omitting the role changed
-             * nothing for it. A pull means the card now lives in the line: shelved is the only role
-             * consistent with that.
-             */
-            role: "shelved",
-            binder_id: plan.binderId,
-            binder_half: "back",
-            color_band: plan.colorBand,
-            line_slot_id: slotId,
-          },
-        });
-        // Its own audit row. Without this the move is not merely unconfirmed, it is UNTRACKED: the
-        // commit loop writes one decision per incoming DRAFT card, so a pulled copy previously got
-        // none at all and "why is this Charmander in the back half" had no answer anywhere.
-        ops.push({
-          op: "insert_decision",
-          haul_id: null, // not acquired in this haul — it was already hers
-          copy_id: ownedCopyId,
-          decision: "line-pull-confirmed",
-          reason:
-            `Moved into the new ${plan.colorBand} line for ${p.tcgdexId} at your confirmation ` +
-            `(was ${owned.binder_half ?? "unplaced"}${owned.color_band ? ` · ${owned.color_band}` : ""}, role ${owned.role}).`,
-          resolved_by: "user",
-        });
-        counts.decisions += 1;
-      }
-    }
-  }
-
-  // No wish for an empty stage (UIL-119, Karvi's ruling): a stage goes on her wishlist only when SHE adds it. The
-  // cascade's `wishlist` proposals are not written; the line popup's builder, the Haul Plan's writer since UIL-117,
-  // wishes nothing either.
-
-  slotsByLine.set(lineId, mirror);
-  passLines.set(key, { lineId });
-}
-
 /** Mutate the mirror so a subsequent same-pass read of this slot sees the fill. */
 /**
  * Update the live slot mirror so a later card in the same pass sees this change.
@@ -1312,36 +1042,6 @@ function touchSlot(
       return;
     }
   }
-}
-
-/** Existing line id for a (rootDexId, colorBand), read from the loaded snapshot (was a live query). */
-/**
- * The line that already occupies (binder, species, band) — the uniqueness key as of UIL-084, keyed on
- * the BINDER too. `pc.ctx.lines` is ordered oldest-first (see `loadPlanContext`), so when duplicates
- * exist from before this rule the answer is the original rather than an arbitrary row.
- */
-function findLineInBinder(
-  pc: PlanContext,
-  rootDexId: number,
-  colorBand: string,
-  binderId: string | null,
-  locale: Locale,
-): string | null {
-  for (const line of pc.ctx.lines) {
-    if (
-      line.rootDexId === rootDexId &&
-      line.colorBand === colorBand &&
-      (line.binderId ?? null) === binderId &&
-      // UIL-090: an English and a Japanese line of one species are different lines, so one does not
-      // occupy the other's key. Derived from the line's own slots — `root_dex_id` is a species key
-      // shared by both regional variants and cannot answer this.
-      lineLocaleOf(line.slots, (id: string) => pc.copyRowById.get(id)?.catalog_card_id ?? null) ===
-        locale
-    ) {
-      return line.id;
-    }
-  }
-  return null;
 }
 
 /**

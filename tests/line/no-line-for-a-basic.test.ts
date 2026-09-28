@@ -26,6 +26,7 @@ import {
   buildHaulCommitPayload,
   clearCatalogCache,
   commitCardPlacement,
+  LINE_CHOICE,
   loadPlanContext,
   planFromDraft,
   type DraftItem,
@@ -142,7 +143,7 @@ describe("every writer refuses a line for it, with nothing written", () => {
     await nothingWritten();
   });
 
-  it("the cascade's own new line, if it ever planned one for it", async () => {
+  it("the cascade's own new line, if it ever planned one for it, is never written", async () => {
     const card: DraftItem = haulRow("d0000000-0000-4000-8000-0000000000d2", LONER.tcgdexId);
     await seedHaulRows(db, [card]);
     await asOwner(db);
@@ -180,7 +181,10 @@ describe("every writer refuses a line for it, with nothing written", () => {
         },
       },
     } as PlannedCard;
-    expect(() => buildHaulCommitPayload(pc, [forged], { draft: [card] })).toThrow(NOT_A_LINE);
+    // The cascade's own line writer is gone: any line card needs her line choice, which the builder above refuses.
+    expect(() => buildHaulCommitPayload(pc, [forged], { draft: [card] })).toThrow(
+      LINE_CHOICE.missing,
+    );
   });
 
   it("the popup's model for a start refuses too: every screen's backstop", async () => {

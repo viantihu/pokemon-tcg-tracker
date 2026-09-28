@@ -16,6 +16,7 @@ import {
   commitCardPlacement,
   deriveSpotlightPlacement,
   existingCopyIds,
+  LINE_CHOICE,
   loadPlanContext,
   planFromDraft,
   type DraftItem,
@@ -75,7 +76,7 @@ const wishes = async () => {
 };
 
 describe("UIL-119 · a Haul Plan line never wishes an empty stage", () => {
-  it("the old cascade writer: no insert_wishlist, although the cascade proposed one", async () => {
+  it("the old cascade writer is gone: a line card never reaches the write without her line choice", async () => {
     const pc = await loadPlanContext(pgliteClient(db), {
       excludeOwnedCopyIds: existingCopyIds([CML]),
     });
@@ -83,10 +84,10 @@ describe("UIL-119 · a Haul Plan line never wishes an empty stage", () => {
     expect(planned[0].result.step).toBe("line-new");
     // The cascade still PROPOSES a wish for the empty Charizard stage; that is what used to be written.
     expect(planned[0].result.wishlist?.length ?? 0).toBeGreaterThan(0);
-    const { payload, counts } = buildHaulCommitPayload(pc, planned, { draft: [CML] });
-    // PRE-FIX: one insert_wishlist per empty stage.
-    expect(payload.ops.filter((o) => o.op === "insert_wishlist")).toEqual([]);
-    expect(counts.wishlist).toBe(0);
+    // PRE-FIX (before UIL-117): one insert_wishlist per empty stage. The writer is gone; the card is refused.
+    expect(() => buildHaulCommitPayload(pc, planned, { draft: [CML] })).toThrow(
+      LINE_CHOICE.missing,
+    );
   });
 
   it("through the Haul Plan's commit: her started line leaves its empty stages empty, on no wishlist", async () => {

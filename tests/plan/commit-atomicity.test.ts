@@ -182,9 +182,10 @@ afterEach(async () => {
 });
 
 describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
-  // A mixed haul: NEWLINE (Charmeleon, Fire) + SPEC (Charizard ex holo) + FRONT (Vaporeon).
+  // A mixed haul: FRONT (Nest Ball, a Trainer) + SPEC (Charizard ex holo) + FRONT (Vaporeon). A card headed into a
+  // line is written only by her line choice (UIL-117), never by this payload, so none is here.
   const draft: DraftItem[] = [
-    haulRow("d0000000-0000-4000-8000-00000000c0e1", CHARMELEON_SV03_027.tcgdexId),
+    haulRow("d0000000-0000-4000-8000-00000000c0e1", NEST_BALL_SV01_181.tcgdexId),
     haulRow("d0000000-0000-4000-8000-00000000c0e2", CHARIZARD_EX_SV035_006.tcgdexId, "holo"),
     haulRow("d0000000-0000-4000-8000-00000000c0e3", VAPOREON_SV035_134.tcgdexId),
   ];
@@ -221,19 +222,10 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
     expect(audit.rows.every((r) => r.reason.length > 0)).toBe(true);
     expect(audit.rows.every((r) => r.copy_id !== null)).toBe(true);
 
-    // The Charmeleon copy is wired to its line slot and the slot points back (round-trip intact).
-    const zardLine = await db.query<{ n: number }>(
-      `select count(*)::int as n from evolution_line where color_band = 'red'`,
-    );
-    expect(zardLine.rows[0].n).toBe(1);
-    const wired = await db.query<{ n: number }>(
-      `select count(*)::int as n
-         from copy c join line_slot s on s.id = c.line_slot_id
-        where s.copy_id = c.id and s.state = 'filled'`,
-    );
-    expect(wired.rows[0].n).toBe(1);
+    // No line: the payload writes none (UIL-117).
+    expect(counts.lines).toBe(0);
 
-    // The specialty (Charizard ex) copy shelved in the specialty binder; the Vaporeon shelved front.
+    // The specialty (Charizard ex) copy shelved in the specialty binder; the Vaporeon and the Trainer shelved front.
     const spec = await db.query<{ n: number }>(
       `select count(*)::int as n from copy where role = 'shelved' and binder_id = $1 and binder_half is null`,
       [SPEC],
@@ -243,7 +235,7 @@ describe("haul commit atomicity (fresh Postgres via PGlite)", () => {
       `select count(*)::int as n from copy where role = 'shelved' and binder_id = $1 and binder_half = 'front'`,
       [B1],
     );
-    expect(front.rows[0].n).toBe(1);
+    expect(front.rows[0].n).toBe(2);
 
     // owner_id defaulted to auth.uid() on every owned row (never carried in the payload).
     const owners = await db.query<{ bad: number }>(
