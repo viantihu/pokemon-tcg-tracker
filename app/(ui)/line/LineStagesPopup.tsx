@@ -9,11 +9,13 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import type {
-  FillerCardOption,
-  StageDecision,
-  StageOption,
-  ThirdPocketChoice as ThirdPocketValue,
+import {
+  chosenFillerCopyIds,
+  stageLabel,
+  type FillerCardOption,
+  type StageDecision,
+  type StageOption,
+  type ThirdPocketChoice as ThirdPocketValue,
 } from "@/lib/line/popup";
 import type { LineStagesModel } from "@/lib/line/stages-load";
 import type { DecideStagesChoice } from "@/lib/line/decide-stages";
@@ -29,6 +31,13 @@ async function unwrap<T>(p: Promise<{ ok: true; options: T[] } | { ok: false; er
 }
 const loadBulk = (): Promise<FillerCardOption[]> => unwrap(bulkFillerAction());
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+/** A stage's choice in a word or two, for the strip across the top. */
+const STRIP_WORD: Record<StageDecision["kind"], string> = {
+  chase: "Chasing",
+  empty: "Left empty",
+  filler: "Filler",
+  later: "Decide later",
+};
 
 export function LineStagesPopup({
   lineId,
@@ -85,6 +94,7 @@ export function LineStagesPopup({
       !!model.thirdPocket && pocket !== null && !same(pocket, model.thirdPocket.current);
     return { stages: out, pocket: pocketChanged ? pocket : null };
   }, [model, open, stages, pocket]);
+  const chosen = chosenFillerCopyIds(stages, pocket);
   const anyChange =
     !!changed && (Object.keys(changed.stages).length > 0 || changed.pocket !== null);
 
@@ -104,6 +114,27 @@ export function LineStagesPopup({
           </button>
         </div>
         <div className="lp-body">
+          {model ? (
+            // UX (A2c): the whole line at a glance, above the choices, following them as she makes them.
+            <ol className="lp-stagestrip" aria-label="This line's stages">
+              {model.stages.map((s) => {
+                const d = stages[s.stageIndex];
+                return (
+                  <li
+                    key={s.stageIndex}
+                    className={s.state === "here" ? "here" : d ? "decided" : "open"}
+                  >
+                    <b className="u">{stageLabel(s.stage)}</b>{" "}
+                    {s.state === "here"
+                      ? (s.card?.name ?? "Has its card")
+                      : d
+                        ? STRIP_WORD[d.kind]
+                        : "Not decided"}
+                  </li>
+                );
+              })}
+            </ol>
+          ) : null}
           {loadError ? (
             <div className="lp-error" role="alert">
               {loadError}
@@ -128,6 +159,7 @@ export function LineStagesPopup({
                   loadBulk={loadBulk}
                   busy={busy}
                   allowLater
+                  chosenFillerCopyIds={chosen}
                 />
               ))}
               {model.thirdPocket ? (
@@ -137,6 +169,7 @@ export function LineStagesPopup({
                   loadBulk={loadBulk}
                   busy={busy}
                   allowLater
+                  chosenFillerCopyIds={chosen}
                 />
               ) : null}
             </>
@@ -147,7 +180,12 @@ export function LineStagesPopup({
             </div>
           ) : null}
           <div className="lp-foot">
-            <span className="lp-sum u">nothing is written until you confirm</span>
+            <span className="lp-sum u">
+              {/* UX (A2c): say why Save is off, not just grey it. */}
+              {model && !anyChange
+                ? "Change a choice to save"
+                : "nothing is written until you save"}
+            </span>
             <button type="button" className="btn" onClick={onClose} disabled={busy}>
               Cancel
             </button>

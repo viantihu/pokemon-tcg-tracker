@@ -3604,6 +3604,42 @@ button.subhead.folded:hover {
   flex-wrap: wrap;
   margin-top: 6px;
 }
+/* UIL-121 (UX): a long spare-card list is capped and scrolls, so the popup's buttons stay in reach. */
+.lp-minigrid.lp-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  align-content: flex-start;
+}
+/* UIL-121 A2c (UX): Lines' "Choose" shows the whole line at a glance above its choices. */
+.lp-stagestrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+}
+.lp-stagestrip li {
+  padding: 2px 6px;
+  border: 2px solid var(--ink);
+}
+.lp-stagestrip li.here {
+  background: var(--panel-2);
+}
+.lp-stagestrip li.open {
+  border-style: dashed;
+}
+.lp-find {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 2px solid var(--ink);
+  background: var(--panel);
+  font: inherit;
+  font-size: 12px;
+}
 .lp-mini {
   display: flex;
   align-items: center;

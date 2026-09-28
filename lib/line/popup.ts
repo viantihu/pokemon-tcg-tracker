@@ -114,6 +114,21 @@ export type FillerSource = "bulk" | "haul";
 export type ThirdPocketChoice = FillerChoice | { material: "empty" } | { material: "later" };
 
 /**
+ * Every spare card her choices in one popup put in a pocket (UIL-121): one copy fills one pocket, so a picker offers a
+ * printing's NEXT copy that none of these holds. The server refuses the same copy twice as well (stage-choice.ts).
+ */
+export function chosenFillerCopyIds(
+  stages: Record<number, StageDecision> | undefined,
+  thirdPocket?: ThirdPocketChoice | null,
+): string[] {
+  const out: string[] = [];
+  for (const d of Object.values(stages ?? {}))
+    if (d.kind === "filler" && d.filler.material === "card") out.push(d.filler.copyId);
+  if (thirdPocket?.material === "card") out.push(thirdPocket.copyId);
+  return out;
+}
+
+/**
  * A placeholder card she makes from the popup: a CATALOG-ONLY stand-in (no copy; UIL-108's form). Its dex id, stage,
  * types and card class are the stage's, set on the server; only what she typed travels.
  */
@@ -140,6 +155,12 @@ export interface FillerCardOption {
   where: string;
   /** Its source, sent back with her pick. Absent: the bulk box. */
   from?: FillerSource;
+  /**
+   * UIL-121 (UX): one option per printing and variant. `copyIds` are its copies there, oldest first (`copyId` is the
+   * first), and `count` how many: the grid shows one tile with ×N, and a pick takes the next copy no other pocket holds.
+   */
+  count?: number;
+  copyIds?: string[];
 }
 
 /** Pockets in one row of her binder page (3x3). A complete line with fewer cards has a third pocket to fill. */
