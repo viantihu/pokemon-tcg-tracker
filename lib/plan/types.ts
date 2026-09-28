@@ -46,7 +46,7 @@ export interface PlanItem {
   /** Human destination string, e.g. "BINDER 1 · BACK · RED". Cosmetic; not used for grouping. */
   destination: string;
   reason: string;
-  /** True when the cascade emitted proposals (cap / block / termination / swap / collection-vs-line). */
+  /** True when the card leaves her a decision on the Lines screen: a collection claims what a line needs (UIL-122). */
   needsDecision: boolean;
   /** UIL-030: a bulk-bound duplicate the engine offers as a repurposed binder block (an open need exists). */
   offerBlockRepurpose?: boolean;

@@ -56,11 +56,24 @@ describe("actionForResult", () => {
     expect(actionForResult(base({ step: "trainer" }))).toBe("FRONT");
   });
 
-  it("flags a decision only when the cascade attached proposals", () => {
+  it("flags a decision only for the one the Lines screen still shows: a collection claims what a line needs (UIL-122)", () => {
     expect(resultNeedsDecision(base({ step: "basic-no-line" }))).toBe(false);
+    // PRE-FIX: true for every proposal, so the banner sent her to a Lines screen with nothing for the card.
+    for (const p of [
+      { kind: "termination" as const, reason: "…" },
+      { kind: "block" as const, reason: "…", stageIndex: 1, dexId: 5 },
+      { kind: "root-block" as const, reason: "…", stageIndex: 0, dexId: 4 },
+      { kind: "ex-only-cap" as const, reason: "…", stageIndex: 2, dexId: 6 },
+      { kind: "holo-swap" as const, reason: "…", displacedCopyId: "c" },
+    ]) {
+      expect(resultNeedsDecision(base({ step: "line-nonviable", proposals: [p] }))).toBe(false);
+    }
     expect(
       resultNeedsDecision(
-        base({ step: "line-new", proposals: [{ kind: "termination", reason: "…" }] }),
+        base({
+          step: "collection-claim",
+          proposals: [{ kind: "collection-vs-line", reason: "…", lineId: "L1", stageIndex: 1 }],
+        }),
       ),
     ).toBe(true);
   });

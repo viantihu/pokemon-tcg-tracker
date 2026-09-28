@@ -114,8 +114,9 @@ describe("UIL-116 · the Haul Plan has no decisions bar", () => {
     render(createElement(PlanScreen, { stateStamp: STAMP }));
     await screen.findAllByText(/Toedscruel/);
     expect(screen.getAllByText("Decide").length).toBeGreaterThan(0);
-    expect(screen.getByText("Needs a decision")).toBeTruthy();
-    expect(screen.getByText(/Confirm or override it on the Lines screen/)).toBeTruthy();
+    // Named as the Lines screen's one decision card names it (UIL-122).
+    expect(screen.getByText("Needs a decision: collection claim vs line slot")).toBeTruthy();
+    expect(screen.getByText(/decide whether the collection still wins/)).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/\bM7\b/);
   });
 
