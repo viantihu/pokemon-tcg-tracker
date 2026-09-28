@@ -131,6 +131,10 @@ function assertStartMatchesDestination(
  * evolution line, I want a warning that there is a line existing in my ENTIRE collection." The warning is the popup's,
  * shown before she confirms; by the time a request reaches here she has chosen to start one anyway.
  */
+/** A Keep sent as a move into a line: the card that's there stays, so this one needs a home of its own. */
+export const KEEP_IS_NO_LINE_MOVE =
+  "Keeping the card that's there means this one doesn't go into the line — pick where it goes instead.";
+
 export async function buildBackHalfLineOps(
   db: DbClient,
   copy: Row<"copy">,
@@ -141,11 +145,7 @@ export async function buildBackHalfLineOps(
   if (choice.mode === "join") await assertJoinMatchesLine(db, choice.lineId, destination);
   if (choice.mode === "start") assertStartMatchesDestination(choice, destination);
   if (choice.mode === "replace") {
-    if (choice.keep) {
-      throw new Error(
-        "Keeping the card that's there means this one doesn't go into the line — pick where it goes instead.",
-      );
-    }
+    if (choice.keep) throw new Error(KEEP_IS_NO_LINE_MOVE);
     await assertJoinMatchesLine(db, choice.lineId, destination);
     await assertCollectionDestinationLives(db, choice.outgoing);
   }

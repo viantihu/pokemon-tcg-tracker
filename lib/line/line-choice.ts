@@ -24,12 +24,14 @@
 import {
   generateSlots,
   lineLocaleOf,
+  stageFit,
   testViability,
   type Band,
   type CatalogCard,
   type IncomingCard,
   type LineSlotRecord,
   type OwnedCopy,
+  type StageFit,
   type TypeColorMap,
 } from "@/lib/engine";
 import { isStandInId, localeOfId, standInIdFor } from "@/lib/catalog/locale";
@@ -43,6 +45,7 @@ import {
 import {
   lineReadsClosed,
   lineStatusOf,
+  JOIN_UNCONFIRMED,
   NOT_A_LINE,
   type LineChoice,
   type StageDecision,
@@ -309,6 +312,43 @@ function pullInto(
 
 /* ----------------------------------------------- join ----------------------------------------------- */
 
+/**
+ * Whether this card is the slot's own stage of this line, by the ONE rule (`stageFit`, lib/engine/line.ts): the same
+ * rule every screen's offer uses, so no screen proposes an Add this refuses. What is known around the slot: a card in
+ * it, or the card she CHASES there (an undecided stage's leftover engine target is not known).
+ */
+function fitOfSlot(
+  state: LineWriteState,
+  line: Row<"evolution_line">,
+  slots: Row<"line_slot">[],
+  slot: Row<"line_slot">,
+): StageFit {
+  const catalogById = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
+  const knownAt = (s: Row<"line_slot"> | undefined) => {
+    const id = s?.copy_id
+      ? state.copiesById.get(s.copy_id)?.catalog_card_id
+      : s?.stage_choice === "chase"
+        ? s.target_catalog_card_id
+        : null;
+    return (id ? catalogById.get(id) : undefined) ?? null;
+  };
+  const at = (i: number) => slots.find((s) => s.stage_index === i);
+  const seed =
+    [...slots]
+      .filter((s) => s.id !== slot.id)
+      .sort((a, b) => b.stage_index - a.stage_index)
+      .map(knownAt)
+      .find((c) => c !== null) ?? null;
+  return stageFit(state.incoming.card, state.catalog, {
+    rootDexId: line.root_dex_id,
+    stageIndex: slot.stage_index,
+    chased: slot.stage_choice === "chase" ? knownAt(slot) : null,
+    before: knownAt(at(slot.stage_index - 1)),
+    after: knownAt(at(slot.stage_index + 1)),
+    seed,
+  });
+}
+
 function joinLine(
   state: LineWriteState,
   choice: Extract<LineChoice, { mode: "join" }>,
@@ -323,14 +363,10 @@ function joinLine(
     throw new Error("That slot has already been filled — reload the screen and pick again.");
   }
 
-  const catalogById = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
-  if (slot.target_catalog_card_id) {
-    const target = catalogById.get(slot.target_catalog_card_id);
-    const same = !!target && state.incoming.card.dexId.some((d) => target.dexId.includes(d));
-    if (!same)
-      throw new Error(
-        "That slot is for a different card — pick the slot for this card's own stage.",
-      );
+  const fit = fitOfSlot(state, line, slots, slot);
+  if (fit === "unknown") throw new Error(JOIN_UNCONFIRMED);
+  if (fit === "wrong") {
+    throw new Error("That slot is for a different card — pick the slot for this card's own stage.");
   }
 
   const cardOf = (id: string) => state.copiesById.get(id)?.catalog_card_id ?? null;

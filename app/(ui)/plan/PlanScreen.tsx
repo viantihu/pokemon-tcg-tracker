@@ -520,12 +520,6 @@ export function PlanScreen({
     );
   }
 
-  function onMoveConfirm(dest: MoveDestination) {
-    if (!moveTarget) return;
-    setOverrides((prev) => ({ ...prev, [moveTarget.copyId]: dest }));
-    flashToast(`Placement override set · ${moveTarget.name}`);
-    setMoveTarget(null);
-  }
   /**
    * "I do not have this card" — remove the COPY from the app (UIL-089), from the plan she is working
    * (UIL-114: there is no first screen to do it from). "Leave for later" beside it means something different
@@ -756,8 +750,15 @@ export function PlanScreen({
    */
   async function shelveCard(
     item: PlanItem,
-    /** From the line popup (UIL-117): her line choice, or her "file by its own colour" destination. */
-    extra?: { lineChoice?: LineChoice; override?: MoveDestination },
+    /**
+     * From the line popup (UIL-117): her line choice, or her "file by its own colour" destination. `report`: say a
+     * refusal there instead of on the page (the Move sheet's line popup, which stays open with it: UX review of #434).
+     */
+    extra?: {
+      lineChoice?: LineChoice;
+      override?: MoveDestination;
+      report?: (message: string) => void;
+    },
   ): Promise<false | { lineDone: boolean; line?: LineAfterWrite }> {
     if (done.has(item.incomingId) || shelving) return false;
     const entry = draft.find((d) => d.id === item.incomingId);
@@ -785,7 +786,12 @@ export function PlanScreen({
             expectedDigest: fresh?.id === item.incomingId ? fresh.digest : null,
             // Her choice in the line popup for a card headed into a line (UIL-117). Pulls, a colour question and
             // a replace all live in the popup now; an override names its own destination and needs none.
-            lineChoice: overrides[item.incomingId] ? null : (extra?.lineChoice ?? null),
+            // Her Move sheet's line popup sends the two together: a back half, and the line choice that places it there.
+            lineChoice: extra?.override
+              ? (extra.lineChoice ?? null)
+              : overrides[item.incomingId]
+                ? null
+                : (extra?.lineChoice ?? null),
             // Her collection for a specialty card (UIL-053). An override names its own destination.
             collectionChoice: overrides[item.incomingId]
               ? null
@@ -797,9 +803,10 @@ export function PlanScreen({
         LOST.action,
       );
       if (!res.ok) {
+        const say = extra?.report ?? setError;
         // Never reached the server (UIL-106): not a refusal, so her override is KEPT (UIL-084 below).
         if ("unreached" in res) {
-          setError(res.error);
+          say(res.error);
           return false;
         }
         // The placement moved under her. Nothing was written; show the new one and let her look
@@ -815,7 +822,12 @@ export function PlanScreen({
             proposedPulls: [],
             bandMismatch: null,
           });
-          setError(res.error);
+          say(res.error);
+          return false;
+        }
+        // A destination sent with this confirm (her Move sheet's line popup) is what was refused, not one set before.
+        if (extra?.override && extra.report) {
+          extra.report(res.error);
           return false;
         }
         /**
@@ -885,6 +897,45 @@ export function PlanScreen({
     flatItems.forEach((it, i) => m.set(it.incomingId, i));
     return m;
   }, [flatItems]);
+
+  /**
+   * Her Move. Anywhere but a line, it is an override written with her Done (M7). Into a line it went through the
+   * sheet's line popup (UIL-117: the one popup on every screen, her stage choices included), and her confirm there is
+   * the write, now, as the plan's own line popup's is.
+   */
+  async function onMoveConfirm(
+    dest: MoveDestination,
+    lineChoice?: LineChoice,
+    lineName?: string | null,
+  ): Promise<string | void> {
+    if (!moveTarget) return;
+    const target = moveTarget;
+    if (!lineChoice) {
+      setMoveTarget(null);
+      setOverrides((prev) => ({ ...prev, [target.copyId]: dest }));
+      flashToast(`Placement override set · ${target.name}`);
+      return;
+    }
+    const item = flatItems.find((it) => it.incomingId === target.copyId);
+    if (!item) return;
+    // The sheet and its popup stay open, busy, until the write lands; a refusal is said inside the popup with her
+    // choices kept, as the plan's own line popup does (UX review of #434). Whether the line is done is not asked: a
+    // Move is not the step-through, so nothing opens after it (UIL-120).
+    let refusal: string | null = null;
+    const shelved = await shelveCard(item, {
+      override: dest,
+      lineChoice,
+      report: (m) => {
+        refusal = m;
+      },
+    });
+    if (!shelved) return refusal ?? LOST.action;
+    setMoveTarget(null);
+    // A line write can change what the other cards would do, so the rest re-route, as after any line write.
+    scheduleReroute();
+    flashToast(`Moved · ${target.name} → ${lineName ? `the ${lineName} line` : "its line"}`);
+    if (flatItems[cur]?.incomingId === item.incomingId) advance();
+  }
 
   // UIL-117: the line card whose popup is open, its place among its line's cards, and its model loader.
   const popItem = linePop ? (flatItems.find((it) => it.incomingId === linePop) ?? null) : null;
@@ -1354,9 +1405,16 @@ export function PlanScreen({
         <MoveOverlay
           card={moveTarget}
           options={moveOptions}
-          // No `allowLineJoin` here on purpose: MoveOverlay derives it from `card.joinCandidates`,
-          // which `moveTargetFor` threads from the line-join lookup (UIL-070 part 1). One signal,
-          // owned by the component that renders the picker, so a call site cannot drop it.
+          // UIL-117: BACK HALF opens the one line popup, as on Lines, Lookup and Collections, so she is asked her stage
+          // choices and shown what a pull leaves behind. The older inline line picker is off; the line-join lookup
+          // (`card.joinCandidates`) still tells the popup whether her binder and band hold an open slot for this card.
+          allowLineJoin={false}
+          lineModel={(proposal) =>
+            loadLineModelFor(
+              draft.find((d) => d.id === moveTarget.copyId)?.existingCopyId ?? moveTarget.copyId,
+              proposal,
+            )
+          }
           onConfirm={onMoveConfirm}
           onClose={() => setMoveTarget(null)}
         />

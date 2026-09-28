@@ -56,7 +56,7 @@ import {
 import type { MoveDestination } from "@/lib/line/types";
 import { NOT_A_LINE, type LineChoice } from "@/lib/line/popup";
 import { lineReadsClosed } from "@/lib/line/popup";
-import { buildBackHalfLineOps } from "@/lib/line/write";
+import { buildBackHalfLineOps, KEEP_IS_NO_LINE_MOVE } from "@/lib/line/write";
 import { isLineCard } from "./line-proposal";
 import { lineDoneFor, newLineKey } from "./line-done";
 
@@ -349,6 +349,9 @@ export async function commitCardPlacement(
      * Her choice in the line popup (UIL-117), REQUIRED for a card whose placement is in a line or that could
      * replace a card in one, unless she moved it instead (`override`). Start and join are written by the ONE line
      * builder over fresh state; a replace's Keep writes no line at all.
+     *
+     * With a back-half `override` it is her Move sheet's line popup (UIL-117: the one popup on every screen): that
+     * line choice IS where the card goes, whatever the cascade routed it to.
      */
     lineChoice?: LineChoice | null;
   },
@@ -357,8 +360,15 @@ export async function commitCardPlacement(
   // incomplete destination, but a stale tab or a caller that skips the panel could still send a bare
   // back-half shelf — which this path used to WRITE, as exactly UIL-056's strand: a back-half copy
   // with no line. Checked before any I/O; nothing to roll back.
-  if (input.override && !isMoveDestinationComplete(input.override)) {
+  // A line choice is the line instruction for a back-half move, in place of the older `lineJoin` (`applyMove`'s rule).
+  const movedIntoLine =
+    !!input.lineChoice && input.override?.kind === "shelf" && input.override.half === "back";
+  if (input.override && !movedIntoLine && !isMoveDestinationComplete(input.override)) {
     throw new Error(REFUSE.incomplete);
+  }
+  // A line choice rides only with a back-half move: with any other override the screen and the server disagree.
+  if (input.override && input.lineChoice && !movedIntoLine) {
+    throw new Error(LINE_CHOICE.notALineCard);
   }
   // UIL-098 part 2: a row that names no copy is a hand-typed card, and placing it would CREATE one — the
   // twin the next import cannot see. Refused before any I/O.
@@ -404,6 +414,16 @@ export async function commitCardPlacement(
   /** A Keep writes no line, but it concerned one: the step-through asks whether that line is done (UIL-120). */
   let keptLineId: string | null = null;
   const lead = planned[0];
+  /**
+   * Her Move to a back half from the Plan's Move sheet, through its line popup (UIL-117; the Senior BA's follow-up to
+   * #422): the ONE line builder writes her choice, stage choices and pulls included, as on Lines, Lookup and
+   * Collections. A Keep is no move into a line.
+   */
+  if (lead && movedIntoLine && input.lineChoice) {
+    const choice = input.lineChoice;
+    if (choice.mode === "replace" && choice.keep) throw new Error(KEEP_IS_NO_LINE_MOVE);
+    return commitLineChoice(db, pc, lead, copy, choice);
+  }
   /**
    * UIL-126: a PLAIN extra copy of a stage a line holds is not a line card; a normal Done files it in the front half.
    * Her one line choice for it is "⇄ Swap this one into the line…": a swap into exactly the line and slot it
