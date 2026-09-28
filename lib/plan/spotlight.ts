@@ -167,7 +167,7 @@ export interface SpotlightPlacement {
   digest: string;
   /**
    * Cards of hers this placement would move. Empty for everything except a new line with owned chain
-   * members. Nothing here moves unless its `copyId` comes back in `confirmedPulls`.
+   * members. Nothing here moves unless she ticks it in the line popup (`lineChoice.pulls`, UIL-117).
    */
   proposedPulls: ProposedPull[];
   /** Present only for a colour mismatch on an existing line's open slot (UIL-069); null otherwise. */

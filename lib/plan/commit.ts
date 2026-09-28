@@ -1020,8 +1020,6 @@ function emitIncomingCopy(
   return p.existingCopyId;
 }
 
-/** Create the proposed line + its slots + wishlist, or fill the incoming's slot if the line exists. */
-/** Mutate the mirror so a subsequent same-pass read of this slot sees the fill. */
 /**
  * Update the live slot mirror so a later card in the same pass sees this change.
  *
