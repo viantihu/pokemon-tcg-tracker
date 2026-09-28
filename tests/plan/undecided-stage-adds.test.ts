@@ -185,6 +185,32 @@ describe("the Haul Plan: a card for a stage she has not decided ADDS to her line
     expect(await proposalFor(await haulOf(TWIGLEAF))).toEqual(ADDS_TO(1));
   });
 
+  it("a CHASED neighbour of the other branch counts: no Add for Twigthorn beside her chased Twigtree, in the Plan, the popup or the builder (TL)", async () => {
+    await seedLine(950, [
+      { card: TWIGLING.tcgdexId },
+      { open: true },
+      { chase: TWIGTREE.tcgdexId },
+    ]);
+    const card = await haulOf(TWIGTHORN);
+    // The Plan's offer…
+    expect(await proposalFor(card)).not.toEqual(ADDS_TO(1));
+    // …the popup's Add (the join index)…
+    const model = await loadLinePopupModel(pgliteClient(db), card.existingCopyId!, {
+      kind: "start",
+      binderId: KB1,
+      band: "red",
+    });
+    expect(model.existingLines.map((l) => l.joinSlotId)).toEqual([null]);
+    // …and the builder agree.
+    await expect(
+      commitCardPlacement(pgliteClient(db), {
+        card,
+        override: { kind: "shelf", binderId: KB1, half: "back", band: "red" },
+        lineChoice: { mode: "join", lineId: LINE, slotId: slotId(1) },
+      }),
+    ).rejects.toThrow("That slot is for a different card");
+  });
+
   it("the language is still held (UIL-090): a Japanese Charmeleon is not routed into her English line", async () => {
     await seedLine(4, [{ card: CHARMANDER_SV03_026.tcgdexId }, { open: true }]);
     expect(await proposalFor(await haulOf(JA_CHARMELEON))).not.toEqual(ADDS_TO(1));
