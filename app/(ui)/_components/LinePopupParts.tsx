@@ -532,9 +532,10 @@ export function LineStageTile({
 }
 
 /**
- * UIL-096's warning, render-only: every line this family already has, anywhere, each with "Add to that line" where
- * this card's stage is open there. Renders nothing when there are none. Shared by the line popup's START and
- * Backfill's confirm sheet (UIL-117 PR 5).
+ * UIL-096's warning, render-only: every line this family already has, anywhere. A line with an open slot for this
+ * card is marked "Has room for this card" and listed first, with "Add it there instead" (the Senior BA's ruling: a
+ * warning, never a block; nothing is picked for her, and starting a new line anyway stays hers). Renders nothing when
+ * there are none. Shared by the line popup's START and Backfill's confirm sheet (UIL-117 PR 5).
  */
 export function ExistingLinesBlock({
   existingLines,
@@ -552,6 +553,10 @@ export function ExistingLinesBlock({
   busy?: boolean;
 }) {
   if (existingLines.length === 0) return null;
+  // The lines with room first; otherwise as they came (oldest first).
+  const ordered = [...existingLines].sort(
+    (a, b) => Number(!!b.joinSlotId) - Number(!!a.joinSlotId),
+  );
   return (
     <div className="lp-also">
       <b className="u">
@@ -560,7 +565,7 @@ export function ExistingLinesBlock({
       </b>
       Adding to one instead of starting another is one tap. Starting a second one is fine too.
       <div className="lp-minigrid">
-        {existingLines.map((l) => (
+        {ordered.map((l) => (
           <div className="lp-mini" key={l.lineId}>
             {l.face ? (
               <CardFace
@@ -575,6 +580,12 @@ export function ExistingLinesBlock({
               <br />
               {language(l.locale).flag} {language(l.locale).name} · {l.filledCount}/{l.totalCount}{" "}
               filled
+              {l.joinSlotId ? (
+                <>
+                  <br />
+                  <b>Has room for this card</b>
+                </>
+              ) : null}
             </span>
             {l.joinSlotId && onSwitch ? (
               <button
@@ -583,7 +594,7 @@ export function ExistingLinesBlock({
                 disabled={busy}
                 onClick={() => onSwitch({ kind: "add", lineId: l.lineId, slotId: l.joinSlotId! })}
               >
-                Add to that line
+                Add it there instead
               </button>
             ) : null}
           </div>

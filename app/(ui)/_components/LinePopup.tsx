@@ -211,7 +211,10 @@ export function LinePopup({
   const label =
     confirmLabel ??
     (model.mode === "start"
-      ? "Start line"
+      ? // A line she has already has room for this card: starting another is still hers, said as such (UIL-096).
+        model.existingLines.some((l) => l.joinSlotId)
+        ? "Start a new line anyway"
+        : "Start line"
       : model.mode === "add"
         ? cc && cc.picked === null
           ? "Confirm"

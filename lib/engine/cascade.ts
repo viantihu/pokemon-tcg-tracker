@@ -28,6 +28,7 @@ import { isUpgradeOver, resolveDuplicate, type HoloSwap } from "./duplicate";
 import {
   generateSlots,
   rankAlternates,
+  stageFit,
   testViability,
   type LineSlotPlan,
   type PriceOf,
@@ -239,7 +240,13 @@ function existingLineSlot(
   const matches: { line: EvolutionLine; slot: LineSlotRecord }[] = [];
   for (const line of ctx.lines) {
     if (lineLocaleOf(line.slots, (id: string) => ownedCardIdOf(ctx, id)) !== locale) continue;
-    const slot = line.slots.find((s) => s.dexId === dexId);
+    const slot =
+      line.slots.find((s) => s.dexId === dexId) ??
+      // An open stage that names no species: undecided since UIL-121 (no target until she chases one), or past a
+      // branch (an Eevee line's Stage 1). Before, it matched no card at all, and the Plan proposed a SECOND line.
+      line.slots.find(
+        (s) => s.dexId === null && s.state !== "filled" && fitsUnnamedStage(incoming, line, s, ctx),
+      );
     if (slot) matches.push({ line, slot });
   }
   if (matches.length < 2) return matches[0] ?? null;
@@ -250,6 +257,55 @@ function existingLineSlot(
     matches.find((m) => m.line.colorBand === own) ??
     matches.find(open) ??
     matches[0]
+  );
+}
+
+/** The catalog by id, once per catalog slice (the cascade routes every card of a haul against the same one). */
+const catalogIndex = new WeakMap<CatalogCard[], Map<string, CatalogCard>>();
+function catalogById(ctx: EngineContext): Map<string, CatalogCard> {
+  let m = catalogIndex.get(ctx.catalog);
+  if (!m) {
+    m = new Map(ctx.catalog.map((c) => [c.tcgdexId, c]));
+    catalogIndex.set(ctx.catalog, m);
+  }
+  return m;
+}
+
+/**
+ * Whether an open stage that names no species is this card's, by the ONE rule (`stageFit`, ./line), the one the line
+ * builder holds a join to, so the Plan never proposes an Add the builder refuses. What is known around it: a card in
+ * a slot, or the card she chases there (the only target the plan context names a slot by).
+ */
+function fitsUnnamedStage(
+  incoming: IncomingCard,
+  line: EvolutionLine,
+  slot: LineSlotRecord,
+  ctx: EngineContext,
+): boolean {
+  const byId = catalogById(ctx);
+  const known = (s: LineSlotRecord | undefined) => {
+    const id = s?.copyId
+      ? ownedCardIdOf(ctx, s.copyId)
+      : s?.dexId !== null && s?.dexId !== undefined
+        ? s.targetCatalogCardId
+        : null;
+    return (id ? byId.get(id) : undefined) ?? null;
+  };
+  const at = (i: number) => line.slots.find((s) => s.stageIndex === i);
+  const seed =
+    [...line.slots]
+      .filter((s) => s.id !== slot.id)
+      .sort((a, b) => b.stageIndex - a.stageIndex)
+      .map(known)
+      .find((c) => c !== null) ?? null;
+  return (
+    stageFit(incoming.card, ctx.catalog, {
+      rootDexId: line.rootDexId,
+      stageIndex: slot.stageIndex,
+      before: known(at(slot.stageIndex - 1)),
+      after: known(at(slot.stageIndex + 1)),
+      seed,
+    }) === "fits"
   );
 }
 

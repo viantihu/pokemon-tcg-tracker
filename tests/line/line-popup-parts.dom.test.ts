@@ -55,7 +55,7 @@ describe("UIL-117 PR 5 prep · the popup's parts, on their own", () => {
     expect(
       screen.getByText(/A line in another language won't take this English card/),
     ).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Add to that line" }));
+    await user.click(screen.getByRole("button", { name: "Add it there instead" }));
     expect(onSwitch).toHaveBeenCalledWith({ kind: "add", lineId: "L2", slotId: "S2" });
   });
 
@@ -68,7 +68,7 @@ describe("UIL-117 PR 5 prep · the popup's parts, on their own", () => {
     render(
       createElement(ExistingLinesBlock, { existingLines: [LINE], lineName: "X", cardLocale: "ja" }),
     );
-    expect(screen.queryByRole("button", { name: "Add to that line" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add it there instead" })).toBeNull();
   });
 
   it("LineStageTile: a stage with its card, number and state tag", () => {

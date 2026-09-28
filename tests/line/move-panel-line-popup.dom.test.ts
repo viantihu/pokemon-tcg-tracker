@@ -242,7 +242,7 @@ describe("UIL-117 · BACK HALF opens the line popup", () => {
     const { onConfirm, user } = mount({ lineModel });
     await user.click(backHalf());
     await screen.findByRole("dialog", { name: "Start a line" });
-    await user.click(screen.getByRole("button", { name: "Add to that line" }));
+    await user.click(screen.getByRole("button", { name: "Add it there instead" }));
     await screen.findByRole("dialog", { name: "Add to a line" });
     await user.click(screen.getByRole("button", { name: /Add to line/ }));
     // The sheet still says KB-001 · red; the line is in KB-002 · green, and that is where the card goes.

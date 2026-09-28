@@ -478,15 +478,11 @@ function familyLinesFrom(
     cardOfCopy,
   );
   const options = joinOptionsFor(card, index, st.typeColorMap, st.catalog);
+  // The open slot this card takes there, by the join index: the ONE rule the line builder holds a join to (`stageFit`).
+  // It used to need a target naming the species, which an undecided stage has not had since UIL-121, so a line with
+  // room for the card offered no "Add" and she could start a second one without meaning to.
   const openSlotFor = (lineId: string): string | null =>
-    (slotsByLine.get(lineId) ?? []).find(
-      (s) =>
-        s.state !== "filled" &&
-        !!s.target_catalog_card_id &&
-        (catalogById.get(s.target_catalog_card_id)?.dexId ?? []).some((d) =>
-          card.dexId.includes(d),
-        ),
-    )?.id ?? null;
+    options?.joinCandidates.find((c) => c.lineId === lineId)?.slotId ?? null;
   /** An existing line's tile image: its most evolved card she holds there, else its top target. */
   const faceOfLine = (lineId: string, bandKey: string): CardIdentity | null => {
     const lineSlots = slotsByLine.get(lineId) ?? [];
