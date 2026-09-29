@@ -337,9 +337,12 @@ describe("0035 · an account with no box gets 'Bulk box' on its first bulk write
       is_default: boolean;
       capacity: number | null;
     }>(`select id, name, is_default, capacity from bulk_unit where owner_id = $1`, [OWNER]);
-    expect(boxes).toEqual([
-      { id: expect.any(String), name: "Bulk box", is_default: true, capacity: null },
-    ]);
+    // The id is derived from her, the same one the conversion gives her first box, so a box made here and one on a
+    // baseline always coincide (the DB Engineer's ask: a random id made every refresh-to-baseline refuse).
+    const derived = (
+      await q<{ id: string }>(`select md5('bulk-box:' || $1::text)::uuid::text as id`, [OWNER])
+    )[0].id;
+    expect(boxes).toEqual([{ id: derived, name: "Bulk box", is_default: true, capacity: null }]);
     expect(await unitOf(1)).toEqual({ role: "bulk", unit: boxes[0].id });
   });
 });

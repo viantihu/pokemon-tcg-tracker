@@ -19,7 +19,8 @@
 -- block. It runs before the CHECKs, so they hold for every writer, and it refuses a copy entering a full box that has
 -- a capacity, in her words, not as a raw constraint error. Moving OUT of a box is never refused.
 --
--- Expected row effect on Testing: one "Bulk box" for her; her 54 bulk copies move into it. Function-free on the RPC:
+-- Expected row effect on Testing (the DB Engineer's read): one "Bulk box" for her; her 54 bulk copies move into it,
+-- and the 4 spare cards filling pockets take it as their home (58 copies boxed). Function-free on the RPC:
 -- no `apply_write_ops` change (the #418 chain guard is untouched).
 --
 -- SECURITY: the trigger is SECURITY INVOKER with `set search_path = public, pg_temp` and no dynamic SQL. As the
@@ -108,9 +109,11 @@ begin
     -- A writer that does not name a box (every writer before UIL-130 PR 2): her default box, created if she has none.
     select * into unit from bulk_unit u where u.owner_id = new.owner_id and u.is_default;
     if not found then
-      insert into bulk_unit (owner_id, name, sort_order, is_default)
-        values (new.owner_id, 'Bulk box', 0, true)
-        on conflict (owner_id) where is_default do nothing;
+      -- The same id the conversion gives her first box (derived from her), so a box made here, by the migration and
+      -- on a baseline always coincide, and a refresh-to-baseline never meets two defaults (the DB Engineer's ask).
+      insert into bulk_unit (id, owner_id, name, sort_order, is_default)
+        values (md5('bulk-box:' || new.owner_id::text)::uuid, new.owner_id, 'Bulk box', 0, true)
+        on conflict do nothing;
       select * into unit from bulk_unit u where u.owner_id = new.owner_id and u.is_default;
     end if;
     new.bulk_unit_id := unit.id;
