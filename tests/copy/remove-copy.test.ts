@@ -181,7 +181,7 @@ describe("UIL-089 · what a removal releases", () => {
     await asSuperuser(db);
     await db.exec(`
       insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-        values ('${LINE}', '${OWNER}', 4, 'red', '${B1}', 'back', 'complete');
+        values ('${LINE}', '${OWNER}', 4, 'red', '${B1}', 'back', 'closed');
       insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id,
         resolved_decision_kind, resolved_decision_choice)
         values ('${SLOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${copy.id}',

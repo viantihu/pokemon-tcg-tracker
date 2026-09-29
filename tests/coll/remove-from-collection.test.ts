@@ -85,7 +85,7 @@ async function seed(): Promise<void> {
   ]);
   await db.exec(`
     insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, status)
-      values ('${LINE}', '${OWNER}', 1, 'red', '${SPEC}', 'complete');
+      values ('${LINE}', '${OWNER}', 1, 'red', '${SPEC}', 'closed');
     insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band)
       values ('${CA1}', '${OWNER}', 'cardA', 'shelved', '${SPEC}', null, null),
              ('${CA2}', '${OWNER}', 'cardA', 'shelved', '${SPEC}', null, null),
@@ -419,7 +419,7 @@ describe("a removal cannot half-apply", () => {
     expect(
       (await q<{ status: string }>(`select status from evolution_line where id = '${LINE}'`))[0]
         .status,
-    ).toBe("complete");
+    ).toBe("closed"); // UIL-121 (0034): was "complete"
     expect(await q(`select 1 from placement_decision`)).toHaveLength(0);
   });
 

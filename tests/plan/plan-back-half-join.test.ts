@@ -105,7 +105,7 @@ async function seedFilledLine(): Promise<void> {
   );
   await db.exec(`
     insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-      values ('${LINE}', '${OWNER}', ${EMBERLING_DEX}, 'red', '${GEN}', 'back', 'complete');
+      values ('${LINE}', '${OWNER}', ${EMBERLING_DEX}, 'red', '${GEN}', 'back', 'closed');
     insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
       values ('${SLOT_ROOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${OWNED_EMBERLING}'),
              ('${SLOT_NEXT}', '${OWNER}', '${LINE}', 1, 'Stage1', 'filled', '${OTHER_DRAKE}');

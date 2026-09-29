@@ -116,9 +116,10 @@ async function seedLine(opts: {
   stage1: "open" | "cml";
   /** A Charizard stage, still to fill (`open`), or one she left EMPTY (UIL-121: a stage she declined). */
   stage2?: "open" | "empty";
-  status?: "open" | "closed" | "complete" | "capped";
+  status?: "open" | "closed";
 }) {
-  const status = opts.status ?? (opts.stage1 === "cml" && !opts.stage2 ? "complete" : "open");
+  // UIL-121 (0034): a line is only open or closed; every stage filled reads closed.
+  const status = opts.status ?? (opts.stage1 === "cml" && !opts.stage2 ? "closed" : "open");
   await db.exec(`
     insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band) values
       ('${OWNED_CMD}', '${OWNER}', '${CHARMANDER_SV03_026.tcgdexId}', 'normal', 'shelved', '${KB1}', 'back', 'red');
@@ -243,8 +244,8 @@ describe("UIL-120 after UIL-121 · the five states (the Senior BA's ruling; each
     expect((await keep()).lineDone).toBe(true);
   });
 
-  it("(c) a capped line whose specialty stage is still a placeholder steps on", async () => {
-    await seedLine({ stage1: "cml", stage2: "open", status: "capped" });
+  it("(c) an open line whose specialty stage is still a placeholder steps on (it read 'capped' before 0034)", async () => {
+    await seedLine({ stage1: "cml", stage2: "open", status: "open" });
     await asOwner(db);
     expect((await keep()).lineDone).toBe(false);
   });
@@ -387,7 +388,7 @@ describe("UIL-120 (b)(c) · on a line that was ALREADY complete", () => {
       },
     });
     expect(res.lineDone).toBe(true);
-    expect(await statusOf(LINE)).toBe("complete");
+    expect(await statusOf(LINE)).toBe("closed"); // UIL-121 (0034): was "complete"
   });
 
   it("(c) a Swap changes no status, and still stops", async () => {
@@ -445,8 +446,8 @@ describe("UIL-120 (d) · a line whose only unfilled stage is a block", () => {
 });
 
 describe("UIL-120 (e)(f) · it keeps stepping while a stage is still open", () => {
-  it("(e) a capped line with its specialty stage still open keeps stepping", async () => {
-    await seedLine({ stage1: "open", stage2: "open", status: "capped" });
+  it("(e) an open line with its specialty stage still open keeps stepping (it read 'capped' before 0034)", async () => {
+    await seedLine({ stage1: "open", stage2: "open", status: "open" });
     await seedHaulRows(db, [CML]);
     await asOwner(db);
     // UIL-121: her last card for the line, so the open Stage 2 is asked; she decides it later.

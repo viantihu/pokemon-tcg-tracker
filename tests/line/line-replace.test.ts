@@ -87,7 +87,7 @@ beforeEach(async () => {
   );
   await db.query(
     `insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-       values ($1, $2, 9301, 'red', $3, 'back', 'complete')`,
+       values ($1, $2, 9301, 'red', $3, 'back', 'closed')`,
     [LINE, OWNER, GEN],
   );
   await db.query(
@@ -147,9 +147,9 @@ describe("SWAP · one write, the line never shows a gap", () => {
       color_band: null,
       line_slot_id: null,
     });
-    // Still complete: no moment where the line was missing its Stage 1.
+    // Still closed: no moment where the line was missing its Stage 1.
     expect(await q(`select status from evolution_line where id = $1`, [LINE])).toEqual([
-      { status: "complete" },
+      { status: "closed" }, // UIL-121 (0034): was "complete"
     ]);
     expect(
       await q(`select decision, resolved_by from placement_decision where copy_id = $1`, [OLD]),

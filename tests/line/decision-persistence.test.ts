@@ -22,6 +22,7 @@ import {
   moveNameLookups,
   releaseSlotOps,
 } from "@/lib/line";
+import { DECISION_RETIRED } from "@/lib/line/write";
 import { executeApply, type SyncPlanBundle } from "@/lib/sync";
 import { buildScreenModel } from "@/lib/line/load";
 import type { ReconcilePlan } from "@/lib/sync/reconcile";
@@ -71,13 +72,17 @@ async function decisionIds(): Promise<string[]> {
   return (await buildScreenModel(pgliteClient(db))).derived.map((d) => d.card.id);
 }
 
-describe("UIL-078 · ex-only-cap stays resolved", () => {
+/**
+ * UIL-121 (0034): the cap, the block, the root block and the termination are no longer questions she is asked; their
+ * writes (a 'capped' or 'terminated' status, an engine block slot) are gone from the data. They are still DERIVED on
+ * the server (the card is hidden from her screen, A2c), and a stale tab could still send one: refused, nothing written.
+ */
+describe("UIL-121 · a retired decision sent anyway is refused, and nothing is written", () => {
   const LINE = "10000000-0000-0000-0000-00000000ec01";
   const SLOT = "50000000-0000-0000-0000-00000000ec01";
   const DEX = 9401;
 
   beforeEach(async () => {
-    // Both printings specialty-class in "red" — rankAlternates reports willLiveInSpecialty: true.
     await seedCatalog([
       { id: "onlymon-ex-cheap", name: "Onlymon ex", dexId: DEX, cardClass: "specialty" },
       { id: "onlymon-ex-pricey", name: "Onlymon ex", dexId: DEX, cardClass: "specialty" },
@@ -90,27 +95,27 @@ describe("UIL-078 · ex-only-cap stays resolved", () => {
     `);
   });
 
-  it("confirm-cap removes the decision on the next load", async () => {
-    const client = pgliteClient(db);
-    await asOwner(db);
-    expect(await decisionIds()).toContain(`${LINE}:ex-only-cap:0`);
-
-    await applyDecision(client, OWNER, `${LINE}:ex-only-cap:0`, "confirm-cap");
-
-    expect(await decisionIds()).not.toContain(`${LINE}:ex-only-cap:0`);
-  });
-
-  it("the marker is what suppresses it — dropped by hand, the same decision comes back", async () => {
-    const client = pgliteClient(db);
-    await asOwner(db);
-    await applyDecision(client, OWNER, `${LINE}:ex-only-cap:0`, "confirm-cap");
-    expect(await decisionIds()).not.toContain(`${LINE}:ex-only-cap:0`);
-
-    await asSuperuser(db);
-    await db.query(`update line_slot set resolved_decision_kind = null where id = $1`, [SLOT]);
-
-    expect(await decisionIds()).toContain(`${LINE}:ex-only-cap:0`);
-  });
+  it.each(["confirm-cap", "cap-no-wishlist", "leave-it"] as const)(
+    "an ex-only cap's '%s' is refused in her words",
+    async (choice) => {
+      await asOwner(db);
+      expect(await decisionIds()).toContain(`${LINE}:ex-only-cap:0`); // still derived, only hidden
+      await expect(
+        applyDecision(pgliteClient(db), OWNER, `${LINE}:ex-only-cap:0`, choice),
+      ).rejects.toThrow(DECISION_RETIRED);
+      await asSuperuser(db);
+      expect(
+        (
+          await db.query(
+            `select l.status, s.resolved_decision_kind from evolution_line l join line_slot s on s.line_id = l.id`,
+          )
+        ).rows,
+      ).toEqual([{ status: "open", resolved_decision_kind: null }]);
+      expect((await db.query(`select count(*)::int n from placement_decision`)).rows).toEqual([
+        { n: 0 },
+      ]);
+    },
+  );
 });
 
 describe("UIL-078 · collection-vs-line stays resolved", () => {
@@ -214,15 +219,19 @@ describe("UIL-078 · a released slot forgets its resolution", () => {
   const DEX = 9405;
 
   beforeEach(async () => {
+    // UIL-121 (0034): the question a released slot asks afresh is the one still asked, collection-vs-line (the cap this
+    // used before retired).
     await seedCatalog([
-      { id: "refillmon-ex-a", name: "Refillmon ex", dexId: DEX, cardClass: "specialty" },
-      { id: "refillmon-ex-b", name: "Refillmon ex", dexId: DEX, cardClass: "specialty" },
+      { id: "refillmon-a", name: "Refillmon", dexId: DEX },
+      { id: "refillmon-b", name: "Refillmon", dexId: DEX },
     ]);
     await db.exec(`
       insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
         values ('${LINE}', '${OWNER}', ${DEX}, 'red', '${B1}', 'back', 'open');
-      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, target_catalog_card_id)
-        values ('${SLOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'placeholder', 'refillmon-ex-a');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state)
+        values ('${SLOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'placeholder');
+      insert into collection (owner_id, name, target_catalog_card_ids)
+        values ('${OWNER}', 'Refill Collection', array['refillmon-a']);
     `);
   });
 
@@ -242,21 +251,21 @@ describe("UIL-078 · a released slot forgets its resolution", () => {
     });
   });
 
-  it("confirmed cap, then filled, then vacated by a move: the cap question is asked afresh", async () => {
+  it("collection wins, then filled, then vacated by a move: the question is asked afresh", async () => {
     const client = pgliteClient(db);
     await asOwner(db);
-    await applyDecision(client, OWNER, `${LINE}:ex-only-cap:0`, "confirm-cap");
-    expect(await decisionIds()).not.toContain(`${LINE}:ex-only-cap:0`);
+    await applyDecision(client, OWNER, `${LINE}:collection-vs-line:0`, "collection-wins");
+    expect(await decisionIds()).not.toContain(`${LINE}:collection-vs-line:0`);
 
     // A card lands in the slot (as the Haul Plan or a line join would leave it)…
     await asSuperuser(db);
     await db.exec(`
       insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band, line_slot_id)
-        values ('${COPY}', '${OWNER}', 'refillmon-ex-a', 'shelved', '${B1}', 'back', 'red', '${SLOT}');
+        values ('${COPY}', '${OWNER}', 'refillmon-a', 'shelved', '${B1}', 'back', 'red', '${SLOT}');
       update line_slot set state = 'filled', copy_id = '${COPY}' where id = '${SLOT}';
     `);
     await asOwner(db);
-    expect(await decisionIds()).not.toContain(`${LINE}:ex-only-cap:0`); // filled: nothing to ask
+    expect(await decisionIds()).not.toContain(`${LINE}:collection-vs-line:0`); // filled: nothing to ask
 
     // …and leaves again through the real move path, which releases the slot.
     await applyMove(
@@ -280,7 +289,7 @@ describe("UIL-078 · a released slot forgets its resolution", () => {
       resolved_decision_choice: null,
     });
     await asOwner(db);
-    expect(await decisionIds()).toContain(`${LINE}:ex-only-cap:0`);
+    expect(await decisionIds()).toContain(`${LINE}:collection-vs-line:0`);
   });
 
   /** A sync plan that retires exactly one copy — what the reconciler emits when the export drops it. */
@@ -332,18 +341,18 @@ describe("UIL-078 · a released slot forgets its resolution", () => {
   it("a slot vacated by a sync retire asks afresh", async () => {
     const client = pgliteClient(db);
     await asOwner(db);
-    await applyDecision(client, OWNER, `${LINE}:ex-only-cap:0`, "confirm-cap");
-    expect(await decisionIds()).not.toContain(`${LINE}:ex-only-cap:0`);
+    await applyDecision(client, OWNER, `${LINE}:collection-vs-line:0`, "collection-wins");
+    expect(await decisionIds()).not.toContain(`${LINE}:collection-vs-line:0`);
 
     await asSuperuser(db);
     await db.exec(`
       insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band, line_slot_id)
-        values ('${COPY}', '${OWNER}', 'refillmon-ex-a', 'shelved', '${B1}', 'back', 'red', '${SLOT}');
+        values ('${COPY}', '${OWNER}', 'refillmon-a', 'shelved', '${B1}', 'back', 'red', '${SLOT}');
       update line_slot set state = 'filled', copy_id = '${COPY}' where id = '${SLOT}';
     `);
     await asOwner(db);
 
-    await executeApply(client, retireBundle(COPY, "refillmon-ex-a"), OWNER);
+    await executeApply(client, retireBundle(COPY, "refillmon-a"), OWNER);
 
     await asSuperuser(db);
     const slot = await db.query<{
@@ -358,51 +367,7 @@ describe("UIL-078 · a released slot forgets its resolution", () => {
     });
     expect((await db.query<{ n: number }>(`select count(*)::int n from copy`)).rows[0].n).toBe(0);
     await asOwner(db);
-    expect(await decisionIds()).toContain(`${LINE}:ex-only-cap:0`);
-  });
-});
-
-describe("UIL-078 · root-block stays resolved, and its hand-offs are NOT wrongly suppressed", () => {
-  const LINE = "10000000-0000-0000-0000-00000000bb01";
-  const SLOT = "50000000-0000-0000-0000-00000000bb01";
-  const DEX = 9403;
-
-  beforeEach(async () => {
-    await seedCatalog([{ id: "blockmon-basic", name: "Blockmon", dexId: DEX }]);
-    await db.exec(`
-      insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-        values ('${LINE}', '${OWNER}', ${DEX}, 'red', '${B1}', 'back', 'open');
-      insert into line_slot (id, owner_id, line_id, stage_index, stage, state)
-        values ('${SLOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'block');
-    `);
-  });
-
-  it("confirm-root-block removes the decision on the next load", async () => {
-    const client = pgliteClient(db);
-    await asOwner(db);
-    expect(await decisionIds()).toContain(`${LINE}:root-block:0`);
-
-    await applyDecision(client, OWNER, `${LINE}:root-block:0`, "confirm-root-block");
-
-    expect(await decisionIds()).not.toContain(`${LINE}:root-block:0`);
-  });
-
-  it("a materially changed situation still asks: no-line hands off to termination, unsuppressed", async () => {
-    const client = pgliteClient(db);
-    await asOwner(db);
-
-    // She did NOT confirm root-block — she picked "no line at all" straight from it. This is a
-    // DIFFERENT question (termination) surfacing for the first time, not the root-block question
-    // answered twice; it must not be silently swallowed by this fix.
-    await applyDecision(client, OWNER, `${LINE}:root-block:0`, "no-line");
-
-    const ids = await decisionIds();
-    expect(ids).not.toContain(`${LINE}:root-block:0`); // the line is terminated now; that trigger is gone
-    expect(ids).toContain(`${LINE}:termination`); // the NEW question, fresh — not suppressed
-
-    // Confirming THAT one, in turn, must stick exactly like the others.
-    await applyDecision(client, OWNER, `${LINE}:termination`, "confirm-termination");
-    expect(await decisionIds()).not.toContain(`${LINE}:termination`);
+    expect(await decisionIds()).toContain(`${LINE}:collection-vs-line:0`);
   });
 });
 
@@ -410,63 +375,56 @@ describe("UIL-078 · leave-it resurfaces by design — the one choice that must 
   const LINE = "10000000-0000-0000-0000-00000000ea01";
   const DEX = 9404;
 
-  it("leaving an ex-only-cap decision unresolved shows it again on the next load", async () => {
-    await seedCatalog([
-      { id: "leavemon-ex", name: "Leavemon ex", dexId: DEX, cardClass: "specialty" },
-    ]);
+  it("leaving a collection-vs-line decision unresolved shows it again on the next load", async () => {
+    await seedCatalog([{ id: "leavemon", name: "Leavemon", dexId: DEX }]);
     await db.exec(`
       insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
         values ('${LINE}', '${OWNER}', ${DEX}, 'red', '${B1}', 'back', 'open');
-      insert into line_slot (id, owner_id, line_id, stage_index, stage, state, target_catalog_card_id)
-        values ('50000000-0000-0000-0000-00000000ea01', '${OWNER}', '${LINE}', 0, 'Basic', 'placeholder', 'leavemon-ex');
+      insert into line_slot (id, owner_id, line_id, stage_index, stage, state)
+        values ('50000000-0000-0000-0000-00000000ea01', '${OWNER}', '${LINE}', 0, 'Basic', 'placeholder');
+      insert into collection (owner_id, name, target_catalog_card_ids)
+        values ('${OWNER}', 'Leave Collection', array['leavemon']);
     `);
     const client = pgliteClient(db);
     await asOwner(db);
 
-    await applyDecision(client, OWNER, `${LINE}:ex-only-cap:0`, "leave-it");
+    await applyDecision(client, OWNER, `${LINE}:collection-vs-line:0`, "leave-it");
 
-    expect(await decisionIds()).toContain(`${LINE}:ex-only-cap:0`);
+    expect(await decisionIds()).toContain(`${LINE}:collection-vs-line:0`);
   });
 });
 
 /**
  * UIL-121 A2c (her Q5, 2026-09-27): only the collection-vs-line decision card remains on her screen. The server still
- * derives a cap and a termination (above) until the tightening migration; `loadLineScreen` is what she sees.
+ * derives a cap (above), hidden; a termination can no longer exist (0034: no line reads 'terminated'). `loadLineScreen`
+ * is what she sees.
  */
 describe("UIL-121 A2c · her screen shows only the collection-vs-line decision card", () => {
   const CAPPED = "10000000-0000-0000-0000-00000000a2c1";
-  const ENDED = "10000000-0000-0000-0000-00000000a2c2";
   const CLAIMED = "10000000-0000-0000-0000-00000000a2c3";
 
   beforeEach(async () => {
     await seedCatalog([
       { id: "onlymon-ex", name: "Onlymon ex", dexId: 9411, cardClass: "specialty" },
-      { id: "lonelymon", name: "Lonelymon", dexId: 9412 },
       { id: "collectamon", name: "Collectamon", dexId: 9413 },
     ]);
     await db.exec(`
       insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status) values
         ('${CAPPED}', '${OWNER}', 9411, 'red', '${B1}', 'back', 'open'),
-        ('${ENDED}', '${OWNER}', 9412, 'red', '${B1}', 'back', 'terminated'),
         ('${CLAIMED}', '${OWNER}', 9413, 'red', '${B1}', 'back', 'open');
       insert into line_slot (id, owner_id, line_id, stage_index, stage, state, target_catalog_card_id) values
         ('50000000-0000-0000-0000-00000000a2c1', '${OWNER}', '${CAPPED}', 0, 'Basic', 'placeholder', 'onlymon-ex'),
-        ('50000000-0000-0000-0000-00000000a2c2', '${OWNER}', '${ENDED}', 0, 'Basic', 'placeholder', 'lonelymon'),
         ('50000000-0000-0000-0000-00000000a2c3', '${OWNER}', '${CLAIMED}', 0, 'Basic', 'placeholder', 'collectamon');
       insert into collection (owner_id, name, target_catalog_card_ids)
         values ('${OWNER}', 'Fire Collection', array['collectamon']);
     `);
   });
 
-  it("a derived cap and a derived termination show no card; the collection-vs-line one still does", async () => {
+  it("a derived cap shows no card; the collection-vs-line one still does", async () => {
     await asOwner(db);
-    // The server derives all three (so the filter, not the data, is what hides two of them) ...
+    // The server derives both (so the filter, not the data, is what hides the cap) ...
     expect(await decisionIds()).toEqual(
-      expect.arrayContaining([
-        `${CAPPED}:ex-only-cap:0`,
-        `${ENDED}:termination`,
-        `${CLAIMED}:collection-vs-line:0`,
-      ]),
+      expect.arrayContaining([`${CAPPED}:ex-only-cap:0`, `${CLAIMED}:collection-vs-line:0`]),
     );
     // ... and her screen gets only the collection-vs-line card.
     const screen = await loadLineScreen(pgliteClient(db));

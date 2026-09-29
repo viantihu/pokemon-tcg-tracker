@@ -260,15 +260,15 @@ describe("UIL-062 · overriding a card OUT of a line releases the slot it leaves
     });
   });
 
-  it("demotes a COMPLETE line to open, since a stage just emptied", async () => {
-    const { slots, copies } = await seedFilledLine("complete");
+  it("demotes a CLOSED line to open, since a stage just emptied", async () => {
+    const { slots, copies } = await seedFilledLine("closed");
     const card: DraftItem = {
       id: COPY,
       tcgdexId: CHARMANDER_SV03_026.tcgdexId,
       variant: "normal",
       existingCopyId: COPY,
     };
-    const pc = ctxFor(copies, slots, "complete");
+    const pc = ctxFor(copies, slots, "closed");
     pc.ctx.owned = [];
     const { planned } = planFromDraft(pc, [card]);
     const built = buildHaulCommitPayload(pc, planned, {

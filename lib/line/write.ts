@@ -358,6 +358,10 @@ async function assertCollectionDestinationLives(
  * Resolve a decision: re-derive it from fresh state, compute the writes for the chosen option, apply
  * them, and record the `PlacementDecision`. Throws if the decision is stale (state changed under it).
  */
+/** A retired decision card, sent anyway (a stale tab): refused in her words. */
+export const DECISION_RETIRED =
+  "That question isn't asked any more. Use Choose on the line to decide its stages.";
+
 export async function applyDecision(
   db: DbClient,
   ownerId: string,
@@ -368,6 +372,10 @@ export async function applyDecision(
   const model = await buildScreenModel(db);
   const derived = model.derived.find((d) => d.card.id === decisionId);
   if (!derived) throw new Error("That decision is no longer open — the line state has changed.");
+  // UIL-121 (Karvi, 2026-09-27; 0034): the only decision still asked is collection-vs-line (her Q5). A cap, a block,
+  // a root block and a termination wrote statuses and block slots a line no longer has; each open stage is hers on
+  // Lines' "Choose" instead. Refused here, before any write, in her words.
+  if (derived.card.kind !== "collection-vs-line") throw new Error(DECISION_RETIRED);
 
   // `pickedCatalogCardId` is validated against THIS freshly-derived resolution's own options inside
   // resolveDecisionWrites/wishlistUpsertFor — never trusted outright, the same rule a stale slot/line

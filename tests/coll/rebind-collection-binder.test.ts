@@ -392,7 +392,7 @@ describe("applyCollectionRebindMove — the copies and the collection change bin
     await seedBinders(db, [{ id: GEN, type: "general", name: "Binder 1" }]);
     await db.exec(`
       insert into evolution_line (id, owner_id, root_dex_id, color_band, binder_id, half, status)
-        values ('${LINE}', '${OWNER}', 1, 'red', '${GEN}', 'back', 'complete');
+        values ('${LINE}', '${OWNER}', 1, 'red', '${GEN}', 'back', 'closed');
       insert into line_slot (id, owner_id, line_id, stage_index, stage, state, copy_id)
         values ('${SLOT}', '${OWNER}', '${LINE}', 0, 'Basic', 'filled', '${CA1}');
       update copy set line_slot_id = '${SLOT}' where id = '${CA1}';

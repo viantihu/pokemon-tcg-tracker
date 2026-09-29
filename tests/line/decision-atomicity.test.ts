@@ -12,8 +12,9 @@
  * established for UIL-033. The real path is then poisoned the same way and writes nothing.
  *
  * Real Postgres (PGlite) with every migration applied, real RLS as the authenticated owner, the real
- * `apply_write_ops` RPC. The decision seeded is a genuine "ex-only-cap" from `deriveDecisions`, the same
- * fixture apply-decision-pick-wiring.test.ts uses, so this exercises production config and not a stub.
+ * `apply_write_ops` RPC. The decision seeded is a genuine "collection-vs-line" from `deriveDecisions` (the one decision
+ * still asked since UIL-121 A2c; the ex-only cap this file seeded before retired, and 0034 forbids the status it wrote),
+ * the same fixture apply-decision-pick-wiring.test.ts uses, so this exercises production config and not a stub.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
@@ -29,7 +30,7 @@ const SLOT = "50000000-0000-0000-0000-0000000000c1";
 const EMBEREX_DEX = 9411;
 const CHEAP_ID = "atomic-cheap";
 const PRICEY_ID = "atomic-pricey";
-const DECISION_ID = `${LINE}:ex-only-cap:0`;
+const DECISION_ID = `${LINE}:collection-vs-line:0`;
 
 let db: PGlite;
 beforeEach(async () => {
@@ -41,7 +42,7 @@ beforeEach(async () => {
   ] as const) {
     await db.query(
       `insert into catalog_card (tcgdex_id, name, dex_id, types, stage, evolve_from, card_class, price_market)
-         values ($1, 'Emberex', $2, $3, 'Basic', null, 'specialty', $4)`,
+         values ($1, 'Emberex', $2, $3, 'Basic', null, 'standard', $4)`,
       [id, [EMBEREX_DEX], ["Fire"], price],
     );
   }
@@ -54,6 +55,11 @@ beforeEach(async () => {
     `insert into line_slot (id, owner_id, line_id, stage_index, stage, state, target_catalog_card_id)
        values ($1, $2, $3, 0, 'Basic', 'placeholder', null)`,
     [SLOT, OWNER, LINE],
+  );
+  // A collection claims the species: the collection-vs-line question.
+  await db.query(
+    `insert into collection (owner_id, name, target_catalog_card_ids) values ($1, 'Fire Collection', $2)`,
+    [OWNER, [CHEAP_ID]],
   );
 });
 afterEach(async () => {
@@ -92,7 +98,7 @@ async function state() {
 }
 
 describe("UIL-095 · CONTROL — the pre-fix SEQUENCE leaves a decision half-applied", () => {
-  it("line capped and slot marked, but no wishlist row and NO audit row", async () => {
+  it("slot marked, but no wishlist row and NO audit row", async () => {
     // The old shape, written out: four awaited writes in order, each its own statement. This is not a
     // description of the bug, it is the bug, executed — so the state it leaves is on the record.
     await poisonWishlist();
@@ -101,12 +107,11 @@ describe("UIL-095 · CONTROL — the pre-fix SEQUENCE leaves a decision half-app
 
     let failed: string | null = null;
     try {
-      await client.from("evolution_line").update({ status: "capped" }).eq("id", LINE);
       await client
         .from("line_slot")
-        .update({ resolved_decision_kind: "ex-only-cap" })
+        .update({ resolved_decision_kind: "collection-vs-line" })
         .eq("id", SLOT);
-      // Third write of four. Everything before it has already committed on its own.
+      // Second write of three. Everything before it has already committed on its own.
       const { error } = await client.from("wishlist_item").insert({
         line_slot_id: SLOT,
         chosen_catalog_card_id: CHEAP_ID,
@@ -115,7 +120,7 @@ describe("UIL-095 · CONTROL — the pre-fix SEQUENCE leaves a decision half-app
       });
       if (error) throw error;
       await client.from("placement_decision").insert({
-        decision: "line-cap-confirmed",
+        decision: "collection-wins",
         reason: "never reached",
         resolved_by: "user",
       });
@@ -127,8 +132,8 @@ describe("UIL-095 · CONTROL — the pre-fix SEQUENCE leaves a decision half-app
 
     expect(failed).toContain("poisoned wishlist");
     expect(await state()).toEqual({
-      lineStatus: "capped", // already written
-      slotMark: "ex-only-cap", // already written
+      lineStatus: "open",
+      slotMark: "collection-vs-line", // already written
       wishlistRows: 0, // the one that failed
       auditRows: 0, // never reached — UIL-042's row, silently absent
     });
@@ -141,7 +146,7 @@ describe("UIL-095 · the real path is one transaction", () => {
     await asOwner(db);
 
     await expect(
-      applyDecision(pgliteClient(db), OWNER, DECISION_ID, "confirm-cap", PRICEY_ID),
+      applyDecision(pgliteClient(db), OWNER, DECISION_ID, "collection-wins", PRICEY_ID),
     ).rejects.toThrow(/poisoned wishlist/);
 
     // Every fact the control block showed half-written is absent here.
@@ -155,10 +160,10 @@ describe("UIL-095 · the real path is one transaction", () => {
 
   it("and when nothing is poisoned, every fact lands together", async () => {
     await asOwner(db);
-    await applyDecision(pgliteClient(db), OWNER, DECISION_ID, "confirm-cap", PRICEY_ID);
+    await applyDecision(pgliteClient(db), OWNER, DECISION_ID, "collection-wins", PRICEY_ID);
     expect(await state()).toEqual({
-      lineStatus: "capped",
-      slotMark: "ex-only-cap",
+      lineStatus: "open", // her chase of the wished card, on an open line (UIL-121)
+      slotMark: "collection-vs-line",
       wishlistRows: 1,
       auditRows: 1,
     });
@@ -186,13 +191,14 @@ describe("UIL-095 · the real path is one transaction", () => {
     } as unknown as ReturnType<typeof pgliteClient>;
 
     await asOwner(db);
-    await applyDecision(spy, OWNER, DECISION_ID, "confirm-cap", PRICEY_ID);
+    await applyDecision(spy, OWNER, DECISION_ID, "collection-wins", PRICEY_ID);
 
     expect(seen).toHaveLength(1); // ONE call, not four writes
     expect(seen[0]).toEqual([
-      "update_line",
       "update_slot",
       "upsert_wishlist_for_slot",
+      // UIL-121 A2c: collection-wins records her chase of the wished card on the slot.
+      "update_slot",
       "insert_decision",
       // 0028 (UIL-117 PR 1): applyWriteOps appends the slot check last to every write touching a slot.
       "assert_line_slots",
@@ -279,7 +285,7 @@ async function seedOpenWish(over: { held_for_binder_id?: string | null } = {}) {
   await db.query(
     `insert into wishlist_item (owner_id, line_slot_id, required_dex_id, required_type, required_stage,
        chosen_catalog_card_id, alternate_catalog_card_ids, will_live_in_specialty, held_for_binder_id)
-     values ($1, $2, $3, 'Fire', 'Basic', $4, '{}', true, $5)`,
+     values ($1, $2, $3, 'Fire', 'Basic', $4, '{}', false, $5)`,
     [OWNER, SLOT, EMBEREX_DEX, CHEAP_ID, over.held_for_binder_id ?? null],
   );
   await asOwner(db);
@@ -304,14 +310,14 @@ async function wishRows() {
 }
 
 describe("UIL-095 · a choice that STOPS chasing the card resolves its wish (QA's survivor)", () => {
-  it("'cap without a wishlist' marks the slot's open wishlist row resolved, through applyDecision", async () => {
+  it("'collection wins, no target' marks the slot's open wishlist row resolved, through applyDecision", async () => {
     // Removing the `resolve_wishlist_for_slot` op left the whole suite green: the SQL op was tested on its
     // own, but nothing drove a want-dropping choice through `applyDecision`. Product effect: she resolves a
     // decision to stop chasing a card, and it stays on her wishlist.
     await seedOpenWish();
     expect((await wishRows())[0].resolved_at).toBeNull();
 
-    await applyDecision(pgliteClient(db), OWNER, DECISION_ID, "cap-no-wishlist");
+    await applyDecision(pgliteClient(db), OWNER, DECISION_ID, "collection-wins-no-target");
 
     const rows = await wishRows();
     expect(rows).toHaveLength(1);
@@ -324,7 +330,7 @@ describe("UIL-095 · a refresh keeps what the decision does not decide (QA's sec
     // The Haul Plan (lib/plan/commit.ts) and Backfill (lib/backfill/plan.ts) write `held_for_binder_id`;
     // a line decision always sends null for it. A plain `= excluded` in the upsert wiped their value.
     await seedOpenWish({ held_for_binder_id: GEN });
-    await applyDecision(pgliteClient(db), OWNER, DECISION_ID, "confirm-cap", PRICEY_ID);
+    await applyDecision(pgliteClient(db), OWNER, DECISION_ID, "collection-wins", PRICEY_ID);
 
     const rows = await wishRows();
     expect(rows).toHaveLength(1); // refreshed, not duplicated

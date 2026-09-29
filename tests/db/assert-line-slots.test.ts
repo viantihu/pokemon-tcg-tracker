@@ -218,23 +218,21 @@ describe("0028 · every half-written shape is refused, and the whole write rolls
   });
 });
 
-describe("0028 · a line reads complete only when every one of its slots is filled (the Senior BA's rule)", () => {
-  it("marking the line complete while a slot waits is refused", async () => {
+// 0028's "complete only when every slot is filled" rule held a word that 0034 retired: a line is OPEN or CLOSED.
+describe("0034 · 'complete' is no longer a line status; a full line reads closed", () => {
+  it("writing 'complete' is refused by the status check, and nothing is written", async () => {
     await applyOps(db, { ops: [...fillS0, check([S0], [C0])] });
-    await refused([
-      { op: "update_line", id: LINE, patch: { status: "complete" } },
-      check([], [], [LINE]),
-    ]);
+    await expect(
+      applyOps(db, {
+        ops: [
+          { op: "update_line", id: LINE, patch: { status: "complete" } },
+          check([], [], [LINE]),
+        ],
+      }),
+    ).rejects.toThrow(/evolution_line_status_check/);
   });
 
-  it("filling a slot of a line already marked complete that still has another open slot is refused", async () => {
-    await asSuperuser(db);
-    await db.query(`update evolution_line set status = 'complete' where id = $1`, [LINE]);
-    await asOwner(db);
-    await refused([...fillS0, check([S0], [C0])]);
-  });
-
-  it("complete with every slot filled passes", async () => {
+  it("closed with every slot filled passes", async () => {
     await applyOps(db, {
       ops: [
         ...fillS0,
@@ -244,7 +242,7 @@ describe("0028 · a line reads complete only when every one of its slots is fill
           id: C1,
           patch: { role: "shelved", binder_id: BINDER, binder_half: "back", line_slot_id: S1 },
         },
-        { op: "update_line", id: LINE, patch: { status: "complete" } },
+        { op: "update_line", id: LINE, patch: { status: "closed" } },
         check([S0, S1], [C0, C1], [LINE]),
       ],
     });
