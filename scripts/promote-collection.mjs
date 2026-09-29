@@ -97,6 +97,8 @@ export const OWNER_TABLES = [
   // Production; they land before evolution_line and copy, whose bands they describe.
   "owner_band_order",
   "owner_type_band",
+  // 0035 (UIL-130): her bulk boxes. Before copy, whose bulk_unit_id names them; ids travel as they are.
+  "bulk_unit",
   "evolution_line",
   "copy",
   "line_slot",
