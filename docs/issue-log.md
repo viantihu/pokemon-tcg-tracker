@@ -9303,7 +9303,7 @@ sign-up — this entry is the "banner" stage specifically).
 - **Reported:** 2026-09-27 (Karvi, direct to the Senior BA). In her words: "Another major conceptual
   change that needs to happen is that 'Bulk' is a type of storage unit. For phase 2, I plan to introduce
   'sorted bulk', but bulk needs to be its own storage unit that we can track capacity against."
-- **Status:** Open, design pending.
+- **Status:** Open, design approved, the Tech Lead is building.
 - **Priority:** High (pre-go-live; Karvi confirmed "after line work").
 - **Area:** Storage / Bulk / Settings
 - **Env:** Testing
@@ -9339,6 +9339,19 @@ ruling, 2026-09-27 — not Karvi's — extending her words "Choose a basic energ
 bulk box, or leave empty. If a bulk box card is chosen, the user should specify which card." Shipped in
 PR #424 (merged `a24e63b`). The "every copy comes from a Dex row" principle (UIL-098) is named by the
 Senior BA as adjacent to this design, not re-derived here.
+
+**Karvi's rulings, 2026-09-29, direct answers.** A box with finite capacity that's full REFUSES a card
+and asks for another box: "Stop it, ask for another. This should only apply to boxes that have a finite
+capacity. This should not apply to an untracked box." New boxes start untracked. The first box is named
+"Bulk box."
+
+**Design, from the Tech Lead, approved by the Senior BA.** A separate `bulk_unit` table, and
+`copy.bulk_unit_id`; a two-direction trigger so existing writers keep working without every call site
+changing at once; moving a card OUT of a box is never refused, only moving one IN to a full, capacity-
+tracked box; a filler (basic energy or a bulk-box pick) keeps its home box, not a floating reference;
+promotion lists `bulk_unit` ahead of `copy` (the same ordering `presence_group`/`copy` and
+`evolution_line`/`line_slot` already need, since `copy` would reference it). Migration 0035 allocated at
+PR-open — confirmed unclaimed (0034 is the highest that exists on `develop` as of this entry).
 
 **Cross-reference UIL-121** (the line work this is sequenced after) and **UIL-117** (C1-C2, the same
 sequencing dependency) and **UIL-098** (the Dex-only-creates-copies principle this design has to keep
