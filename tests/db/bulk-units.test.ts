@@ -433,6 +433,56 @@ describe("0035 · a full box with a card limit takes no more (Karvi: 'Stop it, a
   });
 });
 
+describe("0035 · the rule holds without the trigger (the durable invariant, for when a later PR replaces it)", () => {
+  // QA's B13: the trigger always satisfies copy_bulk_unit_role, so no writer reaches it. With the trigger off, the
+  // CHECK alone refuses both shapes. Inside a transaction that is rolled back, so the trigger is never left off.
+  beforeEach(async () => {
+    db = await freshRpcDb();
+    await seedCatalogCardsFull(db, [CHARMANDER_SV03_026]);
+    await seedBinders(db, [{ id: GEN, type: "general", name: "KB-001" }]);
+    await q(
+      `insert into bulk_unit (id, owner_id, name, is_default) values ($1, $2, 'Bulk box', true)`,
+      [BOX(1), OWNER],
+    );
+  });
+  const withoutTrigger = async (sql: string, params: unknown[]) => {
+    await asSuperuser(db);
+    await db.exec(`begin; alter table copy disable trigger copy_bulk_unit;`);
+    try {
+      await db.query(sql, params);
+    } finally {
+      await db.exec(`rollback;`);
+    }
+  };
+
+  it("a bulk copy with no box is refused", async () => {
+    await expect(
+      withoutTrigger(
+        `insert into copy (id, owner_id, catalog_card_id, role) values ($1, $2, 'sv03-026', 'bulk')`,
+        [COPY(1), OWNER],
+      ),
+    ).rejects.toThrow(/copy_bulk_unit_role/);
+  });
+
+  it("a shelved copy with a box is refused", async () => {
+    await expect(
+      withoutTrigger(
+        `insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band, bulk_unit_id)
+           values ($1, $2, 'sv03-026', 'shelved', $3, 'front', 'red', $4)`,
+        [COPY(1), OWNER, GEN, BOX(1)],
+      ),
+    ).rejects.toThrow(/copy_bulk_unit_role/);
+  });
+
+  it("…and the trigger is on again afterwards (a bulk write still gets her box)", async () => {
+    await q(
+      `insert into copy (id, owner_id, catalog_card_id, role) values ($1, $2, 'sv03-026', 'bulk')`,
+      [COPY(2), OWNER],
+    );
+    expect(await unitOf(2)).toEqual({ role: "bulk", unit: BOX(1) });
+  });
+});
+
 /* ------------------------------------------ the writer list ------------------------------------------ */
 
 describe("0035 · every writer of a bulk copy is on the list above (a new one must be tested here, or this fails)", () => {
