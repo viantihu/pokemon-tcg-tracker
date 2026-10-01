@@ -1,5 +1,6 @@
 import type { BlockNeedCandidate } from "@/lib/line/types";
 import { isOpenBlockNeed } from "@/lib/line/move";
+import { bulkUnitViews, type BulkUnitView } from "./bulk-units";
 /**
  * Load the M3 engine context from the DB and run the cascade over a haul draft (dev-spec §5 M6).
  *
@@ -35,6 +36,7 @@ import {
   type DbClient,
   type Row,
   binderBlockRepo,
+  bulkUnitRepo,
 } from "@/lib/repo";
 import { loadCatalogCached } from "./catalog-cache";
 import { toBinder, toCatalogCard, toCollection, toEvolutionLine, toOwnedCopy } from "./adapt";
@@ -67,6 +69,12 @@ export interface PlanContext {
    * — with what the Move panel needs to list it. `ctx.openBlockNeeds` is this list's length.
    */
   blockNeeds?: BlockNeedCandidate[];
+  /**
+   * UIL-130: her bulk boxes, with how many cards each holds. Where the plan sends a card to bulk on its own, it names
+   * the box `bulkUnitForRoute` picks (lib/plan/bulk-units.ts). Absent (an older test context): the database gives the
+   * card her default box.
+   */
+  bulkUnits?: BulkUnitView[];
 }
 
 export interface LoadPlanContextOptions {
@@ -99,6 +107,7 @@ export async function loadPlanContext(
     bandRows,
     sectionRows,
     blockRows,
+    bulkUnitRows,
   ] = await Promise.all([
     // `listAll`, not `list`: these tables scale with the collection and the mirror (~23.5k catalog
     // rows), and a single `select *` is silently capped at the server's `max-rows` (1000). A
@@ -118,6 +127,7 @@ export async function loadPlanContext(
     colorBandRepo.listOrdered(db),
     binderSectionRepo.list(db),
     binderBlockRepo.list(db),
+    bulkUnitRepo.listOrdered(db),
   ]);
 
   const catalogById = new Map<string, CatalogCard>();
@@ -257,6 +267,7 @@ export async function loadPlanContext(
 
   return {
     blockNeeds,
+    bulkUnits: bulkUnitViews(bulkUnitRows, copyRows),
     ctx,
     catalogById,
     copyRowById,

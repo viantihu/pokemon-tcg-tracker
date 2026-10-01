@@ -107,6 +107,7 @@ export const NOT_A_HAUL_COPY = {
   copyGone: "That card is no longer in your collection. Reload the plan to see what is waiting.",
 } as const;
 import { copyPlacementFromTarget } from "./placement";
+import { bulkUnitForRoute } from "./bulk-units";
 import { NO_BINDER } from "./no-binder";
 import { loadPlanContext, planFromDraft, type DraftItem, type PlanContext } from "./context";
 import { derivePlacementFrom, placementDigest } from "./spotlight";
@@ -807,8 +808,16 @@ function writeCard(ops: WriteOp[], p: PlannedCard, pc: PlanContext, counts: Comm
         colorBand: swap.incomingInherits.colorBand,
       }
     : copyPlacementFromTarget(result.target);
+  // UIL-130: where the plan sends a card to bulk on its own, the box with room it names (her default first). None with
+  // room: no box named, and the database refuses in her words rather than overfill one.
+  const routeBox = pc.bulkUnits ? bulkUnitForRoute(pc.bulkUnits) : null;
 
-  const copyId = emitIncomingCopy(ops, p, placement, counts);
+  const copyId = emitIncomingCopy(
+    ops,
+    p,
+    placement.role === "bulk" && routeBox ? { ...placement, bulkUnitId: routeBox } : placement,
+    counts,
+  );
 
   if (swap) {
     // The displaced normal copy goes to the bulk box.
@@ -823,6 +832,7 @@ function writeCard(ops: WriteOp[], p: PlannedCard, pc: PlanContext, counts: Comm
           binder_half: null,
           color_band: null,
           line_slot_id: null,
+          ...(routeBox ? { bulk_unit_id: routeBox } : {}),
         },
       });
     }
@@ -925,6 +935,8 @@ function writeOverriddenCard(
       binderHalf: placement.binder_half,
       colorBand: placement.color_band,
       lineSlotId: existingJoin?.slotId ?? placement.line_slot_id,
+      // UIL-130: the box her Move named (absent: her default box).
+      bulkUnitId: placement.bulk_unit_id ?? null,
     },
     counts,
   );
@@ -998,6 +1010,8 @@ function emitIncomingCopy(
     binderHalf: "front" | "back" | null;
     colorBand: string | null;
     lineSlotId?: string | null;
+    /** UIL-130: the bulk box, when one is named. Absent: the database gives a bulk copy her default box. */
+    bulkUnitId?: string | null;
   },
   counts: CommitCounts,
 ): string {
@@ -1014,6 +1028,7 @@ function emitIncomingCopy(
       binder_half: placement.binderHalf,
       color_band: placement.colorBand,
       line_slot_id: placement.lineSlotId ?? null,
+      ...(placement.bulkUnitId ? { bulk_unit_id: placement.bulkUnitId } : {}),
     },
   });
   counts.routed += 1;

@@ -18,6 +18,7 @@ export type {
 export { catalogCardRepo } from "./catalog-card";
 export { copyRepo, removedPresenceRepo } from "./copy";
 export { binderRepo } from "./binder";
+export { bulkUnitRepo } from "./bulk-unit";
 export { binderSectionRepo } from "./binder-section";
 export { collectionRepo } from "./collection";
 export { evolutionLineRepo } from "./evolution-line";

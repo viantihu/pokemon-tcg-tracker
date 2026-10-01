@@ -41,13 +41,15 @@ import { NOT_A_LINE } from "./popup";
 export function placementForMove(dest: MoveDestination): CopyPlacementPatch {
   switch (dest.kind) {
     case "bulk":
-      // Bulk box has no internal structure: no binder, no half, no band, no line slot.
+      // Bulk box has no internal structure: no binder, no half, no band, no line slot. The box she picked, when she
+      // picked one (UIL-130); otherwise the copy keeps its box, or the database gives it her default box.
       return {
         role: "bulk",
         binder_id: null,
         binder_half: null,
         color_band: null,
         line_slot_id: null,
+        ...(dest.unitId ? { bulk_unit_id: dest.unitId } : {}),
       };
     case "collection":
       // Specialty binders are a single section — no half, no rainbow band (system-design §4).
@@ -477,6 +479,8 @@ export function buildMoveOps(plan: MovePlan): WriteOp[] {
         binder_half: patch.binder_half,
         color_band: patch.color_band,
         line_slot_id: patch.line_slot_id,
+        // UIL-130: the box she picked (absent: the copy keeps its box, or gets her default box).
+        ...(patch.bulk_unit_id ? { bulk_unit_id: patch.bulk_unit_id } : {}),
       },
     },
   ];

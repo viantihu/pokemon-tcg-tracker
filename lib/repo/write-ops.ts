@@ -29,6 +29,8 @@ export interface CopyPatch {
   binder_half?: string | null;
   color_band?: string | null;
   line_slot_id?: string | null;
+  /** 0036 (UIL-130): the box she picked. Absent: the copy keeps its box, or a bulk copy gets her default box. */
+  bulk_unit_id?: string | null;
 }
 
 export interface SlotPatch {
@@ -295,6 +297,26 @@ export type WriteOp =
   | { op: "set_band_order"; bands: string[] }
   /** 0033 (UIL-127b): one type's band in her map. Her map starts as a copy of the defaults, so it is always whole. */
   | { op: "set_type_band"; card_type: string; band: string }
+  /** 0036 (UIL-130): her bulk boxes. Her first box is her default; `capacity` null = untracked (never full). */
+  | {
+      op: "insert_bulk_unit";
+      id: string;
+      name: string;
+      capacity: number | null;
+      sort_order?: number;
+    }
+  | {
+      op: "update_bulk_unit";
+      id: string;
+      patch: { name?: string; capacity?: number | null; sort_order?: number };
+    }
+  /** Her default box, swapped in one op (she always has exactly one). */
+  | { op: "set_default_bulk_unit"; id: string }
+  /**
+   * A box goes only with somewhere for its cards to go: `move_to`, another of her boxes, checked before anything
+   * moves (never her last box; never into a box with a limit that cannot take them all).
+   */
+  | { op: "delete_bulk_unit"; id: string; move_to: string }
   /**
    * 0033: the database's backstop for UIL-127a. Refuses when a named copy is shelved or a block with no binder.
    * Appended by `applyWriteOps` naming ONLY the copies whose binder the payload SETS (see `withCopyBinderCheck`).

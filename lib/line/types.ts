@@ -193,6 +193,8 @@ export interface CopyPlacementPatch {
   binder_half: "front" | "back" | null;
   color_band: string | null;
   line_slot_id: string | null;
+  /** UIL-130: the bulk box she picked. Absent: the copy keeps its box, or a bulk copy gets her default box. */
+  bulk_unit_id?: string;
 }
 
 /** A slot-state patch (filled → placeholder on removal, placeholder → block on override, …). */
@@ -264,7 +266,8 @@ export type MoveDestination =
       lineJoin?: LineJoinChoice;
     }
   | { kind: "collection"; binderId: string; collectionId: string }
-  | { kind: "bulk" }
+  /** `unitId`: the box she picked (UIL-130). Absent: the card keeps its box, or goes to her default box. */
+  | { kind: "bulk"; unitId?: string }
   /**
    * UIL-030: use the card as the physical BINDER BLOCK for a line's block slot — a reserved run of
    * pockets the engine decided can never be filled. The copy takes role 'block' in the line's binder

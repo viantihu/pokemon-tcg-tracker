@@ -544,6 +544,8 @@ function replaceInLine(
         binder_half: outPatch.binder_half,
         color_band: outPatch.color_band,
         line_slot_id: outPatch.line_slot_id,
+        // UIL-130: the box she picked for the card coming out (absent: her default box).
+        ...(outPatch.bulk_unit_id ? { bulk_unit_id: outPatch.bulk_unit_id } : {}),
       },
     },
     { op: "update_slot", id: slot.id, patch: { copy_id: state.copy.id } },

@@ -117,6 +117,7 @@ export function buildCollectionRemovalOps(plan: CollectionRemovalPlan): WriteOp[
         binder_half: patch.binder_half,
         color_band: patch.color_band,
         line_slot_id: patch.line_slot_id,
+        ...(patch.bulk_unit_id ? { bulk_unit_id: patch.bulk_unit_id } : {}),
       },
     });
   }
