@@ -4080,3 +4080,13 @@ html.tour-open .app {
     padding-bottom: max(120px, calc(var(--tour-h, 0px) + 64px + 24px));
   }
 }
+
+/* UIL-130: a bulk box row in Settings. Three buttons beside a long name left the name a sliver at 375px; its name and
+   load keep the room they need, and the buttons wrap under them on a phone. */
+.binderrow.bulkrow {
+  flex-wrap: wrap;
+}
+.binderrow.bulkrow > .bx {
+  flex: 1 1 160px;
+  min-width: 0;
+}

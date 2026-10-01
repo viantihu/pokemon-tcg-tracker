@@ -50,8 +50,8 @@ export function BulkBoxes({
       </div>
       <div className="binderlist">
         {units.map((u) => (
-          <div key={u.id} className="binderrow" data-box={u.id}>
-            <div style={{ minWidth: 0 }}>
+          <div key={u.id} className="binderrow bulkrow" data-box={u.id}>
+            <div className="bx">
               <div className="nm u">
                 {u.name}
                 {u.isDefault ? (
