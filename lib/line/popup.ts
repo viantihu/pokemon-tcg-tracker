@@ -12,6 +12,7 @@
  * Pure: types and small helpers only, no I/O.
  */
 
+import type { BulkUnitView } from "@/lib/repo/bulk-unit";
 import type { Language } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
 import type { CardIdentity, ExistingLineBlock, MoveDestination, MoveOptions } from "./types";
@@ -52,6 +53,11 @@ export type LineChoice =
       stages?: Record<number, StageDecision>;
       /** As a start's: haul copies the screen routes to this same line. */
       comingCopyIds?: string[];
+      /**
+       * UIL-130: the box a spare card coming OUT of the pocket this card takes goes back to, by copy id, when she
+       * picked one (its home box is full). Absent: it goes back to its home box.
+       */
+      returnBoxes?: Record<string, string>;
     }
   /**
    * A copy for a filled slot: keep the one that's there (nothing in the line moves). NOT a line write: the builder
@@ -298,6 +304,20 @@ export interface LinePopupModel {
   existingLines: LinePopupExistingLine[];
   /** Present exactly when `mode` is "replace". */
   replace?: LinePopupReplace;
+  /**
+   * UIL-130: a spare card that comes out of its pocket because this card takes it (an Add into a stage she filled
+   * with a spare card). It goes back to its home box, or to a box she picks when that one is full.
+   */
+  returning?: ReturningCard[];
+  /** Her bulk boxes, for a returning card's box (and a full home box's reason). */
+  boxes?: BulkUnitView[];
+}
+
+/** A spare card going back to the bulk: which card, and the box it calls home (null: none any more). */
+export interface ReturningCard {
+  copyId: string;
+  name: string;
+  homeBoxId: string | null;
 }
 
 /* --------------------------------------- the popup's own props --------------------------------------- */

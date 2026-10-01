@@ -52,6 +52,7 @@ import {
   type LineProposal,
 } from "@/lib/line/popup";
 import { LinePopup } from "./LinePopup";
+import { boxLoad, fullBoxReason, initialBox } from "@/lib/plan/bulk-units";
 
 const BULK = "__bulk__";
 
@@ -147,6 +148,20 @@ export function MovePanel({
     initial?.kind === "shelf" ? initial.lineJoin : undefined,
   );
 
+  /**
+   * UIL-130: the bulk box she picks. Her boxes come with the options; absent (an older caller), the bulk box is one
+   * place and the database gives the card her default box. Starts on the box named, else her default with room.
+   */
+  const boxes = options.bulkUnits ?? [];
+  const [unitId, setUnitId] = useState<string | undefined>(() =>
+    initialBox(boxes, initial?.kind === "bulk" ? initial.unitId : undefined),
+  );
+  const box = boxes.find((u) => u.id === unitId);
+  /** A box with a card limit that is full takes no more (Karvi: "Stop it, ask for another"). */
+  const boxFull = (u: { held: number; capacity: number | null }) =>
+    u.capacity !== null && u.held >= u.capacity;
+  const everyBoxFull = boxes.length > 0 && boxes.every(boxFull);
+
   /** UIL-030: the block need she picked (by slot id). A manual binder/bulk pick clears it. */
   const [blockPick, setBlockPick] = useState<string | null>(null);
   const blockNeed = (blockNeeds ?? []).find((n) => n.slotId === blockPick) ?? null;
@@ -193,7 +208,7 @@ export function MovePanel({
         binderId: blockNeed.binderId,
       }
     : isBulk
-      ? { kind: "bulk" }
+      ? { kind: "bulk", ...(unitId ? { unitId } : {}) }
       : isSpecialty
         ? { kind: "collection", binderId: binder!.id, collectionId: collectionId ?? "" }
         : {
@@ -206,7 +221,10 @@ export function MovePanel({
 
   // No line-uniqueness gate any more (UIL-096): starting a second line is her call, and the warning below
   // is how she makes it knowingly.
-  const canConfirm = isMoveDestinationComplete(destination);
+  const canConfirm =
+    isMoveDestinationComplete(destination) &&
+    !(isBulk && box && boxFull(box)) &&
+    !(isBulk && everyBoxFull);
 
   const hasCandidates = (joinCandidates ?? []).length > 0;
 
@@ -321,7 +339,7 @@ export function MovePanel({
     if (blockNeed) {
       return `BINDER BLOCK · ${blockNeed.speciesLabel} · ${blockNeed.binderName.toUpperCase()} BACK`;
     }
-    if (isBulk) return "BULK BOX · NOT SHELVED";
+    if (isBulk) return `${(box?.name ?? "Bulk box").toUpperCase()} · NOT SHELVED`;
     if (isSpecialty) {
       const c = collections.find((x) => x.id === collectionId);
       return `${binder?.name ?? "BINDER"} · ${c ? c.name.toUpperCase() : "PICK A COLLECTION"}`;
@@ -404,12 +422,38 @@ export function MovePanel({
 
       {isBulk ? (
         <div className="orow">
-          <div className="ol" />
-          <div className="ochips">
-            <span className="oskip">
-              Bulk box has no internal structure: no binder, no half, no band. It stays in the pile
-              until you place it.
-            </span>
+          <div className="ol">{boxes.length > 0 ? "WHICH BOX" : ""}</div>
+          <div className="ochips" role="group" aria-label="Which bulk box">
+            {boxes.map((u) => {
+              const full = boxFull(u);
+              return (
+                <button
+                  key={u.id}
+                  type="button"
+                  className={"ochip" + (unitId === u.id ? " on" : "")}
+                  aria-pressed={unitId === u.id}
+                  disabled={full}
+                  title={full ? fullBoxReason(u) : undefined}
+                  onClick={() => setUnitId(u.id)}
+                >
+                  {u.name} · {boxLoad(u)}
+                </button>
+              );
+            })}
+            {everyBoxFull ? (
+              <span className="oskip" role="alert">
+                Every bulk box is full. Pick another place, or raise a box&apos;s limit in Settings.
+              </span>
+            ) : box && boxFull(box) ? (
+              <span className="oskip" role="alert">
+                {fullBoxReason(box)}
+              </span>
+            ) : (
+              <span className="oskip">
+                A bulk box has no internal structure: no binder, no half, no band. It stays in the
+                pile until you place it.
+              </span>
+            )}
           </div>
         </div>
       ) : isSpecialty ? (

@@ -111,6 +111,8 @@ export interface CopySnapshot {
   colorBand: string | null;
   /** Non-null when this copy fills an evolution-line slot. */
   lineSlotId: string | null;
+  /** UIL-130: the bulk box it is in (optional: a hand-built snapshot may leave it out). */
+  bulkUnitId?: string | null;
   /** ISO timestamp; the shrink tiebreak retires the most recently created copy first (§1.6). */
   createdAt: string;
   /**

@@ -10,7 +10,7 @@
  * the line popup for the card coming out. Nothing here writes: it reports her pick to the popup.
  */
 
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { stageLabel } from "@/lib/line/popup";
 import type {
   LineChoice,
@@ -25,6 +25,7 @@ import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { BandChip } from "./BandChip";
 import { CardFace } from "./CardFace";
 import { MoveOverlay } from "./MoveOverlay";
+import { initialBox } from "@/lib/plan/bulk-units";
 import { useEscapeLayer } from "./escape-layer";
 
 type OutgoingLine = Extract<LineChoice, { mode: "start" } | { mode: "join" }>;
@@ -39,8 +40,11 @@ export function destinationLabel(dest: MoveDestination, options?: MoveOptions): 
   const binder = (id: string) => options?.binders.find((b) => b.id === id)?.name ?? "a binder";
   const band = (key: string) => options?.bands.find((b) => b.key === key)?.display ?? key;
   switch (dest.kind) {
-    case "bulk":
-      return "the bulk box";
+    case "bulk": {
+      // UIL-130: the box she picked, by its name ("Shoebox"); none named: her bulk box.
+      const box = dest.unitId ? options?.bulkUnits?.find((u) => u.id === dest.unitId) : undefined;
+      return box ? box.name : "the bulk box";
+    }
     case "shelf":
       return `${binder(dest.binderId)} · ${dest.half === "back" ? "Back" : "Front"} · ${band(dest.band)}`;
     case "collection": {
@@ -194,17 +198,7 @@ export function ReplaceChoice({
  * Where a card goes: the suggested place in one tap, or anywhere else through the Move sheet (a front half,
  * another line when `lineModel` is given, a collection).
  */
-function DestinationPicker({
-  label,
-  card,
-  value,
-  suggested,
-  options,
-  lineModel,
-  note = "",
-  busy,
-  onPick,
-}: {
+function DestinationPicker(props: {
   label: string;
   /** ", new line" / ", into its slot" when the card goes into a line (UX review of #391). */
   note?: string;
@@ -216,15 +210,41 @@ function DestinationPicker({
   busy: boolean;
   onPick(dest: MoveDestination, line?: OutgoingLine): void;
 }) {
+  const { label, card, options, lineModel, note = "", busy, onPick } = props;
+  let { value, suggested } = props;
   const [sheet, setSheet] = useState<MoveDestination | null>(null);
   // Escape closes this sheet only, not the popup under it (escape-layer.ts).
   useEscapeLayer(sheet !== null, () => setSheet(null));
+  // UIL-130: "the bulk box" is one of her boxes. A suggestion or a pick that names none means her default box with
+  // room (else her first with room), named, so what she confirms is the box the card goes to, never a full one.
+  const boxes = options?.bulkUnits ?? [];
+  const routeBox = boxes.length > 0 ? initialBox(boxes) : undefined;
+  const named = (d: MoveDestination): MoveDestination =>
+    d.kind === "bulk" && !d.unitId && routeBox ? { kind: "bulk", unitId: routeBox } : d;
+  suggested = named(suggested);
+  value = named(value);
+  const everyBoxFull =
+    boxes.length > 0 && boxes.every((u) => u.capacity !== null && u.held >= u.capacity);
+  useEffect(() => {
+    // The choice she confirms carries the box the screen shows (once, when it named none).
+    if (value.kind === "bulk" && JSON.stringify(value) !== JSON.stringify(props.value))
+      onPick(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeBox]);
   const general = options?.binders.find((b) => b.type === "general");
   const specialty = options?.binders.find(
     (b) => b.type === "specialty" && (options.collectionsByBinder[b.id]?.length ?? 0) > 0,
   );
   const isSuggested = JSON.stringify(value) === JSON.stringify(suggested);
   const isBulk = value.kind === "bulk";
+  /** A bulk chip says which box: "Bulk box" when she has one, its name when she has several. */
+  const bulkText = (d: MoveDestination) => {
+    const name = destinationLabel(d, options);
+    // Her box named "Bulk box" reads as itself, never "Bulk · Bulk box" (as on the plan rows).
+    return boxes.length > 1 && d.kind === "bulk" && name !== "Bulk box"
+      ? `Bulk · ${name}`
+      : "Bulk box";
+  };
   const chips: {
     key: string;
     text: string;
@@ -234,7 +254,7 @@ function DestinationPicker({
   }[] = [
     {
       key: "suggested",
-      text: suggested.kind === "bulk" ? "Bulk box" : destinationLabel(suggested, options),
+      text: suggested.kind === "bulk" ? bulkText(suggested) : destinationLabel(suggested, options),
       pick: suggested,
       on: isSuggested,
     },
@@ -243,9 +263,18 @@ function DestinationPicker({
   if (suggested.kind !== "bulk") {
     chips.push({
       key: "bulk",
-      text: "Bulk box",
-      pick: { kind: "bulk" },
+      text: bulkText(named({ kind: "bulk" })),
+      pick: named({ kind: "bulk" }),
       on: !isSuggested && isBulk,
+    });
+  }
+  // UIL-130: with more than one box, any other box through the Move sheet (a full one shown, and refused there).
+  if (options && boxes.length > 1) {
+    chips.push({
+      key: "box",
+      text: "Another box…",
+      open: named({ kind: "bulk" }),
+      on: !isSuggested && isBulk && value.kind === "bulk" && value.unitId !== routeBox,
     });
   }
   if (options && general) {
@@ -295,6 +324,11 @@ function DestinationPicker({
         <div className="lp-note">
           → {destinationLabel(value, options)}
           {note}
+        </div>
+      ) : null}
+      {everyBoxFull && isBulk ? (
+        <div className="lp-error" role="alert">
+          Every bulk box is full. Pick another place, or raise a box&apos;s limit in Settings.
         </div>
       ) : null}
       {sheet && options ? (

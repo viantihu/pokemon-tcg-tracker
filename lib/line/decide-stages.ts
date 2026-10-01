@@ -27,6 +27,11 @@ export interface DecideStagesChoice {
   lineId: string;
   stages: Record<number, StageDecision>;
   thirdPocket?: ThirdPocketChoice;
+  /**
+   * UIL-130: the box a spare card coming out of its pocket goes back to, by copy id, when she picked one (its home
+   * box is full). Absent: it goes back to its home box.
+   */
+  returnBoxes?: Record<string, string>;
 }
 
 /** Fresh state for one line. */
@@ -45,11 +50,18 @@ export const DECIDE_REFUSAL = {
   noStage: "That line has no such stage any more. Reload and choose again.",
 } as const;
 
-/** A copy out of a pocket, back to her bulk box. */
-const toBulk = (copyId: string): WriteOp => ({
+/** A copy out of a pocket, back to her bulk box: the box she picked, else its home box (UIL-130). */
+const toBulk = (copyId: string, box?: string): WriteOp => ({
   op: "update_copy",
   id: copyId,
-  patch: { role: "bulk", binder_id: null, binder_half: null, color_band: null, line_slot_id: null },
+  patch: {
+    role: "bulk",
+    binder_id: null,
+    binder_half: null,
+    color_band: null,
+    line_slot_id: null,
+    ...(box ? { bulk_unit_id: box } : {}),
+  },
 });
 
 export function buildDecideStagesOps(st: DecideStagesState, choice: DecideStagesChoice): WriteOp[] {
@@ -81,7 +93,7 @@ export function buildDecideStagesOps(st: DecideStagesState, choice: DecideStages
     // What the stage had comes out first: a filler's block (a spare card back to bulk).
     for (const b of blocks.filter((x) => x.line_slot_id === slot.id)) {
       ops.push({ op: "delete_binder_block", id: b.id, line_id: line.id });
-      if (b.copy_id) ops.push(toBulk(b.copy_id));
+      if (b.copy_id) ops.push(toBulk(b.copy_id, choice.returnBoxes?.[b.copy_id]));
     }
 
     if (d.kind === "later") {
@@ -137,7 +149,7 @@ export function buildDecideStagesOps(st: DecideStagesState, choice: DecideStages
     if (!hasThirdPocket(t)) validateThirdPocket(shared, t, choice.thirdPocket); // refuses, in her words
     for (const b of blocks.filter((x) => x.line_slot_id === null && x.purpose === "line-filler")) {
       ops.push({ op: "delete_binder_block", id: b.id, line_id: line.id });
-      if (b.copy_id) ops.push(toBulk(b.copy_id));
+      if (b.copy_id) ops.push(toBulk(b.copy_id, choice.returnBoxes?.[b.copy_id]));
     }
     if (choice.thirdPocket.material === "later") {
       ops.push({ op: "update_line", id: line.id, patch: { extra_pocket: null } });

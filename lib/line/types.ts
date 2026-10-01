@@ -10,6 +10,7 @@
 
 import type { Locale } from "@/lib/sync/types";
 import type { LineStatus, Role, SlotState } from "@/lib/engine";
+import type { BulkUnitView } from "@/lib/repo/bulk-unit";
 
 /* ------------------------------- line detail ------------------------------- */
 
@@ -307,6 +308,8 @@ export interface MoveOptions {
   binders: { id: string; name: string; type: "general" | "specialty" }[];
   collectionsByBinder: Record<string, { id: string; name: string }[]>;
   bands: { key: string; display: string }[];
+  /** UIL-130: her bulk boxes, in her order. Absent (an older caller): the bulk box is picked as one place. */
+  bulkUnits?: BulkUnitView[];
 }
 
 /**

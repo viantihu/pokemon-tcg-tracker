@@ -406,7 +406,7 @@ function joinLine(
     ops: [
       // A stage that held a filler: the card takes its pocket, so the filler comes out (a spare card back to the
       // bulk box), in the same write.
-      ...fillerOutOps(state, line.id, slot),
+      ...fillerOutOps(state, line.id, slot, choice.returnBoxes),
       ...buildExistingLineJoinOps({
         copyId: state.copy.id,
         lineId: line.id,
@@ -661,7 +661,13 @@ export function typeOfBand(bandKey: string, map: TypeColorMap): string | null {
 }
 
 /** A card joining a stage that held a filler: the filler's block comes out, and a spare card goes back to bulk. */
-function fillerOutOps(state: LineWriteState, lineId: string, slot: Row<"line_slot">): WriteOp[] {
+function fillerOutOps(
+  state: LineWriteState,
+  lineId: string,
+  slot: Row<"line_slot">,
+  /** UIL-130: the box she picked for a spare card coming out, by copy id (absent: its home box). */
+  returnBoxes: Record<string, string> = {},
+): WriteOp[] {
   if (slot.state !== "block") return [];
   const ops: WriteOp[] = [];
   for (const b of state.blocksByLine.get(lineId) ?? []) {
@@ -677,6 +683,7 @@ function fillerOutOps(state: LineWriteState, lineId: string, slot: Row<"line_slo
           binder_half: null,
           color_band: null,
           line_slot_id: null,
+          ...(returnBoxes[b.copy_id] ? { bulk_unit_id: returnBoxes[b.copy_id] } : {}),
         },
       });
     }

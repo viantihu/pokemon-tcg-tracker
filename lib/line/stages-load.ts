@@ -11,12 +11,14 @@ import { toCatalogCard } from "@/lib/plan/adapt";
 import {
   binderBlockRepo,
   binderRepo,
+  bulkUnitRepo,
   catalogCardRepo,
   colorBandRepo,
   copyRepo,
   evolutionLineRepo,
   lineSlotRepo,
   typeColorMapRepo,
+  type BulkUnitView,
   type DbClient,
 } from "@/lib/repo";
 import type { Locale } from "@/lib/sync/types";
@@ -46,11 +48,18 @@ export interface LineStagesModel {
   current: Record<number, StageDecision>;
   /** A complete line shorter than three pockets: its third pocket, and what fills it now (null: not decided). */
   thirdPocket: { current: ThirdPocketChoice | null } | null;
+  /**
+   * UIL-130: every spare card filling one of this line's pockets now, by copy id. A choice that takes one out sends
+   * it back to its home box, or to a box she picks when that one is full.
+   */
+  spares?: Record<string, { name: string; homeBoxId: string | null }>;
+  /** Her bulk boxes, for a returning spare card's box. */
+  boxes?: BulkUnitView[];
 }
 
 export async function loadLineStagesModel(db: DbClient, lineId: string): Promise<LineStagesModel> {
-  const [line, slots, blocks, catalogRows, typeMapRows, copies, binders, bands] = await Promise.all(
-    [
+  const [line, slots, blocks, catalogRows, typeMapRows, copies, binders, bands, boxes] =
+    await Promise.all([
       evolutionLineRepo.getByPk(db, lineId),
       lineSlotRepo.listByLine(db, lineId),
       binderBlockRepo.list(db),
@@ -59,8 +68,8 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
       copyRepo.list(db),
       binderRepo.list(db),
       colorBandRepo.listOrdered(db),
-    ],
-  );
+      bulkUnitRepo.views(db),
+    ]);
   if (!line) throw new Error("That line is no longer there. Reload and choose again.");
   const map: TypeColorMap = {};
   for (const t of typeMapRows) map[t.card_type] = t.band;
@@ -175,5 +184,18 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
     stages,
     current,
     thirdPocket,
+    spares: Object.fromEntries(
+      lineBlocks
+        .filter((b) => b.copy_id)
+        .map((b) => {
+          const spare = copyById.get(b.copy_id!);
+          const cc = spare ? byId.get(spare.catalog_card_id) : undefined;
+          return [
+            b.copy_id!,
+            { name: cc?.name ?? "The spare card", homeBoxId: spare?.bulk_unit_id ?? null },
+          ];
+        }),
+    ),
+    boxes,
   };
 }

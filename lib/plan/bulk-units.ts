@@ -6,17 +6,9 @@
  * it names her default box when it has room, else her first box (in her order) that has room. When none has room it
  * names none, and the database refuses the write in her words, so she is asked rather than a box overfilled.
  */
-import type { Row } from "@/lib/repo";
+import type { BulkUnitView, Row } from "@/lib/repo";
 
-export interface BulkUnitView {
-  id: string;
-  name: string;
-  /** null: untracked, never full. */
-  capacity: number | null;
-  isDefault: boolean;
-  /** The bulk copies in it now. */
-  held: number;
-}
+export type { BulkUnitView };
 
 /** Her boxes with how many cards each holds, in her order. */
 export function bulkUnitViews(
@@ -49,3 +41,23 @@ export function bulkUnitForRoute(units: readonly BulkUnitView[]): string | null 
   if (byDefault && hasRoom(byDefault)) return byDefault.id;
   return units.find((u) => hasRoom(u))?.id ?? null;
 }
+
+/** A box's load in her terms: "54 cards · no limit", "50 of 60 cards", "60 of 60 cards · full", "72 of 60 cards · 12 over". */
+export function boxLoad(u: Pick<BulkUnitView, "held" | "capacity">): string {
+  const cards = (n: number) => `${n} card${n === 1 ? "" : "s"}`;
+  if (u.capacity === null) return `${cards(u.held)} · no limit`;
+  const of = `${u.held} of ${cards(u.capacity)}`;
+  if (u.held > u.capacity) return `${of} · ${u.held - u.capacity} over`;
+  if (u.held === u.capacity) return `${of} · full`;
+  return of;
+}
+
+/** The box a picker starts on: the one named, else her default with room, else her first with room, else her default. */
+export function initialBox(units: readonly BulkUnitView[], named?: string): string | undefined {
+  if (named && units.some((u) => u.id === named)) return named;
+  return bulkUnitForRoute(units) ?? units.find((u) => u.isDefault)?.id;
+}
+
+/** Her words for a full box a picker can't take a card into. */
+export const fullBoxReason = (u: Pick<BulkUnitView, "name" | "held" | "capacity">) =>
+  `${u.name} is full (${u.held} of ${u.capacity} cards). Pick another box.`;

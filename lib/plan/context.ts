@@ -1,6 +1,6 @@
 import type { BlockNeedCandidate } from "@/lib/line/types";
 import { isOpenBlockNeed } from "@/lib/line/move";
-import { bulkUnitViews, type BulkUnitView } from "./bulk-units";
+import { bulkUnitForRoute, bulkUnitViews, type BulkUnitView } from "./bulk-units";
 /**
  * Load the M3 engine context from the DB and run the cascade over a haul draft (dev-spec §5 M6).
  *
@@ -213,6 +213,7 @@ export async function loadPlanContext(
    * offering as the block. Only needs with a binder are listed: a line with no binder has nowhere to place anything.
    */
   const lineRowById = new Map(lineRows.map((l) => [l.id, l]));
+  const bulkUnits = bulkUnitViews(bulkUnitRows, copyRows);
   /** A species' card name by dex id, as the catalog spells it ("Charizard"), for the Haul Plan's badges (UIL-117). */
   // Built once per load (TL review of #392: a scan per call was ~25M comparisons at her size). The English printing's
   // name wins when there is one, so a badge never reads in another script by accident.
@@ -267,13 +268,17 @@ export async function loadPlanContext(
 
   return {
     blockNeeds,
-    bulkUnits: bulkUnitViews(bulkUnitRows, copyRows),
+    bulkUnits,
     ctx,
     catalogById,
     copyRowById,
     slotRowsByLine: slotsByLine,
     orderedBandKeys,
     lookups: {
+      bulkBoxName: (unitId) => {
+        const id = unitId ?? bulkUnitForRoute(bulkUnits);
+        return bulkUnits.find((u) => u.id === id)?.name ?? null;
+      },
       binderNameById,
       bandDisplayByKey,
       collectionNameById,

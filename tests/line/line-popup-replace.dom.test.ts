@@ -165,6 +165,75 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
     });
   });
 
+  it("UIL-130 · the card coming out goes to a BOX: her default full, the next box with room, named and sent", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    render(
+      createElement(Harness, {
+        model: REPLACE,
+        initial: defaultChoiceFor(PROPOSAL),
+        onConfirm,
+        moveOptions: {
+          ...OPTIONS,
+          bulkUnits: [
+            { id: "d", name: "Bulk box", capacity: 1, held: 1, isDefault: true },
+            { id: "s", name: "Shoebox", capacity: null, held: 3, isDefault: false },
+          ],
+        },
+      }),
+    );
+    await user.click(radio(/Swap in 169\/165/));
+    const where = screen.getByRole("group", { name: /Where 027\/197 goes/ });
+    expect(
+      within(where)
+        .getByRole("button", { name: /Bulk · Shoebox/ })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(within(where).getByRole("button", { name: "Another box…" })).toBeTruthy();
+    expect(movesText()).toMatch(/To bulk.*027\/197.*Shoebox/);
+    await user.click(confirmBtn());
+    expect(onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ keep: false, outgoing: { kind: "bulk", unitId: "s" } }),
+    );
+  });
+
+  it("UIL-130 · her box named 'Bulk box' reads as itself, never 'Bulk · Bulk box'", async () => {
+    const user = userEvent.setup();
+    render(
+      createElement(Harness, {
+        model: REPLACE,
+        initial: defaultChoiceFor(PROPOSAL),
+        moveOptions: {
+          ...OPTIONS,
+          bulkUnits: [
+            { id: "d", name: "Bulk box", capacity: null, held: 1, isDefault: true },
+            { id: "s", name: "Shoebox", capacity: null, held: 0, isDefault: false },
+          ],
+        },
+      }),
+    );
+    await user.click(radio(/Swap in 169\/165/));
+    const where = screen.getByRole("group", { name: /Where 027\/197 goes/ });
+    expect(within(where).getByRole("button", { name: /^Bulk box/ })).toBeTruthy();
+    expect(within(where).queryByRole("button", { name: /Bulk · Bulk box/ })).toBeNull();
+  });
+
+  it("UIL-130 · every box full: the popup says so where the card would go", async () => {
+    const user = userEvent.setup();
+    render(
+      createElement(Harness, {
+        model: REPLACE,
+        initial: defaultChoiceFor(PROPOSAL),
+        moveOptions: {
+          ...OPTIONS,
+          bulkUnits: [{ id: "d", name: "Bulk box", capacity: 1, held: 1, isDefault: true }],
+        },
+      }),
+    );
+    await user.click(radio(/Swap in 169\/165/));
+    expect(screen.getByRole("alert").textContent).toMatch(/Every bulk box is full/);
+  });
+
   it("the card coming out can go to a front half she picks on the Move sheet", async () => {
     const onConfirm = vi.fn();
     const user = userEvent.setup();

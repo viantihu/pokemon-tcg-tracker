@@ -133,7 +133,8 @@ export function blockOps(
 export function describeMove(dest: MoveDestination, names: MoveNameLookups): string {
   switch (dest.kind) {
     case "bulk":
-      return "Bulk box (not shelved)";
+      // UIL-130: the box by name (her default when none is named).
+      return `${names.bulkBoxName?.(dest.unitId) ?? "Bulk box"} (not shelved)`;
     case "collection": {
       const binder = names.binderName(dest.binderId);
       const coll = names.collectionName(dest.collectionId);
@@ -162,6 +163,8 @@ export interface MoveNameLookups {
   /** UIL-030: the species label of a line, for a block destination's sentence. Optional — only the
    *  Plan holds the candidates that know it. */
   lineLabel?: (lineId: string) => string | null;
+  /** UIL-130: a bulk box's name by id. Optional: a caller with no boxes says "Bulk box". */
+  bulkBoxName?: (id: string | undefined) => string | null;
 }
 
 /**
@@ -186,6 +189,10 @@ export function moveNameLookups(options: MoveOptions): MoveNameLookups {
       return null;
     },
     bandDisplay: (key) => options.bands.find((b) => b.key === key)?.display ?? key,
+    bulkBoxName: (id) =>
+      (id && options.bulkUnits?.find((u) => u.id === id)?.name) ||
+      options.bulkUnits?.find((u) => u.isDefault)?.name ||
+      null,
   };
 }
 

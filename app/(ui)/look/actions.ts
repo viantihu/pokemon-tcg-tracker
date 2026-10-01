@@ -137,6 +137,11 @@ function homeNames(pc: PlanContext, tcgdexId: string): HomeNames {
       pc.ctx.collections.find(
         (c) => c.currentBinderIds.includes(binderId) && c.targetCatalogCardIds.includes(tcgdexId),
       )?.id ?? null,
+    bulkBoxOf: (copyId) => {
+      const unitId = pc.copyRowById.get(copyId)?.bulk_unit_id;
+      const box = unitId ? pc.bulkUnits?.find((u) => u.id === unitId) : undefined;
+      return box ? { id: box.id, name: box.name } : null;
+    },
     // UIL-061: the line a copy fills, named as the Lines page names it, and the stage it would leave empty.
     leavesOf: (slotId, copyId) =>
       leavesFromSlots(

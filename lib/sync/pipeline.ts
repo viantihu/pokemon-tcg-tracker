@@ -15,6 +15,7 @@ import { normalizeLocale } from "@/lib/catalog/locale";
 import type { DbClient, Row } from "@/lib/repo";
 import {
   binderRepo,
+  bulkUnitRepo,
   catalogCardRepo,
   colorBandRepo,
   copyRepo,
@@ -152,6 +153,7 @@ export async function loadCurrentGroups(db: DbClient): Promise<CurrentGroup[]> {
       binderHalf: c.binder_half as "front" | "back" | null,
       colorBand: c.color_band,
       lineSlotId: c.line_slot_id,
+      bulkUnitId: c.bulk_unit_id,
       createdAt: c.created_at,
       // Audited by reconcile against the group's Dex variant (UIL-102).
       variant: c.variant,
@@ -417,12 +419,15 @@ async function loadEnrichment(
   for (const v of plan.variantUpdates) cardIds.add(v.catalogCardId);
   for (const f of plan.flagFixes) cardIds.add(f.catalogCardId);
 
-  const [cards, binders, bands, typeMapRows] = await Promise.all([
+  const [cards, binders, bands, typeMapRows, boxes] = await Promise.all([
     Promise.all([...cardIds].map((id) => catalogCardRepo.getByPk(db, id))),
     binderRepo.list(db),
     colorBandRepo.listOrdered(db),
     typeColorMapRepo.list(db),
+    bulkUnitRepo.listOrdered(db),
   ]);
+  /** UIL-130: her boxes by id, for where a bulk card is now. */
+  const boxNameById = new Map(boxes.map((u) => [u.id, u.name]));
 
   const binderNameById = new Map(binders.map((b) => [b.id, b.name]));
   const bandDisplayByKey = new Map(bands.map((b) => [b.band, b.display_name]));
@@ -457,7 +462,8 @@ async function loadEnrichment(
         label = [binderName, c.binderHalf, "line slot"].filter(Boolean).join(" · ");
       else if (c.role === "shelved" && c.binderId)
         label = [binderName, c.binderHalf, bandDisplay].filter(Boolean).join(" · ");
-      else if (c.role === "bulk") label = "bulk box";
+      else if (c.role === "bulk")
+        label = (c.bulkUnitId && boxNameById.get(c.bulkUnitId)) || "bulk box";
       else label = "unplaced";
       placementByCopyId[c.copyId] = label;
       list.push({ copyId: c.copyId, label });

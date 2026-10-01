@@ -14,6 +14,7 @@ import { getOwnerContext, toCatalogCard } from "@/lib/plan";
 import {
   applyWriteOps,
   binderRepo,
+  bulkUnitRepo,
   catalogCardRepo,
   colorBandRepo,
   copyRepo,
@@ -32,14 +33,21 @@ import {
 import { readShelvedBySection } from "@/lib/binders/save";
 import type { CatalogCard as EngineCatalogCard } from "@/lib/engine";
 import { errorMessage } from "@/lib/errors";
-import type { BinderInput, RecomputeCounts, SettingsData, SettingsResult } from "./settings-types";
+import type {
+  BinderInput,
+  BulkUnitInput,
+  RecomputeCounts,
+  SettingsData,
+  SettingsResult,
+} from "./settings-types";
 
 export async function loadSettings(): Promise<SettingsData> {
   const { db } = await getOwnerContext();
-  const [binders, bands, typeMap] = await Promise.all([
+  const [binders, bands, typeMap, bulkUnits] = await Promise.all([
     binderRepo.list(db),
     colorBandRepo.listOrdered(db),
     typeColorMapRepo.list(db),
+    bulkUnitRepo.views(db),
   ]);
 
   return {
@@ -54,6 +62,7 @@ export async function loadSettings(): Promise<SettingsData> {
         isActive: b.is_active,
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),
+    bulkUnits,
     bands: bands.map((b) => ({ band: b.band, displayName: b.display_name, position: b.position })),
     typeMap: typeMap
       .map((t) => ({ cardType: t.card_type, band: t.band }))
@@ -112,6 +121,58 @@ export async function saveBinder(input: BinderInput): Promise<SettingsResult> {
           .map((b) => binderRepo.update(db, b.id, { is_active: false })),
       );
     }
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * Add or edit one of her bulk boxes (UIL-130): a name, and a card limit or none (Karvi: a new box starts with no
+ * limit). Her first box is her default. A limit below what the box holds is allowed: the box takes no more until it
+ * has room, and nothing in it moves.
+ */
+export async function saveBulkUnit(input: BulkUnitInput): Promise<SettingsResult> {
+  const name = input.name.trim();
+  if (!name) return { ok: false, error: "A box needs a name." };
+  const capacity = input.capacity === null ? null : Math.floor(input.capacity);
+  if (capacity !== null && !(capacity >= 1)) {
+    return { ok: false, error: "A card limit is a number of cards, 1 or more." };
+  }
+  try {
+    const { db } = await getOwnerContext();
+    await applyWriteOps(db, {
+      ops: [
+        input.id
+          ? { op: "update_bulk_unit", id: input.id, patch: { name, capacity } }
+          : { op: "insert_bulk_unit", id: crypto.randomUUID(), name, capacity },
+      ],
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/** Make a box her default (she always has exactly one): one write, so she is never without one. */
+export async function setDefaultBulkUnit(id: string): Promise<SettingsResult> {
+  try {
+    const { db } = await getOwnerContext();
+    await applyWriteOps(db, { ops: [{ op: "set_default_bulk_unit", id }] });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * Delete a box, its cards going to `moveTo` (UIL-130): one write. The database refuses her last box, and a box with a
+ * card limit that cannot take them all, before anything moves, in her words.
+ */
+export async function deleteBulkUnit(id: string, moveTo: string): Promise<SettingsResult> {
+  try {
+    const { db } = await getOwnerContext();
+    await applyWriteOps(db, { ops: [{ op: "delete_bulk_unit", id, move_to: moveTo }] });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };

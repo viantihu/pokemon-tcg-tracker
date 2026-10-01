@@ -4080,3 +4080,45 @@ html.tour-open .app {
     padding-bottom: max(120px, calc(var(--tour-h, 0px) + 64px + 24px));
   }
 }
+
+/* UIL-130: a bulk box row in Settings. Three buttons beside a long name left the name a sliver at 375px; its name and
+   load keep the room they need, and the buttons wrap under them on a phone. */
+.binderrow.bulkrow {
+  flex-wrap: wrap;
+}
+.binderrow.bulkrow > .bx {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+/* UIL-130 (QA's pass on #450): a spare card's box picker sits under its sentence, full width. Each box is at least
+   140px wide (one per row on a phone narrower than 360px) and 40px tall, so a long box name never wraps to a column
+   of words. */
+.lp-returns .lp-mrow {
+  flex-wrap: wrap;
+}
+.lp-returns .lp-mrow > .lp-bands {
+  flex: 1 1 100%;
+  margin-bottom: 0;
+}
+.lp-returns .lp-band {
+  flex: 1 1 140px;
+  min-height: 40px;
+}
+@media (max-width: 359px) {
+  .lp-returns .lp-band {
+    flex-basis: 100%;
+  }
+}
+
+/* UIL-130 (QA's pass on #450, items 2 and 3): tap targets of 40px on the new box surfaces. The binder rows and the
+   other popup chips share these classes and follow in their own change. */
+.binderrow.bulkrow .editcollbtn {
+  min-height: 40px;
+}
+.binderrow.bulkrow .bxdel {
+  min-width: 40px;
+}
+.lp-dest .lp-bands .lp-band {
+  min-height: 40px;
+}
