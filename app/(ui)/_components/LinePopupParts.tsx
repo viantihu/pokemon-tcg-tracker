@@ -238,8 +238,13 @@ function DestinationPicker(props: {
   const isSuggested = JSON.stringify(value) === JSON.stringify(suggested);
   const isBulk = value.kind === "bulk";
   /** A bulk chip says which box: "Bulk box" when she has one, its name when she has several. */
-  const bulkText = (d: MoveDestination) =>
-    boxes.length > 1 && d.kind === "bulk" ? `Bulk · ${destinationLabel(d, options)}` : "Bulk box";
+  const bulkText = (d: MoveDestination) => {
+    const name = destinationLabel(d, options);
+    // Her box named "Bulk box" reads as itself, never "Bulk · Bulk box" (as on the plan rows).
+    return boxes.length > 1 && d.kind === "bulk" && name !== "Bulk box"
+      ? `Bulk · ${name}`
+      : "Bulk box";
+  };
   const chips: {
     key: string;
     text: string;

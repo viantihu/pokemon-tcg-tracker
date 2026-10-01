@@ -4110,3 +4110,15 @@ html.tour-open .app {
     flex-basis: 100%;
   }
 }
+
+/* UIL-130 (QA's pass on #450, items 2 and 3): tap targets of 40px on the new box surfaces. The binder rows and the
+   other popup chips share these classes and follow in their own change. */
+.binderrow.bulkrow .editcollbtn {
+  min-height: 40px;
+}
+.binderrow.bulkrow .bxdel {
+  min-width: 40px;
+}
+.lp-dest .lp-bands .lp-band {
+  min-height: 40px;
+}

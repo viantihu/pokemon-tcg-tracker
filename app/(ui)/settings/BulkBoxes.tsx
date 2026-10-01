@@ -79,7 +79,7 @@ export function BulkBoxes({
               ✎ Edit
             </button>
             <button
-              className="editcollbtn u"
+              className="editcollbtn u bxdel"
               onClick={() => {
                 setEditing(null);
                 setDeleting({ id: u.id, moveTo: units.find((o) => o.id !== u.id)?.id ?? "" });
