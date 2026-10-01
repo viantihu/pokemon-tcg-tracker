@@ -121,6 +121,11 @@ async function seed(owner: string): Promise<void> {
     `insert into owner_type_band (owner_id, card_type, band) select $1, card_type, band from type_color_map`,
     [owner],
   );
+  // 0035 (UIL-130): her bulk box.
+  await q(
+    `insert into bulk_unit (id, owner_id, name, is_default) values ($1, $2, 'Bulk box', true)`,
+    [id(owner, 13), owner],
+  );
 }
 
 /** Every public table carrying an owner_all policy: the owner-scoped tables, discovered. */
