@@ -31,6 +31,7 @@ vi.mock("@/app/(ui)/settings/actions", () => ({
 const LOST_CALL = () => new TypeError("Failed to fetch");
 
 const DATA: SettingsData = {
+  bulkUnits: [{ id: "bx1", name: "Bulk box", capacity: null, isDefault: true, held: 0 }],
   binders: [
     {
       id: "kb1",

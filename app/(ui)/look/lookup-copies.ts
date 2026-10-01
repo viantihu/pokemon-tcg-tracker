@@ -41,6 +41,8 @@ export interface HomeNames {
   collectionIn: (binderId: string) => string | null;
   /** The line a copy fills through `lineSlotId`, when that slot really holds it (UIL-061). */
   leavesOf?: (lineSlotId: string, copyId: string) => LeavesLine | null;
+  /** UIL-130: the bulk box a copy is in, by id and name. */
+  bulkBoxOf?: (copyId: string) => { id: string; name: string } | null;
 }
 
 /** The Line screen's label shape for a copy's current home (lib/line/load.ts `currentLabel`). */
@@ -48,7 +50,7 @@ export function copyHomeLabel(c: CopyHome, names: HomeNames): string {
   // UIL-088: an in-haul copy is placed NOWHERE, which is a different answer from the bulk box — the box
   // is somewhere she chose. Both were `'bulk'` before, so this label claimed a placement she never made.
   if (!isPlaced(c.role)) return "In haul (not placed yet)";
-  if (c.role === "bulk") return "Bulk box (not shelved)";
+  if (c.role === "bulk") return `${names.bulkBoxOf?.(c.id)?.name ?? "Bulk box"} (not shelved)`;
   if (!c.binderId) return "Unshelved";
   const binder = names.binderName(c.binderId) ?? "Binder";
   if (c.role === "block") return `${binder} · binder block`;
@@ -68,7 +70,10 @@ export function copyHomeDestination(c: CopyHome, names: HomeNames): MoveDestinat
   // An in-haul copy has no present home to pre-select: every destination is equally new (UIL-088). The
   // picker opens on its own default rather than pretending the bulk box is where the card already is.
   if (!isPlaced(c.role)) return undefined;
-  if (c.role === "bulk") return { kind: "bulk" };
+  if (c.role === "bulk") {
+    const box = names.bulkBoxOf?.(c.id);
+    return box ? { kind: "bulk", unitId: box.id } : { kind: "bulk" };
+  }
   if (c.role !== "shelved" || !c.binderId) return undefined;
   if (c.binderHalf !== null) {
     if (!c.colorBand) return undefined;

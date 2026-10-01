@@ -38,6 +38,7 @@ import {
 } from "./LinePopupParts";
 import { bulkFillerAction, stageOptionsAction } from "./line-popup-actions";
 import { StageChoice, ThirdPocketChoice } from "./StageChoice";
+import { ReturningSpares, sparesReady } from "./ReturningSpares";
 
 /** A loader's answer, or its refusal thrown in her words (the part shows it in place). */
 async function unwrap<T>(p: Promise<{ ok: true; options: T[] } | { ok: false; error: string }>) {
@@ -124,12 +125,16 @@ export function LinePopup({
       (value.mode === "join" && line.thirdPocketOpen === true && line.filledAfter === line.total));
   const pocketValue =
     value.mode === "start" || value.mode === "join" ? value.thirdPocket : undefined;
+  // UIL-130: a spare card this Add takes out of its pocket goes back to its home box, or one she picks (home full).
+  const returning = value.mode === "join" ? (model.returning ?? []) : [];
+  const returnBoxes = value.mode === "join" ? (value.returnBoxes ?? {}) : {};
   const canConfirm =
     !busy &&
     (!foreign || foreignConfirmed) &&
     (!cc || cc.picked !== null) &&
     stagesDecided &&
-    (!pocketAsked || pocketValue !== undefined);
+    (!pocketAsked || pocketValue !== undefined) &&
+    sparesReady(returning, model.boxes ?? [], returnBoxes);
   /** What she physically does besides moving cards, for "What moves": fillers she puts in, and what she now chases. */
   const fillerMoves: { key: string; verb: string; what: string; where: string; into?: false }[] =
     [];
@@ -387,6 +392,15 @@ export function LinePopup({
           />
         ) : null}
 
+        {returning.length > 0 ? (
+          <ReturningSpares
+            spares={returning}
+            boxes={model.boxes ?? []}
+            picked={returnBoxes}
+            busy={busy}
+            onPick={(next) => value.mode === "join" && onChange({ ...value, returnBoxes: next })}
+          />
+        ) : null}
         <div className="lp-lbl u">What moves</div>
         {rep && value.mode === "replace" ? (
           <ReplaceMoves

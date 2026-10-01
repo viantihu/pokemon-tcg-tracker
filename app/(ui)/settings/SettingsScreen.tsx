@@ -13,7 +13,17 @@ import { useCallback, useEffect, useState } from "react";
 import { binderSplit } from "@/lib/surfaces";
 import { BandChip } from "../_components/BandChip";
 import { isUnreached, LOST, reach } from "../_components/reach";
-import { deleteBinder, loadSettings, reorderBands, saveBinder, setTypeBand } from "./actions";
+import {
+  deleteBinder,
+  deleteBulkUnit,
+  loadSettings,
+  reorderBands,
+  saveBinder,
+  saveBulkUnit,
+  setDefaultBulkUnit,
+  setTypeBand,
+} from "./actions";
+import { BulkBoxes } from "./BulkBoxes";
 import type { BandRow, BinderInput, SettingsData } from "./settings-types";
 import { ReplayTutorialButton } from "../_components/tutorial/Tutorial";
 
@@ -227,6 +237,15 @@ export function SettingsScreen() {
           />
         )}
       </section>
+
+      {/* ---- Bulk boxes (UIL-130) ---- */}
+      <BulkBoxes
+        units={data.bulkUnits}
+        busy={busy}
+        onSave={(input) => run(() => saveBulkUnit(input), input.id ? "Box saved" : "Box added")}
+        onMakeDefault={(id) => void run(() => setDefaultBulkUnit(id), "Default box changed")}
+        onDelete={(id, moveTo) => run(() => deleteBulkUnit(id, moveTo), "Box deleted")}
+      />
 
       {/* ---- Rainbow order ---- */}
       <section className="setpanel panel">

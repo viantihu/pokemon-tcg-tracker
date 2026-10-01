@@ -26,7 +26,9 @@ import {
 import { localeOfId } from "@/lib/catalog/locale";
 import { toCatalogCard, toOwnedCopy } from "@/lib/plan/adapt";
 import {
+  binderBlockRepo,
   binderRepo,
+  bulkUnitRepo,
   catalogCardRepo,
   colorBandRepo,
   copyRepo,
@@ -62,16 +64,21 @@ export async function loadLinePopupModel(
    */
   opts: { comingCopyIds?: readonly string[] } = {},
 ): Promise<LinePopupModel> {
-  const [copy, catalogRows, typeMapRows, copies, lines, slots, binders, bands] = await Promise.all([
-    copyRepo.getByPk(db, copyId),
-    catalogCardRepo.listAll(db),
-    typeColorMapRepo.list(db),
-    copyRepo.list(db),
-    evolutionLineRepo.list(db),
-    lineSlotRepo.list(db),
-    binderRepo.list(db),
-    colorBandRepo.listOrdered(db),
-  ]);
+  const [copy, catalogRows, typeMapRows, copies, lines, slots, binders, bands, boxes, blocks] =
+    await Promise.all([
+      copyRepo.getByPk(db, copyId),
+      catalogCardRepo.listAll(db),
+      typeColorMapRepo.list(db),
+      copyRepo.list(db),
+      evolutionLineRepo.list(db),
+      lineSlotRepo.list(db),
+      binderRepo.list(db),
+      colorBandRepo.listOrdered(db),
+      bulkUnitRepo.views(db),
+      binderBlockRepo.list(db),
+    ]);
+  /** UIL-130: her boxes by id, for where a bulk card is now. */
+  const boxName = new Map(boxes.map((u) => [u.id, u.name]));
   if (!copy) throw new Error("That card is no longer in the collection.");
   const catalog = catalogRows.map(toCatalogCard);
   const catalogById = new Map(catalog.map((c) => [c.tcgdexId, c]));
@@ -103,7 +110,8 @@ export async function loadLinePopupModel(
   /** Where a card is now, in her words: "KB-001 · Front · Red", the bulk box, or still in the haul. */
   const whereIs = (c: Row<"copy">): string => {
     if (c.role === "haul") return IN_THE_HAUL;
-    if (c.role === "bulk" || !c.binder_id) return "Bulk box";
+    if (c.role === "bulk" || !c.binder_id)
+      return (c.bulk_unit_id && boxName.get(c.bulk_unit_id)) || "Bulk box";
     const half = c.binder_half === "back" ? "Back" : c.binder_half === "front" ? "Front" : null;
     return [
       binderName.get(c.binder_id) ?? "A binder",
@@ -368,6 +376,23 @@ export async function loadLinePopupModel(
             },
           }
         : {}),
+      // UIL-130: an Add into a stage she filled with a spare card takes its pocket; the spare card goes back.
+      ...(!replacing && target.state === "block"
+        ? {
+            returning: blocks
+              .filter((b) => b.line_slot_id === target.id && b.copy_id)
+              .map((b) => {
+                const spare = copyById.get(b.copy_id!);
+                const spareCard = spare ? catalogById.get(spare.catalog_card_id) : undefined;
+                return {
+                  copyId: b.copy_id!,
+                  name: spareCard?.name ?? "The spare card",
+                  homeBoxId: spare?.bulk_unit_id ?? null,
+                };
+              }),
+          }
+        : {}),
+      boxes,
     };
   }
 

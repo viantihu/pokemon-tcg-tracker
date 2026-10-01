@@ -293,7 +293,7 @@ function proposedPullsFor(
  */
 function describeCurrentPlacement(row: Row<"copy">, pc: PlanContext): string {
   if (row.role === "haul") return "In haul (not placed yet)";
-  if (row.role === "bulk") return "Bulk box";
+  if (row.role === "bulk") return pc.lookups.bulkBoxName?.(row.bulk_unit_id) ?? "Bulk box";
   if (row.role === "block") return "A binder block";
   const binder = (row.binder_id && pc.lookups.binderNameById.get(row.binder_id)) || "Binder";
   const half = row.binder_half === "front" ? "Front" : row.binder_half === "back" ? "Back" : null;

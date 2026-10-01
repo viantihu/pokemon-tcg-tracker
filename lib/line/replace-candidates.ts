@@ -9,6 +9,7 @@
 
 import {
   binderRepo,
+  bulkUnitRepo,
   catalogCardRepo,
   colorBandRepo,
   copyRepo,
@@ -47,16 +48,20 @@ export async function listReplaceCandidates(
   for (const dex of slotCard.dex_id ?? []) {
     for (const p of await catalogCardRepo.findByDexId(db, dex)) printings.set(p.tcgdex_id, p);
   }
-  const [copies, binders, bands] = await Promise.all([
+  const [copies, binders, bands, boxes] = await Promise.all([
     copyRepo.list(db),
     binderRepo.list(db),
     colorBandRepo.listOrdered(db),
+    bulkUnitRepo.listOrdered(db),
   ]);
+  /** UIL-130: her boxes by id, for where a bulk card is now. */
+  const boxName = new Map(boxes.map((u) => [u.id, u.name]));
   const binderName = new Map(binders.map((b) => [b.id, b.name]));
   const bandDisplay = new Map(bands.map((b) => [b.band, b.display_name]));
   const whereIs = (c: Row<"copy">): string => {
     if (c.role === "haul") return IN_THE_HAUL;
-    if (c.role === "bulk" || !c.binder_id) return "Bulk box";
+    if (c.role === "bulk" || !c.binder_id)
+      return (c.bulk_unit_id && boxName.get(c.bulk_unit_id)) || "Bulk box";
     const half = c.binder_half === "back" ? "Back" : c.binder_half === "front" ? "Front" : null;
     return [
       binderName.get(c.binder_id) ?? "A binder",

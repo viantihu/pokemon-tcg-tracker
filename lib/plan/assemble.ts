@@ -31,6 +31,8 @@ export interface AssembleLookups {
    * test that builds lookups by hand still compiles; the plan context always supplies them.
    */
   lines?: LineLookups;
+  /** UIL-130: a bulk box's name by id; no id: the box the plan sends a card to (her default with room). */
+  bulkBoxName?(unitId?: string | null): string | null;
   /** A copy as she would name it, "Charmeleon 027/197", and its variant, for an upgrade's reason (UIL-126). */
   copyLabel?(copyId: string): { label: string; variant: string } | null;
   /** Whether a card's species forms a line at all (Karvi, 2026-09-27). Optional for hand-built lookups. */
@@ -49,8 +51,11 @@ const bandName = (key: string, l: AssembleLookups) => l.bandDisplayByKey.get(key
  */
 export function describeTarget(t: PlacementTarget, l: AssembleLookups): string {
   switch (t.kind) {
-    case "bulk":
-      return "Bulk box";
+    case "bulk": {
+      // UIL-130: "Bulk · Shoebox", the box the plan sends it to; her one box named "Bulk box" reads as before.
+      const name = l.bulkBoxName?.() ?? "Bulk box";
+      return name === "Bulk box" ? name : `Bulk · ${name}`;
+    }
     case "specialty": {
       const coll = t.collectionId ? l.collectionNameById.get(t.collectionId) : null;
       return coll ? `${binderName(t.binderId, l)} · ${coll}` : binderName(t.binderId, l);

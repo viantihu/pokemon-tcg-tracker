@@ -31,6 +31,7 @@ import { releaseSlotOps } from "@/lib/line/move";
 import {
   applyWriteOps,
   binderRepo,
+  bulkUnitRepo,
   copyRepo,
   evolutionLineRepo,
   lineSlotRepo,
@@ -78,9 +79,12 @@ export function removalReason(plan: RemoveCopyPlan): string {
 export function describeFormerPlacement(
   copy: Row<"copy">,
   binderName: (id: string) => string | undefined,
+  /** UIL-130: a bulk box's name by id. */
+  boxName: (id: string) => string | undefined = () => undefined,
 ): string {
   if (copy.role === "haul") return "in the haul, not placed yet";
-  if (copy.role === "bulk") return "the bulk box";
+  if (copy.role === "bulk")
+    return (copy.bulk_unit_id && boxName(copy.bulk_unit_id)) || "the bulk box";
   const binder = (copy.binder_id && binderName(copy.binder_id)) || "a binder";
   const half = copy.binder_half === "front" ? "Front" : copy.binder_half === "back" ? "Back" : null;
   const inLine = copy.line_slot_id ? "in a line" : null;
@@ -149,14 +153,19 @@ export async function loadRemoveCopyPlan(
     }
   }
 
-  const binders = await binderRepo.list(db);
+  const [binders, boxes] = await Promise.all([binderRepo.list(db), bulkUnitRepo.listOrdered(db)]);
   const nameById = new Map(binders.map((b) => [b.id, b.name]));
+  const boxById = new Map(boxes.map((u) => [u.id, u.name]));
 
   return {
     copy,
     reopenSlotId,
     demoteLineId,
-    formerPlacement: describeFormerPlacement(copy, (id) => nameById.get(id)),
+    formerPlacement: describeFormerPlacement(
+      copy,
+      (id) => nameById.get(id),
+      (id) => boxById.get(id),
+    ),
     rememberKey:
       copy.presence_group_id && copy.dex_variant_raw
         ? { catalogCardId: copy.catalog_card_id, dexVariantRaw: copy.dex_variant_raw }

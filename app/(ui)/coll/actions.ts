@@ -14,6 +14,7 @@
 import type { LineChoice } from "@/lib/line/popup";
 import {
   binderRepo,
+  bulkUnitRepo,
   catalogCardRepo,
   collectionRepo,
   colorBandRepo,
@@ -228,7 +229,7 @@ export async function loadCollHub(): Promise<CollHubData> {
       .map((b) => ({ id: b.id, name: b.name })),
     wishlist: { groups: groupWishlist(entries), entries },
     // The same picker the line strip and the plan spotlight use, built from rows already in hand.
-    moveOptions: buildMoveOptions(binders, collections, bands),
+    moveOptions: buildMoveOptions(binders, collections, bands, await bulkUnitRepo.views(db)),
   };
 }
 

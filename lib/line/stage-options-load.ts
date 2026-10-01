@@ -6,7 +6,14 @@
 
 import { band, type TypeColorMap } from "@/lib/engine";
 import { toCatalogCard } from "@/lib/plan/adapt";
-import { catalogCardRepo, copyRepo, typeColorMapRepo, type DbClient, type Row } from "@/lib/repo";
+import {
+  catalogCardRepo,
+  copyRepo,
+  bulkUnitRepo,
+  typeColorMapRepo,
+  type DbClient,
+  type Row,
+} from "@/lib/repo";
 import type { Locale } from "@/lib/sync/types";
 import type { FillerCardOption, StageOption } from "./popup";
 import { stageOptionsFrom, type StagePrinting } from "./stage-options";
@@ -53,7 +60,13 @@ export async function loadStageOptions(
  * copies oldest first and how many (UIL-121, the UX Dev: hundreds of copies must not become hundreds of tiles).
  */
 export async function loadBulkFillers(db: DbClient): Promise<FillerCardOption[]> {
-  const [copies, map] = await Promise.all([copyRepo.listBulk(db), colourMap(db)]);
+  const [copies, map, boxes] = await Promise.all([
+    copyRepo.listBulk(db),
+    colourMap(db),
+    bulkUnitRepo.listOrdered(db),
+  ]);
+  /** UIL-130: each tile names the box its copies are in ("Bulk box", "Shoebox"). */
+  const boxName = new Map(boxes.map((u) => [u.id, u.name]));
   const rows = await catalogCardRepo.listByIds(db, [
     ...new Set(copies.map((c) => c.catalog_card_id)),
   ]);
@@ -65,7 +78,8 @@ export async function loadBulkFillers(db: DbClient): Promise<FillerCardOption[]>
   for (const c of oldestFirst) {
     const r = byId.get(c.catalog_card_id);
     if (!r) continue;
-    const key = `${c.catalog_card_id}|${c.variant}`;
+    // One tile per printing, variant AND box, so a tile's copies are all where its tag says.
+    const key = `${c.catalog_card_id}|${c.variant}|${c.bulk_unit_id ?? ""}`;
     const had = groups.get(key);
     if (had) {
       had.copyIds!.push(c.id);
@@ -76,7 +90,7 @@ export async function loadBulkFillers(db: DbClient): Promise<FillerCardOption[]>
       copyId: c.id,
       copyIds: [c.id],
       count: 1,
-      where: "Bulk box",
+      where: (c.bulk_unit_id && boxName.get(c.bulk_unit_id)) || "Bulk box",
       card: {
         tcgdexId: r.tcgdex_id,
         name: r.name,

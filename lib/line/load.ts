@@ -26,6 +26,7 @@ import { toCatalogCard } from "@/lib/plan/adapt";
 import {
   binderBlockRepo,
   binderRepo,
+  bulkUnitRepo,
   catalogCardRepo,
   collectionRepo,
   colorBandRepo,
@@ -34,6 +35,7 @@ import {
   lineSlotRepo,
   typeColorMapRepo,
   wishlistItemRepo,
+  type BulkUnitView,
   type DbClient,
   type Row,
 } from "@/lib/repo";
@@ -444,7 +446,12 @@ export async function buildScreenModel(
     });
   }
 
-  const moveOptions = buildMoveOptions(binderRows, collectionRows, bandRows);
+  const moveOptions = buildMoveOptions(
+    binderRows,
+    collectionRows,
+    bandRows,
+    await bulkUnitRepo.views(db),
+  );
 
   // Shelved, line-less cards with a way OFF the front half and INTO a line (UIL-056): the strand her
   // UAT report named. `dexId.length > 0` excludes Trainer/Energy — there is no line concept for them.
@@ -503,6 +510,8 @@ export function buildMoveOptions(
   binderRows: Row<"binder">[],
   collectionRows: Row<"collection">[],
   bandRows: Row<"color_band">[],
+  /** UIL-130: her bulk boxes with what they hold (`bulkUnitRepo.views`). */
+  bulkUnits?: BulkUnitView[],
 ): MoveOptions {
   const specialtyBinderIds = new Set(
     binderRows.filter((b) => b.type === "specialty").map((b) => b.id),
@@ -522,6 +531,7 @@ export function buildMoveOptions(
     })),
     collectionsByBinder,
     bands: bandRows.map((b) => ({ key: b.band, display: b.display_name })),
+    ...(bulkUnits ? { bulkUnits } : {}),
   };
 }
 
@@ -531,12 +541,13 @@ export function buildMoveOptions(
  * full line + decision model.
  */
 export async function loadMoveOptions(db: DbClient): Promise<MoveOptions> {
-  const [binderRows, collectionRows, bandRows] = await Promise.all([
+  const [binderRows, collectionRows, bandRows, bulkUnits] = await Promise.all([
     binderRepo.list(db),
     collectionRepo.list(db),
     colorBandRepo.listOrdered(db),
+    bulkUnitRepo.views(db),
   ]);
-  return buildMoveOptions(binderRows, collectionRows, bandRows);
+  return buildMoveOptions(binderRows, collectionRows, bandRows, bulkUnits);
 }
 
 /** The client-facing screen data (decisions flattened to their cards). */

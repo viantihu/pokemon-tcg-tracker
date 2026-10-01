@@ -13,6 +13,7 @@ import {
   chosenFillerCopyIds,
   stageLabel,
   type FillerCardOption,
+  type ReturningCard,
   type StageDecision,
   type StageOption,
   type ThirdPocketChoice as ThirdPocketValue,
@@ -22,6 +23,7 @@ import type { DecideStagesChoice } from "@/lib/line/decide-stages";
 import { BandChip } from "../_components/BandChip";
 import { bulkFillerAction, stageOptionsAction } from "../_components/line-popup-actions";
 import { StageChoice, ThirdPocketChoice } from "../_components/StageChoice";
+import { ReturningSpares, sparesReady } from "../_components/ReturningSpares";
 import { useEscapeLayer } from "../_components/escape-layer";
 
 async function unwrap<T>(p: Promise<{ ok: true; options: T[] } | { ok: false; error: string }>) {
@@ -95,6 +97,17 @@ export function LineStagesPopup({
     return { stages: out, pocket: pocketChanged ? pocket : null };
   }, [model, open, stages, pocket]);
   const chosen = chosenFillerCopyIds(stages, pocket);
+  // UIL-130: a spare card filling one of this line's pockets now that her changes take out goes back to its home
+  // box, or to one she picks when that one is full.
+  const [returnBoxes, setReturnBoxes] = useState<Record<string, string>>({});
+  const spares = model?.spares ?? {};
+  const after = new Set(chosen);
+  const returning: ReturningCard[] = model
+    ? chosenFillerCopyIds(model.current, model.thirdPocket?.current ?? null)
+        .filter((id) => !after.has(id) && spares[id])
+        .map((id) => ({ copyId: id, ...spares[id] }))
+    : [];
+  const sparesOk = sparesReady(returning, model?.boxes ?? [], returnBoxes);
   const anyChange =
     !!changed && (Object.keys(changed.stages).length > 0 || changed.pocket !== null);
 
@@ -174,6 +187,15 @@ export function LineStagesPopup({
               ) : null}
             </>
           )}
+          {model && returning.length > 0 ? (
+            <ReturningSpares
+              spares={returning}
+              boxes={model.boxes ?? []}
+              picked={returnBoxes}
+              busy={busy}
+              onPick={setReturnBoxes}
+            />
+          ) : null}
           {error ? (
             <div className="lp-error" role="alert">
               {error}
@@ -192,15 +214,22 @@ export function LineStagesPopup({
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy || !anyChange}
-              onClick={() =>
-                changed &&
+              disabled={busy || !anyChange || !sparesOk}
+              onClick={() => {
+                if (!changed) return;
+                // Only the boxes she picked for cards that really go back (a pick for one that stays is dropped).
+                const picks = Object.fromEntries(
+                  returning
+                    .filter((s) => returnBoxes[s.copyId])
+                    .map((s) => [s.copyId, returnBoxes[s.copyId]]),
+                );
                 onConfirm({
                   lineId,
                   stages: changed.stages,
                   ...(changed.pocket ? { thirdPocket: changed.pocket } : {}),
-                })
-              }
+                  ...(Object.keys(picks).length > 0 ? { returnBoxes: picks } : {}),
+                });
+              }}
             >
               Save ▶
             </button>
