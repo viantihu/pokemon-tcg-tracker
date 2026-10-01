@@ -112,4 +112,52 @@ describe("UIL-130 · the Move panel's bulk box", () => {
     await user.click(confirm());
     expect(onConfirm).toHaveBeenCalledWith({ kind: "bulk" });
   });
+
+  it("every box full: only bulk is off; the front half and a collection still confirm (Karvi: always movable)", async () => {
+    const options: MoveOptions = {
+      binders: [
+        { id: "b1", name: "Binder 1", type: "general" },
+        { id: "sp", name: "Specialty A", type: "specialty" },
+      ],
+      collectionsByBinder: { sp: [{ id: "col", name: "Starters" }] },
+      bands: [{ key: "red", display: "Red" }],
+      bulkUnits: [box("d", "Bulk box", 1, 1, true)],
+    };
+    const { user, onConfirm } = mount(options);
+    expect(confirm().disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Binder 1" }));
+    await user.click(screen.getByRole("button", { name: /Red/ }));
+    expect(confirm().disabled).toBe(false);
+    await user.click(confirm());
+    expect(onConfirm).toHaveBeenLastCalledWith({
+      kind: "shelf",
+      binderId: "b1",
+      half: "front",
+      band: "red",
+    });
+    await user.click(screen.getByRole("button", { name: "Specialty A" }));
+    await user.click(screen.getByRole("button", { name: "Starters" }));
+    expect(confirm().disabled).toBe(false);
+    await user.click(confirm());
+    expect(onConfirm).toHaveBeenLastCalledWith({
+      kind: "collection",
+      binderId: "sp",
+      collectionId: "col",
+    });
+  });
+
+  it("a Move opened on a FULL box (Lookup opens on the card's own box): Confirm waits until a box with room is picked", async () => {
+    const { user, onConfirm } = mount(
+      { ...base, bulkUnits: [box("d", "Bulk box", 5, null, true), box("s", "Shoebox", 2, 2)] },
+      { kind: "bulk", unitId: "s" },
+    );
+    expect(confirm().disabled).toBe(true);
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Shoebox is full (2 of 2 cards). Pick another box.",
+    );
+    await user.click(boxes().getByRole("button", { name: /Bulk box/ }));
+    expect(confirm().disabled).toBe(false);
+    await user.click(confirm());
+    expect(onConfirm).toHaveBeenCalledWith({ kind: "bulk", unitId: "d" });
+  });
 });
