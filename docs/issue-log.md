@@ -8943,7 +8943,12 @@ until the Senior BA has explained the current line rules to her — deliberately
 
 - **Reported:** 2026-09-27 (not from Karvi — verified by the Tech Lead on `develop` `a181336`, source
   reading plus PGlite through the real paths).
-- **Status:** **Built except D, awaiting Karvi's test.** A1 open or closed (#412, migration 0030, `42831ad`); A2a the
+- **Status:** **Fixed, awaiting Karvi's test.** D is done: #443 (migration 0034, `develop` `70ae681`,
+  live 2026-09-29) — the AFTER read was identical to the BEFORE, and the Database Engineer confirmed on
+  live that the `('open', 'closed')` status check, the `UNIQUE binder_block(copy_id)` constraint, and the
+  filler `pocket_count = 1` rule all hold. Follow-ups #435, #439, #441 (below) are the complete A-through-D
+  picture.
+- **Status (before 2026-10-01):** **Built except D, awaiting Karvi's test.** A1 open or closed (#412, migration 0030, `42831ad`); A2a the
   server rule (#420); A2b her choice for every empty stage in the popup, plus 0032's third-pocket rule (#421, #424,
   #429 `94c84a5`); A2c Lines' Choose and Change, every decision card retired except collection-vs-line (#432,
   `ae738dd`). Follow-ups: #435 (one bulk copy per pocket), #439 (a filled filler stage is never offered as a block),
@@ -9007,7 +9012,9 @@ collide.
 ## UIL-122 — A Haul Plan card that cannot form a line points her at the Lines screen, but no line exists there to confirm or override
 
 - **Reported:** 2026-09-27 (not from Karvi — verified by the Tech Lead on `develop` `a181336`).
-- **Status:** Open, assigned to Full Stack Dev - 2 (2026-09-28), Medium. UIL-121's design is settled: #432 retired
+- **Status:** **Fixed, awaiting Karvi's test.** #444 (`develop` `bfdf4c5`): the "Needs a decision" banner
+  and chip now show only for a real collection-vs-line claim, not every proposal.
+- **Status (before 2026-10-01):** Open, assigned to Full Stack Dev - 2 (2026-09-28), Medium. UIL-121's design is settled: #432 retired
   every decision card except collection-vs-line, so the banner now almost always points at nothing. The fix shows it
   only for a real collection-vs-line decision.
 - **Status (before 2026-09-28):** Open, unassigned; the fix waits on UIL-121's design (the termination needs a home: the
@@ -9303,7 +9310,12 @@ sign-up — this entry is the "banner" stage specifically).
 - **Reported:** 2026-09-27 (Karvi, direct to the Senior BA). In her words: "Another major conceptual
   change that needs to happen is that 'Bulk' is a type of storage unit. For phase 2, I plan to introduce
   'sorted bulk', but bulk needs to be its own storage unit that we can track capacity against."
-- **Status:** Open, design approved, the Tech Lead is building.
+- **Status:** **Built, awaiting Karvi's test.** #448 (migration 0035, `76b7d66`): bulk is a named box
+  with an optional card limit; a full, limit-tracked box refuses a new card. #449 (migration 0036,
+  `4575c15`): box operations, exactly one default box. #450 (`b9136ff`): every screen — Settings, the
+  Move box picker, popups, plan rows, labels. Follow-up: the Tech Lead's Low-priority tap-target PR for
+  the binder rows and band chips, not folded into this entry.
+- **Status (before 2026-10-01):** Open, design approved, the Tech Lead is building.
 - **Priority:** High (pre-go-live; Karvi confirmed "after line work").
 - **Area:** Storage / Bulk / Settings
 - **Env:** Testing
