@@ -16,6 +16,8 @@ export interface CopyPlacement {
   binderId: string | null;
   binderHalf: "front" | "back" | null;
   colorBand: string | null;
+  /** UIL-130: the bulk box, when the caller names one (absent: the database gives a bulk copy her default box). */
+  bulkUnitId?: string | null;
 }
 
 /** Derive the placement columns for the incoming copy from its cascade target. */

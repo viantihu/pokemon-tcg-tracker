@@ -153,6 +153,39 @@ export type Database = {
         };
         Relationships: [];
       };
+      bulk_unit: {
+        Row: {
+          id: string;
+          owner_id: string;
+          name: string;
+          sort_order: number;
+          is_default: boolean;
+          capacity: number | null;
+          kind: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id?: string;
+          name: string;
+          sort_order?: number;
+          is_default?: boolean;
+          capacity?: number | null;
+          kind?: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          name?: string;
+          sort_order?: number;
+          is_default?: boolean;
+          capacity?: number | null;
+          kind?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       binder: {
         Row: {
           id: string;
@@ -431,6 +464,7 @@ export type Database = {
           binder_half: string | null;
           color_band: string | null;
           line_slot_id: string | null;
+          bulk_unit_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -447,6 +481,7 @@ export type Database = {
           binder_half?: string | null;
           color_band?: string | null;
           line_slot_id?: string | null;
+          bulk_unit_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -463,6 +498,7 @@ export type Database = {
           binder_half?: string | null;
           color_band?: string | null;
           line_slot_id?: string | null;
+          bulk_unit_id?: string | null;
           created_at?: string;
         };
         Relationships: [
