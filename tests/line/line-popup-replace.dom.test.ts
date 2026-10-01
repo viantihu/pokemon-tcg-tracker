@@ -197,6 +197,27 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
     );
   });
 
+  it("UIL-130 · her box named 'Bulk box' reads as itself, never 'Bulk · Bulk box'", async () => {
+    const user = userEvent.setup();
+    render(
+      createElement(Harness, {
+        model: REPLACE,
+        initial: defaultChoiceFor(PROPOSAL),
+        moveOptions: {
+          ...OPTIONS,
+          bulkUnits: [
+            { id: "d", name: "Bulk box", capacity: null, held: 1, isDefault: true },
+            { id: "s", name: "Shoebox", capacity: null, held: 0, isDefault: false },
+          ],
+        },
+      }),
+    );
+    await user.click(radio(/Swap in 169\/165/));
+    const where = screen.getByRole("group", { name: /Where 027\/197 goes/ });
+    expect(within(where).getByRole("button", { name: /^Bulk box/ })).toBeTruthy();
+    expect(within(where).queryByRole("button", { name: /Bulk · Bulk box/ })).toBeNull();
+  });
+
   it("UIL-130 · every box full: the popup says so where the card would go", async () => {
     const user = userEvent.setup();
     render(
