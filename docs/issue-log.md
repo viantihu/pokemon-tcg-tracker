@@ -9454,3 +9454,134 @@ this fix should follow — reported, not independently checked here since that P
 **Cross-reference UIL-121** (the same line-writing surface this affects) and **UIL-096** (the
 existing-lines warning that currently stands in for the join offer this entry says should exist
 instead).
+
+## UIL-133 — A line's identity is species-only (one `rootDexId`), so a Trainer's Pokémon and a wild one — or two regional forms — of the same species collapse into one line
+
+- **Reported:** 2026-10-01 (Karvi). In her words: "I'm not able to move arven's toedscool to the other
+  toedscool line. Also note, Arven'ts toedscool and toedscool are two different evolution line. The
+  evolution line can only belong to the trainer/ region." Her direct answers: trainer AND region each
+  make a separate line — a trainer's Pokémon (Arven's, Team Rocket's) is its own line, and so is each
+  regional form (Alolan, Galarian, Hisuian, Paldean). She was trying to ADD Arven's Toedscool to her
+  existing Arven's Toedscool line, and the app refused it.
+- **Status:** Open, assigned to Full Stack Dev - 2, design first, the Tech Lead reviews.
+- **Priority:** High.
+- **Area:** Lines, Engine
+- **Env:** Testing
+
+**Confirmed the exact gap, in the engine's own words.** A line's identity is `rootDexId: number`
+([`lib/engine/line.ts:253`](../lib/engine/line.ts:253)) — a plain National Pokédex number, nothing else.
+The engine's own comment names precisely the limitation she just ran into:
+[`:75`](../lib/engine/line.ts:75), "A dexId maps to a single species-stage; regional forms share it."
+TCGdex's `dexId` is the species' National number regardless of trainer ownership or regional form, so a
+wild Toedscool and Arven's Toedscool (and, separately, an Alolan or Galarian form of any species) all
+report the same `dexId` and the engine treats them as the identical line. UIL-090 already carved out one
+dimension of this — locale (an English line and a Japanese line of one species are different lines) —
+but trainer-ownership and regional-form are a different axis, not yet split out the same way.
+
+**Live, reported by the Senior BA, not independently checkable from this repo:** 2 lines currently share
+root `948` (Toedscool); she owns 7 Arven's cards; roughly 933 English catalog cards carry a trainer
+prefix in their name. The scale of the second figure is why this can't be a one-off special case for
+Arven specifically — the fix has to generalize to every trainer-prefixed card and every regional form.
+
+**Suggested fix, scoped as a design question, not decided here.** A line's identity key needs a second
+(or third) dimension beyond `rootDexId` — something that distinguishes a trainer's Pokémon from a wild
+one and one regional form from another, the same way `locale` already does for language. Where that
+distinguishing value comes from (a name-prefix parse, a dedicated TCGdex field if one exists, or
+something else) and how existing lines migrate once it lands are both open questions for the design the
+Tech Lead reviews.
+
+**Ruling, 2026-10-01, changes the shape of the fix this entry asks for.** Karvi: "The rules should exist
+only for the recommendation engine. Users should always be able to override all rules." Applied here:
+trainer/region line-fit becomes a recommendation plus a warning in her own words, with an override, not
+a hard refusal — her mixed Drowzee line (reported, DB id `4b1cace4`, not independently checkable from
+this repo) is a VALID line under the new rule, where today's model would have refused or silently
+collapsed it. See UIL-135 for the cross-cutting change this is one instance of.
+
+**Cross-reference UIL-090** (the locale dimension of line identity, the nearest precedent for adding
+this one), **UIL-121** (the same line-identity model this entry's fix would touch), and **UIL-135** (the
+recommendation-not-refusal ruling this entry's fix now has to follow).
+
+## UIL-134 — Performance review: the app feels too slow, across the Haul Plan, Lines, Lookup/Collections, and every other page
+
+- **Reported:** 2026-10-01 (Karvi). In her words: "I feel that the app is too slow. Please do a
+  performance review." Screens she named: Haul Plan, Lines page, Lookup/Collections, and every page.
+- **Status:** Open, assigned to the Tech Lead. Findings in; Karvi approved the fix order (catalog
+  cache and the 1,000-row list cap first, then keyset paging, duplicate-work cuts, and Haul Plan
+  memoisation).
+- **Status (before 2026-10-02):** Open, assigned to the Tech Lead. Measure first; no fix proposed yet.
+- **Priority:** High.
+- **Area:** Performance, App-wide
+- **Env:** Testing
+
+**Scope, as she set it — a measurement pass, not a fix list yet.** The report has to cover, per screen:
+server time, network time, and client time; region and cold-start effects; query counts; the catalog
+cache; and bundle size. It closes with the top 5 fixes, ranked, not every finding treated equally.
+
+**The Tech Lead's findings, reported 2026-10-02, not independently re-measured here.** Nine loaders
+bypass the catalog cache ([`lib/plan/catalog-cache.ts`](../lib/plan/catalog-cache.ts)) and instead
+re-download the whole mirror, roughly 36k rows across 38 OFFSET-paginated pages (about 25 MB), on every
+line action — about 76% of the app's total DB time by the Tech Lead's measurement. The second finding is
+a 1,000-row cap on certain list reads, framed as "an outage one import away" once a collection crosses
+it. Karvi approved fixing both first, then keyset paging, cutting duplicate work, and memoising the Haul
+Plan, in that order.
+
+**Independently confirmed, from source, what each finding describes.** The cache exists exactly where
+cited: `loadCatalogCached` in `catalog-cache.ts` holds a process-local, five-minute-TTL copy of the
+mirror precisely so that committing one card does not re-page all 23,548+ mirror rows per click (its own
+header comment names `loadPlanContext` as the caller that pages the whole mirror on every commit — the
+loader class the Tech Lead's "nine loaders" finding points at). The 1,000-row cap risk is real and
+currently unmitigated in at least two reads: [`copyRepo.listShelved`](../lib/repo/copy.ts:25) and
+[`copyRepo.listUnplaced`](../lib/repo/copy.ts:94) both call `.select("*").eq(...)` with no `.range()` or
+`.limit()`, so either would silently truncate at PostgREST's default 1,000-row cap once her shelved or
+unplaced copies cross that count — contrast `copyRepo.listBulk` (`copy.ts:35`), which already pages via
+`.range(from, to)`. The exact loader count, byte figures, and 76% share are the Tech Lead's own
+measurement, not reproduced here.
+
+**Cross-reference:** none yet — first performance-specific entry in the log; later screen-specific
+findings from this review should cite back to this one rather than opening unrelated new entries, per
+Karvi's group-by-function rule.
+
+## UIL-135 — Rules exist only for the recommendation engine; she can always override, across every hard refusal the app currently has
+
+- **Reported:** 2026-10-01 (Karvi, direct answers, relayed by the Senior BA). In her words: "The rules
+  should exist only for the recommendation engine. Users should always be able to override all rules."
+  Asked which rules, she picked all four named at intake: what fits a line (species, stage, branch,
+  trainer, region); single-card lines; a full bulk box; and line completion prompts (third pocket,
+  "Decide every stage"). Each becomes a recommendation plus a warning in her own words, with an override.
+- **Status:** Open, owner the Tech Lead with Full Stack Dev - 2.
+- **Priority:** High.
+- **Area:** Lines, Bulk, Engine, App-wide
+- **Env:** Testing
+
+**The one thing this does NOT touch — Karvi's own ruling, 2026-10-01, not just the Senior BA's scoping:
+physical integrity stays hard.** Her words: "Keep those hard." One copy in one place and one pocket; the
+slot ↔ copy pointer invariant; owner checks and Dex count checks — no override on any of these. This
+entry is about rules that shape a RECOMMENDATION, not about the database-level facts that keep one
+physical card from being two places at once.
+
+**Confirmed each of the four named hard rules exists today, exactly where cited.**
+
+1. **Line fit** (species, stage, branch, trainer, region) — UIL-133's own subject;
+   `generateSlots`/`buildLineJoinIndex` currently decide this without asking her.
+2. **Single-card lines refused** — PR #431 (merged `a8de38b`, "a Basic with no evolutions is never a
+   line, on every screen," Karvi 2026-09-27).
+3. **A full bulk box refuses a card** — UIL-130's own ruling, built in #448 (migration 0035).
+4. **Line completion prompts** — the third-pocket rule (migration 0032,
+   [`0032_third_pocket_stays.sql`](../supabase/migrations/0032_third_pocket_stays.sql)) and the "Decide
+   every stage" save gate
+   ([`app/(ui)/backfill/BackfillScreen.tsx:516`](<../app/(ui)/backfill/BackfillScreen.tsx>:516):
+   `if (undecided > 0) return \`Decide every stage (${undecided} left), then save the line.\`;`).
+
+**This entry supersedes those four rulings' REFUSAL behavior, not the rulings themselves — their
+findings and citations stay as written.** UIL-120 and UIL-121 (the line-completion and auto-block
+history), UIL-130 (the full-box refusal), and UIL-117 C1 (the "Decide every stage" gate) are cited, not
+edited: this is a cross-cutting change layered on top of work already recorded there, and each of those
+entries' own body stays exactly as its own session wrote it.
+
+**Suggested shape, as scoped by the Senior BA, pending Karvi's say on specifics per rule.** Each of the
+four becomes: a recommendation (today's existing proposal/suggestion), a warning in her own words when
+she's about to go against it, and a button that lets the write proceed anyway. What the warning says,
+and whether any of the four needs a confirmation step beyond a single override tap, is not decided here.
+
+**Cross-reference UIL-120, UIL-121, UIL-130, UIL-117 C1** (the four hard-refusal rulings this change
+reshapes) and **UIL-133** (the specific line-fit instance already updated to reflect this ruling).
