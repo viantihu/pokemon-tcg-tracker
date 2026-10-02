@@ -49,7 +49,8 @@ export async function listReplaceCandidates(
     for (const p of await catalogCardRepo.findByDexId(db, dex)) printings.set(p.tcgdex_id, p);
   }
   const [copies, binders, bands, boxes] = await Promise.all([
-    copyRepo.list(db),
+    // Paged: her copies pass the server's 1,000-row cap, where `list` throws.
+    copyRepo.listAll(db),
     binderRepo.list(db),
     colorBandRepo.listOrdered(db),
     bulkUnitRepo.listOrdered(db),

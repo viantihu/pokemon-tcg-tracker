@@ -30,6 +30,7 @@ import {
 } from "../support/pglite-rpc";
 import { NOT_A_LINE } from "@/lib/line/popup";
 import { pgliteClient } from "../support/pglite-client";
+import { clearCatalogCache } from "@/lib/plan/catalog-cache";
 
 const GEN = "b0000000-0000-0000-0000-0000000000e1";
 /** A SECOND general binder — she is deliberately filling one (UIL-084). */
@@ -77,6 +78,8 @@ let db: PGlite;
 let binderSeeded = false;
 beforeEach(async () => {
   db = await freshRpcDb();
+  // Every catalog loader reads through the shared cache (module state): each fresh database starts it cold.
+  clearCatalogCache();
   binderSeeded = false;
 });
 afterEach(async () => {

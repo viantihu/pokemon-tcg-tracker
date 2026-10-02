@@ -29,11 +29,11 @@ import {
 import { localeOfId } from "@/lib/catalog/locale";
 import { formFromStored, storedOr } from "@/lib/engine/form";
 import { toCatalogCard, toOwnedCopy } from "@/lib/plan/adapt";
+import { loadCatalogCached } from "@/lib/plan/catalog-cache";
 import {
   binderBlockRepo,
   binderRepo,
   bulkUnitRepo,
-  catalogCardRepo,
   colorBandRepo,
   copyRepo,
   evolutionLineRepo,
@@ -71,15 +71,16 @@ export async function loadLinePopupModel(
   const [copy, catalogRows, typeMapRows, copies, lines, slots, binders, bands, boxes, blocks] =
     await Promise.all([
       copyRepo.getByPk(db, copyId),
-      catalogCardRepo.listAll(db),
+      loadCatalogCached(db),
       typeColorMapRepo.list(db),
-      copyRepo.list(db),
-      evolutionLineRepo.list(db),
-      lineSlotRepo.list(db),
+      // Every row, paged: each of these passes the server's 1,000-row cap with her collection, and `list` throws there.
+      copyRepo.listAll(db),
+      evolutionLineRepo.listAll(db),
+      lineSlotRepo.listAll(db),
       binderRepo.list(db),
       colorBandRepo.listOrdered(db),
       bulkUnitRepo.views(db),
-      binderBlockRepo.list(db),
+      binderBlockRepo.listAll(db),
     ]);
   /** UIL-130: her boxes by id, for where a bulk card is now. */
   const boxName = new Map(boxes.map((u) => [u.id, u.name]));
@@ -448,11 +449,11 @@ export async function loadFamilyLines(
   here: { binderId: string | null; band: string },
 ): Promise<LinePopupExistingLine[]> {
   const [catalogRows, typeMapRows, copies, lines, slots, binders, bands] = await Promise.all([
-    catalogCardRepo.listAll(db),
+    loadCatalogCached(db),
     typeColorMapRepo.list(db),
-    copyRepo.list(db),
-    evolutionLineRepo.list(db),
-    lineSlotRepo.list(db),
+    copyRepo.listAll(db),
+    evolutionLineRepo.listAll(db),
+    lineSlotRepo.listAll(db),
     binderRepo.list(db),
     colorBandRepo.listOrdered(db),
   ]);

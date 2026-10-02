@@ -23,10 +23,14 @@ import {
   lineSlotRepo,
   typeColorMapRepo,
   wishlistItemRepo,
-  type Row,
 } from "@/lib/repo";
 import { band } from "@/lib/engine";
-import { getOwnerContext, toCatalogCard } from "@/lib/plan";
+import {
+  getOwnerContext,
+  loadCatalogCached,
+  toCatalogCard,
+  type CachedCatalogRow,
+} from "@/lib/plan";
 import { applyCopyRemoval } from "@/lib/copy";
 import { errorMessage } from "@/lib/errors";
 import {
@@ -66,7 +70,7 @@ export async function searchCatalog(query: string): Promise<LookupCard[]> {
   return lookupCatalog(query);
 }
 
-function toWishlistCard(row: Row<"catalog_card">): WishlistCard {
+function toWishlistCard(row: CachedCatalogRow): WishlistCard {
   return {
     tcgdexId: row.tcgdex_id,
     name: row.name,
@@ -97,9 +101,10 @@ export async function loadCollHub(): Promise<CollHubData> {
   ] = await Promise.all([
     collectionRepo.list(db),
     binderRepo.list(db),
-    catalogCardRepo.listAll(db),
-    // Every copy (paginated, checked complete): the shelved ones decide what is IN a collection (UIL-113).
-    copyRepo.list(db),
+    // The whole catalog, through the shared cache (lib/plan/catalog-cache.ts): her stand-ins fresh, the mirror from memory.
+    loadCatalogCached(db),
+    // Every copy (paged past the server's row cap): the shelved ones decide what is IN a collection (UIL-113).
+    copyRepo.listAll(db),
     // Whether a card on a list is hers at all: the app's one "owned" predicate (every role but `block`, #319),
     // shared with Browse and "Add a card", so this screen cannot disagree with itself.
     copyRepo.ownedCatalogCardIdSet(db),
@@ -116,7 +121,7 @@ export async function loadCollHub(): Promise<CollHubData> {
   const typeColorMap: Record<string, string> = {};
   for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
   // A collection card's band is cosmetic here — derived from its type through the live map.
-  const bandKeyForCard = (row: Row<"catalog_card">): string =>
+  const bandKeyForCard = (row: CachedCatalogRow): string =>
     band(toCatalogCard(row), typeColorMap) ?? "white";
 
   // What she owns, per binder (a target card is "owned" if a shelved copy of it sits in a binder
@@ -147,7 +152,7 @@ export async function loadCollHub(): Promise<CollHubData> {
     const targets = col.target_catalog_card_ids ?? [];
     const cardsView: CollectionCardView[] = targets
       .map((id) => cardById.get(id))
-      .filter((r): r is Row<"catalog_card"> => !!r)
+      .filter((r): r is CachedCatalogRow => !!r)
       .map((r) => {
         const copyIds = (col.current_binder_ids ?? []).flatMap(
           (bid) => ownedByBinder.get(bid)?.get(r.tcgdex_id) ?? [],
@@ -217,7 +222,7 @@ export async function loadCollHub(): Promise<CollHubData> {
       chosen: chosenRow ? toWishlistCard(chosenRow) : null,
       alternates: (w.alternate_catalog_card_ids ?? [])
         .map((id) => cardById.get(id))
-        .filter((r): r is Row<"catalog_card"> => !!r)
+        .filter((r): r is CachedCatalogRow => !!r)
         .map(toWishlistCard),
     };
   });
@@ -421,10 +426,14 @@ export async function browseCards(filters: BrowseFilters, offset: number): Promi
   return { cards: page.cards as BrowseCard[], hasMore: page.hasMore, nextOffset: page.nextOffset };
 }
 
-/** Distinct sets in the catalog, for the search grid's set filter. Sorted by name. */
+/**
+ * Distinct sets in the catalog, for the search grid's set filter. Sorted by name. From the shared catalog cache
+ * (lib/plan/catalog-cache.ts), which the hub's own load has just warmed: its own walk of every row's two columns was
+ * 38 more sequential requests each time she opened the grid.
+ */
 export async function listSetOptions(): Promise<SetOption[]> {
   const { db } = await getOwnerContext();
-  const rows = await catalogCardRepo.listAllFields(db, ["set_id", "set_name"]);
+  const rows = await loadCatalogCached(db);
   const seen = new Map<string, string>();
   for (const r of rows) {
     if (r.set_id && !seen.has(r.set_id)) seen.set(r.set_id, r.set_name ?? r.set_id);

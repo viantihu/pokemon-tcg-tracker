@@ -7,9 +7,9 @@
  * is rebuilt from the line's `root_dex_id` against the catalog (system-design §6 walk) and the
  * ordered slots are mapped onto it — that is how a blocked slot still reads a species name.
  *
- * PERF (phase-1, mirrors lib/plan/context.ts): the whole catalog mirror is loaded for fact-counting
- * and alternate ranking. Trivial on the seeded local mirror; a production build should scope the
- * query to the lines' dexId neighbourhoods. Flagged, not premature-optimised. SERVER ONLY.
+ * PERF: the whole catalog is read for fact-counting and alternate ranking, through the shared cache
+ * (lib/plan/catalog-cache.ts) the Haul Plan reads it through: her stand-ins fresh, the mirror from memory.
+ * SERVER ONLY.
  */
 
 import type { Locale } from "@/lib/sync/types";
@@ -25,11 +25,11 @@ import {
 } from "@/lib/engine";
 import { formFromStored } from "@/lib/engine/form";
 import { toCatalogCard } from "@/lib/plan/adapt";
+import { loadCatalogCached } from "@/lib/plan/catalog-cache";
 import {
   binderBlockRepo,
   binderRepo,
   bulkUnitRepo,
-  catalogCardRepo,
   collectionRepo,
   colorBandRepo,
   copyRepo,
@@ -130,13 +130,13 @@ export async function buildScreenModel(
     evolutionLineRepo.listAll(db),
     lineSlotRepo.listAll(db),
     copyRepo.listAll(db),
-    catalogCardRepo.listAll(db),
+    loadCatalogCached(db),
     wishlistItemRepo.listAll(db),
     binderRepo.list(db),
     collectionRepo.list(db),
     colorBandRepo.listOrdered(db),
     typeColorMapRepo.list(db),
-    binderBlockRepo.list(db),
+    binderBlockRepo.listAll(db),
   ]);
 
   const catalogById = new Map<string, CatalogCard>();

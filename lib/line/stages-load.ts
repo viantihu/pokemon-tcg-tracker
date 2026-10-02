@@ -16,11 +16,11 @@ import {
 import { localeOfId } from "@/lib/catalog/locale";
 import { storedOr } from "@/lib/engine/form";
 import { toCatalogCard } from "@/lib/plan/adapt";
+import { loadCatalogCached } from "@/lib/plan/catalog-cache";
 import {
   binderBlockRepo,
   binderRepo,
   bulkUnitRepo,
-  catalogCardRepo,
   colorBandRepo,
   copyRepo,
   evolutionLineRepo,
@@ -72,10 +72,11 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
     await Promise.all([
       evolutionLineRepo.getByPk(db, lineId),
       lineSlotRepo.listByLine(db, lineId),
-      binderBlockRepo.list(db),
-      catalogCardRepo.listAll(db),
+      binderBlockRepo.listAll(db),
+      loadCatalogCached(db),
       typeColorMapRepo.list(db),
-      copyRepo.list(db),
+      // Paged: her copies pass the server's 1,000-row cap, where `list` throws.
+      copyRepo.listAll(db),
       binderRepo.list(db),
       colorBandRepo.listOrdered(db),
       bulkUnitRepo.views(db),

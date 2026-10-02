@@ -21,6 +21,7 @@ import {
   seedCollections,
 } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
+import { recordingClient } from "../support/recording-client";
 
 const GEN = "b0000000-0000-4000-8000-0000000117d1";
 const GEN2 = "b0000000-0000-4000-8000-0000000117d2";
@@ -202,6 +203,31 @@ describe("SWAP · one write, the line never shows a gap", () => {
     expect(await q(`select binder_id from evolution_line where id <> $1`, [LINE])).toEqual([
       { binder_id: GEN2 },
     ]);
+  });
+
+  it("both cards of that swap are checked against ONE read: the catalog and her copies are read once, not once per card", async () => {
+    const rec = recordingClient(pgliteClient(db));
+    const other: MoveDestination = { kind: "shelf", binderId: GEN2, half: "back", band: "red" };
+    await applyMove(
+      rec.db,
+      {
+        copyId: NEW,
+        destination: HERE,
+        lineChoice: swap(other, {
+          outgoingLine: {
+            mode: "start",
+            binderId: GEN2,
+            band: "red",
+            pulls: [],
+            stages: { 0: { kind: "empty" } },
+          },
+        } as Partial<LineChoice>),
+      },
+      names,
+    );
+    expect(rec.standInReads()).toBe(1);
+    // Every copy, once (the swap's own copy is read by id, the line builder's set once for both cards).
+    expect(rec.reads.filter((r) => r.table === "copy" && r.filters.length === 0)).toHaveLength(1);
   });
 });
 

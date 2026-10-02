@@ -25,12 +25,17 @@
  *
  * `select(cols, { count: "exact" })` is supported (UIL-031's `assertReadComplete` needs it), and the
  * count it reports is real: this runs the query's actual SQL with no `LIMIT`/`OFFSET`, so `count` is
- * just `rows.length` — genuinely accurate, not a guess. What that does NOT do is model PostgREST's
- * `max-rows` cap: PGlite is real Postgres with no REST layer in front of it, so nothing here ever
- * truncates a response the way a live 1000+-row table would. This shim can prove a query wired for
- * truncation detection still returns the right rows on real Postgres/RLS; it cannot exercise the
- * detection actually firing — see `tests/repo/truncation-detection.test.ts` for that, against a fake
- * that models the cap explicitly instead.
+ * just `rows.length` — genuinely accurate, not a guess. By default it does NOT model PostgREST's
+ * `max-rows` cap: PGlite is real Postgres with no REST layer in front of it, so nothing here truncates a
+ * response the way a live 1000+-row table would, and a test that never opts in cannot see a read that
+ * breaks past the cap.
+ *
+ * `pgliteClient(db, { maxRows: 1000 })` opts in, and then a SELECT is cut exactly as PostgREST cuts it on
+ * Supabase: at most `maxRows` rows come back, un-ranged or ranged (a `range` asking for more gets the cap),
+ * while `count: "exact"` still reports the true total, because that is what PostgREST counts. Writes and
+ * their `returning` rows are not cut. With it, a `list()` on a table past the cap throws by name here as it
+ * does in production (`assertReadComplete`), and a read with no count silently comes back short, as it does
+ * there. `tests/repo/truncation-detection.test.ts` pins the same rule against a fake.
  */
 import type { PGlite } from "@electric-sql/pglite";
 import type { DbClient } from "@/lib/repo";
@@ -150,6 +155,8 @@ class PgQuery {
   constructor(
     private readonly db: PGlite,
     private readonly table: string,
+    /** PostgREST's `max-rows`, when the test opts in (`pgliteClient`'s `maxRows`); null: no cap. */
+    private readonly maxRows: number | null = null,
   ) {}
 
   select(cols?: string, opts?: { count?: "exact"; head?: boolean }): this {
@@ -351,8 +358,16 @@ class PgQuery {
     return where.length > 0 ? ` where ${where.join(" and ")}` : "";
   }
 
-  private compile(): [string, unknown[]] {
+  /** `capped`: the rows of a read, cut at `maxRows` as PostgREST cuts them. Never the count, which is the true total. */
+  private compile(capped = false): [string, unknown[]] {
     const params: unknown[] = [];
+    const window = this.limitOffset
+      ? { limit: this.limitOffset.to - this.limitOffset.from + 1, offset: this.limitOffset.from }
+      : null;
+    const limit =
+      capped && this.maxRows !== null
+        ? Math.min(window?.limit ?? Number.POSITIVE_INFINITY, this.maxRows)
+        : window?.limit;
     const sql =
       `select ${this.cols} from ${quoteIdent(this.table)}` +
       this.whereClause(params) +
@@ -365,14 +380,13 @@ class PgQuery {
             )
             .join(", ")}`
         : "") +
-      (this.limitOffset
-        ? ` limit ${this.limitOffset.to - this.limitOffset.from + 1} offset ${this.limitOffset.from}`
-        : "");
+      (limit !== undefined ? ` limit ${limit}` : "") +
+      (window ? ` offset ${window.offset}` : "");
     return [sql, params];
   }
 
   private async rows(): Promise<Row[]> {
-    const [sql, params] = this.compile();
+    const [sql, params] = this.compile(true);
     const res = await this.db.query<Row>(sql, params, { parsers: PARSERS });
     return res.rows;
   }
@@ -527,10 +541,18 @@ class PgQuery {
  * A `DbClient` over an open PGlite database. Writes must go through `rpc('apply_write_ops', …)` — the
  * only write path the collection-removal code uses, and the one whose atomicity is under test.
  */
-export function pgliteClient(db: PGlite): DbClient {
+export function pgliteClient(
+  db: PGlite,
+  /** `maxRows`: model PostgREST's `max-rows` (1000 on Supabase) on every read. Absent: no cap (see the header). */
+  options: { maxRows?: number } = {},
+): DbClient {
+  const maxRows = options.maxRows ?? null;
+  if (maxRows !== null && (!Number.isInteger(maxRows) || maxRows < 1)) {
+    throw new Error(`pglite-client: bad maxRows ${maxRows}`);
+  }
   const client = {
     from(table: string) {
-      return new PgQuery(db, table);
+      return new PgQuery(db, table, maxRows);
     },
     async rpc(fn: string, args: Record<string, unknown>) {
       if (fn !== "apply_write_ops") throw new Error(`pglite-client: unsupported rpc ${fn}`);

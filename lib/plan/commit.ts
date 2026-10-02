@@ -70,6 +70,7 @@ import {
   recordOverrides,
 } from "@/lib/line/overrides";
 import { lineReadsClosed } from "@/lib/line/popup";
+import type { LineWriteReads } from "@/lib/line/line-choice";
 import { buildBackHalfLineOps, KEEP_IS_NO_LINE_MOVE } from "@/lib/line/write";
 import { isLineCard } from "./line-proposal";
 import { lineDoneFor, newLineKey } from "./line-done";
@@ -608,7 +609,7 @@ async function commitLineChoice(
     if (!line.binderId) throw new Error(NO_BINDER.refusal(cardName(pc, p.tcgdexId)));
     dest = { kind: "shelf", binderId: line.binderId, half: "back", band: line.colorBand };
   }
-  const built = await buildBackHalfLineOps(db, copy, dest, choice);
+  const built = await buildBackHalfLineOps(db, copy, dest, choice, { reads: lineWriteReadsOf(pc) });
   const ops: WriteOp[] = [...built.ops];
   const counts: CommitCounts = {
     routed: 0,
@@ -660,6 +661,26 @@ async function commitLineChoice(
     choice.mode === "start" ? (started?.op === "insert_line" ? started.id : null) : choice.lineId;
   if (!lineId) return { counts, lineDone: false };
   return { counts, ...(await lineAfterWrite(db, pc, lineId, p)) };
+}
+
+/**
+ * What the line builder reads, from the plan context this commit has already loaded (the Tech Lead's measurement,
+ * 2026-10: a Haul Plan line confirm read every copy, line, slot and block, and the whole catalog, a second time). The
+ * same rows: the context was read at the start of this request and nothing is written before the one write below.
+ * Undefined for an older test context without the raw line rows: the builder then reads them itself.
+ */
+function lineWriteReadsOf(pc: PlanContext): LineWriteReads | undefined {
+  if (!pc.lineRowById || !pc.blockRowsByLine) return undefined;
+  return {
+    catalog: pc.ctx.catalog,
+    catalogById: pc.catalogById,
+    typeColorMap: pc.ctx.typeColorMap,
+    copiesById: pc.copyRowById,
+    lines: pc.lineRowById,
+    slotsByLine: pc.slotRowsByLine,
+    blocksByLine: pc.blockRowsByLine,
+    ...(pc.bulkUnits ? { boxNames: new Map(pc.bulkUnits.map((u) => [u.id, u.name])) } : {}),
+  };
 }
 
 /**

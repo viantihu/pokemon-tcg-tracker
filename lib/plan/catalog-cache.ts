@@ -31,6 +31,18 @@
  * caller's own are read fresh on every call, through the caller's RLS client, and merged in. Caching the whole
  * catalog would hand one account's stand-ins to the next caller on the instance, and would hide a stand-in she has
  * just created for up to the TTL.
+ *
+ * EVERY WHOLE-CATALOG READ ON A REQUEST COMES THROUGH HERE (the Tech Lead's measurement, 2026-10): nine loaders, and
+ * the search grid's set filter, used to page the whole table themselves, 38 sequential requests and ~2.5 s each in
+ * production, and a Haul Plan line confirm paid it twice. (The mirror job's own `regroupArtwork` still reads the
+ * table directly: it runs in Actions, not on a request, and must see what it is about to rewrite.) The rows come back in the mirror's order (by id) with her stand-ins after it, where a full-table `listAll`
+ * put a stand-in among them by id: the same rows, in the order the cascade has always read them in.
+ *
+ * SHARED, SO READ-ONLY. The rows in the cache are the same objects for every request on the instance, so a caller
+ * that wrote to one would change what the next request reads, for every account, until the entry expires. Nothing
+ * may: copy a row before changing it. Outside production every cached row, everything in it (`dex_id`, `types`,
+ * `variants`) and the array are FROZEN, so a write throws in the test suite and in `next dev`. Production is left
+ * unfrozen, so a write nothing caught cannot become a crash there.
  */
 
 import { catalogCardRepo, type DbClient, type Row } from "@/lib/repo";
@@ -38,14 +50,28 @@ import { catalogCardRepo, type DbClient, type Row } from "@/lib/repo";
 /** Five minutes: long enough to cover a sorting sitting, short enough that a mirror run lands. */
 export const CATALOG_CACHE_TTL_MS = 5 * 60_000;
 
+/** A catalog row as the cache hands it out: shared by every request on the instance, so never written to. */
+export type CachedCatalogRow = Readonly<Row<"catalog_card">>;
+
 interface CacheEntry {
-  rows: Row<"catalog_card">[];
+  rows: readonly CachedCatalogRow[];
   loadedAt: number;
 }
 
 let entry: CacheEntry | null = null;
 /** Concurrent callers share one in-flight load rather than each starting their own. */
-let inFlight: Promise<Row<"catalog_card">[]> | null = null;
+let inFlight: Promise<readonly CachedCatalogRow[]> | null = null;
+
+/** Outside production, a shared row is frozen through and through, so a caller that writes to one throws. */
+function freezesShared(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
+
+function deepFreeze(value: unknown): void {
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) return;
+  Object.freeze(value);
+  for (const inner of Object.values(value)) deepFreeze(inner);
+}
 
 export interface CatalogCacheOptions {
   ttlMs?: number;
@@ -61,7 +87,7 @@ export interface CatalogCacheOptions {
 export async function loadCatalogCached(
   db: DbClient,
   options: CatalogCacheOptions = {},
-): Promise<Row<"catalog_card">[]> {
+): Promise<readonly CachedCatalogRow[]> {
   const ttl = options.ttlMs ?? CATALOG_CACHE_TTL_MS;
   const now = options.now ?? Date.now();
 
@@ -69,10 +95,18 @@ export async function loadCatalogCached(
     loadMirror(db, ttl, now),
     catalogCardRepo.listStandIns(db),
   ]);
-  return mine.length === 0 ? mirror : [...mirror, ...mine];
+  if (mine.length === 0) return mirror;
+  // Her stand-ins are hers and this request's alone; the array is frozen too, so a caller cannot sort it in place
+  // in a test with stand-ins and corrupt the shared one in a test without.
+  const merged = [...mirror, ...mine];
+  return freezesShared() ? Object.freeze(merged) : merged;
 }
 
-async function loadMirror(db: DbClient, ttl: number, now: number): Promise<Row<"catalog_card">[]> {
+async function loadMirror(
+  db: DbClient,
+  ttl: number,
+  now: number,
+): Promise<readonly CachedCatalogRow[]> {
   if (entry && now - entry.loadedAt < ttl) return entry.rows;
 
   // A second caller arriving mid-load waits for the first rather than doubling the work — the case
@@ -82,6 +116,7 @@ async function loadMirror(db: DbClient, ttl: number, now: number): Promise<Row<"
   inFlight = catalogCardRepo
     .listAllMirror(db)
     .then((rows) => {
+      if (freezesShared()) deepFreeze(rows);
       entry = { rows, loadedAt: now };
       return rows;
     })
