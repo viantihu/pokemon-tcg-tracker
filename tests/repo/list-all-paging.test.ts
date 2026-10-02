@@ -13,6 +13,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createRepo, type DbClient } from "@/lib/repo";
+import { pageFiltered } from "@/lib/repo/base";
 
 /**
  * A fake table that honours `range()`, truncates at `maxRows` like PostgREST — and ORDERS.
@@ -24,7 +25,7 @@ import { createRepo, type DbClient } from "@/lib/repo";
  * — produces a visibly wrong walk instead of an accidentally correct one. (UIL-015's lesson: a double
  * that flatters the code under test certifies the wrong behaviour.)
  */
-function cappedDb(rowCount: number, maxRows: number) {
+function cappedDb(rowCount: number, maxRows: number, opts: { counts?: boolean } = {}) {
   const inKeyOrder = Array.from({ length: rowCount }, (_, i) => ({
     tcgdex_id: `card-${String(i).padStart(5, "0")}`,
   }));
@@ -33,10 +34,13 @@ function cappedDb(rowCount: number, maxRows: number) {
   const ranges: [number, number][] = [];
   const selects: string[] = [];
   const orderedBy: string[] = [];
+  /** Whether the request in flight asked for the true total (`count: "exact"`), as PostgREST is asked. */
+  let wantsCount = false;
 
   const query = {
-    select: (cols: string) => {
+    select: (cols: string, options?: { count?: "exact" }) => {
       selects.push(cols);
+      wantsCount = options?.count === "exact";
       return query;
     },
     order: (col: string) => {
@@ -58,7 +62,9 @@ function cappedDb(rowCount: number, maxRows: number) {
           })
         : rows;
       const window = sorted.slice(from, to + 1).slice(0, maxRows);
-      return Promise.resolve({ data: window, error: null });
+      // A server that counts (`opts.counts`, as PostgREST does) reports the true total, whatever the cap let through.
+      const count = opts.counts && wantsCount ? rows.length : null;
+      return Promise.resolve({ data: window, error: null, count });
     },
   };
   return {
@@ -107,6 +113,59 @@ describe("createRepo().listAll", () => {
   it("returns [] for an empty table", async () => {
     const { db } = cappedDb(0, 1000);
     expect(await catalogRepo.listAll(db)).toEqual([]);
+  });
+});
+
+describe("createRepo().listAll ends on the server's count: no empty probe, so no round trip over `list`", () => {
+  it("a table that fits one page is ONE request, as a single-page `list` was", async () => {
+    const { db, ranges, ids } = cappedDb(695, 1000, { counts: true });
+    const out = await catalogRepo.listAll(db);
+    expect(out.map((r) => r.tcgdex_id)).toEqual(ids);
+    expect(ranges).toEqual([[0, 999]]);
+  });
+
+  it("a bigger table pages to its count and stops there", async () => {
+    const { db, ranges } = cappedDb(2_500, 1000, { counts: true });
+    expect(await catalogRepo.listAll(db, 1000)).toHaveLength(2_500);
+    expect(ranges).toEqual([
+      [0, 999],
+      [1000, 1999],
+      [2000, 2999],
+    ]);
+  });
+
+  it("still returns everything when the cap is smaller than the page: the count is the total, not the page", async () => {
+    const { db, ids } = cappedDb(1_030, 250, { counts: true });
+    expect((await catalogRepo.listAll(db, 1000)).map((r) => r.tcgdex_id)).toEqual(ids);
+  });
+
+  it("an empty table is one request", async () => {
+    const { db, ranges } = cappedDb(0, 1000, { counts: true });
+    expect(await catalogRepo.listAll(db)).toEqual([]);
+    expect(ranges).toHaveLength(1);
+  });
+});
+
+describe("pageFiltered ends on a page's count too", () => {
+  it("one request for a filtered read that fits one page; without a count, the empty probe as before", async () => {
+    const calls: [number, number][] = [];
+    const page = (withCount: boolean) => (from: number, to: number) => {
+      calls.push([from, to]);
+      const all = Array.from({ length: 12 }, (_, i) => ({ id: i }));
+      return Promise.resolve({
+        data: all.slice(from, to + 1),
+        error: null,
+        count: withCount ? all.length : null,
+      });
+    };
+    expect(await pageFiltered("t", page(true))).toHaveLength(12);
+    expect(calls).toEqual([[0, 999]]);
+    calls.length = 0;
+    expect(await pageFiltered("t", page(false))).toHaveLength(12);
+    expect(calls).toEqual([
+      [0, 999],
+      [12, 1011],
+    ]);
   });
 });
 

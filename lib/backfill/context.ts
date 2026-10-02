@@ -2,21 +2,19 @@
  * Backfill context load + chain resolution (dev-spec §5 M5; §2 module boundary).
  *
  * All the reads a backfill step needs live here so the planners stay pure and the server actions
- * stay thin. Reads go through `lib/repo`. Loading the whole `catalog_card` mirror is fine locally
- * (seeded rows only); a full ~23.5k mirror would scope this to the picked species' neighbourhood
- * (same flagged perf note as `lib/plan/context.ts`).
+ * stay thin. Reads go through `lib/repo`; the whole catalog comes through the shared cache the Haul Plan
+ * reads it through (lib/plan/catalog-cache.ts): her stand-ins fresh, the mirror from memory.
  */
 
 import type { CatalogCard, TypeColorMap } from "@/lib/engine";
 import {
   binderRepo,
-  catalogCardRepo,
   collectionRepo,
   colorBandRepo,
   typeColorMapRepo,
   type DbClient,
 } from "@/lib/repo";
-import { toCatalogCard } from "@/lib/plan";
+import { loadCatalogCached, toCatalogCard } from "@/lib/plan";
 import { resolveBackLine } from "./resolve";
 import type { BackfillBinder, BackfillCollection, BandOption, ResolvedBackLine } from "./types";
 import type { PlanDeps } from "./plan";
@@ -42,7 +40,7 @@ export async function loadBackfillContext(db: DbClient): Promise<BackfillContext
     collectionRepo.list(db),
     colorBandRepo.listOrdered(db),
     typeColorMapRepo.list(db),
-    catalogCardRepo.listAll(db),
+    loadCatalogCached(db),
   ]);
 
   const catalogById = new Map<string, CatalogCard>();

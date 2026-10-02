@@ -16,6 +16,7 @@ import { STAGE_REFUSAL } from "@/lib/line/stage-choice";
 import type { MoveDestination } from "@/lib/line/types";
 import { asOwner, asSuperuser, freshRpcDb, OWNER, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
+import { clearCatalogCache } from "@/lib/plan/catalog-cache";
 
 const GEN = "b0000000-0000-4000-8000-0000000435d1";
 const GEN2 = "b0000000-0000-4000-8000-0000000435d2";
@@ -38,6 +39,8 @@ const spare = { kind: "filler", filler: { material: "card", copyId: SPARE } } as
 let db: PGlite;
 beforeEach(async () => {
   db = await freshRpcDb();
+  // Every catalog loader reads through the shared cache (module state): each fresh database starts it cold.
+  clearCatalogCache();
   await seedBinders(db, [
     { id: GEN, type: "general", name: "KB-001" },
     { id: GEN2, type: "general", name: "KB-002" },

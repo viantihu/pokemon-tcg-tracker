@@ -66,6 +66,23 @@ import {
   type StageState,
 } from "./stage-choice";
 
+/**
+ * Every row the line builder reads, read once per request: by `loadLineWriteReads` (lib/line/write.ts), or handed over
+ * by a caller that read the same rows in this same request (the Haul Plan's line confirm, from its plan context).
+ */
+export interface LineWriteReads {
+  catalog: CatalogCard[];
+  catalogById: Map<string, CatalogCard>;
+  typeColorMap: TypeColorMap;
+  /** Every copy she holds, by id. */
+  copiesById: Map<string, Row<"copy">>;
+  lines: Map<string, Row<"evolution_line">>;
+  slotsByLine: Map<string, Row<"line_slot">[]>;
+  blocksByLine: Map<string, Row<"binder_block">[]>;
+  /** 0037: her box names by id, when the caller has them (read otherwise, only for a choice that needs them). */
+  boxNames?: ReadonlyMap<string, string>;
+}
+
 /** Everything `buildLineChoiceOps` reads, loaded fresh by the server just before the write. */
 export interface LineWriteState {
   /** The copy being placed. */

@@ -17,6 +17,7 @@ import type { LineChoice, StageDecision } from "@/lib/line/popup";
 import { loadLinePopupModel } from "@/lib/line/popup-load";
 import { asOwner, asSuperuser, freshRpcDb, OWNER, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
+import { clearCatalogCache } from "@/lib/plan/catalog-cache";
 
 const GEN = "b0000000-0000-4000-8000-0000000121b2";
 const MOVING = "c0000000-0000-4000-8000-0000000121b1";
@@ -80,6 +81,8 @@ const slotRows = () =>
 
 beforeEach(async () => {
   db = await freshRpcDb();
+  // Every catalog loader reads through the shared cache (module state): each fresh database starts it cold.
+  clearCatalogCache();
   await seedBinders(db, [{ id: GEN, type: "general", name: "KB-001" }]);
   await q(
     `insert into catalog_card (tcgdex_id, name, dex_id, types, stage, evolve_from, card_class, set_name, local_id) values

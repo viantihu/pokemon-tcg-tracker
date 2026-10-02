@@ -18,6 +18,7 @@ import {
   seedCollections,
 } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
+import { clearCatalogCache } from "@/lib/plan/catalog-cache";
 import { loadCollHub } from "@/app/(ui)/coll/actions";
 import { collectionTally, openCollectionSummary } from "@/lib/surfaces";
 
@@ -42,6 +43,8 @@ const [IN, HAUL, ELSEWHERE, GONE, BLOCK] = [
 
 beforeEach(async () => {
   db = await freshRpcDb();
+  // Every catalog loader reads through the shared cache (module state): each fresh database starts it cold.
+  clearCatalogCache();
   await db.exec(`insert into catalog_card (tcgdex_id, name) values
     ('${IN}', 'In'), ('${HAUL}', 'Haul'), ('${ELSEWHERE}', 'Elsewhere'), ('${GONE}', 'Gone'),
     ('${BLOCK}', 'Block')`);

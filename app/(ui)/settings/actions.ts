@@ -10,12 +10,11 @@
  * all ten.
  */
 
-import { getOwnerContext, toCatalogCard } from "@/lib/plan";
+import { getOwnerContext, loadCatalogCached, toCatalogCard } from "@/lib/plan";
 import {
   applyWriteOps,
   binderRepo,
   bulkUnitRepo,
-  catalogCardRepo,
   colorBandRepo,
   copyRepo,
   evolutionLineRepo,
@@ -226,10 +225,10 @@ export async function setTypeBand(
     // 1. Persist the map edit in HER map (UIL-127b: per owner, 0033; the defaults are copied in first).
     await applyWriteOps(db, { ops: [{ op: "set_type_band", card_type: cardType, band }] });
 
-    // 2. Load everything the recompute needs.
+    // 2. Load everything the recompute needs (the catalog through the shared cache, lib/plan/catalog-cache.ts).
     const [copies, catalogRows, lines, slots, typeMapRows] = await Promise.all([
       copyRepo.listAll(db),
-      catalogCardRepo.listAll(db),
+      loadCatalogCached(db),
       evolutionLineRepo.listAll(db),
       lineSlotRepo.listAll(db),
       typeColorMapRepo.list(db),

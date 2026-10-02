@@ -28,10 +28,10 @@
  */
 
 import { toCatalogCard, toOwnedCopy } from "@/lib/plan/adapt";
+import { loadCatalogCached } from "@/lib/plan/catalog-cache";
 import type { TypeColorMap, Variant } from "@/lib/engine";
 import {
   applyWriteOps,
-  catalogCardRepo,
   collectionRepo,
   copyRepo,
   evolutionLineRepo,
@@ -55,7 +55,7 @@ import {
   type MoveNameLookups,
 } from "./move";
 import type { DecisionChoiceId, LineJoinChoice, MoveDestination, MoveRequest } from "./types";
-import { buildLineChoiceOps, type LineWriteState } from "./line-choice";
+import { buildLineChoiceOps, type LineWriteReads, type LineWriteState } from "./line-choice";
 import { lineChoiceDestinations, overridesFor, returnDestinations } from "./overrides";
 import { buildDecideStagesOps, DECIDE_REFUSAL, type DecideStagesChoice } from "./decide-stages";
 import type { LineChoice } from "./popup";
@@ -143,7 +143,11 @@ export async function buildBackHalfLineOps(
   copy: Row<"copy">,
   destination: MoveDestination,
   choice: LineChoice,
-  opts: { undecidedOk?: boolean } = {},
+  opts: {
+    undecidedOk?: boolean;
+    /** What the line builder reads, when the caller read it in this same request (the Haul Plan's context). */
+    reads?: LineWriteReads;
+  } = {},
 ): Promise<{ ops: WriteOp[]; slotId: string }> {
   if (choice.mode === "join") await assertJoinMatchesLine(db, choice.lineId, destination);
   if (choice.mode === "start") assertStartMatchesDestination(choice, destination);
@@ -152,7 +156,16 @@ export async function buildBackHalfLineOps(
     await assertJoinMatchesLine(db, choice.lineId, destination);
     await assertCollectionDestinationLives(db, choice.outgoing);
   }
-  const state = await loadLineWriteState(db, copy, choice);
+  // ONE read for both cards of a swap: nothing is written between them, so the card coming out is checked against the
+  // same rows (they used to be read twice, the whole catalog among them).
+  const outgoingLine = choice.mode === "replace" && !choice.keep ? choice.outgoingLine : undefined;
+  const reads =
+    opts.reads ??
+    (await loadLineWriteReads(
+      db,
+      needsBoxNames(choice) || (!!outgoingLine && needsBoxNames(outgoingLine)),
+    ));
+  const state = await loadLineWriteState(db, copy, choice, reads);
   if (choice.mode === "replace" && !choice.keep && choice.outgoingLine) {
     const slot = [...state.slotsByLine.values()].flat().find((sl) => sl.id === choice.slotId);
     const outgoing = slot?.copy_id ? state.copiesById.get(slot.copy_id) : undefined;
@@ -161,9 +174,9 @@ export async function buildBackHalfLineOps(
     const next = choice.outgoingLine;
     if (next.mode === "join") await assertJoinMatchesLine(db, next.lineId, choice.outgoing);
     else assertStartMatchesDestination(next, choice.outgoing);
-    state.outgoing = await loadLineWriteState(db, outgoing, next);
+    state.outgoing = await loadLineWriteState(db, outgoing, next, reads);
   }
-  const built = buildLineChoiceOps(state, copy.id, choice, opts);
+  const built = buildLineChoiceOps(state, copy.id, choice, { undecidedOk: opts.undecidedOk });
   return { ops: built.ops, slotId: built.slotId };
 }
 
@@ -176,30 +189,28 @@ function lineChoiceFromJoin(join: LineJoinChoice | null, dest: MoveDestination):
       { mode: "start", binderId: dest.binderId, band: dest.band, pulls: [], stages: {} };
 }
 
+/** 0037: her box names are needed only for a spare card she sends into a full box knowingly (its decision names it). */
+function needsBoxNames(choice: LineChoice): boolean {
+  return choice.mode === "join" && (choice.returnOverFull?.length ?? 0) > 0;
+}
+
 /**
- * Fresh state for `buildLineChoiceOps`: the copy's card, the catalog and type map for a new line's slots, her other
- * copies as pull candidates, and every line and slot (for a joined line's language, and the slots pulls leave).
+ * Everything `buildLineChoiceOps` reads, from fresh state, in one round: the catalog (through the shared cache) and
+ * type map for a new line's slots, every copy (pull candidates), and every line, slot and block (for a joined line's
+ * language, and the slots pulls leave). Paged: copies, lines and slots each pass the server's 1,000-row cap with her
+ * collection, where a single-page `list` throws.
  */
-async function loadLineWriteState(
-  db: DbClient,
-  copy: Row<"copy">,
-  choice: LineChoice,
-): Promise<LineWriteState> {
-  // 0037: her box names, only for a spare card she sends into a full box knowingly (its decision names the box).
-  const namesBoxes = choice.mode === "join" && (choice.returnOverFull?.length ?? 0) > 0;
+async function loadLineWriteReads(db: DbClient, withBoxNames: boolean): Promise<LineWriteReads> {
   const [catalogRows, typeMapRows, copies, lines, slots, blocks, boxes] = await Promise.all([
-    catalogCardRepo.listAll(db),
+    loadCatalogCached(db),
     typeColorMapRepo.list(db),
-    copyRepo.list(db),
-    evolutionLineRepo.list(db),
-    lineSlotRepo.list(db),
-    binderBlockRepo.list(db),
-    namesBoxes ? bulkUnitRepo.listOrdered(db) : Promise.resolve([]),
+    copyRepo.listAll(db),
+    evolutionLineRepo.listAll(db),
+    lineSlotRepo.listAll(db),
+    binderBlockRepo.listAll(db),
+    withBoxNames ? boxNamesOf(db) : Promise.resolve(undefined),
   ]);
   const catalog = catalogRows.map(toCatalogCard);
-  const catalogById = new Map(catalog.map((c) => [c.tcgdexId, c]));
-  const card = catalogById.get(copy.catalog_card_id);
-  if (!card) throw new Error("That card's catalog entry is missing — reload and try again.");
   const typeColorMap: TypeColorMap = {};
   for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
   const slotsByLine = new Map<string, Row<"line_slot">[]>();
@@ -209,22 +220,52 @@ async function loadLineWriteState(
     if (b.line_id) blocksByLine.set(b.line_id, [...(blocksByLine.get(b.line_id) ?? []), b]);
   }
   return {
-    copy,
-    incoming: { id: copy.id, card, variant: (copy.variant as Variant) ?? "normal" },
     catalog,
+    catalogById: new Map(catalog.map((c) => [c.tcgdexId, c])),
     typeColorMap,
-    owned:
-      choice.mode === "start"
-        ? copies
-            .filter((c) => c.id !== copy.id)
-            .map((c) => toOwnedCopy(c, catalogById))
-            .filter((o): o is NonNullable<typeof o> => o !== null)
-        : [],
     copiesById: new Map(copies.map((c) => [c.id, c])),
     lines: new Map(lines.map((l) => [l.id, l])),
     slotsByLine,
     blocksByLine,
-    ...(namesBoxes ? { boxNames: new Map(boxes.map((u) => [u.id, u.name])) } : {}),
+    ...(boxes ? { boxNames: boxes } : {}),
+  };
+}
+
+async function boxNamesOf(db: DbClient): Promise<ReadonlyMap<string, string>> {
+  return new Map((await bulkUnitRepo.listOrdered(db)).map((u) => [u.id, u.name]));
+}
+
+/**
+ * State for `buildLineChoiceOps` over `reads`: the copy's card, and her other copies as the pull candidates a START can
+ * propose. A new object every call, so a write's filler claims (line-choice.ts `stageStates`) never outlive it.
+ */
+async function loadLineWriteState(
+  db: DbClient,
+  copy: Row<"copy">,
+  choice: LineChoice,
+  reads: LineWriteReads,
+): Promise<LineWriteState> {
+  const card = reads.catalogById.get(copy.catalog_card_id);
+  if (!card) throw new Error("That card's catalog entry is missing — reload and try again.");
+  // A caller's own reads carry her box names when it has them; read here only when they do not and this one needs them.
+  const boxNames = needsBoxNames(choice) ? (reads.boxNames ?? (await boxNamesOf(db))) : undefined;
+  return {
+    copy,
+    incoming: { id: copy.id, card, variant: (copy.variant as Variant) ?? "normal" },
+    catalog: reads.catalog,
+    typeColorMap: reads.typeColorMap,
+    owned:
+      choice.mode === "start"
+        ? [...reads.copiesById.values()]
+            .filter((c) => c.id !== copy.id)
+            .map((c) => toOwnedCopy(c, reads.catalogById))
+            .filter((o): o is NonNullable<typeof o> => o !== null)
+        : [],
+    copiesById: reads.copiesById,
+    lines: reads.lines,
+    slotsByLine: reads.slotsByLine,
+    blocksByLine: reads.blocksByLine,
+    ...(boxNames ? { boxNames } : {}),
   };
 }
 
@@ -320,7 +361,7 @@ async function assertBlockDestinationOpen(
   if (!line || line.binder_id !== destination.binderId) {
     throw new Error("That line is not in that binder any more — reload the screen and pick again.");
   }
-  const blocks = await binderBlockRepo.list(db);
+  const blocks = await binderBlockRepo.listAll(db);
   // A stage she filled (a filler: an energy or a spare card) is not a need, nor a pocket another block already fills.
   if (!isOpenBlockNeed(slot, blocks)) {
     throw new Error(
@@ -515,10 +556,11 @@ export async function applyStageDecisions(db: DbClient, choice: DecideStagesChoi
   const [line, slots, blocks, catalogRows, typeMapRows, copies, boxes] = await Promise.all([
     evolutionLineRepo.getByPk(db, choice.lineId),
     lineSlotRepo.listByLine(db, choice.lineId),
-    binderBlockRepo.list(db),
-    catalogCardRepo.listAll(db),
+    binderBlockRepo.listAll(db),
+    loadCatalogCached(db),
     typeColorMapRepo.list(db),
-    copyRepo.list(db),
+    // Paged: her copies pass the server's 1,000-row cap, where `list` throws.
+    copyRepo.listAll(db),
     namesBoxes ? bulkUnitRepo.listOrdered(db) : Promise.resolve([]),
   ]);
   if (!line) throw new Error(DECIDE_REFUSAL.noStage);

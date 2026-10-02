@@ -68,6 +68,12 @@ export interface PlanContext {
   /** Raw line_slot rows grouped by line id — the commit's write set resolves slot fills against this
    *  snapshot (M10; lib/plan/commit.ts) instead of re-reading the DB mid-commit. */
   slotRowsByLine: Map<string, Row<"line_slot">[]>;
+  /**
+   * The raw `evolution_line` and line `binder_block` rows this load read, so a line confirm hands the line builder
+   * the rows already in hand (`commitLineChoice`) rather than reading them all again. Absent: an older test context.
+   */
+  lineRowById?: Map<string, Row<"evolution_line">>;
+  blockRowsByLine?: Map<string, Row<"binder_block">[]>;
   orderedBandKeys: string[];
   lookups: AssembleLookups;
   /**
@@ -132,7 +138,8 @@ export async function loadPlanContext(
     typeColorMapRepo.list(db),
     colorBandRepo.listOrdered(db),
     binderSectionRepo.list(db),
-    binderBlockRepo.list(db),
+    // Paged like the line tables: a block per filled or reserved pocket grows with her lines.
+    binderBlockRepo.listAll(db),
     bulkUnitRepo.listOrdered(db),
   ]);
 
@@ -219,6 +226,10 @@ export async function loadPlanContext(
    * offering as the block. Only needs with a binder are listed: a line with no binder has nowhere to place anything.
    */
   const lineRowById = new Map(lineRows.map((l) => [l.id, l]));
+  const blockRowsByLine = new Map<string, Row<"binder_block">[]>();
+  for (const b of blockRows) {
+    if (b.line_id) blockRowsByLine.set(b.line_id, [...(blockRowsByLine.get(b.line_id) ?? []), b]);
+  }
   const bulkUnits = bulkUnitViews(bulkUnitRows, copyRows);
   /** A species' card name by dex id, as the catalog spells it ("Charizard"), for the Haul Plan's badges (UIL-117). */
   // Built once per load (TL review of #392: a scan per call was ~25M comparisons at her size). The English printing's
@@ -309,6 +320,8 @@ export async function loadPlanContext(
     catalogById,
     copyRowById,
     slotRowsByLine: slotsByLine,
+    lineRowById,
+    blockRowsByLine,
     orderedBandKeys,
     lookups: {
       bulkBoxName: (unitId) => {

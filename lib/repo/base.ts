@@ -72,8 +72,14 @@ export function assertReadComplete(
  *
  * Ordered by the primary key so the window is stable across requests, and advanced by rows RECEIVED
  * rather than rows requested — the server cap can be smaller than `pageSize`, which a fixed stride
- * would skip over. Costs one extra empty-page request at the end in exchange for being correct at any
- * cap. Shared by `listAll` and `listAllFields` so there is only one paging implementation to get right.
+ * would skip over. Shared by `listAll` and `listAllFields` so there is only one paging implementation
+ * to get right.
+ *
+ * The FIRST page asks for the true total too (`count: "exact"`, counted server-side in the same
+ * statement), and the walk ends once it has that many rows. So a table that fits in one page costs ONE
+ * request, what a single-page `list` costs, rather than a page and then an empty probe: moving a read
+ * off `list` (which throws past the cap) adds no round trip. Without a count (a server or double that
+ * gives none) it ends on the first empty page, as it always has.
  */
 async function pageAll<R>(
   db: DbClient,
@@ -83,16 +89,18 @@ async function pageAll<R>(
   pageSize: number,
 ): Promise<R[]> {
   const out: R[] = [];
+  let total: number | null = null;
   for (let from = 0; ;) {
-    const { data, error } = await loose(db)
+    const { data, error, count } = await loose(db)
       .from(table)
-      .select(columns)
+      .select(columns, from === 0 ? { count: "exact" } : undefined)
       .order(pk, { ascending: true })
       .range(from, from + pageSize - 1);
     if (error) throw error;
     const page = (data ?? []) as unknown as R[];
     out.push(...page);
-    if (page.length === 0) return out;
+    if (from === 0 && typeof count === "number") total = count;
+    if (page.length === 0 || (total !== null && out.length >= total)) return out;
     from += page.length;
     if (out.length > LIST_ALL_HARD_CAP) {
       throw new Error(
@@ -110,6 +118,10 @@ async function pageAll<R>(
  * placement, ordered oldest-first) page instead of throwing on truncation, without `pageAll` having
  * to know its filters.
  *
+ * A page built with `.select(cols, { count: "exact" })` reports the true total of its filters, and
+ * the walk then ends once it has that many rows: one request for a read that fits in one page, as
+ * `pageAll` does. Without a count it ends on the first empty page.
+ *
  * The order the caller applies MUST be a TOTAL order (no ties) — `.range()` only tiles correctly
  * over rows in a fixed sequence, so an order that can tie (a timestamp, say) needs a unique
  * tiebreaker appended, the way `listUnplaced` orders `created_at` then `id`. An order with ties can
@@ -122,11 +134,15 @@ export async function pageFiltered<R>(
 ): Promise<R[]> {
   const out: R[] = [];
   for (let from = 0; ;) {
-    const { data, error } = await page(from, from + pageSize - 1);
+    const { data, error, count } = (await page(from, from + pageSize - 1)) as {
+      data: unknown;
+      error: unknown;
+      count?: number | null;
+    };
     if (error) throw error;
     const rows = (data ?? []) as R[];
     out.push(...rows);
-    if (rows.length === 0) return out;
+    if (rows.length === 0 || (typeof count === "number" && out.length >= count)) return out;
     from += rows.length;
     if (out.length > LIST_ALL_HARD_CAP) {
       throw new Error(

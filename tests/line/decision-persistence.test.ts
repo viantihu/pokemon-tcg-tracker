@@ -28,12 +28,15 @@ import { buildScreenModel } from "@/lib/line/load";
 import type { ReconcilePlan } from "@/lib/sync/reconcile";
 import { asOwner, asSuperuser, freshRpcDb, OWNER, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
+import { clearCatalogCache } from "@/lib/plan/catalog-cache";
 
 const B1 = "1c000000-0000-0000-0000-0000000000b1";
 
 let db: PGlite;
 beforeEach(async () => {
   db = await freshRpcDb();
+  // Every catalog loader reads through the shared cache (module state): each fresh database starts it cold.
+  clearCatalogCache();
   await seedBinders(db, [{ id: B1, type: "general", name: "Binder 1" }]);
 });
 afterEach(async () => {

@@ -14,7 +14,7 @@
  * Query COUNTS, never elapsed time. `artwork.test.ts:303` is the standing example of what a wall-clock
  * assertion does on a shared runner.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CATALOG_CACHE_TTL_MS,
   catalogCacheIsWarm,
@@ -24,12 +24,13 @@ import {
 import type { DbClient } from "@/lib/repo";
 
 /** A fake honouring `listAllMirror`'s chain: select → eq → order → range, paged, counting requests. */
-function pagingDb(rowCount: number, pageSize = 1000) {
+function pagingDb(rowCount: number, pageSize = 1000, standIns: Record<string, unknown>[] = []) {
   let requests = 0;
   const rows = Array.from({ length: rowCount }, (_, i) => ({
     tcgdex_id: `card-${String(i).padStart(5, "0")}`,
     name: `Card ${i}`,
     local_id: String(i),
+    dex_id: [i],
   }));
   const db = {
     from: () => {
@@ -37,8 +38,9 @@ function pagingDb(rowCount: number, pageSize = 1000) {
         select: () => q,
         eq: () => q,
         order: () => q,
-        // `listStandIns` awaits the query itself (no range): her own stand-ins, none in this fake (0033).
-        then: (resolve: (v: unknown) => void) => resolve({ data: [], error: null, count: 0 }),
+        // `listStandIns` awaits the query itself (no range): her own stand-ins (0033), none unless given.
+        then: (resolve: (v: unknown) => void) =>
+          resolve({ data: standIns, error: null, count: standIns.length }),
         range: (from: number, to: number) => {
           requests += 1;
           return Promise.resolve({
@@ -122,6 +124,42 @@ describe("staleness is bounded", () => {
     await loadCatalogCached(db, { now: t0 });
     expect(catalogCacheIsWarm({ now: t0 })).toBe(true);
     expect(catalogCacheIsWarm({ now: t0 + CATALOG_CACHE_TTL_MS })).toBe(false);
+  });
+});
+
+describe("the shared rows are read-only: frozen outside production", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("here every cached row, what it holds, and the array are frozen, so a caller's write throws", async () => {
+    const { db } = pagingDb(3);
+    const rows = await loadCatalogCached(db);
+    expect(Object.isFrozen(rows)).toBe(true);
+    expect(rows.every((r) => Object.isFrozen(r) && Object.isFrozen(r.dex_id))).toBe(true);
+    expect(() => {
+      (rows[0] as { name: string }).name = "Renamed";
+    }).toThrow(TypeError);
+    expect(() => (rows[0].dex_id as number[]).push(99)).toThrow(TypeError);
+    expect(() => (rows as unknown[]).sort()).toThrow(TypeError);
+    // ...and still frozen when served from memory to the next caller.
+    expect(Object.isFrozen((await loadCatalogCached(db))[1])).toBe(true);
+  });
+
+  it("with her stand-ins merged in, the array she gets is frozen too (an in-place sort cannot depend on having one)", async () => {
+    const { db } = pagingDb(2, 1000, [{ tcgdex_id: "user:en:x", name: "Mine", dex_id: [1] }]);
+    const rows = await loadCatalogCached(db);
+    expect(rows.map((r) => r.tcgdex_id)).toEqual(["card-00000", "card-00001", "user:en:x"]);
+    expect(Object.isFrozen(rows)).toBe(true);
+    expect(Object.isFrozen(rows[0])).toBe(true);
+  });
+
+  it("production hands out the same rows UNFROZEN: a write nothing caught never becomes a crash there", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const { db } = pagingDb(2);
+    const rows = await loadCatalogCached(db);
+    expect(Object.isFrozen(rows)).toBe(false);
+    expect(Object.isFrozen(rows[0])).toBe(false);
   });
 });
 
