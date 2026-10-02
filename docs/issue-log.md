@@ -9525,10 +9525,11 @@ Karvi's group-by-function rule.
 - **Area:** Lines, Bulk, Engine, App-wide
 - **Env:** Testing
 
-**The one thing this does NOT touch, stated by the Senior BA's scoping and not re-derived here: physical
-integrity stays hard.** One copy, one place, one pocket; the slot/copy pointer invariant; owner and count
-checks. Those remain refusals — this entry is about rules that shape a RECOMMENDATION, not about the
-database-level facts that keep one physical card from being two places at once.
+**The one thing this does NOT touch — Karvi's own ruling, 2026-10-01, not just the Senior BA's scoping:
+physical integrity stays hard.** Her words: "Keep those hard." One copy in one place and one pocket; the
+slot ↔ copy pointer invariant; owner checks and Dex count checks — no override on any of these. This
+entry is about rules that shape a RECOMMENDATION, not about the database-level facts that keep one
+physical card from being two places at once.
 
 **Confirmed each of the four named hard rules exists today, exactly where cited.**
 
