@@ -15,8 +15,7 @@ import {
 } from "@/lib/engine";
 import { localeOfId } from "@/lib/catalog/locale";
 import { storedOr } from "@/lib/engine/form";
-import { toCatalogCard } from "@/lib/plan/adapt";
-import { loadCatalogCached } from "@/lib/plan/catalog-cache";
+import { catalogCardsOf, loadCatalogCached } from "@/lib/plan/catalog-cache";
 import {
   binderBlockRepo,
   binderRepo,
@@ -84,7 +83,7 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
   if (!line) throw new Error("That line is no longer there. Reload and choose again.");
   const map: TypeColorMap = {};
   for (const t of typeMapRows) map[t.card_type] = t.band;
-  const catalog: CatalogCard[] = catalogRows.map(toCatalogCard);
+  const catalog: CatalogCard[] = catalogCardsOf(catalogRows);
   const byId = new Map(catalog.map((c) => [c.tcgdexId, c]));
   const imageOf = new Map(catalogRows.map((r) => [r.tcgdex_id, r.image_url]));
   const copyById = new Map(copies.map((c) => [c.id, c]));

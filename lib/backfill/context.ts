@@ -14,7 +14,7 @@ import {
   typeColorMapRepo,
   type DbClient,
 } from "@/lib/repo";
-import { loadCatalogCached, toCatalogCard } from "@/lib/plan";
+import { catalogCardsOf, loadCatalogCached } from "@/lib/plan";
 import { resolveBackLine } from "./resolve";
 import type { BackfillBinder, BackfillCollection, BandOption, ResolvedBackLine } from "./types";
 import type { PlanDeps } from "./plan";
@@ -43,8 +43,10 @@ export async function loadBackfillContext(db: DbClient): Promise<BackfillContext
     loadCatalogCached(db),
   ]);
 
-  const catalogById = new Map<string, CatalogCard>();
-  for (const r of catalogRows) catalogById.set(r.tcgdex_id, toCatalogCard(r));
+  // Her catalog's shared cards (lib/plan/catalog-cache.ts): made once per mirror load, not once per request.
+  const catalogById = new Map<string, CatalogCard>(
+    catalogCardsOf(catalogRows).map((c) => [c.tcgdexId, c]),
+  );
 
   const typeColorMap: TypeColorMap = {};
   for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;

@@ -20,6 +20,12 @@ import { localeOfId } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
 import type { LineSlotRecord } from "./types";
 import { band, type Band } from "./bands";
+import {
+  physicalIndex,
+  printingsEvolvingFrom,
+  printingsNamed,
+  printingsOfDex,
+} from "./catalog-index";
 import { formFit, formOf, type CardForm } from "./form";
 import { isPlaced } from "./types";
 import type {
@@ -60,23 +66,26 @@ const norm = (s: string) => s.trim().toLowerCase();
  * `localeOfId` is imported rather than re-testing the `ja:` prefix here: lib/catalog/locale.ts is
  * deliberately the only place that prefix is spelled out, and a second copy of that rule is exactly how
  * the two drift. It is a pure string function, so the engine stays I/O-free.
+ *
+ * An INDEX, since the Tech Lead's profile (2026-10-02): this and the three lookups below were each a filter of the
+ * whole catalog, at every stage of every chain, about 60% of a Lines load on her data. They are lookups now, built
+ * once per catalog array and language, every list in catalog order so each returns what its filter did, card for card
+ * (./catalog-index).
  */
-const physicalIn = (catalog: CatalogCard[], locale: Locale) =>
-  catalog.filter((c) => !c.isDigitalOnly && localeOfId(c.tcgdexId) === locale);
+const physicalIn = (catalog: CatalogCard[], locale: Locale) => physicalIndex(catalog, locale);
 
-const byName = (cards: CatalogCard[], name: string) =>
-  cards.filter((c) => norm(c.name) === norm(name));
+const byName = printingsNamed;
 
-const byDex = (cards: CatalogCard[], dexId: number) => cards.filter((c) => c.dexId.includes(dexId));
+const byDex = printingsOfDex;
 
-const evolvingFrom = (cards: CatalogCard[], names: Set<string>) =>
-  cards.filter((c) => c.evolveFrom && names.has(norm(c.evolveFrom)));
+const evolvingFrom = printingsEvolvingFrom;
 
-function makeNode(dexId: number, cards: CatalogCard[]): ChainNode {
+function makeNode(dexId: number, cards: readonly CatalogCard[]): ChainNode {
   // A dexId maps to a single species-stage; regional forms share it but the same-colour rule
   // separates them downstream. Use the shortest name as the base species label.
   const name = cards.map((c) => c.name).sort((a, b) => a.length - b.length)[0] ?? "";
-  return { dexId, stage: cards[0]?.stage ?? "", name, cards };
+  // Its own copy of the index's list: the index is shared by every caller of the catalog.
+  return { dexId, stage: cards[0]?.stage ?? "", name, cards: [...cards] };
 }
 
 /**
@@ -380,8 +389,9 @@ export function rankAlternates(
   inForm?: { form: CardForm },
 ): PricedAlternates {
   const excluded = new Set(exclude);
-  const phys = physicalIn(catalog, locale).filter(
-    (c) => c.dexId.includes(dexId) && band(c, map) === b && !excluded.has(c.tcgdexId),
+  // The species' printings from the index, in catalog order: the same cards the whole-catalog filter found.
+  const phys = byDex(physicalIn(catalog, locale), dexId).filter(
+    (c) => band(c, map) === b && !excluded.has(c.tcgdexId),
   );
   const price = (c: CatalogCard) => {
     const p = priceOf(c);

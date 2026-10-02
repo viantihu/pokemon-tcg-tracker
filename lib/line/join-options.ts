@@ -20,6 +20,8 @@ import {
   lineLabel,
   lineLocaleOf,
   nameInForm,
+  physicalIndex,
+  printingsOfDex,
   stageFit,
   type CardForm,
   type CatalogCard,
@@ -203,12 +205,13 @@ export function buildLineJoinIndex(
      * species with the SHORTEST name among the node's cards, and a Japanese name is usually shorter. Two
      * same-species lines were therefore indistinguishable on screen — and so were the two READINGS of
      * Karvi's screenshot, which is why her report could not be diagnosed from it.
+     *
+     * The first such printing in catalog order, from the chain index (the TL's profile, 2026-10-02): this was two
+     * scans of the whole catalog per line. Else the first in any language, as the second scan found.
      */
     const seed =
-      catalog.find(
-        (c) =>
-          !c.isDigitalOnly && c.dexId.includes(line.rootDexId) && localeOfId(c.tcgdexId) === locale,
-      ) ?? catalog.find((c) => !c.isDigitalOnly && c.dexId.includes(line.rootDexId));
+      printingsOfDex(physicalIndex(catalog, locale), line.rootDexId)[0] ??
+      printingsOfDex(physicalIndex(catalog), line.rootDexId)[0];
     const chain = seed
       ? buildChain({ id: "r", card: seed, variant: "normal" } as IncomingCard, catalog)
       : [];

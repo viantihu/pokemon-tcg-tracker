@@ -27,8 +27,8 @@
  * SERVER ONLY.
  */
 
-import { toCatalogCard, toOwnedCopy } from "@/lib/plan/adapt";
-import { loadCatalogCached } from "@/lib/plan/catalog-cache";
+import { toOwnedCopy } from "@/lib/plan/adapt";
+import { catalogCardsOf, loadCatalogCached } from "@/lib/plan/catalog-cache";
 import type { TypeColorMap, Variant } from "@/lib/engine";
 import {
   applyWriteOps,
@@ -210,7 +210,7 @@ async function loadLineWriteReads(db: DbClient, withBoxNames: boolean): Promise<
     binderBlockRepo.listAll(db),
     withBoxNames ? boxNamesOf(db) : Promise.resolve(undefined),
   ]);
-  const catalog = catalogRows.map(toCatalogCard);
+  const catalog = catalogCardsOf(catalogRows);
   const typeColorMap: TypeColorMap = {};
   for (const t of typeMapRows) typeColorMap[t.card_type] = t.band;
   const slotsByLine = new Map<string, Row<"line_slot">[]>();
@@ -581,7 +581,7 @@ export async function applyStageDecisions(db: DbClient, choice: DecideStagesChoi
       line,
       slots,
       blocks: blocks.filter((b) => b.line_id === line.id),
-      catalog: catalogRows.map(toCatalogCard),
+      catalog: catalogCardsOf(catalogRows),
       copiesById: new Map(copies.map((c) => [c.id, c])),
       typeColorMap,
       ...(namesBoxes ? { boxNames: new Map(boxes.map((u) => [u.id, u.name])) } : {}),

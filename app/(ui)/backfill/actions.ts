@@ -11,6 +11,7 @@
 
 import {
   availableVariants,
+  catalogCardsOf,
   getOwnerContext,
   loadCatalogCached,
   toCardVariants,
@@ -107,7 +108,7 @@ export async function lookupLineSpecies(query: string): Promise<LookupCard[]> {
       catalogCardRepo.search(db, q, 24),
       loadCatalogCached(db),
     ]);
-    const catalog = catalogRows.map(toCatalogCard);
+    const catalog = catalogCardsOf(catalogRows);
     return rows
       .filter((r) => formsALine(toCatalogCard(r), catalog))
       .slice(0, 12)

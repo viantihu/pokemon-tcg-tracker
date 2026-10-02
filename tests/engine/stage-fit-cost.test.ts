@@ -1,7 +1,8 @@
 /**
  * The cost of the ONE stage rule (`stageFit`), which the cascade and the line-join index ask for every card × line ×
- * open stage (the TL's review): a chain is a scan of the whole catalog (`buildChain` filters it by locale), so it is
- * built once per catalog slice and card (`chainFor`), never per call. Pinned by counting the catalog scans.
+ * open stage (the TL's review): a chain is built once per catalog slice and card (`chainFor`), never per call, and
+ * since the chain index (lib/engine/catalog-index.ts, 2026-10-02) the catalog itself is walked once per language to
+ * build it. Pinned by counting the passes over the catalog: any iteration of it or whole-array method on it.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -13,12 +14,25 @@ import {
 } from "@/lib/engine";
 import { EEVEE_SV035_133, KEY_FORM_TYPE_COLOR_MAP, VAPOREON_SV035_134 } from "./fixtures";
 
-/** The catalog, counting how many times it is scanned (every chain built is one `filter`). */
+/** A pass over the whole catalog: iterating it, or any whole-array method. */
+const WHOLE = new Set<PropertyKey>([
+  Symbol.iterator,
+  "filter",
+  "find",
+  "some",
+  "every",
+  "map",
+  "flatMap",
+  "forEach",
+  "reduce",
+]);
+
+/** The catalog, counting how many times it is scanned. */
 function counted(cards: CatalogCard[]) {
   let scans = 0;
   const catalog = new Proxy([...cards], {
     get(target, key, receiver) {
-      if (key === "filter") scans += 1;
+      if (WHOLE.has(key)) scans += 1;
       return Reflect.get(target, key, receiver);
     },
   });
@@ -38,7 +52,7 @@ describe("stageFit builds each chain once per catalog slice, not per call", () =
         }),
       ).toBe("fits");
     }
-    // Two chains (the Vaporeon's, the Eevee's): PRE-FIX (a chain per call) this was 400.
+    // One pass to index the catalog for both chains: PRE-FIX (a chain per call, a filter per chain) this was 400.
     expect(scans()).toBeLessThanOrEqual(2);
   });
 
