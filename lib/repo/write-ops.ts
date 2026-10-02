@@ -19,6 +19,28 @@
 import type { DbClient } from "./base";
 import type { Json } from "./database.types";
 
+/**
+ * The rules she can override (0037). Karvi, 2026-10-01: "The rules should exist only for the recommendation engine.
+ * Users should always be able to override all rules." One key per family; the app recommends, warns in her words,
+ * and lets her do it anyway. A write that overrides one names it in `WritePayload.overrides` AND records it on an
+ * `insert_decision` in the same write, or the database refuses it. Integrity (one copy in one place, one copy per
+ * pocket, slot and copy agreeing, owners, Dex counts, her last box) has no key, so it cannot be overridden.
+ *
+ *   line_fit         species, stage, branch, trainer, region or language fit (no database rule; recorded only)
+ *   line_min_stages  a line with a single stage
+ *   bulk_box_full    a card into a full box (a move, or a deleted box's cards)
+ *   line_completion  the third pocket and "Decide every stage" prompts (no database rule; recorded only)
+ *   collection_pick  a specialty card shelved with no collection (no database rule; recorded only)
+ */
+export const OVERRIDE_RULES = [
+  "line_fit",
+  "line_min_stages",
+  "bulk_box_full",
+  "line_completion",
+  "collection_pick",
+] as const;
+export type OverrideRule = (typeof OVERRIDE_RULES)[number];
+
 /** An update patch: keys PRESENT are written (even when null); keys ABSENT are left unchanged. */
 export interface CopyPatch {
   variant?: string;
@@ -149,6 +171,8 @@ export type WriteOp =
        */
       line_id?: string | null;
       line_slot_id?: string | null;
+      /** 0037: the rules she overrode with this move (recorded; absent = none). */
+      overrides?: OverrideRule[];
     }
   /**
    * A block: a reserved pocket (0007). `copy_id` is set iff a card fills it. Since 0030 (UIL-121) `line_slot_id` names
@@ -378,6 +402,11 @@ export interface WritePayload {
   ops: WriteOp[];
   /** Presence groups whose `desired_count` is recomputed (post-apply live copy count). */
   resyncGroupIds?: string[];
+  /**
+   * 0037: the rules this write overrides. Each must also be recorded by an `insert_decision` in `ops`, or the whole
+   * write is refused. Sent only when non-empty.
+   */
+  overrides?: OverrideRule[];
 }
 
 /**
@@ -483,6 +512,7 @@ export async function applyWriteOps(db: DbClient, payload: WritePayload): Promis
   const body = {
     ops: withCopyBinderCheck(withLineSlotCheck(payload.ops)),
     resync_group_ids: payload.resyncGroupIds ?? [],
+    ...(payload.overrides?.length ? { overrides: payload.overrides } : {}),
   };
   const { error } = await db.rpc("apply_write_ops", { payload: body as unknown as Json });
   if (error) throw error;

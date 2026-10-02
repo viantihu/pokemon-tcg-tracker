@@ -190,8 +190,8 @@ async function seedCollection(db: PGlite, owner: string): Promise<void> {
     [IDS.block, owner, IDS.binder, IDS.copyBulk, IDS.line],
   );
   await db.query(
-    `insert into placement_decision (id, owner_id, haul_id, copy_id, decision, reason, resolved_by)
-     values ($1, $2, $3, $4, 'shelved:back', 'line member', 'auto')`,
+    `insert into placement_decision (id, owner_id, haul_id, copy_id, decision, reason, resolved_by, overrides)
+     values ($1, $2, $3, $4, 'shelved:back', 'line member', 'user', '{line_min_stages}')`,
     [IDS.decision, owner, IDS.haul, IDS.copyShelved],
   );
   await db.query(
@@ -307,6 +307,16 @@ describe("promote-collection: Testing -> Production", () => {
       variant: "reverse",
       dex_variant_raw: "Reverse Holo",
     });
+  });
+
+  it("carries the rules a decision overrode (0037), so Production keeps why she did it", async () => {
+    await promoteCollection({ source, target, ownerEmail: PROD_EMAIL });
+    const row = await one<{ overrides: string[] }>(
+      target,
+      `select overrides from placement_decision where id = $1`,
+      [IDS.decision],
+    );
+    expect(row).toEqual({ overrides: ["line_min_stages"] });
   });
 
   it("reconstructs the circular copy <-> line_slot reference", async () => {

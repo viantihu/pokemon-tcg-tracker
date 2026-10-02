@@ -160,7 +160,11 @@ export async function asSuperuser(db: PGlite): Promise<void> {
 
 /** Apply a write set through the RPC (as whatever role is current). Mirrors lib/repo applyWriteOps. */
 export async function applyOps(db: PGlite, payload: WritePayload): Promise<void> {
-  const body = { ops: payload.ops, resync_group_ids: payload.resyncGroupIds ?? [] };
+  const body = {
+    ops: payload.ops,
+    resync_group_ids: payload.resyncGroupIds ?? [],
+    ...(payload.overrides?.length ? { overrides: payload.overrides } : {}),
+  };
   await db.query(`select apply_write_ops($1::jsonb)`, [JSON.stringify(body)]);
 }
 
