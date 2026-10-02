@@ -591,6 +591,23 @@ describe("0037 · the override lasts only for the write that declared it", () =>
     expect(await boxOf(3)).toEqual({ role: "shelved", unit: null });
   });
 
+  it("after a committed write that declared bulk_box_full, the next transaction on the same connection is held to every rule", async () => {
+    // A pooled connection carries its session settings from one request to the next: a key set for the SESSION
+    // rather than the transaction would let the next request into a full box.
+    await asOwner(db);
+    await applyOps(db, {
+      ops: [toBox(2, 2), decision(1, ["bulk_box_full"], COPY(2))],
+      overrides: ["bulk_box_full"],
+    });
+    expect(await boxOf(2)).toEqual({ role: "bulk", unit: BOX(2) });
+    expect(
+      (await db.query<{ v: string }>(`select current_setting('app.overrides', true) as v`)).rows[0]
+        .v ?? "",
+    ).not.toMatch(/bulk_box_full/);
+    await expect(directToBoxB(3)).rejects.toThrow("Your Box B is full. Pick another box.");
+    expect(await boxOf(3)).toEqual({ role: "shelved", unit: null });
+  });
+
   it("a direct table write with no RPC into a full box refuses", async () => {
     await asOwner(db);
     await expect(directToBoxB(3)).rejects.toThrow("Your Box B is full. Pick another box.");
