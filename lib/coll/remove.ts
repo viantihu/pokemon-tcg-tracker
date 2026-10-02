@@ -50,6 +50,12 @@ import {
 } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
 import type { LineChoice } from "@/lib/line/popup";
+import {
+  lineChoiceDestinations,
+  overLimitNote,
+  overridesFor,
+  recordOverrides,
+} from "@/lib/line/overrides";
 import { lineReadsClosed } from "@/lib/line/popup";
 import { buildBackHalfLineOps } from "@/lib/line/write";
 
@@ -149,30 +155,43 @@ export function buildCollectionRemovalOps(plan: CollectionRemovalPlan): WriteOp[
   const join = collectionTargetJoinOp(plan.destination, plan.tcgdexId);
   if (join && join.collection_id !== plan.collectionId) ops.push(join);
 
-  const reason = removalDecisionReason({
-    collectionName: plan.collectionName,
-    destinationLabel: plan.destinationLabel,
-    hasCopy: plan.copies.length > 0,
-  });
+  const reason =
+    removalDecisionReason({
+      collectionName: plan.collectionName,
+      destinationLabel: plan.destinationLabel,
+      hasCopy: plan.copies.length > 0,
+    }) + (plan.copies.length > 0 ? overLimitNote([plan.destination]) : "");
+  // 0037: a full box she picked knowingly is recorded on the removal's decisions (lib/line/overrides).
+  const rules = overridesFor([plan.destination]);
   if (plan.copies.length === 0) {
-    ops.push({
-      op: "insert_decision",
-      haul_id: null,
-      copy_id: null,
-      decision: "collection-remove",
-      reason,
-      resolved_by: "user",
-    });
+    ops.push(
+      recordOverrides(
+        {
+          op: "insert_decision",
+          haul_id: null,
+          copy_id: null,
+          decision: "collection-remove",
+          reason,
+          resolved_by: "user",
+        },
+        rules,
+      ),
+    );
   } else {
     for (const copy of plan.copies) {
-      ops.push({
-        op: "insert_decision",
-        haul_id: null,
-        copy_id: copy.id,
-        decision: "collection-remove",
-        reason,
-        resolved_by: "user",
-      });
+      ops.push(
+        recordOverrides(
+          {
+            op: "insert_decision",
+            haul_id: null,
+            copy_id: copy.id,
+            decision: "collection-remove",
+            reason,
+            resolved_by: "user",
+          },
+          rules,
+        ),
+      );
     }
   }
 
@@ -306,8 +325,12 @@ export async function applyCollectionRemoval(
     const own = ops.find((o) => o.op === "update_copy" && o.id === copyRows[0].id);
     if (own && own.op === "update_copy") own.patch = { ...own.patch, line_slot_id: lineSlotId };
   }
-  // The line first: the copy's pointer names a slot this same write creates or fills.
-  await applyWriteOps(db, { ops: [...lineOps, ...ops] });
+  // The line first: the copy's pointer names a slot this same write creates or fills. 0037: what she overrides, from
+  // every place this removal sends a card; each writer records its own.
+  await applyWriteOps(db, {
+    ops: [...lineOps, ...ops],
+    overrides: overridesFor([req.destination, ...lineChoiceDestinations(req.lineChoice)]),
+  });
 
   return {
     collectionName: col.name,

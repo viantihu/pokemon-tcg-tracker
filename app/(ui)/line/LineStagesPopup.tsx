@@ -100,6 +100,8 @@ export function LineStagesPopup({
   // UIL-130: a spare card filling one of this line's pockets now that her changes take out goes back to its home
   // box, or to one she picks when that one is full.
   const [returnBoxes, setReturnBoxes] = useState<Record<string, string>>({});
+  // 0037: the ones she sends into a full box knowingly ("Add anyway").
+  const [returnOverFull, setReturnOverFull] = useState<string[]>([]);
   const spares = model?.spares ?? {};
   const after = new Set(chosen);
   const returning: ReturningCard[] = model
@@ -107,7 +109,7 @@ export function LineStagesPopup({
         .filter((id) => !after.has(id) && spares[id])
         .map((id) => ({ copyId: id, ...spares[id] }))
     : [];
-  const sparesOk = sparesReady(returning, model?.boxes ?? [], returnBoxes);
+  const sparesOk = sparesReady(returning, model?.boxes ?? [], returnBoxes, returnOverFull);
   const anyChange =
     !!changed && (Object.keys(changed.stages).length > 0 || changed.pocket !== null);
 
@@ -199,8 +201,12 @@ export function LineStagesPopup({
               spares={returning}
               boxes={model.boxes ?? []}
               picked={returnBoxes}
+              overFull={returnOverFull}
               busy={busy}
-              onPick={setReturnBoxes}
+              onPick={(next, over) => {
+                setReturnBoxes(next);
+                setReturnOverFull(over);
+              }}
             />
           ) : null}
           {error ? (
@@ -230,11 +236,14 @@ export function LineStagesPopup({
                     .filter((s) => returnBoxes[s.copyId])
                     .map((s) => [s.copyId, returnBoxes[s.copyId]]),
                 );
+                // …and only her "Add anyway" for those cards, into the box she picked for each.
+                const over = returnOverFull.filter((id) => picks[id]);
                 onConfirm({
                   lineId,
                   stages: changed.stages,
                   ...(changed.pocket ? { thirdPocket: changed.pocket } : {}),
                   ...(Object.keys(picks).length > 0 ? { returnBoxes: picks } : {}),
+                  ...(over.length > 0 ? { returnOverFull: over } : {}),
                 });
               }}
             >

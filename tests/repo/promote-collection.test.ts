@@ -319,6 +319,48 @@ describe("promote-collection: Testing -> Production", () => {
     expect(row).toEqual({ overrides: ["line_min_stages"] });
   });
 
+  it("a box she filled past its limit by overriding it (0037) arrives full, and still takes no more there", async () => {
+    // On Testing: a Shoebox with room for 1, holding 2. She put the second one there knowingly (bulk_box_full,
+    // recorded on that move's decision), which is the only way past the copy trigger, so it is seeded the same way.
+    const SHOEBOX = "aaaaaac1-0000-4000-8000-000000000001";
+    const OVER = ["aaaaaac2-0000-4000-8000-000000000001", "aaaaaac2-0000-4000-8000-000000000002"];
+    await source.query(
+      `insert into bulk_unit (id, owner_id, name, capacity, sort_order, is_default) values ($1, $2, 'Shoebox', 1, 5, false)`,
+      [SHOEBOX, TESTING_OWNER],
+    );
+    await source.exec(`begin; select set_config('app.overrides', '["bulk_box_full"]', true);`);
+    for (const copyId of OVER) {
+      await source.query(
+        `insert into copy (id, owner_id, catalog_card_id, dex_variant_raw, presence_group_id, haul_id, role, bulk_unit_id)
+         values ($1, $2, 'sv01-084', 'Normal', $3, $4, 'bulk', $5)`,
+        [copyId, TESTING_OWNER, IDS.presenceGroupBulk, IDS.haul, SHOEBOX],
+      );
+    }
+    await source.query(
+      `insert into placement_decision (owner_id, copy_id, decision, reason, resolved_by, overrides)
+       values ($1, $2, 'placement-move', 'Into the Shoebox, over its limit (her call).', 'user', '{bulk_box_full}')`,
+      [TESTING_OWNER, OVER[1]],
+    );
+    await source.exec(`commit;`);
+
+    await promoteCollection({ source, target, ownerEmail: PROD_EMAIL });
+
+    const held = await one<{ n: number }>(
+      target,
+      `select count(*)::int as n from copy where bulk_unit_id = $1 and role = 'bulk'`,
+      [SHOEBOX],
+    );
+    expect(Number(held.n)).toBe(2);
+    // The override ended with the promotion: a plain write into that full box is refused in her words.
+    await expect(
+      target.query(
+        `insert into copy (owner_id, catalog_card_id, dex_variant_raw, presence_group_id, role, bulk_unit_id)
+         values ($1, 'sv01-084', 'Normal', $2, 'bulk', $3)`,
+        [PROD_OWNER, IDS.presenceGroupBulk, SHOEBOX],
+      ),
+    ).rejects.toThrow("Your Shoebox is full. Pick another box.");
+  });
+
   it("reconstructs the circular copy <-> line_slot reference", async () => {
     await promoteCollection({ source, target, ownerEmail: PROD_EMAIL });
 

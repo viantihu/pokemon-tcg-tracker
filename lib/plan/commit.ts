@@ -45,6 +45,7 @@ import {
   evolutionLineRepo,
   lineSlotRepo,
   type DbClient,
+  type OverrideRule,
   type Row,
   type WriteOp,
   type WritePayload,
@@ -62,6 +63,12 @@ import {
 } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
 import type { LineChoice } from "@/lib/line/popup";
+import {
+  lineChoiceDestinations,
+  overLimitNote,
+  overridesFor,
+  recordOverrides,
+} from "@/lib/line/overrides";
 import { lineReadsClosed } from "@/lib/line/popup";
 import { buildBackHalfLineOps, KEEP_IS_NO_LINE_MOVE } from "@/lib/line/write";
 import { isLineCard } from "./line-proposal";
@@ -94,6 +101,8 @@ export const LINE_CHOICE = {
 /**
  * UIL-053: a specialty card bound for a binder that holds collections must name the one it joins, or it
  * lands in the binder on no collection's list. Exported so the screen and the tests agree on the wording.
+ * Since 0037 that is the recommendation, not a wall: "Shelve without a collection" is her override
+ * (`noCollection`, collection_pick). A pick that is not one of the binder's collections stays refused.
  */
 export const COLLECTION_PICK = {
   missing:
@@ -146,6 +155,8 @@ export class PlacementChangedError extends Error {
   }
 }
 
+type BulkDestination = Extract<MoveDestination, { kind: "bulk" }>;
+
 export interface CommitInput {
   draft: DraftItem[];
   /**
@@ -160,6 +171,16 @@ export interface CommitInput {
    * draft id. `commitCardPlacement` has already checked each is one of that binder's collections.
    */
   collectionChoices?: Record<string, string>;
+  /**
+   * The specialty cards she shelves in such a binder with NO collection, knowingly (0037's collection_pick), keyed by
+   * draft id. Recorded on the card's decision and declared on the write.
+   */
+  withoutCollection?: Record<string, true>;
+  /**
+   * The box she picked for the copy a swap displaces (0037, the Tech Lead's "no dead ends": with every box full the
+   * plan names none), keyed by draft id. `overFull` is recorded on the swap's decision and declared on the write.
+   */
+  displacedTo?: Record<string, BulkDestination>;
   /** The audit text for an override that stands for a line-popup Keep (UIL-117), keyed by draft id. */
   overrideReasons?: Record<string, string>;
 }
@@ -348,6 +369,18 @@ export async function commitCardPlacement(
      */
     collectionChoice?: string | null;
     /**
+     * Her "Shelve without a collection" for that card (0037, Karvi: "Users should always be able to override all
+     * rules"): it goes in the binder on no collection's list, recorded as her override (collection_pick). Only with no
+     * `collectionChoice`: a stale pick is refused either way. Ignored for an override, as `collectionChoice` is.
+     */
+    noCollection?: boolean | null;
+    /**
+     * The box she picked for the copy this card swaps out (a holo over her normal in a front half), when the plan can
+     * name none because every box is full (0037). With `overFull` it goes over that box's limit, recorded. Only for a
+     * swap written by the plan; ignored for an override (her Move skips the swap) and for any other card.
+     */
+    displacedTo?: BulkDestination | null;
+    /**
      * Her choice in the line popup (UIL-117), REQUIRED for a card whose placement is in a line or that could
      * replace a card in one, unless she moved it instead (`override`). Start and join are written by the ONE line
      * builder over fresh state; a replace's Keep writes no line at all.
@@ -372,6 +405,8 @@ export async function commitCardPlacement(
   if (input.override && input.lineChoice && !movedIntoLine) {
     throw new Error(LINE_CHOICE.notALineCard);
   }
+  // 0037: the box she picks for a swapped-out copy is a bulk box, never anywhere else.
+  if (input.displacedTo && input.displacedTo.kind !== "bulk") throw new Error(REFUSE.incomplete);
   // UIL-098 part 2: a row that names no copy is a hand-typed card, and placing it would CREATE one — the
   // twin the next import cannot see. Refused before any I/O.
   if (!input.card.existingCopyId) throw new Error(NOT_A_HAUL_COPY.notFromImport);
@@ -485,12 +520,18 @@ export async function commitCardPlacement(
     );
   }
 
-  // UIL-053: in a binder that holds collections, the card joins the one she picked, never none.
+  // UIL-053: in a binder that holds collections, the card joins the one she picked, or, her override (0037), none.
   const pick = planned[0]?.result.collectionPick;
+  let withoutCollection = false;
   if (pick && !override) {
-    if (!input.collectionChoice) throw new Error(COLLECTION_PICK.missing);
-    if (!pick.collections.some((c) => c.id === input.collectionChoice)) {
-      throw new Error(COLLECTION_PICK.notHere);
+    if (input.collectionChoice) {
+      if (!pick.collections.some((c) => c.id === input.collectionChoice)) {
+        throw new Error(COLLECTION_PICK.notHere);
+      }
+    } else if (input.noCollection === true) {
+      withoutCollection = true;
+    } else {
+      throw new Error(COLLECTION_PICK.missing);
     }
   }
 
@@ -513,6 +554,11 @@ export async function commitCardPlacement(
     collectionChoices:
       pick && !override && input.collectionChoice
         ? { [input.card.id]: input.collectionChoice }
+        : undefined,
+    withoutCollection: withoutCollection ? { [input.card.id]: true } : undefined,
+    displacedTo:
+      input.displacedTo && !override && planned[0]?.result.swap
+        ? { [input.card.id]: input.displacedTo }
         : undefined,
   });
   assertPlacementBandsConfigured(payload, pc);
@@ -605,7 +651,8 @@ async function commitLineChoice(
     line_slot_id: built.slotId,
   });
   counts.decisions += 1;
-  const payload: WritePayload = { ops };
+  // 0037: what she overrides, from every place her line choice sends a card; the line builder records its own.
+  const payload: WritePayload = { ops, overrides: overridesFor(lineChoiceDestinations(choice)) };
   assertPlacementBandsConfigured(payload, pc);
   assertPlacementBindersConfigured(payload, pc);
   await applyWriteOps(db, payload);
@@ -734,6 +781,8 @@ export function buildHaulCommitPayload(
 
   // Lines created THIS pass, so a second card of the same (root, band) fills instead of duplicating.
   const passLines = new Map<string, { lineId: string }>();
+  // 0037: the rules her choices override, each recorded on its card's decision below and declared on the write.
+  const declared = new Set<OverrideRule>();
 
   for (const p of planned) {
     const override = input.overrides?.[p.incomingId];
@@ -747,19 +796,28 @@ export function buildHaulCommitPayload(
       // Manual placement wins: place the copy where she said, skip all cascade side effects.
       const copyId = writeOverriddenCard(ops, p, override, pc, slotsByLine, passLines, counts);
       const reason =
-        input.overrideReasons?.[p.incomingId] ??
-        (mismatch
-          ? "Colour mismatch resolved at intake (her call, UIL-069): filed by its own colour rather " +
-            "than joining the existing line."
-          : `Manual placement override at intake (your call, cascade skipped): ${p.result.reason}`);
-      ops.push({
-        op: "insert_decision",
-        haul_id: null,
-        copy_id: copyId,
-        decision: mismatch ? "colour-mismatch-own-color" : "placement-override",
-        reason,
-        resolved_by: "user",
-      });
+        (input.overrideReasons?.[p.incomingId] ??
+          (mismatch
+            ? "Colour mismatch resolved at intake (her call, UIL-069): filed by its own colour rather " +
+              "than joining the existing line."
+            : `Manual placement override at intake (your call, cascade skipped): ${p.result.reason}`)) +
+        overLimitNote([override]);
+      // A full box she picked knowingly (0037) is recorded on this card's decision.
+      const rules = overridesFor([override]);
+      for (const r of rules) declared.add(r);
+      ops.push(
+        recordOverrides(
+          {
+            op: "insert_decision",
+            haul_id: null,
+            copy_id: copyId,
+            decision: mismatch ? "colour-mismatch-own-color" : "placement-override",
+            reason,
+            resolved_by: "user",
+          },
+          rules,
+        ),
+      );
       counts.decisions += 1;
       continue;
     }
@@ -767,7 +825,11 @@ export function buildHaulCommitPayload(
     // (above). The cascade no longer starts, fills or swaps a line on its own; a line card here would mean the screen
     // and the server disagree about it, so it is refused, never written.
     if (isLineCard(p.result)) throw new Error(LINE_CHOICE.missing);
-    const copyId = writeCard(ops, p, pc, counts);
+    // 0037: the box she picked for the copy a swap displaces (every box full), recorded on this card's decision.
+    const displaced = p.result.swap ? input.displacedTo?.[p.incomingId] : undefined;
+    const displacedRules = overridesFor([displaced]);
+    for (const r of displacedRules) declared.add(r);
+    const copyId = writeCard(ops, p, pc, counts, displaced);
     // UIL-053: the card goes on the list of the collection she picked, in the same transaction as its
     // placement, so it is never in the binder and on no list.
     const picked = p.result.collectionPick?.collections.find(
@@ -780,21 +842,32 @@ export function buildHaulCommitPayload(
         catalog_card_ids: [p.tcgdexId],
       });
     }
+    // 0037: her "Shelve without a collection", in a binder that holds collections: on no list, as her override.
+    const without =
+      !picked && !!p.result.collectionPick && input.withoutCollection?.[p.incomingId] === true;
+    if (without) declared.add("collection_pick");
     const reason = picked
       ? `Specialty card filed in the "${picked.name}" collection (her pick, UIL-053).`
-      : p.result.reason;
-    ops.push({
-      op: "insert_decision",
-      haul_id: null,
-      copy_id: copyId,
-      decision: p.result.step,
-      reason,
-      resolved_by: picked ? "user" : "auto",
-    });
+      : without
+        ? "Specialty card shelved in its binder with no collection (your call): it counts toward none."
+        : p.result.reason + overLimitNote([displaced]);
+    ops.push(
+      recordOverrides(
+        {
+          op: "insert_decision",
+          haul_id: null,
+          copy_id: copyId,
+          decision: p.result.step,
+          reason,
+          resolved_by: picked || without || displaced ? "user" : "auto",
+        },
+        [...(without ? (["collection_pick"] as const) : []), ...displacedRules],
+      ),
+    );
     counts.decisions += 1;
   }
 
-  return { payload: { ops }, counts };
+  return { payload: { ops, ...(declared.size > 0 ? { overrides: [...declared] } : {}) }, counts };
 }
 
 /**
@@ -802,7 +875,14 @@ export function buildHaulCommitPayload(
  * that is NOT headed into a line reaches here (`buildHaulCommitPayload` refuses one): a line is written by her line
  * choice alone (UIL-117), so the cascade's own line writes (fill a slot, start a line, a swap inside a line) are gone.
  */
-function writeCard(ops: WriteOp[], p: PlannedCard, pc: PlanContext, counts: CommitCounts): string {
+function writeCard(
+  ops: WriteOp[],
+  p: PlannedCard,
+  pc: PlanContext,
+  counts: CommitCounts,
+  /** 0037: the box she picked for the copy a swap displaces (absent: the box the plan names, if any). */
+  displaced?: BulkDestination,
+): string {
   const { result } = p;
 
   // Placement columns. An upgrade inherits the displaced copy's role wholesale (system-design §3).
@@ -827,19 +907,20 @@ function writeCard(ops: WriteOp[], p: PlannedCard, pc: PlanContext, counts: Comm
   );
 
   if (swap) {
-    // The displaced normal copy goes to the bulk box.
-    const displaced = pc.copyRowById.get(swap.displacedCopyId);
-    if (displaced) {
+    // The displaced normal copy goes to the bulk box: the one she picked (0037), else the one the plan names.
+    const out = pc.copyRowById.get(swap.displacedCopyId);
+    const box = displaced?.unitId ?? routeBox;
+    if (out) {
       ops.push({
         op: "update_copy",
-        id: displaced.id,
+        id: out.id,
         patch: {
           role: "bulk",
           binder_id: null,
           binder_half: null,
           color_band: null,
           line_slot_id: null,
-          ...(routeBox ? { bulk_unit_id: routeBox } : {}),
+          ...(box ? { bulk_unit_id: box } : {}),
         },
       });
     }

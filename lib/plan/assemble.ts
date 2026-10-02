@@ -39,6 +39,8 @@ export interface AssembleLookups {
   lines?: LineLookups;
   /** UIL-130: a bulk box's name by id; no id: the box the plan sends a card to (her default with room). */
   bulkBoxName?(unitId?: string | null): string | null;
+  /** UIL-130 / 0037: she has boxes and none has room, so the plan sends a card to bulk nowhere on its own. */
+  bulkFull?(): boolean;
   /** A copy as she would name it, "Charmeleon 027/197", and its variant, for an upgrade's reason (UIL-126). */
   copyLabel?(copyId: string): { label: string; variant: string } | null;
   /** Whether a card's species forms a line at all (Karvi, 2026-09-27). Optional for hand-built lookups. */
@@ -192,5 +194,12 @@ export function toPlanItem(
           )
         : null,
     formsALine: l.formsALine ? l.formsALine(incoming.card) : true,
+    // 0037: a card the plan sends to bulk, or the copy a holo swaps out of a front half, when every box is full: hers
+    // to place (a swap inside a line is her line popup's, which picks the box itself).
+    ...(((result.target.kind === "bulk" && !result.swap) ||
+      (!!result.swap && result.target.kind !== "back-half-line")) &&
+    l.bulkFull?.()
+      ? { boxesFull: true }
+      : {}),
   };
 }

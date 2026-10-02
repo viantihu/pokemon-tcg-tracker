@@ -498,6 +498,12 @@ export async function promoteCollection({
       if (table === DEFERRED.table) {
         // Pass 1 of the circular FK: hold the column back entirely.
         columns = columns.filter((c) => c.column !== DEFERRED.column);
+        // 0037: a promotion re-creates a state she already reached. A box she filled past its limit by overriding it
+        // (bulk_box_full) holds those cards on Testing, and her override is recorded on that move's decision, which
+        // travels with it (placement_decision, below). So the copies land with that one override declared, the way
+        // apply_write_ops hands it to the copy trigger, transaction-local; it is reset to '[]' as soon as copy and
+        // its line_slot patch have landed, so nothing after them is let past a full box.
+        await target.query(`select set_config('app.overrides', '["bulk_box_full"]', true)`);
       }
       const n = await insertRows(target, table, columns, payload.get(table));
       log(`  ${table.padEnd(20)} ${String(n).padStart(6)} inserted`);
@@ -508,6 +514,8 @@ export async function promoteCollection({
         log(
           `  ${`${DEFERRED.table}.${DEFERRED.column}`.padEnd(20)} ${String(patched).padStart(6)} patched`,
         );
+        // The override ends with the copies (see pass 1): a later write is held to every rule.
+        await target.query(`select set_config('app.overrides', '[]', true)`);
       }
     }
 

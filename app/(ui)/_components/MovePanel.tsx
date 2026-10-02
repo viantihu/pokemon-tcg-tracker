@@ -52,7 +52,14 @@ import {
   type LineProposal,
 } from "@/lib/line/popup";
 import { LinePopup } from "./LinePopup";
-import { boxLoad, fullBoxReason, initialBox } from "@/lib/plan/bulk-units";
+import {
+  addAnywayLabel,
+  addAnywayWarning,
+  boxLoad,
+  fullBoxReason,
+  hasRoom,
+  initialBox,
+} from "@/lib/plan/bulk-units";
 
 const BULK = "__bulk__";
 
@@ -69,6 +76,7 @@ export type MoveConfirm = (
 export function MovePanel({
   options,
   initial,
+  homeBoxId,
   confirmLabel = "Place it here ▶",
   allowLineJoin = false,
   joinCandidates,
@@ -83,6 +91,12 @@ export function MovePanel({
 }: {
   options: MoveOptions;
   initial?: MoveDestination;
+  /**
+   * 0037: the bulk box the card is in now (absent: none, or not known). The card is already counted in its load, so
+   * that box is shown without it: a card in a 60-of-60 box is not "1 over" there, and picking its own box offers no
+   * Add anyway and sends no override.
+   */
+  homeBoxId?: string;
   confirmLabel?: string;
   allowLineJoin?: boolean;
   /** Flat across every band (UIL-064) — present (even empty) turns the line-first flow on. */
@@ -151,16 +165,21 @@ export function MovePanel({
   /**
    * UIL-130: the bulk box she picks. Her boxes come with the options; absent (an older caller), the bulk box is one
    * place and the database gives the card her default box. Starts on the box named, else her default with room.
+   * 0037: the card's own box is counted without it (`homeBoxId`).
    */
-  const boxes = options.bulkUnits ?? [];
+  const boxes = (options.bulkUnits ?? []).map((u) =>
+    u.id === homeBoxId ? { ...u, held: Math.max(0, u.held - 1) } : u,
+  );
   const [unitId, setUnitId] = useState<string | undefined>(() =>
     initialBox(boxes, initial?.kind === "bulk" ? initial.unitId : undefined),
   );
   const box = boxes.find((u) => u.id === unitId);
-  /** A box with a card limit that is full takes no more (Karvi: "Stop it, ask for another"). */
-  const boxFull = (u: { held: number; capacity: number | null }) =>
-    u.capacity !== null && u.held >= u.capacity;
-  const everyBoxFull = boxes.length > 0 && boxes.every(boxFull);
+  /**
+   * A box with a card limit that is full is the recommendation's "no" (Karvi, 2026-09-29: "Stop it, ask for another"),
+   * and since 0037 not a wall: "Users should always be able to override all rules." She can pick it; the panel warns in
+   * her words and Confirm says "Add anyway · N over", and the Move carries `overFull` so the write records it.
+   */
+  const pickedFull = !!box && box.id !== homeBoxId && !hasRoom(box);
 
   /** UIL-030: the block need she picked (by slot id). A manual binder/bulk pick clears it. */
   const [blockPick, setBlockPick] = useState<string | null>(null);
@@ -208,7 +227,7 @@ export function MovePanel({
         binderId: blockNeed.binderId,
       }
     : isBulk
-      ? { kind: "bulk", ...(unitId ? { unitId } : {}) }
+      ? { kind: "bulk", ...(unitId ? { unitId } : {}), ...(pickedFull ? { overFull: true } : {}) }
       : isSpecialty
         ? { kind: "collection", binderId: binder!.id, collectionId: collectionId ?? "" }
         : {
@@ -221,10 +240,8 @@ export function MovePanel({
 
   // No line-uniqueness gate any more (UIL-096): starting a second line is her call, and the warning below
   // is how she makes it knowingly.
-  const canConfirm =
-    isMoveDestinationComplete(destination) &&
-    !(isBulk && box && boxFull(box)) &&
-    !(isBulk && everyBoxFull);
+  // A full box no longer blocks it either (0037): her Confirm is the knowing "Add anyway".
+  const canConfirm = isMoveDestinationComplete(destination);
 
   const hasCandidates = (joinCandidates ?? []).length > 0;
 
@@ -423,30 +440,23 @@ export function MovePanel({
       {isBulk ? (
         <div className="orow">
           <div className="ol">{boxes.length > 0 ? "WHICH BOX" : ""}</div>
-          <div className="ochips" role="group" aria-label="Which bulk box">
-            {boxes.map((u) => {
-              const full = boxFull(u);
-              return (
-                <button
-                  key={u.id}
-                  type="button"
-                  className={"ochip" + (unitId === u.id ? " on" : "")}
-                  aria-pressed={unitId === u.id}
-                  disabled={full}
-                  title={full ? fullBoxReason(u) : undefined}
-                  onClick={() => setUnitId(u.id)}
-                >
-                  {u.name} · {boxLoad(u)}
-                </button>
-              );
-            })}
-            {everyBoxFull ? (
+          <div className="ochips boxchips" role="group" aria-label="Which bulk box">
+            {boxes.map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                className={"ochip" + (unitId === u.id ? " on" : "")}
+                aria-pressed={unitId === u.id}
+                title={hasRoom(u) || u.id === homeBoxId ? undefined : fullBoxReason(u)}
+                onClick={() => setUnitId(u.id)}
+              >
+                {u.name} · {boxLoad(u)}
+              </button>
+            ))}
+            {/* Every box full is no dead end (0037): her default is picked, and each box offers Add anyway. */}
+            {box && pickedFull ? (
               <span className="oskip" role="alert">
-                Every bulk box is full. Pick another place, or raise a box&apos;s limit in Settings.
-              </span>
-            ) : box && boxFull(box) ? (
-              <span className="oskip" role="alert">
-                {fullBoxReason(box)}
+                {addAnywayWarning(box)}
               </span>
             ) : (
               <span className="oskip">
@@ -721,7 +731,10 @@ export function MovePanel({
               says so, rather than a neutral "Place it here" that reads as if nothing was said. */}
           {orderedWarnLines.length > 0 && destination.kind === "shelf"
             ? "Start a new line anyway ▶"
-            : confirmLabel}
+            : destination.kind === "bulk" && box && pickedFull
+              ? // 0037: a full box she picked knowingly; the label says how far over it will be.
+                addAnywayLabel(box)
+              : confirmLabel}
         </button>
         {linePopError && !linePop ? (
           <div className="oskip" role="alert">

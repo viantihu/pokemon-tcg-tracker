@@ -64,6 +64,10 @@ export function lookupMoveTarget(
     currentLabel: copy.currentLabel,
     ...(copy.leaves ? { leaves: copy.leaves } : {}),
     initial: copy.initial,
+    // 0037: a bulk card opens on its own box, which the Move sheet must not count it against.
+    ...(copy.role === "bulk" && copy.initial?.kind === "bulk" && copy.initial.unitId
+      ? { homeBoxId: copy.initial.unitId }
+      : {}),
   };
 }
 

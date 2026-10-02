@@ -105,17 +105,25 @@ describe("UIL-130 · her boxes, in Settings", () => {
     expect(within(panel).getByText(/Your only bulk box can't be deleted/)).toBeTruthy();
   });
 
-  it("delete asks where its cards go; a box without room for them is named and can't be picked to confirm", async () => {
+  it("delete asks where its cards go; a box without room for them is named, and she can delete anyway (0037)", async () => {
     const { user, panel } = await mount(TWO);
     await user.click(within(panel).getByRole("button", { name: "Delete Bulk box" }));
     const ask = within(panel).getByRole("group", { name: "Delete Bulk box" });
     expect(within(ask).getByText(/Its 54 cards go to/)).toBeTruthy();
-    // Shoebox has room for 10, not 54.
-    expect(within(ask).getByRole("alert").textContent).toMatch(/Shoebox has room for 10 cards/);
-    expect(
-      (within(ask).getByRole("button", { name: "Delete Bulk box" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    // Shoebox has room for 10, not 54: the old hint stays, then what deleting anyway does.
+    expect(within(ask).getByRole("alert").textContent).toBe(
+      "Shoebox has room for 10 cards. Pick another box, or raise its limit first. " +
+        "Or delete anyway: Shoebox will be 44 over its limit.",
+    );
+    // Karvi, 2026-10-01: "Users should always be able to override all rules." No longer disabled.
+    expect(within(ask).queryByRole("button", { name: "Delete Bulk box" })).toBeNull();
+    const anyway = within(ask).getByRole("button", {
+      name: "Delete anyway · 44 over",
+    }) as HTMLButtonElement;
+    expect(anyway.disabled).toBe(false);
     expect(deleteBulkUnit).not.toHaveBeenCalled();
+    await user.click(anyway);
+    await waitFor(() => expect(deleteBulkUnit).toHaveBeenCalledWith("bx1", "bx2", true));
   });
 
   it("delete with room: confirmed, its cards go to the box she picked, and her default passes to it", async () => {

@@ -4122,3 +4122,24 @@ html.tour-open .app {
 .lp-dest .lp-bands .lp-band {
   min-height: 40px;
 }
+
+/* 0037 (Karvi, 2026-10-01: "Users should always be able to override all rules"): a full box can be picked anyway, and a
+   specialty card shelved without a collection. The controls she taps for it are at least 40px tall: the Move sheet's
+   box chips (a full one is no longer disabled), the spotlight's collection chips with "Shelve without a collection",
+   and its "Pick a box…". The popups' "Add anyway" chips are `.lp-band`s, sized by the two rules above. A returning
+   card's warning takes the full width under its box chips. */
+.boxchips .ochip,
+.collchips .ochip,
+.spot .boxfull .btn {
+  min-height: 40px;
+}
+.spot .boxfull {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.lp-returns .lp-mrow > .lp-error,
+.lp-returns .lp-mrow > .lp-note {
+  flex: 1 1 100%;
+}

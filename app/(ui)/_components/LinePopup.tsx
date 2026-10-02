@@ -27,6 +27,7 @@ import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { BandChip } from "./BandChip";
 import { CardFace } from "./CardFace";
 import {
+  awaitsAddAnyway,
   ColourChoiceSection,
   destinationLabel,
   ExistingLinesBlock,
@@ -128,13 +129,20 @@ export function LinePopup({
   // UIL-130: a spare card this Add takes out of its pocket goes back to its home box, or one she picks (home full).
   const returning = value.mode === "join" ? (model.returning ?? []) : [];
   const returnBoxes = value.mode === "join" ? (value.returnBoxes ?? {}) : {};
+  // 0037: the spare cards she sends into a full box knowingly ("Add anyway").
+  const returnOverFull = value.mode === "join" ? (value.returnOverFull ?? []) : [];
   const canConfirm =
     !busy &&
     (!foreign || foreignConfirmed) &&
     (!cc || cc.picked !== null) &&
     stagesDecided &&
     (!pocketAsked || pocketValue !== undefined) &&
-    sparesReady(returning, model.boxes ?? [], returnBoxes);
+    sparesReady(returning, model.boxes ?? [], returnBoxes, returnOverFull) &&
+    // 0037: a full box where a card goes waits for her knowing "Add anyway" (or another place).
+    !awaitsAddAnyway(
+      value.mode === "replace" ? (value.keep ? value.incoming : value.outgoing) : undefined,
+      moveOptions?.bulkUnits ?? [],
+    );
   /** What she physically does besides moving cards, for "What moves": fillers she puts in, and what she now chases. */
   const fillerMoves: { key: string; verb: string; what: string; where: string; into?: false }[] =
     [];
@@ -398,8 +406,18 @@ export function LinePopup({
             spares={returning}
             boxes={model.boxes ?? []}
             picked={returnBoxes}
+            overFull={returnOverFull}
             busy={busy}
-            onPick={(next) => value.mode === "join" && onChange({ ...value, returnBoxes: next })}
+            onPick={(next, over) => {
+              if (value.mode !== "join") return;
+              const { returnOverFull: _was, ...rest } = value;
+              void _was;
+              onChange({
+                ...rest,
+                returnBoxes: next,
+                ...(over.length > 0 ? { returnOverFull: over } : {}),
+              });
+            }}
           />
         ) : null}
         <div className="lp-lbl u">What moves</div>

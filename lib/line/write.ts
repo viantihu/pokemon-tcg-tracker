@@ -42,6 +42,7 @@ import {
   type SlotPatch,
   type WriteOp,
   binderBlockRepo,
+  bulkUnitRepo,
 } from "@/lib/repo";
 import { resolveDecisionWrites } from "./decisions";
 import { buildScreenModel } from "./load";
@@ -55,6 +56,7 @@ import {
 } from "./move";
 import type { DecisionChoiceId, LineJoinChoice, MoveDestination, MoveRequest } from "./types";
 import { buildLineChoiceOps, type LineWriteState } from "./line-choice";
+import { lineChoiceDestinations, overridesFor, returnDestinations } from "./overrides";
 import { buildDecideStagesOps, DECIDE_REFUSAL, type DecideStagesChoice } from "./decide-stages";
 import type { LineChoice } from "./popup";
 import { lineReadsClosed } from "./popup";
@@ -183,13 +185,16 @@ async function loadLineWriteState(
   copy: Row<"copy">,
   choice: LineChoice,
 ): Promise<LineWriteState> {
-  const [catalogRows, typeMapRows, copies, lines, slots, blocks] = await Promise.all([
+  // 0037: her box names, only for a spare card she sends into a full box knowingly (its decision names the box).
+  const namesBoxes = choice.mode === "join" && (choice.returnOverFull?.length ?? 0) > 0;
+  const [catalogRows, typeMapRows, copies, lines, slots, blocks, boxes] = await Promise.all([
     catalogCardRepo.listAll(db),
     typeColorMapRepo.list(db),
     copyRepo.list(db),
     evolutionLineRepo.list(db),
     lineSlotRepo.list(db),
     binderBlockRepo.list(db),
+    namesBoxes ? bulkUnitRepo.listOrdered(db) : Promise.resolve([]),
   ]);
   const catalog = catalogRows.map(toCatalogCard);
   const catalogById = new Map(catalog.map((c) => [c.tcgdexId, c]));
@@ -219,6 +224,7 @@ async function loadLineWriteState(
     lines: new Map(lines.map((l) => [l.id, l])),
     slotsByLine,
     blocksByLine,
+    ...(namesBoxes ? { boxNames: new Map(boxes.map((u) => [u.id, u.name])) } : {}),
   };
 }
 
@@ -289,6 +295,8 @@ export async function applyMove(
       lineJoinOps,
       resolvedLineSlotId,
     }),
+    // 0037: what she overrides, from every place this move sends a card; each writer records its own.
+    overrides: overridesFor([req.destination, ...lineChoiceDestinations(req.lineChoice)]),
   });
 
   return { copyId: req.copyId, destinationLabel };
@@ -502,13 +510,16 @@ export async function applyDecision(
  * fresh state and written in one call (./decide-stages).
  */
 export async function applyStageDecisions(db: DbClient, choice: DecideStagesChoice): Promise<void> {
-  const [line, slots, blocks, catalogRows, typeMapRows, copies] = await Promise.all([
+  // 0037: her box names, only for a spare card she sends into a full box knowingly (its decision names the box).
+  const namesBoxes = (choice.returnOverFull?.length ?? 0) > 0;
+  const [line, slots, blocks, catalogRows, typeMapRows, copies, boxes] = await Promise.all([
     evolutionLineRepo.getByPk(db, choice.lineId),
     lineSlotRepo.listByLine(db, choice.lineId),
     binderBlockRepo.list(db),
     catalogCardRepo.listAll(db),
     typeColorMapRepo.list(db),
     copyRepo.list(db),
+    namesBoxes ? bulkUnitRepo.listOrdered(db) : Promise.resolve([]),
   ]);
   if (!line) throw new Error(DECIDE_REFUSAL.noStage);
   const typeColorMap: TypeColorMap = {};
@@ -521,8 +532,12 @@ export async function applyStageDecisions(db: DbClient, choice: DecideStagesChoi
       catalog: catalogRows.map(toCatalogCard),
       copiesById: new Map(copies.map((c) => [c.id, c])),
       typeColorMap,
+      ...(namesBoxes ? { boxNames: new Map(boxes.map((u) => [u.id, u.name])) } : {}),
     },
     choice,
   );
-  if (ops.length > 0) await applyWriteOps(db, { ops });
+  // 0037: the spare cards she sends into a full box knowingly; buildDecideStagesOps records each on its own decision.
+  if (ops.length > 0) {
+    await applyWriteOps(db, { ops, overrides: overridesFor(returnDestinations(choice)) });
+  }
 }

@@ -267,8 +267,12 @@ export type MoveDestination =
       lineJoin?: LineJoinChoice;
     }
   | { kind: "collection"; binderId: string; collectionId: string }
-  /** `unitId`: the box she picked (UIL-130). Absent: the card keeps its box, or goes to her default box. */
-  | { kind: "bulk"; unitId?: string }
+  /**
+   * `unitId`: the box she picked (UIL-130). Absent: the card keeps its box, or goes to her default box. `overFull`: she
+   * picked a full box knowingly ("Add anyway", 0037's bulk_box_full): the write declares it and records it with the
+   * move. Karvi, 2026-10-01: "Users should always be able to override all rules."
+   */
+  | { kind: "bulk"; unitId?: string; overFull?: true }
   /**
    * UIL-030: use the card as the physical BINDER BLOCK for a line's block slot — a reserved run of
    * pockets the engine decided can never be filled. The copy takes role 'block' in the line's binder
