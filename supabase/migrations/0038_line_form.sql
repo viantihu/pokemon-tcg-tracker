@@ -196,27 +196,27 @@ $$;
 -- <<< 0038 NO NULLS
 
 -- A line already holding cards of more than one form (plain counted) is VALID (Karvi, 2026-10-01: a recommendation,
--- never a refusal). Named here so a reader of the deploy log can see which lines got which form.
+-- never a refusal). Counted here, never named: the deploy log is public, and a log carries counts and shape only.
 do $$
 declare
-  mixed text;
+  mixed integer;
 begin
-  select string_agg(format('line %s -> %s', m.id, m.form), '; ' order by m.id)
+  select count(*)
     into mixed
     from (
-      select l.id, l.form
+      select l.id
         from evolution_line l
         join line_slot s on s.line_id = l.id
         left join copy c on c.id = s.copy_id
        where coalesce(case when s.copy_id is not null then c.catalog_card_id
                            when s.stage_choice = 'chase' then s.target_catalog_card_id end, '') <> ''
-       group by l.id, l.form
+       group by l.id
       having count(distinct coalesce(catalog_card_form(
                case when s.copy_id is not null then c.catalog_card_id
                     when s.stage_choice = 'chase' then s.target_catalog_card_id end), 'plain')) > 1
     ) m;
-  if mixed is not null then
-    raise notice '0038: lines holding cards of more than one form, stamped by their most evolved card: %', mixed;
+  if mixed > 0 then
+    raise notice '0038: % line(s) hold cards of more than one form; each stamped by its most evolved card', mixed;
   end if;
 end
 $$;

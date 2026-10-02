@@ -4,7 +4,7 @@
  *
  *   1. The SQL reads a card's form exactly as the app does (lib/engine/form.ts), name by name.
  *   2. Her lines are stamped from what they hold or chase, the most evolved card with a form; a line holding cards of
- *      more than one form is named in a NOTICE, never refused; a baseline taken before 0038, restored, is stamped
+ *      more than one form is counted in a NOTICE (never named: the deploy log is public), never refused; a baseline taken before 0038, restored, is stamped
  *      when the restore commits with the very same forms; with triggers skipped it stays unstamped and the app still
  *      reads it right; the migration ends with no line unstamped.
  *   3. Writers: insert_line stores the form it is given; an older writer's line is stamped at commit from the cards
@@ -301,16 +301,13 @@ describe("0038 · every line she has is stamped from what it holds or chases", (
     expect(await forms()).toEqual(HER_FORMS);
   });
 
-  it("a line holding cards of more than one form is named, with the form it was given, never refused", () => {
-    const mixed = notices.find((n) =>
-      n.startsWith("0038: lines holding cards of more than one form"),
+  it("lines holding cards of more than one form are counted, never named (a public deploy log), and never refused", () => {
+    // Lines 3 (plain + trainer), 4 (plain + Alolan, chased), 8 (plain + Dark), 9 (Galarian + Alolan). Not line 6: an
+    // engine's leftover target is not hers.
+    expect(notices).toContain(
+      "0038: 4 line(s) hold cards of more than one form; each stamped by its most evolved card",
     );
-    expect(mixed).toBeDefined();
-    expect(mixed).toContain(`line ${LINE(3)} -> trainer:sabrina`);
-    expect(mixed).toContain(`line ${LINE(4)} -> region:alolan`);
-    expect(mixed).toContain(`line ${LINE(8)} -> dark`);
-    expect(mixed).not.toContain(LINE(1));
-    expect(mixed).not.toContain(LINE(2));
+    expect(notices.join(" ")).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-|trainer:|region:/);
   });
 
   it("a baseline taken before 0038, restored, is stamped when the restore commits: the same forms as the migration's", async () => {
