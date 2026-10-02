@@ -9585,3 +9585,40 @@ and whether any of the four needs a confirmation step beyond a single override t
 
 **Cross-reference UIL-120, UIL-121, UIL-130, UIL-117 C1** (the four hard-refusal rulings this change
 reshapes) and **UIL-133** (the specific line-fit instance already updated to reflect this ruling).
+
+## UIL-136 — Sync's old "LAST SYNC" undo bar sits beside a brand-new pending preview, and its "Place new cards" link is not the Apply button
+
+- **Reported:** 2026-10-02 (Karvi, relayed by the Senior BA, owner Full Stack Dev - 2). In her words:
+  "It showed me the page that I was expecting so there was no indication that the import errored. It is
+  when I hit 'Place new cards' that nothing updated on my haul plan." On iPad Chrome, she ran a Dex
+  import, got a new preview, and tapped "Place new cards" on the LAST SYNC bar instead of the preview's
+  own "Apply" button — the import was never applied, and the Haul Plan showed nothing new.
+- **Status:** Open, owner Full Stack Dev - 2.
+- **Priority:** Medium.
+- **Area:** Sync
+- **Env:** Testing
+
+**Confirmed the exact mechanism, from source.** `UndoBar` and `PreviewPanel` render as siblings in
+[`SyncScreen.tsx`](<../app/(ui)/sync/SyncScreen.tsx>:272)'s main tree, `UndoBar` first
+([`:272`](<../app/(ui)/sync/SyncScreen.tsx>:272)) and `{preview ? <PreviewPanel ... /> : null}`
+immediately after ([`:278`](<../app/(ui)/sync/SyncScreen.tsx>:278)). `UndoBar` renders purely off the
+*previous* sync's undo state — it bails with `if (!state?.undo.available) return null;`
+([`:535`](<../app/(ui)/sync/SyncScreen.tsx>:535)) — independent of whether a *new* preview is pending.
+So whenever a prior sync's undo window is still open and a new import produces a preview, both render on
+screen together: `UndoBar`'s "Place new cards" link
+([`:557`](<../app/(ui)/sync/SyncScreen.tsx>:557), a plain `<Link href="/plan">`, pure navigation to the
+Haul Plan page) sits next to `PreviewPanel`'s real "Apply" button
+(`onApply={onApply}`, [`:280`](<../app/(ui)/sync/SyncScreen.tsx>:280)). Tapping the former does not apply
+anything — it only navigates to a Haul Plan that has nothing new to show, which matches exactly what she
+reported, and why the page she landed on looked like "the page she was expecting" with no error.
+
+**Reported by peer sessions, not independently checkable from this repo:** the DB Engineer's live read
+shows no write since 01:57Z, and the Tech Lead's own repro confirms Apply itself works correctly when
+pressed — both consistent with the mechanism above, not contradicting it. No data was lost: the import
+simply never got applied, so a repeat Apply from the still-pending preview should recover it.
+
+**Suggested fix, as relayed, not decided here.** Hide or disable the old "LAST SYNC" undo bar while a new
+preview is pending, so the two controls are never both live on screen at once.
+
+**Cross-reference:** none yet — first entry on this confusion; UIL-116 and UIL-113 are the nearest
+precedent for a stale-looking control sitting next to current state, though neither is the same bug.
