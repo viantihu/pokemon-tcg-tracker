@@ -272,6 +272,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
       <UndoBar
         state={state}
         busy={busy}
+        pending={preview !== null}
         onUndo={() => run("Reverted the last sync.", undoLastSync)}
       />
 
@@ -523,13 +524,25 @@ export function appliedToast(
   return `Applied · ${res.added} added · ${res.removed} removed · ${res.variantChanges} variant changes${flags}. Undo available.`;
 }
 
+/**
+ * The LAST SYNC bar: the sync before this one, with "Place new cards" and its Undo.
+ *
+ * While a preview is waiting for her Apply, both belong to the OLD sync, not to the import she is looking at: she
+ * tapped "Place new cards" there, never pressed Apply, and her import looked like it had failed (2026-10-02). So
+ * while one is pending, "Place new cards" is not offered at all (the new cards are not in until she applies), and
+ * the old sync cannot be undone underneath the preview built on it: the bar says to apply this preview first. Once
+ * she applies it, the bar is THIS sync's, with both back.
+ */
 function UndoBar({
   state,
   busy,
+  pending,
   onUndo,
 }: {
   state: SyncState | null;
   busy: boolean;
+  /** A preview is waiting for her Apply. */
+  pending: boolean;
   onUndo: () => void;
 }) {
   if (!state?.undo.available) return null;
@@ -553,10 +566,22 @@ function UndoBar({
         {bits.length ? bits.join(" · ") : "no collection changes"}
         {state.undo.createdAt ? ` · ${waited(state.undo.createdAt)} ago` : ""}
       </span>
-      <Link href="/plan" className="btn" style={{ textDecoration: "none" }}>
-        Place new cards
-      </Link>
-      <button type="button" className="btn" disabled={busy} onClick={onUndo}>
+      {pending ? (
+        <span className="u" role="note" style={{ fontSize: 11 }}>
+          Apply this preview first
+        </span>
+      ) : (
+        <Link href="/plan" className="btn" style={{ textDecoration: "none" }}>
+          Place new cards
+        </Link>
+      )}
+      <button
+        type="button"
+        className="btn"
+        disabled={busy || pending}
+        title={pending ? "Apply or cancel this preview first" : undefined}
+        onClick={onUndo}
+      >
         Undo last sync
       </button>
     </div>
