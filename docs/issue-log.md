@@ -9480,8 +9480,16 @@ distinguishing value comes from (a name-prefix parse, a dedicated TCGdex field i
 something else) and how existing lines migrate once it lands are both open questions for the design the
 Tech Lead reviews.
 
+**Ruling, 2026-10-01, changes the shape of the fix this entry asks for.** Karvi: "The rules should exist
+only for the recommendation engine. Users should always be able to override all rules." Applied here:
+trainer/region line-fit becomes a recommendation plus a warning in her own words, with an override, not
+a hard refusal — her mixed Drowzee line (reported, DB id `4b1cace4`, not independently checkable from
+this repo) is a VALID line under the new rule, where today's model would have refused or silently
+collapsed it. See UIL-135 for the cross-cutting change this is one instance of.
+
 **Cross-reference UIL-090** (the locale dimension of line identity, the nearest precedent for adding
-this one) and **UIL-121** (the same line-identity model this entry's fix would touch).
+this one), **UIL-121** (the same line-identity model this entry's fix would touch), and **UIL-135** (the
+recommendation-not-refusal ruling this entry's fix now has to follow).
 
 ## UIL-134 — Performance review: the app feels too slow, across the Haul Plan, Lines, Lookup/Collections, and every other page
 
@@ -9504,3 +9512,47 @@ read.
 **Cross-reference:** none yet — first performance-specific entry in the log; later screen-specific
 findings from this review should cite back to this one rather than opening unrelated new entries, per
 Karvi's group-by-function rule.
+
+## UIL-135 — Rules exist only for the recommendation engine; she can always override, across every hard refusal the app currently has
+
+- **Reported:** 2026-10-01 (Karvi, direct answers, relayed by the Senior BA). In her words: "The rules
+  should exist only for the recommendation engine. Users should always be able to override all rules."
+  Asked which rules, she picked all four named at intake: what fits a line (species, stage, branch,
+  trainer, region); single-card lines; a full bulk box; and line completion prompts (third pocket,
+  "Decide every stage"). Each becomes a recommendation plus a warning in her own words, with an override.
+- **Status:** Open, owner the Tech Lead with Full Stack Dev - 2.
+- **Priority:** High.
+- **Area:** Lines, Bulk, Engine, App-wide
+- **Env:** Testing
+
+**The one thing this does NOT touch, stated by the Senior BA's scoping and not re-derived here: physical
+integrity stays hard.** One copy, one place, one pocket; the slot/copy pointer invariant; owner and count
+checks. Those remain refusals — this entry is about rules that shape a RECOMMENDATION, not about the
+database-level facts that keep one physical card from being two places at once.
+
+**Confirmed each of the four named hard rules exists today, exactly where cited.**
+
+1. **Line fit** (species, stage, branch, trainer, region) — UIL-133's own subject;
+   `generateSlots`/`buildLineJoinIndex` currently decide this without asking her.
+2. **Single-card lines refused** — PR #431 (merged `a8de38b`, "a Basic with no evolutions is never a
+   line, on every screen," Karvi 2026-09-27).
+3. **A full bulk box refuses a card** — UIL-130's own ruling, built in #448 (migration 0035).
+4. **Line completion prompts** — the third-pocket rule (migration 0032,
+   [`0032_third_pocket_stays.sql`](../supabase/migrations/0032_third_pocket_stays.sql)) and the "Decide
+   every stage" save gate
+   ([`app/(ui)/backfill/BackfillScreen.tsx:516`](<../app/(ui)/backfill/BackfillScreen.tsx>:516):
+   `if (undecided > 0) return \`Decide every stage (${undecided} left), then save the line.\`;`).
+
+**This entry supersedes those four rulings' REFUSAL behavior, not the rulings themselves — their
+findings and citations stay as written.** UIL-120 and UIL-121 (the line-completion and auto-block
+history), UIL-130 (the full-box refusal), and UIL-117 C1 (the "Decide every stage" gate) are cited, not
+edited: this is a cross-cutting change layered on top of work already recorded there, and each of those
+entries' own body stays exactly as its own session wrote it.
+
+**Suggested shape, as scoped by the Senior BA, pending Karvi's say on specifics per rule.** Each of the
+four becomes: a recommendation (today's existing proposal/suggestion), a warning in her own words when
+she's about to go against it, and a button that lets the write proceed anyway. What the warning says,
+and whether any of the four needs a confirmation step beyond a single override tap, is not decided here.
+
+**Cross-reference UIL-120, UIL-121, UIL-130, UIL-117 C1** (the four hard-refusal rulings this change
+reshapes) and **UIL-133** (the specific line-fit instance already updated to reflect this ruling).
