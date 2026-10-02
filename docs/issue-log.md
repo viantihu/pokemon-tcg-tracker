@@ -2107,6 +2107,16 @@ on Testing. Between the two halves, Part 2 (production's actual state) outranks 
 mystery): it's fully known with a concrete fix, while Part 3 remains a genuine unknown accepted by
 decision. Both sessions flagged this; Karvi has been told at a high level and has not ruled on priority.
 
+**Part 4 — region mismatch, added 2026-10-02 (reported by the Senior BA, relaying the Tech Lead).**
+Production Supabase sits in `us-west-2` — independently confirmed from this entry's own Part 1, which
+already names the pooler host as `aws-0-us-west-2.pooler.supabase.com` for project `bqqerxpdxywnpvndhxbs`
+— and is currently paused. Vercel's deployment runs in `iad1` (`us-east-1`), so every request crosses the
+country, adding roughly 65 ms per round trip on top of whatever the paused state itself costs. Not
+independently checkable from this repo: the paused status and the 65 ms figure are both live/measured
+facts, not something a source read confirms. **Runbook step, a dashboard edit only Karvi can make:**
+recreate the Supabase project in `us-east-1` so the database sits in the same region as the app, as part
+of the cutover, not after it.
+
 ## UIL-025 — Finite/Open mode toggle renders with a large dead area inside its own border
 
 - **Reported:** 2026-09-13
