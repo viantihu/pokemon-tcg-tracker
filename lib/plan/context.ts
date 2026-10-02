@@ -13,6 +13,7 @@ import { bulkUnitForRoute, bulkUnitViews, type BulkUnitView } from "./bulk-units
 
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { localeOfId } from "@/lib/catalog/locale";
+import { storedOr } from "@/lib/engine/form";
 import {
   formOf,
   formsALine,
@@ -247,17 +248,19 @@ export async function loadPlanContext(
     const cards = (cardsByDex.get(dexId) ?? []).filter((c) => localeOfId(c.tcgdexId) === locale);
     return cards.length > 0 ? nameInForm(cards, form, ctx.catalog) : dexNameOf(dexId);
   };
-  /** A line's form (UIL-133), from what it holds or chases. */
+  /** A line's form (UIL-133): stored when it was made (0038), else from what it holds or chases. */
   const lineFormOfRow = (lineId: string): CardForm =>
-    lineFormOf(
-      [...(slotsByLine.get(lineId) ?? [])]
-        .sort((a, b) => a.stage_index - b.stage_index)
-        .map((s) => {
-          const viaCopy = s.copy_id ? copyRowById.get(s.copy_id)?.catalog_card_id : undefined;
-          const id = viaCopy ?? (s.stage_choice === "chase" ? s.target_catalog_card_id : null);
-          return id ? catalogById.get(id) : undefined;
-        }),
-      ctx.catalog,
+    storedOr(lineRowById.get(lineId)?.form, () =>
+      lineFormOf(
+        [...(slotsByLine.get(lineId) ?? [])]
+          .sort((a, b) => a.stage_index - b.stage_index)
+          .map((s) => {
+            const viaCopy = s.copy_id ? copyRowById.get(s.copy_id)?.catalog_card_id : undefined;
+            const id = viaCopy ?? (s.stage_choice === "chase" ? s.target_catalog_card_id : null);
+            return id ? catalogById.get(id) : undefined;
+          }),
+        ctx.catalog,
+      ),
     );
   /** A copy as she would name it, "Charmeleon 027/197", with its variant (UIL-126). */
   const copyLabelOf = (copyId: string): { label: string; variant: string } | null => {

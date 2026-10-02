@@ -27,6 +27,7 @@ import {
   type Variant,
 } from "@/lib/engine";
 import { localeOfId } from "@/lib/catalog/locale";
+import { formFromStored, storedOr } from "@/lib/engine/form";
 import { toCatalogCard, toOwnedCopy } from "@/lib/plan/adapt";
 import {
   binderBlockRepo,
@@ -285,18 +286,20 @@ export async function loadLinePopupModel(
     }
     hereBinder = line.binder_id;
     hereBand = line.color_band;
-    lineForm = lineFormOf(
-      [...lineSlots]
-        .sort((a, b) => a.stage_index - b.stage_index)
-        .map((s) => {
-          const id = s.copy_id
-            ? cardOfCopy(s.copy_id)
-            : s.stage_choice === "chase"
-              ? s.target_catalog_card_id
-              : null;
-          return id ? catalogById.get(id) : undefined;
-        }),
-      catalog,
+    lineForm = storedOr(line.form, () =>
+      lineFormOf(
+        [...lineSlots]
+          .sort((a, b) => a.stage_index - b.stage_index)
+          .map((s) => {
+            const id = s.copy_id
+              ? cardOfCopy(s.copy_id)
+              : s.stage_choice === "chase"
+                ? s.target_catalog_card_id
+                : null;
+            return id ? catalogById.get(id) : undefined;
+          }),
+        catalog,
+      ),
     );
     const chain = testViability(incoming, [], catalog, typeColorMap).chain;
     const lineLocale = localeOfLine(line.id);
@@ -518,6 +521,7 @@ function familyLinesFrom(
       rootDexId: l.root_dex_id,
       colorBand: l.color_band,
       binderId: l.binder_id,
+      form: formFromStored(l.form),
     })),
     slotsByLine,
     st.catalog,

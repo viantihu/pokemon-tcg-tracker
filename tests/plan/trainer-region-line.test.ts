@@ -66,6 +66,9 @@ const CATALOG = [
   real("swsh12.5-084", "Galarian Meowth", 52, "Basic", null, "Metal"),
   real("2017sm-8", "Alolan Meowth", 52, "Basic", null, "Darkness"),
   real("sm1-79", "Alolan Persian", 53, "Stage1", "Alolan Meowth", "Darkness"),
+  // An Alolan Raichu evolves from a plain Pikachu (TCGdex, 2026-10-01).
+  real("base1-58", "Pikachu", 25, "Basic", null, "Lightning"),
+  real("sm4-31", "Alolan Raichu", 26, "Stage1", "Pikachu", "Lightning"),
 ];
 
 const BINDER = "9da0166d-f449-4a5d-87d5-e9764229a974";
@@ -151,10 +154,32 @@ async function herShape(): Promise<void> {
   await seedLine(ARVEN, "sv10-109", "sv10-110");
 }
 
-async function planFor(tcgdexId: string, copyId = MINE) {
+/**
+ * Her lines as 0038 leaves them: stamped from their cards, by the migration's own rule (line_form_derived). Seeded
+ * here a statement at a time, a line is stamped at its own insert's commit, before its slots exist, so it is stamped
+ * again once they do, as the migration stamps every line she has.
+ */
+async function stamped(): Promise<void> {
+  await asSuperuser(db);
+  await db.exec(`update evolution_line set form = line_form_derived(id) where true`);
+  await asOwner(db);
+}
+async function screenOf() {
+  await stamped();
+  return loadLineScreen(pgliteClient(db));
+}
+async function popupOf(
+  ...args: Parameters<typeof loadLinePopupModel> extends [unknown, ...infer R] ? R : never
+) {
+  await stamped();
+  return loadLinePopupModel(pgliteClient(db), ...args);
+}
+
+async function planFor(tcgdexId: string, copyId = MINE, opts: { stamp?: boolean } = {}) {
   const card = haulRow(copyId, tcgdexId);
   await seedHaulRows(db, [card]);
-  await asOwner(db);
+  if (opts.stamp === false) await asOwner(db);
+  else await stamped();
   const pc = await loadPlanContext(pgliteClient(db), { excludeOwnedCopyIds: [copyId] });
   return { card, item: planFromDraft(pc, [card]).items[0] };
 }
@@ -171,7 +196,7 @@ describe("UIL-133: her Arven's Toedscool goes to her Arven's line, on her exact 
   it("its popup lays out her Arven's line and lists the plain line as another line, nothing picked for her", async () => {
     await herShape();
     await planFor("sv10-109");
-    const m = await loadLinePopupModel(pgliteClient(db), MINE, {
+    const m = await popupOf(MINE, {
       kind: "add",
       lineId: ARVEN.line,
       slotId: ARVEN.basic,
@@ -190,7 +215,7 @@ describe("UIL-133: her Arven's Toedscool goes to her Arven's line, on her exact 
   it("the plain line's ADD popup (where she was stuck) now offers her Arven's line, first and with room", async () => {
     await herShape();
     await planFor("sv10-109");
-    const m = await loadLinePopupModel(pgliteClient(db), MINE, {
+    const m = await popupOf(MINE, {
       kind: "add",
       lineId: PLAIN.line,
       slotId: PLAIN.basic,
@@ -230,7 +255,7 @@ describe("UIL-133: her Arven's Toedscool goes to her Arven's line, on her exact 
       [MINE, OWNER, BINDER],
     );
     await asOwner(db);
-    const screen = await loadLineScreen(pgliteClient(db));
+    const screen = await screenOf();
     const unlined = screen.unlinedCards.find((c) => c.copyId === MINE);
     expect(unlined?.joinCandidates.map((c) => [c.lineId, c.slotId, c.sameForm])).toEqual([
       [ARVEN.line, ARVEN.basic, true],
@@ -247,14 +272,14 @@ describe("UIL-133: her Arven's Toedscool goes to her Arven's line, on her exact 
       [MINE, OWNER, BINDER],
     );
     await asOwner(db);
-    const screen = await loadLineScreen(pgliteClient(db));
+    const screen = await screenOf();
     const unlined = screen.unlinedCards.find((c) => c.copyId === MINE);
     expect(unlined?.joinCandidates.map((c) => c.lineId)).toEqual([PLAIN.line, ARVEN.line]);
   });
 
   it("the Lines page tells the two apart", async () => {
     await herShape();
-    const screen = await loadLineScreen(pgliteClient(db));
+    const screen = await screenOf();
     const label = (id: string) => screen.lines.find((l) => l.lineId === id)?.speciesLabel;
     expect(label(ARVEN.line)).toBe("ARVEN'S TOEDSCOOL LINE");
     expect(label(PLAIN.line)).toBe("TOEDSCOOL LINE");
@@ -286,7 +311,7 @@ describe("UIL-133: her Arven's Toedscool goes to her Arven's line, on her exact 
       [DECIDUEYE],
     );
     await asOwner(db);
-    const screen = await loadLineScreen(pgliteClient(db));
+    const screen = await screenOf();
     expect(screen.lines.find((l) => l.lineId === HISUI)?.speciesLabel).toBe(
       "ROWLET LINE · HISUIAN",
     );
@@ -315,7 +340,7 @@ describe("UIL-133: the order, a chase of the exact printing, then the card's own
     expect(item.lineProposal).toEqual({ kind: "add", lineId: ARVEN2.line, slotId: ARVEN2.basic });
     // And the back half lists it first: the chase, then her other Arven's line, then the plain one.
     await seedLine(PLAIN, "sv03-118", "sv09-089");
-    const m = await loadLinePopupModel(pgliteClient(db), MINE, {
+    const m = await popupOf(MINE, {
       kind: "start",
       binderId: BINDER,
       band: "orange",
@@ -367,7 +392,7 @@ describe("UIL-133: the order, a chase of the exact printing, then the card's own
     expect(item.lineProposal).toBeNull();
     expect(item.action).toBe("FRONT");
     // On the back half she is offered a line of its own; the plain line is listed, never "room for this card".
-    const m = await loadLinePopupModel(pgliteClient(db), MINE, {
+    const m = await popupOf(MINE, {
       kind: "start",
       binderId: BINDER,
       band: "orange",
@@ -403,5 +428,113 @@ describe("UIL-133: the order, a chase of the exact printing, then the card's own
     const { item } = await planFor("sv10-110", "d0000000-0000-4000-8000-0000000000d2");
     expect(item.lineProposal).toEqual({ kind: "start", binderId: BINDER, band: "orange" });
     expect(item.lineName).toBe("Arven's Toedscruel");
+  });
+});
+
+describe("UIL-133 γ: a line keeps the form it was made with (0038, the Tech Lead's review of #454)", () => {
+  /** Her plain line, made plain, with an Arven's Toedscruel put at its top since (a join she chose). Not re-stamped. */
+  async function plainLineWithAnArvenCard(): Promise<void> {
+    await seedLine(PLAIN, null, "sv10-110");
+    await asSuperuser(db);
+    await db.query(`update evolution_line set form = 'plain' where id = $1`, [PLAIN.line]);
+    await asOwner(db);
+  }
+
+  it("still reads plain: a plain Toedscool is proposed there, an Arven's Toedscool is not", async () => {
+    await plainLineWithAnArvenCard();
+    const plain = await planFor("sv01-024", "d0000000-0000-4000-8000-0000000000d4", {
+      stamp: false,
+    });
+    expect(plain.item.lineProposal).toEqual({
+      kind: "add",
+      lineId: PLAIN.line,
+      slotId: PLAIN.basic,
+    });
+    // Its badge names it in its own form, though an Arven's card sits at its top.
+    expect(plain.item.lineName).toBe("Toedscruel");
+    const add = await loadLinePopupModel(pgliteClient(db), "d0000000-0000-4000-8000-0000000000d4", {
+      kind: "add",
+      lineId: PLAIN.line,
+      slotId: PLAIN.basic,
+    });
+    expect(add.line.form).toBeNull();
+    const arvens = await planFor("sv10-109", MINE, { stamp: false });
+    expect(arvens.item.lineProposal).toBeNull();
+  });
+
+  it("its label and its popup stay plain too", async () => {
+    await plainLineWithAnArvenCard();
+    const screen = await loadLineScreen(pgliteClient(db));
+    expect(screen.lines.find((l) => l.lineId === PLAIN.line)?.speciesLabel).toBe("TOEDSCOOL LINE");
+    await planFor("sv10-109", MINE, { stamp: false });
+    const m = await loadLinePopupModel(pgliteClient(db), MINE, {
+      kind: "start",
+      binderId: BINDER,
+      band: "orange",
+    });
+    expect(m.existingLines.map((l) => [l.lineId, l.sameForm])).toEqual([[PLAIN.line, false]]);
+  });
+});
+
+describe("UIL-133 γ: a new line is written with its form", () => {
+  const formOf = async (lineId?: string) =>
+    (
+      await (async () => {
+        await asSuperuser(db);
+        return db.query<{ form: string }>(
+          lineId
+            ? `select form from evolution_line where id = $1`
+            : `select form from evolution_line`,
+          lineId ? [lineId] : [],
+        );
+      })()
+    ).rows.map((r) => r.form);
+
+  it("an Arven's Toedscool started from the Haul Plan popup, its Arven's Toedscruel chased: an Arven's line", async () => {
+    const { card } = await planFor("sv10-109");
+    await commitCardPlacement(pgliteClient(db), {
+      card,
+      override: { kind: "shelf", binderId: BINDER, half: "back", band: "orange" },
+      lineChoice: {
+        mode: "start",
+        binderId: BINDER,
+        band: "orange",
+        pulls: [],
+        stages: { 1: { kind: "chase", catalogCardId: "sv10-110" } },
+      },
+    });
+    expect(await formOf()).toEqual(["trainer:arven"]);
+  });
+
+  it("a plain Pikachu started with an Alolan Raichu chased above it: an Alolan line", async () => {
+    const { card } = await planFor("base1-58", "d0000000-0000-4000-8000-0000000000d5");
+    await commitCardPlacement(pgliteClient(db), {
+      card,
+      override: { kind: "shelf", binderId: BINDER, half: "back", band: "yellow" },
+      lineChoice: {
+        mode: "start",
+        binderId: BINDER,
+        band: "yellow",
+        pulls: [],
+        stages: { 1: { kind: "chase", catalogCardId: "sm4-31" } },
+      },
+    });
+    expect(await formOf()).toEqual(["region:alolan"]);
+  });
+
+  it("a plain Toedscool started with its next stage left for later: plain", async () => {
+    const { card } = await planFor("sv03-118", "d0000000-0000-4000-8000-0000000000d6");
+    await commitCardPlacement(pgliteClient(db), {
+      card,
+      override: { kind: "shelf", binderId: BINDER, half: "back", band: "orange" },
+      lineChoice: {
+        mode: "start",
+        binderId: BINDER,
+        band: "orange",
+        pulls: [],
+        stages: { 1: { kind: "later" } },
+      },
+    });
+    expect(await formOf()).toEqual(["plain"]);
   });
 });

@@ -54,6 +54,10 @@ const REWRITTEN: Record<string, { lines: string[]; why: string }> = {
     lines: ["if dest.capacity is not null then"],
     why: "delete_bulk_unit's room check gives way to a declared bulk_box_full (Karvi, 2026-10-01: every rule can be overridden)",
   },
+  "0038_line_form.sql": {
+    lines: ["insert into evolution_line (id, root_dex_id, color_band, binder_id, half, status)"],
+    why: "the evolution_line insert's column list gained form (UIL-133)",
+  },
 };
 
 /** A line as SQL reads it: whitespace collapsed, a trailing comma dropped. */

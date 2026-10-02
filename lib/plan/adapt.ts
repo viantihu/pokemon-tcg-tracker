@@ -26,6 +26,7 @@ import type {
   Role,
   Variant,
 } from "@/lib/engine";
+import { formFromStored } from "@/lib/engine/form";
 import type { Row } from "@/lib/repo";
 
 const FALSE_VARIANTS: CardVariants = {
@@ -131,6 +132,7 @@ export function toEvolutionLine(
     binderId: line.binder_id,
     status: line.status as EvolutionLine["status"],
     slots: slotRecords,
+    form: formFromStored(line.form),
   };
 }
 

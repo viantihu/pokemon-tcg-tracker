@@ -296,6 +296,8 @@ const lineForms = new WeakMap<
   { owned: EngineContext["owned"]; sig: string; form: CardForm }
 >();
 function lineFormIn(line: EvolutionLine, ctx: EngineContext): CardForm {
+  // Stored when the line was made (0038): a card put there anyway never changes it.
+  if (line.form !== undefined) return line.form;
   const sig = line.slots
     .map((s) => `${s.stageIndex}:${s.copyId ?? ""}:${s.dexId ?? ""}:${s.targetCatalogCardId ?? ""}`)
     .join("|");

@@ -221,6 +221,7 @@ export function planBackLine(line: ValidatedBackLine, deps: PlanDeps): BackfillW
     binder_id: line.binderId,
     half: "back",
     status: lineStatusOf(finals),
+    // No form: the database stamps it from the cards and chases this write puts in it, at commit (0038).
     created_at: deps.now,
   });
 

@@ -77,6 +77,8 @@ export interface LinePatch {
   status?: string;
   /** What fills a short complete line's third pocket (0030, UIL-121); null = not decided. */
   extra_pocket?: "energy" | "card" | "empty" | null;
+  /** 0038 (UIL-133): the line's form, `formToStored`; changed, never cleared. */
+  form?: string;
 }
 
 export interface EntryPatch {
@@ -130,6 +132,8 @@ export type WriteOp =
       binder_id: string | null;
       half?: string;
       status?: string;
+      /** 0038 (UIL-133): the line's form, `formToStored`. Absent: stamped from its cards when the write commits. */
+      form?: string;
     }
   | {
       op: "insert_slot";
