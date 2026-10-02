@@ -342,8 +342,29 @@ describe("promote-collection: Testing -> Production", () => {
       [TESTING_OWNER, OVER[1]],
     );
     await source.exec(`commit;`);
+    // QA's V10 on #459: the override is on for the copies only. A probe on Production records the setting each
+    // insert statement sees, so "nothing after them is let past a full box" is checked inside the promotion's own
+    // transaction, not only after it commits.
+    await target.exec(`
+      create schema probe;
+      create table probe.seen (tbl text, v text);
+      create function probe.note() returns trigger language plpgsql as $p$
+      begin
+        insert into probe.seen values (tg_table_name, coalesce(current_setting('app.overrides', true), ''));
+        return null;
+      end $p$;
+      create trigger probe_note after insert on copy for each statement execute function probe.note();
+      create trigger probe_note after insert on placement_decision for each statement execute function probe.note();
+    `);
 
     await promoteCollection({ source, target, ownerEmail: PROD_EMAIL });
+
+    const seen = (await target.query<{ tbl: string; v: string }>(`select tbl, v from probe.seen`))
+      .rows;
+    expect(seen.filter((r) => r.tbl === "copy").map((r) => r.v)).toEqual(['["bulk_box_full"]']);
+    const later = seen.filter((r) => r.tbl === "placement_decision");
+    expect(later.length).toBeGreaterThan(0);
+    for (const r of later) expect(r.v).not.toMatch(/bulk_box_full/);
 
     const held = await one<{ n: number }>(
       target,

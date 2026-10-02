@@ -250,6 +250,27 @@ describe("0037 · she shelves it without a collection, knowingly", () => {
     );
   });
 
+  it("the write DECLARES collection_pick, not only records it (QA's V7 on #459)", async () => {
+    // 0037 checks declared ⊆ recorded, and collection_pick relaxes no database rule, so a write that only recorded it
+    // would still pass. The contract is that every override is declared on the payload too: pinned on the RPC itself.
+    await withCollections();
+    const sent: { payload: { overrides?: string[] } }[] = [];
+    const client = pgliteClient(db) as unknown as {
+      rpc(fn: string, args: { payload: { overrides?: string[] } }): Promise<unknown>;
+    };
+    const rpc = client.rpc.bind(client);
+    client.rpc = (fn, args) => {
+      sent.push(args);
+      return rpc(fn, args);
+    };
+    await commitCardPlacement(client as unknown as Parameters<typeof commitCardPlacement>[0], {
+      card: INCOMING,
+      noCollection: true,
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].payload.overrides).toEqual(["collection_pick"]);
+  });
+
   it("through the screen's own action: her override reaches the write", async () => {
     await withCollections();
     const res = await shelveCardAction({
