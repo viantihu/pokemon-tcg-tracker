@@ -156,3 +156,58 @@ describe("UIL-117 PR 2 · Collections → a back half, through the line popup", 
     expect(await targets()).toEqual(["emberling"]);
   });
 });
+
+describe("UIL-135 · Collections → a line of one card, with her “Put it here anyway”", () => {
+  const COL2 = "a0000000-0000-4000-8000-0000000117c2";
+  const LONER_COPY = "c0000000-0000-4000-8000-0000000117c3";
+  beforeEach(async () => {
+    await asSuperuser(db);
+    // A Basic with no evolutions (a Tauros-type card), in a collection of its own.
+    await db.query(
+      `insert into catalog_card (tcgdex_id, name, dex_id, types, stage, evolve_from, card_class, locale)
+         values ('loneling', 'Loneling', '{9401}', '{Fire}', 'Basic', null, 'standard', 'en')`,
+    );
+    await seedCollections(db, [
+      { id: COL2, name: "Loners", targetCatalogCardIds: ["loneling"], currentBinderIds: [SPEC] },
+    ]);
+    await db.query(
+      `insert into copy (id, owner_id, catalog_card_id, role, binder_id, binder_half, color_band)
+         values ($1, $2, 'loneling', 'shelved', $3, 'front', 'red')`,
+      [LONER_COPY, OWNER, SPEC],
+    );
+    await asOwner(db);
+  });
+  const removeLoner = (overrides?: ["line_min_stages"]) =>
+    applyCollectionRemoval(
+      pgliteClient(db),
+      {
+        collectionId: COL2,
+        tcgdexId: "loneling",
+        destination: { kind: "shelf", binderId: GEN, half: "back", band: "red" },
+        lineChoice: {
+          mode: "start",
+          binderId: GEN,
+          band: "red",
+          pulls: [],
+          stages: {},
+          thirdPocket: { material: "empty" },
+          ...(overrides ? { overrides } : {}),
+        },
+      },
+      names,
+    );
+
+  it("refused without her say, nothing written; with it, a one-card line, recorded on the removal's decision", async () => {
+    await expect(removeLoner()).rejects.toThrow(/can't start a line/);
+    expect(await q(`select id from evolution_line`)).toEqual([]);
+    await removeLoner(["line_min_stages"]);
+    expect(
+      await q(
+        `select (select count(*)::int from line_slot s where s.line_id = l.id) n from evolution_line l`,
+      ),
+    ).toEqual([{ n: 1 }]);
+    expect(
+      await q(`select decision, overrides from placement_decision where overrides <> '{}'`),
+    ).toEqual([{ decision: "collection-remove", overrides: ["line_min_stages"] }]);
+  });
+});

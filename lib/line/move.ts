@@ -33,10 +33,10 @@ import {
   type IncomingCard,
   type TypeColorMap,
 } from "@/lib/engine";
-import type { WriteOp } from "@/lib/repo";
+import type { OverrideRule, WriteOp } from "@/lib/repo";
 import type { CopyPlacementPatch, LineJoinChoice, MoveDestination, MoveOptions } from "./types";
 import { NOT_A_LINE } from "./popup";
-import { overLimitNote, overridesFor, recordOverrides } from "./overrides";
+import { lineRuleNote, overLimitNote, overridesFor, recordOverrides } from "./overrides";
 
 /** Derive the four placement columns (+ cleared line link) for a moved copy. */
 export function placementForMove(dest: MoveDestination): CopyPlacementPatch {
@@ -459,6 +459,8 @@ export interface MovePlan {
   lineJoinOps?: WriteOp[];
   /** Overrides `placementForMove`'s default `null` when `lineJoinOps` resolved a slot to fill. */
   resolvedLineSlotId?: string | null;
+  /** UIL-135: the line rules her line choice put this card past, recorded on this move's decision. */
+  lineRules?: OverrideRule[];
 }
 
 /**
@@ -506,7 +508,8 @@ export function buildMoveOps(plan: MovePlan): WriteOp[] {
   const join = collectionTargetJoinOp(plan.destination, plan.catalogCardId);
   if (join) ops.push(join);
 
-  // 0037: a full box she picked knowingly is recorded on this move's decision (lib/line/overrides).
+  // 0037: a full box she picked knowingly, and (UIL-135) a line rule she put it past, are recorded on this move's
+  // decision (lib/line/overrides).
   ops.push(
     recordOverrides(
       {
@@ -514,10 +517,12 @@ export function buildMoveOps(plan: MovePlan): WriteOp[] {
         haul_id: null,
         copy_id: plan.copyId,
         decision: "placement-move",
-        reason: moveDecisionReason(plan.destination, plan.destinationLabel),
+        reason:
+          moveDecisionReason(plan.destination, plan.destinationLabel) +
+          lineRuleNote(plan.lineRules ?? []),
         resolved_by: "user",
       },
-      overridesFor([plan.destination]),
+      [...overridesFor([plan.destination]), ...(plan.lineRules ?? [])],
     ),
   );
 

@@ -66,6 +66,7 @@ import type { LineChoice } from "@/lib/line/popup";
 import {
   lineChoiceDestinations,
   overLimitNote,
+  lineRuleNote,
   overridesFor,
   recordOverrides,
 } from "@/lib/line/overrides";
@@ -641,19 +642,34 @@ async function commitLineChoice(
             "Colour mismatch resolved at intake (her call, UIL-069): joined the existing line over filing by its own colour.",
         }
       : LINE_DECISION[choice.mode];
-  ops.push({
-    op: "insert_decision",
-    haul_id: null,
-    copy_id: copyId,
-    ...named,
-    resolved_by: "user",
-    line_id:
-      choice.mode === "start" ? (started?.op === "insert_line" ? started.id : null) : choice.lineId,
-    line_slot_id: built.slotId,
-  });
+  // UIL-135: a line rule her choice put this card past is recorded on its decision.
+  ops.push(
+    recordOverrides(
+      {
+        op: "insert_decision",
+        haul_id: null,
+        copy_id: copyId,
+        ...named,
+        reason: named.reason + lineRuleNote(built.overrides),
+        resolved_by: "user",
+        line_id:
+          choice.mode === "start"
+            ? started?.op === "insert_line"
+              ? started.id
+              : null
+            : choice.lineId,
+        line_slot_id: built.slotId,
+      },
+      built.overrides,
+    ),
+  );
   counts.decisions += 1;
-  // 0037: what she overrides, from every place her line choice sends a card; the line builder records its own.
-  const payload: WritePayload = { ops, overrides: overridesFor(lineChoiceDestinations(choice)) };
+  // 0037: what she overrides, from every place her line choice sends a card, and (UIL-135) the line rules it put this
+  // card past; the line builder records its own, this card's decision the line rules.
+  const payload: WritePayload = {
+    ops,
+    overrides: [...new Set([...overridesFor(lineChoiceDestinations(choice)), ...built.overrides])],
+  };
   assertPlacementBandsConfigured(payload, pc);
   assertPlacementBindersConfigured(payload, pc);
   await applyWriteOps(db, payload);

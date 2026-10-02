@@ -16,6 +16,7 @@ import {
   IN_THE_HAUL,
   LINE_ROW_POCKETS,
   leavesLineText,
+  PUT_IT_HERE_ANYWAY,
   type FillerCardOption,
   type LineChoice,
   type LinePopupProps,
@@ -175,8 +176,20 @@ export function LinePopup({
   }
   if (pocketAsked && pocketValue) fillerMove("third", pocketValue, "the third pocket");
 
-  /** The choice as sent: stage answers only for the stages asked, and a third-pocket answer only when it is asked. */
+  /**
+   * UIL-135: the line rules this card breaks here (none when she files it by its own colour, or keeps the card that is
+   * there). Shown before she confirms; her confirm is "Put it here anyway", and it carries them as her overrides.
+   */
+  const warnings =
+    filingOwn || (value.mode === "replace" && value.keep) ? [] : (model.warnings ?? []);
+  /** Her choice as sent, with the rules she puts the card past. */
   function finalChoice(): LineChoice {
+    const choice = askedChoice();
+    if (warnings.length === 0 || (choice.mode === "replace" && choice.keep)) return choice;
+    return { ...choice, overrides: [...new Set(warnings.map((w) => w.rule))] };
+  }
+  /** The choice as sent: stage answers only for the stages asked, and a third-pocket answer only when it is asked. */
+  function askedChoice(): LineChoice {
     const open = new Set(undecided.map((s) => s.stageIndex));
     const asked = Object.fromEntries(
       Object.entries(decisions ?? {}).filter(([k]) => open.has(Number(k))),
@@ -229,6 +242,7 @@ export function LinePopup({
         ? "Add to a line"
         : "A copy for a filled slot";
   const label =
+    (warnings.length > 0 ? PUT_IT_HERE_ANYWAY : undefined) ??
     confirmLabel ??
     (model.mode === "start"
       ? // A line she has already has room for this card: starting another is still hers, said as such (UIL-096).
@@ -548,6 +562,17 @@ export function LinePopup({
               />{" "}
               Join the {language(line.locale).name} line anyway
             </label>
+          </div>
+        ) : null}
+
+        {warnings.length > 0 ? (
+          <div className="lp-also" role="alert">
+            {warnings.map((w) => (
+              <b className="u" key={w.text}>
+                {w.text}
+              </b>
+            ))}
+            It&apos;s your call: {PUT_IT_HERE_ANYWAY} puts it there.
           </div>
         ) : null}
 

@@ -16,7 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import type { CatalogCard } from "@/lib/engine";
-import { loadLineScreen } from "@/lib/line";
+import { applyMove, loadLineScreen } from "@/lib/line";
 import { loadLinePopupModel } from "@/lib/line/popup-load";
 import { clearCatalogCache, commitCardPlacement, loadPlanContext, planFromDraft } from "@/lib/plan";
 import { CHARMANDER_SV03_026 } from "../engine/fixtures";
@@ -536,5 +536,148 @@ describe("UIL-133 γ: a new line is written with its form", () => {
       },
     });
     expect(await formOf()).toEqual(["plain"]);
+  });
+});
+
+describe("UIL-135: a card that is not the stage's own goes in with her “Put it here anyway”, recorded", () => {
+  const PLAIN_TOEDSCOOL = "d0000000-0000-4000-8000-0000000000e1";
+  /** The client, with every write's payload kept: what the write DECLARES it overrides (0037). */
+  const capturing = () => {
+    const client = pgliteClient(db);
+    const declared: unknown[] = [];
+    const rpc = client.rpc.bind(client) as unknown as (fn: string, args: unknown) => unknown;
+    client.rpc = ((fn: string, args: { payload: { overrides?: unknown } }) => {
+      declared.push(args.payload.overrides ?? []);
+      return rpc(fn, args);
+    }) as unknown as typeof client.rpc;
+    return { client, declared };
+  };
+  const decisions = async () => {
+    await asSuperuser(db);
+    const rows = (
+      await db.query<{ decision: string; overrides: string[]; reason: string }>(
+        `select decision, overrides, reason from placement_decision where overrides <> '{}'`,
+      )
+    ).rows;
+    await asOwner(db);
+    return rows;
+  };
+  const basicHolds = async (slotId: string) => {
+    await asSuperuser(db);
+    const r = (
+      await db.query<{ copy_id: string | null }>(`select copy_id from line_slot where id = $1`, [
+        slotId,
+      ])
+    ).rows[0];
+    await asOwner(db);
+    return r?.copy_id ?? null;
+  };
+
+  it("a plain Toedscool into her Arven's line: warned in the popup, refused without her say, written with it", async () => {
+    await herShape();
+    const { card } = await planFor("sv03-118", PLAIN_TOEDSCOOL);
+    const m = await popupOf(PLAIN_TOEDSCOOL, {
+      kind: "add",
+      lineId: ARVEN.line,
+      slotId: ARVEN.basic,
+    });
+    expect(m.warnings).toEqual([
+      { rule: "line_fit", text: "This is an Arven's line, and this card is plain." },
+    ]);
+    const join = {
+      mode: "join" as const,
+      lineId: ARVEN.line,
+      slotId: ARVEN.basic,
+      thirdPocket: { material: "empty" as const },
+    };
+    const shelf = {
+      kind: "shelf" as const,
+      binderId: BINDER,
+      half: "back" as const,
+      band: "orange",
+    };
+    await expect(
+      commitCardPlacement(pgliteClient(db), { card, override: shelf, lineChoice: join }),
+    ).rejects.toThrow(/This is an Arven's line, and this card is plain/);
+    expect(await basicHolds(ARVEN.basic)).toBeNull();
+    const { client, declared } = capturing();
+    await commitCardPlacement(client, {
+      card,
+      override: shelf,
+      lineChoice: { ...join, overrides: ["line_fit"] },
+    });
+    expect(declared).toEqual([["line_fit"]]);
+    expect(await basicHolds(ARVEN.basic)).toBe(PLAIN_TOEDSCOOL);
+    const [d] = await decisions();
+    expect(d).toMatchObject({ decision: "line-join", overrides: ["line_fit"] });
+    expect(d.reason).toMatch(/Put in this line anyway \(your call\)\./);
+  });
+
+  it("a card of another stage: warned, and written with her say; the line keeps its form", async () => {
+    await herShape();
+    // Her Arven's Toedscruel (a Stage 1) into the Arven's line's Basic.
+    const STAGE1 = "d0000000-0000-4000-8000-0000000000e2";
+    const { card } = await planFor("sv10-110", STAGE1);
+    const m = await popupOf(STAGE1, { kind: "add", lineId: ARVEN.line, slotId: ARVEN.basic });
+    expect(m.warnings).toEqual([{ rule: "line_fit", text: "This stage is for a different card." }]);
+    await commitCardPlacement(pgliteClient(db), {
+      card,
+      override: { kind: "shelf", binderId: BINDER, half: "back", band: "orange" },
+      lineChoice: {
+        mode: "join",
+        lineId: ARVEN.line,
+        slotId: ARVEN.basic,
+        thirdPocket: { material: "empty" },
+        overrides: ["line_fit"],
+      },
+    });
+    expect(await basicHolds(ARVEN.basic)).toBe(STAGE1);
+    await asSuperuser(db);
+    expect(
+      (await db.query(`select form from evolution_line where id = $1`, [ARVEN.line])).rows,
+    ).toEqual([{ form: "trainer:arven" }]);
+  });
+
+  it("from the Move sheet too: the move's own decision records it", async () => {
+    await herShape();
+    await asSuperuser(db);
+    await db.query(
+      `insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band)
+         values ($1, $2, 'sv03-118', 'normal', 'shelved', $3, 'front', 'orange')`,
+      [PLAIN_TOEDSCOOL, OWNER, BINDER],
+    );
+    await stamped();
+    const names = {
+      binderName: () => "KB-001",
+      collectionName: () => null,
+      bandDisplay: () => "Orange",
+    };
+    const req = {
+      copyId: PLAIN_TOEDSCOOL,
+      destination: {
+        kind: "shelf" as const,
+        binderId: BINDER,
+        half: "back" as const,
+        band: "orange",
+      },
+      lineChoice: {
+        mode: "join" as const,
+        lineId: ARVEN.line,
+        slotId: ARVEN.basic,
+        thirdPocket: { material: "empty" as const },
+      },
+    };
+    await expect(applyMove(pgliteClient(db), req, names)).rejects.toThrow(/Arven's line/);
+    const { client, declared } = capturing();
+    await applyMove(
+      client,
+      { ...req, lineChoice: { ...req.lineChoice, overrides: ["line_fit"] } },
+      names,
+    );
+    expect(declared).toEqual([["line_fit"]]);
+    expect(await basicHolds(ARVEN.basic)).toBe(PLAIN_TOEDSCOOL);
+    expect(await decisions()).toMatchObject([
+      { decision: "placement-move", overrides: ["line_fit"] },
+    ]);
   });
 });

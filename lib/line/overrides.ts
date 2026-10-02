@@ -35,6 +35,16 @@ export function recordOverrides<T extends WriteOp>(op: T, rules: readonly Overri
   return { ...decision, overrides: [...new Set([...(decision.overrides ?? []), ...rules])] } as T;
 }
 
+/**
+ * The sentence a decision's reason ends with when she put the card in its line past a line rule (UIL-135): a card
+ * that is not the stage's own, or a line of one card.
+ */
+export function lineRuleNote(rules: readonly OverrideRule[]): string {
+  if (rules.includes("line_min_stages")) return " A line of one card (your call).";
+  if (rules.includes("line_fit")) return " Put in this line anyway (your call).";
+  return "";
+}
+
 /** The sentence a decision's reason ends with when she put the card in a full box knowingly. */
 export function overLimitNote(dests: Iterable<MoveDestination | null | undefined>): string {
   return overridesFor(dests).includes("bulk_box_full") ? " Over its card limit (your call)." : "";

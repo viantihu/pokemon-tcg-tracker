@@ -58,7 +58,7 @@ import type { DecisionChoiceId, LineJoinChoice, MoveDestination, MoveRequest } f
 import { buildLineChoiceOps, type LineWriteReads, type LineWriteState } from "./line-choice";
 import { lineChoiceDestinations, overridesFor, returnDestinations } from "./overrides";
 import { buildDecideStagesOps, DECIDE_REFUSAL, type DecideStagesChoice } from "./decide-stages";
-import type { LineChoice } from "./popup";
+import type { LineChoice, LineRule } from "./popup";
 import { lineReadsClosed } from "./popup";
 
 export interface MoveResult {
@@ -148,7 +148,7 @@ export async function buildBackHalfLineOps(
     /** What the line builder reads, when the caller read it in this same request (the Haul Plan's context). */
     reads?: LineWriteReads;
   } = {},
-): Promise<{ ops: WriteOp[]; slotId: string }> {
+): Promise<{ ops: WriteOp[]; slotId: string; overrides: LineRule[] }> {
   if (choice.mode === "join") await assertJoinMatchesLine(db, choice.lineId, destination);
   if (choice.mode === "start") assertStartMatchesDestination(choice, destination);
   if (choice.mode === "replace") {
@@ -177,7 +177,7 @@ export async function buildBackHalfLineOps(
     state.outgoing = await loadLineWriteState(db, outgoing, next, reads);
   }
   const built = buildLineChoiceOps(state, copy.id, choice, { undecidedOk: opts.undecidedOk });
-  return { ops: built.ops, slotId: built.slotId };
+  return { ops: built.ops, slotId: built.slotId, overrides: built.overrides };
 }
 
 /** The older `lineJoin` on a Move destination, read as the popup's choice (UIL-117): the same rules either way. */
@@ -312,6 +312,8 @@ export async function applyMove(
   const join = lineJoinOf(req.destination);
   let lineJoinOps: WriteOp[] | undefined;
   let resolvedLineSlotId: string | null | undefined;
+  /** UIL-135: the line rules her choice put the card past. */
+  let lineRules: LineRule[] = [];
   if (req.destination.kind === "shelf" && req.destination.half === "back") {
     const choice = req.lineChoice ?? lineChoiceFromJoin(join, req.destination);
     if (choice) {
@@ -321,6 +323,7 @@ export async function applyMove(
       });
       lineJoinOps = built.ops;
       resolvedLineSlotId = built.slotId;
+      lineRules = built.overrides;
     }
   }
 
@@ -335,9 +338,16 @@ export async function applyMove(
       destinationLabel,
       lineJoinOps,
       resolvedLineSlotId,
+      lineRules,
     }),
-    // 0037: what she overrides, from every place this move sends a card; each writer records its own.
-    overrides: overridesFor([req.destination, ...lineChoiceDestinations(req.lineChoice)]),
+    // 0037: what she overrides, from every place this move sends a card, and (UIL-135) the line rules her choice put
+    // it past; each writer records its own.
+    overrides: [
+      ...new Set([
+        ...overridesFor([req.destination, ...lineChoiceDestinations(req.lineChoice)]),
+        ...lineRules,
+      ]),
+    ],
   });
 
   return { copyId: req.copyId, destinationLabel };
