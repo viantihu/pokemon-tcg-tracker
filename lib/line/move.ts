@@ -376,6 +376,7 @@ export function buildNewLineJoinOps(ctx: NewLineContext): {
       half: "back",
       // UIL-121: open or closed only; nothing is capped for her. Every stage but hers waits for her choice.
       status: gen.slots.length === 1 ? "closed" : "open",
+      // No form: the database stamps it from its card when this write commits (0038's stamp_line_form).
     },
   ];
   let ownSlotId: string | null = null;

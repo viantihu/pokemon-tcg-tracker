@@ -211,6 +211,29 @@ export function nameInForm(
   );
 }
 
+/**
+ * A line's form as `evolution_line.form` stores it (0038): 'plain' for a plain line, else the form. Stored once, when
+ * the line is made, so a card she puts there anyway (UIL-135) never changes what the line is.
+ */
+export function formToStored(form: CardForm): string {
+  return form ?? "plain";
+}
+
+/**
+ * A stored form back: 'plain' is null; a line with none yet (NULL until its write commits, or a row read before 0038)
+ * is `undefined`, worked out instead by the same rule the database stamps with.
+ */
+export function formFromStored(stored: string | null | undefined): CardForm | undefined {
+  if (stored === undefined || stored === null) return undefined;
+  return stored === "plain" ? null : stored;
+}
+
+/** The stored form when there is one (plain included), else the one worked out. */
+export function storedOr(stored: string | null | undefined, workOut: () => CardForm): CardForm {
+  const form = formFromStored(stored);
+  return form !== undefined ? form : workOut();
+}
+
 /** A form as she reads it: "Arven's", "Team Rocket's", "Alolan", "Dark". Null for plain. */
 export function formLabel(form: CardForm): string | null {
   if (form === null) return null;

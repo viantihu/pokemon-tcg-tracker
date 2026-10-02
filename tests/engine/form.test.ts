@@ -234,6 +234,24 @@ describe("lineFormOf: the most evolved known card with a form names the line", (
     expect(lineFormOf([null, ARVENS_TOEDSCRUEL], CATALOG)).toBe("trainer:arven");
   });
 
+  it("cards of two different forms: the most evolved stage's names the line (QA's F4 on #454)", () => {
+    // Real printings (TCGdex, 2026-10-02), as a line she mixed could hold them: a Galarian Meowth under an Alolan
+    // Persian; a trainer's card under a Dark one, and the reverse.
+    const galarianMeowth = real("swsh12.5-084", "Galarian Meowth", 52, "Basic", null, "Metal");
+    const alolanPersian = real(
+      "sm1-79",
+      "Alolan Persian",
+      53,
+      "Stage1",
+      "Alolan Meowth",
+      "Darkness",
+    );
+    const cat = [...CATALOG, galarianMeowth, alolanPersian];
+    expect(lineFormOf([galarianMeowth, alolanPersian], cat)).toBe("region:alolan");
+    expect(lineFormOf([SABRINAS_DROWZEE, DARK_CHARMELEON], CATALOG)).toBe("dark");
+    expect(lineFormOf([DARK_CHARMELEON, SABRINAS_HYPNO], CATALOG)).toBe("trainer:sabrina");
+  });
+
   it("a line of plain cards, or of none, is plain", () => {
     expect(lineFormOf([TOEDSCOOL, TOEDSCRUEL], CATALOG)).toBeNull();
     expect(lineFormOf([PIKACHU], CATALOG)).toBeNull();

@@ -250,6 +250,8 @@ function startLine(
       binder_id: choice.binderId,
       half: "back",
       status: lineStatusOf(finalStages),
+      // No form: the database stamps it when this write commits, from the cards and chases written here (0038's
+      // stamp_line_form, the one rule for every new line), and a card put there anyway later never changes it.
     },
     ...slotOps,
     ...pullOps,

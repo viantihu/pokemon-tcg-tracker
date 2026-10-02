@@ -14,6 +14,7 @@ import {
   type TypeColorMap,
 } from "@/lib/engine";
 import { localeOfId } from "@/lib/catalog/locale";
+import { storedOr } from "@/lib/engine/form";
 import { toCatalogCard } from "@/lib/plan/adapt";
 import {
   binderBlockRepo,
@@ -104,17 +105,19 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
   const anchor = anchorId ? byId.get(anchorId) : undefined;
   const chain = anchor ? buildChain({ id: "line", card: anchor, variant: "normal" }, catalog) : [];
   const locale = (anchor ? localeOfId(anchor.tcgdexId) : "en") as Locale;
-  // Its form (UIL-133), from what it holds or chases.
-  const form = lineFormOf(
-    ordered.map((s) => {
-      const id = s.copy_id
-        ? copyById.get(s.copy_id)?.catalog_card_id
-        : s.stage_choice === "chase"
-          ? s.target_catalog_card_id
-          : null;
-      return id ? byId.get(id) : undefined;
-    }),
-    catalog,
+  // Its form (UIL-133): stored when it was made (0038), else from what it holds or chases.
+  const form = storedOr(line.form, () =>
+    lineFormOf(
+      ordered.map((s) => {
+        const id = s.copy_id
+          ? copyById.get(s.copy_id)?.catalog_card_id
+          : s.stage_choice === "chase"
+            ? s.target_catalog_card_id
+            : null;
+        return id ? byId.get(id) : undefined;
+      }),
+      catalog,
+    ),
   );
   const lineBlocks = blocks.filter((b) => b.line_id === line.id);
 

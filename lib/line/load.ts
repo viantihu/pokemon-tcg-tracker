@@ -23,6 +23,7 @@ import {
   type CatalogCard,
   type TypeColorMap,
 } from "@/lib/engine";
+import { formFromStored } from "@/lib/engine/form";
 import { toCatalogCard } from "@/lib/plan/adapt";
 import {
   binderBlockRepo,
@@ -298,6 +299,7 @@ export async function buildScreenModel(
       rootDexId: l.root_dex_id,
       colorBand: l.color_band,
       binderId: l.binder_id,
+      form: formFromStored(l.form),
     })),
     slotsByLine,
     catalog,

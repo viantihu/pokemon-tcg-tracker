@@ -9,6 +9,8 @@
  * (network client). Callers translate between DB rows and these types.
  */
 
+import type { CardForm } from "./form";
+
 /** M2-derived class. Specialty = ex/V/VMAX/VSTAR/GX/Radiant/Prime/full art/illustration rare/gold. */
 export type CardClass = "standard" | "specialty";
 
@@ -161,6 +163,11 @@ export interface EvolutionLine {
   binderId: string | null;
   status: LineStatus;
   slots: LineSlotRecord[];
+  /**
+   * Its stored form (UIL-133, 0038): null is plain. Absent (a hand-built line), it is worked out from what it holds or
+   * chases (`lineFormOf`).
+   */
+  form?: CardForm;
 }
 
 /** A running custom set. Collection membership beats every other cascade rule (system-design §3). */

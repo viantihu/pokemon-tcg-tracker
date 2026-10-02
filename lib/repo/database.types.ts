@@ -274,6 +274,8 @@ export type Database = {
           half: string;
           status: string;
           extra_pocket: string | null;
+          /** 0038 (UIL-133): 'plain', 'trainer:<name>', 'region:…', 'dark' or 'light'; null until stamped. */
+          form: string | null;
           created_at: string;
         };
         Insert: {
@@ -285,6 +287,7 @@ export type Database = {
           half?: string;
           status?: string;
           extra_pocket?: string | null;
+          form?: string | null;
           created_at?: string;
         };
         Update: {
@@ -296,6 +299,7 @@ export type Database = {
           half?: string;
           status?: string;
           extra_pocket?: string | null;
+          form?: string | null;
           created_at?: string;
         };
         Relationships: [

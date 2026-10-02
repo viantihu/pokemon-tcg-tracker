@@ -370,6 +370,8 @@ describe("backfill back-line commit atomicity (fresh Postgres via PGlite)", () =
     await asSuperuser(db);
 
     expect(await count(db, "evolution_line")).toBe(1);
+    // UIL-133 (0038): the plan names no form; the database stamped the line from its cards when the write committed.
+    expect(await q(`select form from evolution_line`)).toEqual([{ form: "plain" }]);
     expect(await count(db, "line_slot")).toBe(3);
     expect(await count(db, "copy")).toBe(HAUL.length); // no copy created
     expect(await waiting()).toBe(HAUL.length - 2); // the FILLED copy + the sacrificed duplicate placed
