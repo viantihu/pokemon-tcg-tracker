@@ -9,7 +9,7 @@
  *
  *   region   en "Alolan |Galarian |Hisuian |Paldean " (any case)   ja アローラ / ガラル / ヒスイ / パルデア
  *   shade    en "Dark |Light "                                      ja わるい / やさしい
- *   trainer  en "<Name>'s " (straight or curly apostrophe)          ja "<名>の", on ja: ids only
+ *   trainer  en "<Name>'s " (straight or curly apostrophe)          ja "<名>の" with no space before it, on ja: ids
  *
  * A Pokémon's own name is katakana, so a hiragana の or わるい never belongs to it.
  *
@@ -41,7 +41,9 @@ const SHADE_EN = /^(dark|light) /i;
 const SHADE_JA = /^(わるい|やさしい)/;
 const SHADE_OF_JA: Record<string, string> = { わるい: "dark", やさしい: "light" };
 const TRAINER_EN = /^(.{1,30}?)['’]s /;
-const TRAINER_JA = /^(.{1,12}?)の./;
+// No space before the の: "オーガポン みどりのめん" (Teal Mask Ogerpon) and "ネクロズマ あかつきのつばさ" are forms of
+// one Pokémon, not a trainer's (50 such printings in the mirror on 2026-10-02).
+const TRAINER_JA = /^([^\s　]{1,12}?)の./;
 
 /** The form a card's own name says, before anything it evolves from is asked. */
 export function ownFormOf(name: string, tcgdexId: string): CardForm {
@@ -64,6 +66,9 @@ export function ownFormOf(name: string, tcgdexId: string): CardForm {
 
 const norm = (s: string) => s.trim().toLowerCase();
 
+/** A Pokémon: a card with a species. A Trainer or an Energy has none. */
+const isPokemon = (c: CatalogCard) => c.dexId.length > 0;
+
 interface FormIndex {
   /** Physical cards by locale and name, for walking `evolveFrom`. */
   byName: Map<string, CatalogCard>;
@@ -84,7 +89,7 @@ function indexOf(catalog: CatalogCard[]): FormIndex {
   if (ix) return ix;
   const byName = new Map<string, CatalogCard>();
   for (const c of catalog) {
-    if (c.isDigitalOnly) continue;
+    if (c.isDigitalOnly || !isPokemon(c)) continue;
     const k = nameKey(localeOfId(c.tcgdexId), c.name);
     if (!byName.has(k)) byName.set(k, c);
   }
@@ -99,6 +104,8 @@ function indexOf(catalog: CatalogCard[]): FormIndex {
  * Cursola, Mr. Rime, Runerigus, Overqwil, Sneasler, Clodsire). Its own language only, the way a line's chain walks.
  */
 export function formOf(card: CatalogCard, catalog: CatalogCard[]): CardForm {
+  // A Trainer or an Energy has no line and so no form ("Boss's Orders", "Arven's Sandwich", "Dark Patch").
+  if (!isPokemon(card)) return null;
   const ix = indexOf(catalog);
   const hit = ix.form.get(card.tcgdexId);
   if (hit !== undefined) return hit;

@@ -17,8 +17,9 @@ import {
   nameInForm,
   ownFormOf,
 } from "@/lib/engine/form";
+import { placeCard, type EngineContext } from "@/lib/engine/cascade";
 import { generateSlots, testViability } from "@/lib/engine/line";
-import type { CatalogCard, OwnedCopy } from "@/lib/engine/types";
+import type { CatalogCard, EvolutionLine, OwnedCopy } from "@/lib/engine/types";
 import { CHARMANDER_SV03_026 } from "./fixtures";
 
 const real = (
@@ -139,6 +140,35 @@ describe("ownFormOf: the line-class check's own rules, in its order", () => {
 
   it("reads a Japanese trainer's の only on a Japanese card", () => {
     expect(ownFormOf("ペパーのノノクラゲ", "sv10-109")).toBeNull();
+  });
+
+  it("a Japanese forme with a space before its の is that Pokémon's, not a trainer's (the TL's review of #454)", () => {
+    expect(ownFormOf("オーガポン みどりのめん", "ja:MC-080")).toBeNull();
+    expect(ownFormOf("ネクロズマ あかつきのつばさ", "ja:SM5p-021")).toBeNull();
+    expect(ownFormOf("ポワルン たいようのすがた", "ja:MC-102")).toBeNull();
+    expect(ownFormOf("エリカのナゾノクサ", "ja:MC-001")).toBe("trainer:エリカ");
+    expect(ownFormOf("ロケット団のミュウツーex", "ja:M2a-063")).toBe("trainer:ロケット団");
+  });
+
+  it("a Trainer or Energy card has no form, whatever its name says (it never joins a line)", () => {
+    const trainer = (id: string, name: string): CatalogCard => ({
+      ...CHARMANDER_SV03_026,
+      tcgdexId: id,
+      name,
+      dexId: [],
+      stage: null,
+      evolveFrom: null,
+      types: [],
+      category: "Trainer",
+    });
+    // Real Trainer cards (TCGdex): Boss's Orders, Arven's Sandwich, Dark Patch.
+    for (const c of [
+      trainer("me01-114", "Boss's Orders"),
+      trainer("sv10-161", "Arven's Sandwich"),
+      trainer("swsh10-139", "Dark Patch"),
+    ]) {
+      expect(formOf(c, [...CATALOG, c])).toBeNull();
+    }
   });
 });
 
@@ -275,5 +305,66 @@ describe("a new line in a form (UIL-133): its own printings proposed, its own ca
       state: "filled",
       copyId: "plain-cruel",
     });
+  });
+});
+
+describe("the cascade asks a line's form once while the line is unchanged, and again when it changes", () => {
+  it("the same line object, its Stage 1 swapped from plain to Arven's between two cards, is read again", () => {
+    const line: EvolutionLine = {
+      id: "L",
+      rootDexId: 948,
+      colorBand: "orange",
+      binderId: "KB1",
+      status: "open",
+      slots: [
+        {
+          id: "s0",
+          stageIndex: 0,
+          stage: "Basic",
+          state: "placeholder",
+          copyId: null,
+          dexId: null,
+          targetCatalogCardId: null,
+        },
+        {
+          id: "s1",
+          stageIndex: 1,
+          stage: "Stage1",
+          state: "filled",
+          copyId: "c1",
+          dexId: 949,
+          targetCatalogCardId: null,
+        },
+      ],
+    };
+    const ownedCruel = (id: string, c: CatalogCard): OwnedCopy => ({
+      id,
+      card: c,
+      variant: "normal",
+      role: "shelved",
+      binderId: "KB1",
+      binderHalf: "back",
+      colorBand: "orange",
+      lineSlotId: "s1",
+    });
+    const ctx: EngineContext = {
+      typeColorMap: { Fighting: "orange" },
+      catalog: CATALOG,
+      owned: [ownedCruel("c1", TOEDSCRUEL)],
+      binders: [{ id: "KB1", name: "KB-001", type: "general", isActive: true }],
+      lines: [line],
+      collections: [],
+      now: "2026-10-02T00:00:00.000Z",
+    };
+    const into = () => {
+      const res = placeCard({ id: "in", card: ARVENS_TOEDSCOOL, variant: "normal" }, ctx);
+      return res.target.kind === "back-half-line" ? res.target.lineId : res.target.kind;
+    };
+    // A plain line: an Arven's Toedscool is not proposed there.
+    expect(into()).not.toBe("L");
+    // Same line object, now holding her Arven's Toedscruel: it is her Arven's line.
+    line.slots[1] = { ...line.slots[1], copyId: "c2" };
+    ctx.owned = [ownedCruel("c2", ARVENS_TOEDSCRUEL)];
+    expect(into()).toBe("L");
   });
 });

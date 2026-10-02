@@ -286,8 +286,21 @@ function chasesPrinting(slot: LineSlotRecord, tcgdexId: string): boolean {
   );
 }
 
-/** A line's form (UIL-133), from what is known at its stages: a card in a slot, or the card she chases there. */
+/**
+ * A line's form (UIL-133), from what is known at its stages: a card in a slot, or the card she chases there. Once per
+ * line while its slots and her copies are unchanged (the TL's review of #454): the cascade asks it for every card of a
+ * haul against the same lines, and finding a copy's card is a scan of everything she owns.
+ */
+const lineForms = new WeakMap<
+  EvolutionLine,
+  { owned: EngineContext["owned"]; sig: string; form: CardForm }
+>();
 function lineFormIn(line: EvolutionLine, ctx: EngineContext): CardForm {
+  const sig = line.slots
+    .map((s) => `${s.stageIndex}:${s.copyId ?? ""}:${s.dexId ?? ""}:${s.targetCatalogCardId ?? ""}`)
+    .join("|");
+  const hit = lineForms.get(line);
+  if (hit && hit.owned === ctx.owned && hit.sig === sig) return hit.form;
   const byId = catalogById(ctx);
   const known = [...line.slots]
     .sort((a, b) => a.stageIndex - b.stageIndex)
@@ -299,7 +312,9 @@ function lineFormIn(line: EvolutionLine, ctx: EngineContext): CardForm {
           : null;
       return (id ? byId.get(id) : undefined) ?? null;
     });
-  return lineFormOf(known, ctx.catalog);
+  const form = lineFormOf(known, ctx.catalog);
+  lineForms.set(line, { owned: ctx.owned, sig, form });
+  return form;
 }
 
 /** The catalog by id, once per catalog slice (the cascade routes every card of a haul against the same one). */

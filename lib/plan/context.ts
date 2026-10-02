@@ -239,7 +239,9 @@ export async function loadPlanContext(
   for (const c of catalogById.values()) {
     const d = c.dexId[0];
     if (d === undefined || c.isDigitalOnly) continue;
-    cardsByDex.set(d, [...(cardsByDex.get(d) ?? []), c]);
+    const list = cardsByDex.get(d);
+    if (list) list.push(c);
+    else cardsByDex.set(d, [c]);
   }
   const dexNameIn = (dexId: number, form: CardForm, locale: string): string | null => {
     const cards = (cardsByDex.get(dexId) ?? []).filter((c) => localeOfId(c.tcgdexId) === locale);
