@@ -97,21 +97,26 @@ describe("lineFitWarnings: what she is told before she confirms", () => {
     expect(lineFitWarnings(input(TOEDSCOOL, [slot(0, null), slot(1, "c1")]))).toEqual([]);
   });
 
-  it("a card of another stage", () => {
+  it("a card of another stage: the spot named, and the card", () => {
     expect(lineFitWarnings(input(TOEDSCRUEL, [slot(0, null), slot(1, "c1")]))).toEqual([
-      { rule: "line_fit", text: LINE_WARNING.wrongCard },
+      { rule: "line_fit", text: "This spot is for Toedscool (Basic). This card is Toedscruel." },
     ]);
   });
 
   it("a card of another form than the line's stored one (UIL-133), either way round", () => {
     expect(lineFitWarnings(input(ARVENS_TOEDSCOOL, [slot(0, null), slot(1, "c1")]))).toEqual([
-      { rule: "line_fit", text: "This is a plain line, and this card is Arven's." },
+      { rule: "line_fit", text: "This is your Toedscool line, and this is Arven's Toedscool." },
     ]);
     expect(
       lineFitWarnings(
         input(TOEDSCOOL, [slot(0, null), slot(1, "c2")], { line: line("trainer:arven") }),
       ),
-    ).toEqual([{ rule: "line_fit", text: "This is an Arven's line, and this card is plain." }]);
+    ).toEqual([
+      {
+        rule: "line_fit",
+        text: "This is your Arven's Toedscool line, and this is a regular Toedscool.",
+      },
+    ]);
   });
 
   it("a card the catalog cannot place: unconfirmed, not wrong", () => {
@@ -130,7 +135,17 @@ describe("lineFitWarnings: what she is told before she confirms", () => {
   it("a swap into a filled slot is held to the slot's species, which the card there names", () => {
     expect(
       lineFitWarnings(input(TOEDSCOOL, [slot(0, "c1"), slot(1, null)], { replacing: true })),
-    ).toEqual([{ rule: "line_fit", text: LINE_WARNING.wrongCard }]);
+    ).toEqual([
+      { rule: "line_fit", text: "This spot is for Toedscruel (Basic). This card is Toedscool." },
+    ]);
+  });
+
+  it("another language itself is never one of these: the popup asks it with its own Join anyway (the Tech Lead's review of #462)", () => {
+    const foreign = input(TOEDSCRUEL, [slot(0, "cj"), slot(1, null)], {
+      slotId: "s1",
+      line: line(null),
+    });
+    expect(lineFitWarnings(foreign, false)).toEqual([]);
   });
 
   it("another language: a line whose language would flip is said, once she has said to join it anyway", () => {

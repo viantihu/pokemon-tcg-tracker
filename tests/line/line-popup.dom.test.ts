@@ -432,7 +432,7 @@ describe("UIL-117 · the line popup", () => {
       }),
     );
     const confirm = screen.getByRole("button", { name: /Add to line/ }) as HTMLButtonElement;
-    expect(screen.getByText(/This line is Japanese and this card is English/)).toBeTruthy();
+    expect(screen.getByText(/This line is Japanese, and this card is English/)).toBeTruthy();
     expect(confirm.disabled).toBe(true);
     await user.click(screen.getByRole("checkbox", { name: /Join the Japanese line anyway/ }));
     expect(confirm.disabled).toBe(false);

@@ -582,7 +582,10 @@ describe("UIL-135: a card that is not the stage's own goes in with her “Put it
       slotId: ARVEN.basic,
     });
     expect(m.warnings).toEqual([
-      { rule: "line_fit", text: "This is an Arven's line, and this card is plain." },
+      {
+        rule: "line_fit",
+        text: "This is your Arven's Toedscool line, and this is a regular Toedscool.",
+      },
     ]);
     const join = {
       mode: "join" as const,
@@ -598,7 +601,7 @@ describe("UIL-135: a card that is not the stage's own goes in with her “Put it
     };
     await expect(
       commitCardPlacement(pgliteClient(db), { card, override: shelf, lineChoice: join }),
-    ).rejects.toThrow(/This is an Arven's line, and this card is plain/);
+    ).rejects.toThrow(/This is your Arven's Toedscool line, and this is a regular Toedscool/);
     expect(await basicHolds(ARVEN.basic)).toBeNull();
     const { client, declared } = capturing();
     await commitCardPlacement(client, {
@@ -619,7 +622,12 @@ describe("UIL-135: a card that is not the stage's own goes in with her “Put it
     const STAGE1 = "d0000000-0000-4000-8000-0000000000e2";
     const { card } = await planFor("sv10-110", STAGE1);
     const m = await popupOf(STAGE1, { kind: "add", lineId: ARVEN.line, slotId: ARVEN.basic });
-    expect(m.warnings).toEqual([{ rule: "line_fit", text: "This stage is for a different card." }]);
+    expect(m.warnings).toEqual([
+      {
+        rule: "line_fit",
+        text: "This spot is for Arven's Toedscool (Basic). This card is Arven's Toedscruel.",
+      },
+    ]);
     await commitCardPlacement(pgliteClient(db), {
       card,
       override: { kind: "shelf", binderId: BINDER, half: "back", band: "orange" },
@@ -636,6 +644,48 @@ describe("UIL-135: a card that is not the stage's own goes in with her “Put it
     expect(
       (await db.query(`select form from evolution_line where id = $1`, [ARVEN.line])).rows,
     ).toEqual([{ form: "trainer:arven" }]);
+  });
+
+  it("a card in another language: the key alone never joins it; her Join anyway with the key does, recorded", async () => {
+    // A Japanese Toedscool (TCGdex ja:SV9-087) into her plain English line's Basic.
+    await asSuperuser(db);
+    await db.query(
+      `insert into catalog_card (tcgdex_id, name, dex_id, types, stage, locale, set_id, local_id)
+         values ('ja:SV9-087', 'ノノクラゲ', '{948}', '{Fighting}', 'Basic', 'ja', 'SV9', '087')`,
+    );
+    await seedLine(PLAIN, null, "sv09-089");
+    const JA = "d0000000-0000-4000-8000-0000000000e3";
+    const { card } = await planFor("ja:SV9-087", JA);
+    const shelf = {
+      kind: "shelf" as const,
+      binderId: BINDER,
+      half: "back" as const,
+      band: "orange",
+    };
+    const join = {
+      mode: "join" as const,
+      lineId: PLAIN.line,
+      slotId: PLAIN.basic,
+      thirdPocket: { material: "empty" as const },
+    };
+    // PRE-FIX (the Tech Lead's review of #462): line_fit alone passed the language rule unseen.
+    await expect(
+      commitCardPlacement(pgliteClient(db), {
+        card,
+        override: shelf,
+        lineChoice: { ...join, overrides: ["line_fit"] },
+      }),
+    ).rejects.toThrow(/That line is in another language \(English\) than this card \(Japanese\)/);
+    expect(await basicHolds(PLAIN.basic)).toBeNull();
+    const { client, declared } = capturing();
+    await commitCardPlacement(client, {
+      card,
+      override: shelf,
+      lineChoice: { ...join, foreignLocale: true, overrides: ["line_fit"] },
+    });
+    expect(declared).toEqual([["line_fit"]]);
+    expect(await basicHolds(PLAIN.basic)).toBe(JA);
+    expect(await decisions()).toMatchObject([{ decision: "line-join", overrides: ["line_fit"] }]);
   });
 
   it("from the Move sheet too: the move's own decision records it", async () => {
@@ -667,7 +717,9 @@ describe("UIL-135: a card that is not the stage's own goes in with her “Put it
         thirdPocket: { material: "empty" as const },
       },
     };
-    await expect(applyMove(pgliteClient(db), req, names)).rejects.toThrow(/Arven's line/);
+    await expect(applyMove(pgliteClient(db), req, names)).rejects.toThrow(
+      /This is your Arven's Toedscool line/,
+    );
     const { client, declared } = capturing();
     await applyMove(
       client,

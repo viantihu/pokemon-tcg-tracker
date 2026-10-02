@@ -320,7 +320,7 @@ describe("UIL-135 · a card with no evolutions and a card that isn't the stage's
       warnings: [
         {
           rule: "line_min_stages",
-          text: "Loner has no evolutions, so this line would hold just this one card.",
+          text: "Tauros has no evolutions, so this line would hold just this one card.",
         },
       ],
     });
@@ -333,7 +333,7 @@ describe("UIL-135 · a card with no evolutions and a card that isn't the stage's
     await user.click(backHalf());
     const dialog = await screen.findByRole("dialog", { name: "Start a line" });
     expect(within(dialog).getByRole("alert").textContent).toContain(
-      "Loner has no evolutions, so this line would hold just this one card.",
+      "Tauros has no evolutions, so this line would hold just this one card.",
     );
     await user.click(within(dialog).getByRole("button", { name: /^Put it here anyway/ }));
     expect(onConfirm.mock.calls[0][1]).toMatchObject({
@@ -351,7 +351,12 @@ describe("UIL-135 · a card with no evolutions and a card that isn't the stage's
   it("a card of another form: the Add warns, and her confirm carries line_fit; with nothing to warn, none is sent", async () => {
     const otherForm: LinePopupModel = {
       ...model("add"),
-      warnings: [{ rule: "line_fit", text: "This is an Arven's line, and this card is plain." }],
+      warnings: [
+        {
+          rule: "line_fit",
+          text: "This is your Arven's Toedscool line, and this is a regular Toedscool.",
+        },
+      ],
     };
     const { onConfirm, user } = mount({
       joinCandidates: [CANDIDATE_HERE],
@@ -360,8 +365,11 @@ describe("UIL-135 · a card with no evolutions and a card that isn't the stage's
     await user.click(backHalf());
     const dialog = await screen.findByRole("dialog", { name: "Add to a line" });
     expect(within(dialog).getByRole("alert").textContent).toContain(
-      "This is an Arven's line, and this card is plain.",
+      "This is your Arven's Toedscool line, and this is a regular Toedscool.",
     );
+    // The button says it; nothing else repeats it (the Senior BA's wording review).
+    expect(within(dialog).getByRole("alert").textContent).toContain("You can still put it here.");
+    expect(within(dialog).queryByText(/your call/)).toBeNull();
     expect(within(dialog).queryByRole("button", { name: /^Add to line/ })).toBeNull();
     await user.click(within(dialog).getByRole("button", { name: /^Put it here anyway/ }));
     expect(onConfirm.mock.calls[0][1]).toEqual({

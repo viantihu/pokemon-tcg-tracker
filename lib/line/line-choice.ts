@@ -22,11 +22,14 @@
  */
 
 import {
+  chainFor,
   formFit,
   formLabel,
   generateSlots,
   lineFormOf,
   lineLocaleOf,
+  nameInForm,
+  ownFormOf,
   stageFit,
   storedOr,
   testViability,
@@ -52,6 +55,7 @@ import {
   JOIN_UNCONFIRMED,
   LINE_WARNING,
   NOT_A_LINE,
+  stageLabel,
   type LineChoice,
   type LineRule,
   type LineWarning,
@@ -379,6 +383,12 @@ export interface LineFitInput {
 /** A broken line rule: her warning, and the refusal an older request that did not choose to override it gets. */
 interface LineCheck extends LineWarning {
   refusal: string;
+  /**
+   * Passed only by her own confirm for it, never by the rule's key: a card in another language than the line takes
+   * her "Join the … line anyway" (`foreignLocale`), which the popup asks for in its own words. The key alone would let
+   * a card that ALSO breaks another rule join without her ever seeing the language (the Tech Lead's review of #462).
+   */
+  confirmOnly?: true;
 }
 
 const WRONG_CARD = "That slot is for a different card — pick the slot for this card's own stage.";
@@ -405,12 +415,36 @@ function lineFitChecks(i: LineFitInput, foreignLocale: boolean): LineCheck[] {
   const slot = i.slots.find((s) => s.id === i.slotId);
   if (!slot) return [];
   const checks: LineCheck[] = [];
+  const ordered = [...i.slots].sort((a, b) => a.stage_index - b.stage_index);
+  const lineForm = storedOr(i.line.form, () =>
+    lineFormOf(
+      ordered.map((s) => (s.id === slot.id && !i.replacing ? null : knownAt(s))),
+      i.catalog,
+    ),
+  );
+  // The line's own chain, from its root in its language, to name the line and the stage in her words.
+  const lineLocale = lineLocaleOf(ordered.map(toRecord), i.cardOfCopy);
+  const rootCard = i.catalog.find(
+    (c) =>
+      !c.isDigitalOnly &&
+      c.dexId.includes(i.line.root_dex_id) &&
+      localeOfId(c.tcgdexId) === lineLocale,
+  );
+  const chain = rootCard ? chainFor(rootCard, i.catalog) : [];
+  const lineName = chain[0]
+    ? nameWithForm(nameInForm(chain[0].cards, lineForm, i.catalog), lineForm, rootCard!.tcgdexId)
+    : "evolution";
+  const wrongCard = (expected: string | null): LineCheck => ({
+    rule: "line_fit",
+    text: LINE_WARNING.wrongCard(expected, stageLabel(slot.stage), i.card.name, lineName),
+    refusal: WRONG_CARD,
+  });
   if (i.replacing) {
     const slotCard =
       catalogById.get(slot.target_catalog_card_id ?? "") ??
       (slot.copy_id ? catalogById.get(i.cardOfCopy(slot.copy_id) ?? "") : undefined);
     if (!slotCard || !i.card.dexId.some((d) => slotCard.dexId.includes(d))) {
-      checks.push({ rule: "line_fit", text: LINE_WARNING.wrongCard, refusal: WRONG_CARD });
+      checks.push(wrongCard(slotCard?.name ?? null));
     }
   } else {
     const at = (n: number) => i.slots.find((s) => s.stage_index === n);
@@ -432,21 +466,20 @@ function lineFitChecks(i: LineFitInput, foreignLocale: boolean): LineCheck[] {
       checks.push({ rule: "line_fit", text: LINE_WARNING.unconfirmed, refusal: JOIN_UNCONFIRMED });
     }
     if (fit === "wrong") {
-      checks.push({ rule: "line_fit", text: LINE_WARNING.wrongCard, refusal: WRONG_CARD });
+      // The species the stage is for: her chase there, else the line's chain at that depth (none past a branch).
+      const chased = slot.stage_choice === "chase" ? knownAt(slot) : null;
+      const node = chain[slot.stage_index];
+      checks.push(
+        wrongCard(chased?.name ?? (node ? nameInForm(node.cards, lineForm, i.catalog) : null)),
+      );
     }
   }
   // Another trainer's or region's card: only said of a card that is otherwise the stage's own.
-  const ordered = [...i.slots].sort((a, b) => a.stage_index - b.stage_index);
-  const lineForm = storedOr(i.line.form, () =>
-    lineFormOf(
-      ordered.map((s) => (s.id === slot.id && !i.replacing ? null : knownAt(s))),
-      i.catalog,
-    ),
-  );
   if (checks.length === 0 && formFit(i.card, lineForm, i.catalog) === "other") {
+    const cardForm = formOfCard(i.card, i.catalog);
     const text = LINE_WARNING.otherForm(
-      formLine(lineForm),
-      formCard(formOfCard(i.card, i.catalog)),
+      lineName,
+      cardForm === null ? `a regular ${i.card.name}` : i.card.name,
     );
     checks.push({
       rule: "line_fit",
@@ -456,12 +489,12 @@ function lineFitChecks(i: LineFitInput, foreignLocale: boolean): LineCheck[] {
   }
   // A card in another language: her confirm, and then the line's language must not flip (UIL-090).
   const cardLocale = localeOfId(i.card.tcgdexId);
-  const lineLocale = lineLocaleOf(ordered.map(toRecord), i.cardOfCopy);
   if (cardLocale !== lineLocale) {
     if (!foreignLocale) {
       checks.push({
         rule: "line_fit",
-        text: `This line is ${languageName(lineLocale)} and this card is ${languageName(cardLocale)}.`,
+        confirmOnly: true,
+        text: LINE_WARNING.otherLanguage(languageName(lineLocale), languageName(cardLocale)),
         refusal:
           `That line is in another language (${languageName(lineLocale)}) than this card (${languageName(cardLocale)}). ` +
           "Confirm joining it anyway, or start a line in the card's own language.",
@@ -491,7 +524,9 @@ function lineFitChecks(i: LineFitInput, foreignLocale: boolean): LineCheck[] {
  * language one, which the popup asks with its own "Join the … line anyway".
  */
 export function lineFitWarnings(i: LineFitInput, foreignLocale = true): LineWarning[] {
-  return lineFitChecks(i, foreignLocale).map(({ rule, text }) => ({ rule, text }));
+  return lineFitChecks(i, foreignLocale)
+    .filter((c) => !c.confirmOnly)
+    .map(({ rule, text }) => ({ rule, text }));
 }
 
 /**
@@ -505,19 +540,14 @@ function heldTo(
   extra: LineRule[] = [],
 ): LineRule[] {
   const chosen = new Set(overrides ?? []);
-  for (const c of checks) if (!chosen.has(c.rule)) throw new Error(c.refusal);
+  for (const c of checks) if (c.confirmOnly || !chosen.has(c.rule)) throw new Error(c.refusal);
   return [...new Set([...checks.map((c) => c.rule), ...extra])];
 }
 
-/** "a plain" / "an Arven's" / "an Alolan": the line in "This is … line". */
-function formLine(form: CardForm): string {
-  const label = formLabel(form) ?? "plain";
-  return `${/^[aeiou]/i.test(label) ? "an" : "a"} ${label}`;
-}
-
-/** "plain" / "Arven's" / "Alolan": the card in "this card is …". */
-function formCard(form: CardForm): string {
-  return formLabel(form) ?? "plain";
+/** A line's name in her words, its form said when its root's name does not say it: "Hisuian Rowlet". */
+function nameWithForm(rootName: string, form: CardForm, tcgdexId: string): string {
+  const label = formLabel(form);
+  return label && ownFormOf(rootName, tcgdexId) !== form ? `${label} ${rootName}` : rootName;
 }
 
 function formOfCard(card: CatalogCard, catalog: CatalogCard[]): CardForm {

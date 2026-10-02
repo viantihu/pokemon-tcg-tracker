@@ -456,10 +456,16 @@ export const NOT_A_LINE =
 export const LINE_WARNING = {
   singleStage: (name: string) =>
     `${name} has no evolutions, so this line would hold just this one card.`,
-  wrongCard: "This stage is for a different card.",
+  /** The stage's own species when the line names it, else the line's (the Senior BA's wording, 2026-10-02). */
+  wrongCard: (expected: string | null, stage: string, card: string, line: string) =>
+    expected
+      ? `This spot is for ${expected} (${stage}). This card is ${card}.`
+      : `This spot is for another stage of the ${line} line.`,
   unconfirmed:
     "We can't confirm this card's evolution from the catalog yet, so it may not be this stage's card.",
-  otherForm: (line: string, card: string) => `This is ${line} line, and this card is ${card}.`,
+  /** "This is your Arven's Toedscool line, and this is a regular Toedscool." */
+  otherForm: (line: string, card: string) => `This is your ${line} line, and this is ${card}.`,
+  otherLanguage: (line: string, card: string) => `This line is ${line}, and this card is ${card}.`,
   languageFlip: (language: string) => `This would make the line read as ${language}.`,
 } as const;
 

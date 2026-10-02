@@ -539,7 +539,7 @@ export function LinePopup({
         {foreign ? (
           <div className="lp-also" role="alert">
             <b className="u">
-              This line is {language(line.locale).name} and this card is{" "}
+              This line is {language(line.locale).name}, and this card is{" "}
               {language(card.locale).name}
             </b>
             It won&apos;t join a line in another language by default. You can still choose to.
@@ -572,7 +572,7 @@ export function LinePopup({
                 {w.text}
               </b>
             ))}
-            It&apos;s your call: {PUT_IT_HERE_ANYWAY} puts it there.
+            You can still put it here.
           </div>
         ) : null}
 
