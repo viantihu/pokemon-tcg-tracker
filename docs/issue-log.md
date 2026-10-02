@@ -9444,3 +9444,63 @@ this fix should follow — reported, not independently checked here since that P
 **Cross-reference UIL-121** (the same line-writing surface this affects) and **UIL-096** (the
 existing-lines warning that currently stands in for the join offer this entry says should exist
 instead).
+
+## UIL-133 — A line's identity is species-only (one `rootDexId`), so a Trainer's Pokémon and a wild one — or two regional forms — of the same species collapse into one line
+
+- **Reported:** 2026-10-01 (Karvi). In her words: "I'm not able to move arven's toedscool to the other
+  toedscool line. Also note, Arven'ts toedscool and toedscool are two different evolution line. The
+  evolution line can only belong to the trainer/ region." Her direct answers: trainer AND region each
+  make a separate line — a trainer's Pokémon (Arven's, Team Rocket's) is its own line, and so is each
+  regional form (Alolan, Galarian, Hisuian, Paldean). She was trying to ADD Arven's Toedscool to her
+  existing Arven's Toedscool line, and the app refused it.
+- **Status:** Open, assigned to Full Stack Dev - 2, design first, the Tech Lead reviews.
+- **Priority:** High.
+- **Area:** Lines, Engine
+- **Env:** Testing
+
+**Confirmed the exact gap, in the engine's own words.** A line's identity is `rootDexId: number`
+([`lib/engine/line.ts:253`](../lib/engine/line.ts:253)) — a plain National Pokédex number, nothing else.
+The engine's own comment names precisely the limitation she just ran into:
+[`:75`](../lib/engine/line.ts:75), "A dexId maps to a single species-stage; regional forms share it."
+TCGdex's `dexId` is the species' National number regardless of trainer ownership or regional form, so a
+wild Toedscool and Arven's Toedscool (and, separately, an Alolan or Galarian form of any species) all
+report the same `dexId` and the engine treats them as the identical line. UIL-090 already carved out one
+dimension of this — locale (an English line and a Japanese line of one species are different lines) —
+but trainer-ownership and regional-form are a different axis, not yet split out the same way.
+
+**Live, reported by the Senior BA, not independently checkable from this repo:** 2 lines currently share
+root `948` (Toedscool); she owns 7 Arven's cards; roughly 933 English catalog cards carry a trainer
+prefix in their name. The scale of the second figure is why this can't be a one-off special case for
+Arven specifically — the fix has to generalize to every trainer-prefixed card and every regional form.
+
+**Suggested fix, scoped as a design question, not decided here.** A line's identity key needs a second
+(or third) dimension beyond `rootDexId` — something that distinguishes a trainer's Pokémon from a wild
+one and one regional form from another, the same way `locale` already does for language. Where that
+distinguishing value comes from (a name-prefix parse, a dedicated TCGdex field if one exists, or
+something else) and how existing lines migrate once it lands are both open questions for the design the
+Tech Lead reviews.
+
+**Cross-reference UIL-090** (the locale dimension of line identity, the nearest precedent for adding
+this one) and **UIL-121** (the same line-identity model this entry's fix would touch).
+
+## UIL-134 — Performance review: the app feels too slow, across the Haul Plan, Lines, Lookup/Collections, and every other page
+
+- **Reported:** 2026-10-01 (Karvi). In her words: "I feel that the app is too slow. Please do a
+  performance review." Screens she named: Haul Plan, Lines page, Lookup/Collections, and every page.
+- **Status:** Open, assigned to the Tech Lead. Measure first; no fix proposed yet.
+- **Priority:** High.
+- **Area:** Performance, App-wide
+- **Env:** Testing
+
+**Scope, as she set it — a measurement pass, not a fix list yet.** The report has to cover, per screen:
+server time, network time, and client time; region and cold-start effects; query counts; the catalog
+cache; and bundle size. It closes with the top 5 fixes, ranked, not every finding treated equally.
+
+**Not independently investigated in this pass — this entry records the ask, the measurement is the
+Tech Lead's own work.** No source reading or profiling done here; writing up findings before the Tech
+Lead has actually measured would be guessing at numbers that need to come from a real run, not a code
+read.
+
+**Cross-reference:** none yet — first performance-specific entry in the log; later screen-specific
+findings from this review should cite back to this one rather than opening unrelated new entries, per
+Karvi's group-by-function rule.
