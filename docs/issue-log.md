@@ -9463,7 +9463,13 @@ instead).
   make a separate line — a trainer's Pokémon (Arven's, Team Rocket's) is its own line, and so is each
   regional form (Alolan, Galarian, Hisuian, Paldean). She was trying to ADD Arven's Toedscool to her
   existing Arven's Toedscool line, and the app refused it.
-- **Status:** Open, assigned to Full Stack Dev - 2, design first, the Tech Lead reviews.
+- **Status:** **Fixed, awaiting Karvi's test.** PR α (#454, no migration, `2e6f102`): the
+  cascade prefers her exact chased printing, then the card's form, and the ADD popup lists her other
+  lines. PR γ (#460, migration 0038, `ebb533a`): a line's form is stored, not just derived; 126/126
+  existing lines stamped (111 plain, 14 trainer, 1 Alolan). Karvi's rulings, 2026-10-02: Dark and
+  Light are their own forms; the mixed line at DB id `4b1cace4` is a Team Rocket's line.
+- **Status (before 2026-10-02):** Open, assigned to Full Stack Dev - 2, design first, the Tech Lead
+  reviews.
 - **Priority:** High.
 - **Area:** Lines, Engine
 - **Env:** Testing
@@ -9505,9 +9511,14 @@ recommendation-not-refusal ruling this entry's fix now has to follow).
 
 - **Reported:** 2026-10-01 (Karvi). In her words: "I feel that the app is too slow. Please do a
   performance review." Screens she named: Haul Plan, Lines page, Lookup/Collections, and every page.
-- **Status:** Open, assigned to the Tech Lead. Findings in; Karvi approved the fix order (catalog
-  cache and the 1,000-row list cap first, then keyset paging, duplicate-work cuts, and Haul Plan
-  memoisation).
+- **Status:** **In progress.** Fix 1 (catalog-cache loaders) + fix 5 (1,000-row cap paging): #461
+  (`3f4f397`). Fix 2 (a per-catalog index, replacing per-call whole-catalog filters): #463
+  (`67f6aca`). Measured on her data, production builds, quiet machine: Lines page load 3.9 s to
+  0.18 s, Collections hub load 1.8 s to 0.18 s, Lines "Choose" open 1.7 s to 0.13 s. Fixes 3
+  (duplicate-work cuts) and 4 (Haul Plan memoisation) still being built by the Tech Lead.
+- **Status (before 2026-10-02, PR #461/#463):** Open, assigned to the Tech Lead. Findings in;
+  Karvi approved the fix order (catalog cache and the 1,000-row list cap first, then keyset paging,
+  duplicate-work cuts, and Haul Plan memoisation).
 - **Status (before 2026-10-02):** Open, assigned to the Tech Lead. Measure first; no fix proposed yet.
 - **Priority:** High.
 - **Area:** Performance, App-wide
@@ -9548,7 +9559,14 @@ Karvi's group-by-function rule.
   Asked which rules, she picked all four named at intake: what fits a line (species, stage, branch,
   trainer, region); single-card lines; a full bulk box; and line completion prompts (third pocket,
   "Decide every stage"). Each becomes a recommendation plus a warning in her own words, with an override.
-- **Status:** Open, owner the Tech Lead with Full Stack Dev - 2.
+- **Status:** **Built except Backfill (β2), awaiting Karvi's test.** The override mechanism:
+  #453 (migration 0037, `2d19572`). Full-box override, delete-anyway, and shelve-without-a-collection:
+  #459 (`4f3fc24`). β1 (line fit, single-card lines, language): #462 (`b838cc9`); reported by the
+  Senior BA, not independently checkable from this repo, that it only reached her live deploy once
+  #464 (`5b6b72b`) deployed, after Vercel missed a push. Tap targets on the new override buttons: also
+  covered by #464 (`5b6b72b`), whose own scope is the UIL-130 40px follow-up. Still to come: β2,
+  Backfill's "Save, decide the rest later."
+- **Status (before 2026-10-02):** Open, owner the Tech Lead with Full Stack Dev - 2.
 - **Priority:** High.
 - **Area:** Lines, Bulk, Engine, App-wide
 - **Env:** Testing
@@ -9593,7 +9611,10 @@ reshapes) and **UIL-133** (the specific line-fit instance already updated to ref
   when I hit 'Place new cards' that nothing updated on my haul plan." On iPad Chrome, she ran a Dex
   import, got a new preview, and tapped "Place new cards" on the LAST SYNC bar instead of the preview's
   own "Apply" button — the import was never applied, and the Haul Plan showed nothing new.
-- **Status:** Open, owner Full Stack Dev - 2.
+- **Status:** **Fixed, awaiting Karvi's test.** #458 (`1d694e1`): while a preview is pending, the
+  LAST SYNC bar no longer offers "Place new cards" or "Undo last sync" — it reads "Apply this
+  preview first" instead, so the two controls can no longer render as live choices together.
+- **Status (before 2026-10-02):** Open, owner Full Stack Dev - 2.
 - **Priority:** Medium.
 - **Area:** Sync
 - **Env:** Testing
