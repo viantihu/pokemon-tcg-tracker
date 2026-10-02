@@ -38,6 +38,7 @@ import {
   evolutionLineRepo,
   lineSlotRepo,
   type DbClient,
+  type OverrideRule,
   type Row,
   type WriteOp,
 } from "@/lib/repo";
@@ -52,6 +53,7 @@ import type { MoveDestination } from "@/lib/line/types";
 import type { LineChoice } from "@/lib/line/popup";
 import {
   lineChoiceDestinations,
+  lineRuleNote,
   overLimitNote,
   overridesFor,
   recordOverrides,
@@ -84,6 +86,8 @@ export interface CollectionRemovalPlan {
    * list too, or moving it there would just re-orphan it in another binder.
    */
   destinationCollectionId: string | null;
+  /** UIL-135: the line rules her line choice put the card past (a back half), recorded on its decision. */
+  lineRules?: OverrideRule[];
 }
 
 /** The `PlacementDecision.reason` for a removal (always `resolved_by: 'user'`; dev-spec §4). */
@@ -160,9 +164,13 @@ export function buildCollectionRemovalOps(plan: CollectionRemovalPlan): WriteOp[
       collectionName: plan.collectionName,
       destinationLabel: plan.destinationLabel,
       hasCopy: plan.copies.length > 0,
-    }) + (plan.copies.length > 0 ? overLimitNote([plan.destination]) : "");
-  // 0037: a full box she picked knowingly is recorded on the removal's decisions (lib/line/overrides).
-  const rules = overridesFor([plan.destination]);
+    }) +
+    (plan.copies.length > 0
+      ? overLimitNote([plan.destination]) + lineRuleNote(plan.lineRules ?? [])
+      : "");
+  // 0037: a full box she picked knowingly, and (UIL-135) a line rule she put the card past, are recorded on the
+  // removal's decisions (lib/line/overrides).
+  const rules = [...overridesFor([plan.destination]), ...(plan.lineRules ?? [])];
   if (plan.copies.length === 0) {
     ops.push(
       recordOverrides(
@@ -274,6 +282,8 @@ export async function applyCollectionRemoval(
    */
   let lineOps: WriteOp[] = [];
   let lineSlotId: string | null = null;
+  /** UIL-135: the line rules her line choice put the card past, recorded on its decision. */
+  let lineRules: OverrideRule[] = [];
   if (req.destination.kind === "shelf" && req.destination.half === "back") {
     if (!req.lineChoice) {
       throw new Error(
@@ -290,6 +300,7 @@ export async function applyCollectionRemoval(
     const built = await buildBackHalfLineOps(db, copyRows[0], req.destination, req.lineChoice);
     lineOps = built.ops;
     lineSlotId = built.slotId;
+    lineRules = built.overrides;
   }
 
   const copies: RemovalCopy[] = [];
@@ -319,6 +330,7 @@ export async function applyCollectionRemoval(
     destinationLabel,
     destinationCollectionId:
       req.destination.kind === "collection" ? req.destination.collectionId : null,
+    lineRules,
   });
 
   if (lineSlotId) {
@@ -329,7 +341,12 @@ export async function applyCollectionRemoval(
   // every place this removal sends a card; each writer records its own.
   await applyWriteOps(db, {
     ops: [...lineOps, ...ops],
-    overrides: overridesFor([req.destination, ...lineChoiceDestinations(req.lineChoice)]),
+    overrides: [
+      ...new Set([
+        ...overridesFor([req.destination, ...lineChoiceDestinations(req.lineChoice)]),
+        ...lineRules,
+      ]),
+    ],
   });
 
   return {

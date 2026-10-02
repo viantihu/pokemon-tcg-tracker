@@ -45,13 +45,15 @@ import {
 import { buildLineJoinIndex, joinOptionsFor } from "./join-options";
 import {
   IN_THE_HAUL,
-  NOT_A_LINE,
+  LINE_WARNING,
   stageLabel,
   type LinePopupExistingLine,
   type LinePopupModel,
   type LinePopupStage,
   type LineProposal,
+  type LineWarning,
 } from "./popup";
+import { lineFitWarnings } from "./line-choice";
 import type { CardIdentity } from "./types";
 import { LINE_ROW_POCKETS } from "./popup";
 import { stageOptionsFrom, stageSuggestion } from "./stage-options";
@@ -184,9 +186,14 @@ export async function loadLinePopupModel(
         localeOfId(c.catalog_card_id) === locale,
     );
 
+  /** UIL-135: the line rules this card breaks here, shown before she confirms (a recommendation, never a refusal). */
+  let warnings: LineWarning[] = [];
+
   if (proposal.kind === "start") {
-    // A species with no evolutions is never a line (Karvi, 2026-09-27): no line to lay out.
-    if (!formsALine(card, catalog)) throw new Error(NOT_A_LINE);
+    // A species with no evolutions makes a line of one card: not suggested (Karvi, 2026-09-27), but hers to start.
+    if (!formsALine(card, catalog)) {
+      warnings = [{ rule: "line_min_stages", text: LINE_WARNING.singleStage(card.name) }];
+    }
     const general = binders.filter((b) => b.type === "general");
     hereBinder = proposal.binderId ?? general[0]?.id ?? null;
     hereBand = proposal.band;
@@ -366,6 +373,16 @@ export async function loadLinePopupModel(
     });
     const filledBefore = lineSlots.filter((s) => s.state === "filled").length;
     const replacing = proposal.kind === "replace";
+    // The ONE line check the builder holds a write to (lib/line/line-choice.ts), here as her warnings.
+    warnings = lineFitWarnings({
+      card,
+      catalog,
+      line,
+      slots: lineSlots,
+      slotId: target.id,
+      cardOfCopy,
+      replacing,
+    });
     model = {
       mode: replacing ? "replace" : "add",
       copyId: copy.id,
@@ -435,7 +452,7 @@ export async function loadLinePopupModel(
       ? { ...st, dexId: chain[st.stageIndex].dexId }
       : st,
   );
-  return { ...model, stages, existingLines };
+  return { ...model, stages, existingLines, ...(warnings.length > 0 ? { warnings } : {}) };
 }
 
 /**

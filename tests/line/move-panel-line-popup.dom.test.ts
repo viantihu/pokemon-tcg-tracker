@@ -10,7 +10,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MovePanel } from "@/app/(ui)/_components/MovePanel";
 import { MoveOverlay } from "@/app/(ui)/_components/MoveOverlay";
-import type { LinePopupModel, LineProposal } from "@/lib/line/popup";
+import {
+  NOT_A_LINE,
+  ONE_CARD_LINE,
+  type LinePopupModel,
+  type LineProposal,
+} from "@/lib/line/popup";
 import type { LineJoinCandidate, MoveOptions } from "@/lib/line/types";
 
 const OPTIONS: MoveOptions = {
@@ -304,5 +309,74 @@ describe("UIL-117 · BACK HALF opens the line popup", () => {
   it("a sheet WITHOUT the popup's loader is unchanged: the back half still needs a line picked elsewhere", () => {
     mount({ lineModel: undefined });
     expect(backHalf().disabled).toBe(true);
+  });
+});
+
+describe("UIL-135 · a card with no evolutions and a card that isn't the stage's own, through the popup", () => {
+  it("a card with no evolutions: BACK HALF opens the popup, which warns, and Put it here anyway sends her override", async () => {
+    const warned = (p: LineProposal): LinePopupModel => ({
+      ...model("start", p.kind === "start" ? p.band : "red"),
+      stages: [{ stageIndex: 0, stage: "Basic", state: "incoming", card: null }],
+      warnings: [
+        {
+          rule: "line_min_stages",
+          text: "Tauros has no evolutions, so this line would hold just this one card.",
+        },
+      ],
+    });
+    const { onConfirm, user } = mount({
+      formsALine: false,
+      lineModel: vi.fn(async (p) => warned(p)),
+    });
+    expect(backHalf().disabled).toBe(false);
+    expect(screen.getByText(ONE_CARD_LINE)).toBeTruthy();
+    await user.click(backHalf());
+    const dialog = await screen.findByRole("dialog", { name: "Start a line" });
+    expect(within(dialog).getByRole("alert").textContent).toContain(
+      "Tauros has no evolutions, so this line would hold just this one card.",
+    );
+    await user.click(within(dialog).getByRole("button", { name: /^Put it here anyway/ }));
+    expect(onConfirm.mock.calls[0][1]).toMatchObject({
+      mode: "start",
+      overrides: ["line_min_stages"],
+    });
+  });
+
+  it("without the popup (the older inline picker), a card with no evolutions still has no back half", () => {
+    mount({ formsALine: false, lineModel: undefined });
+    expect(backHalf().disabled).toBe(true);
+    expect(screen.getByText(NOT_A_LINE)).toBeTruthy();
+  });
+
+  it("a card of another form: the Add warns, and her confirm carries line_fit; with nothing to warn, none is sent", async () => {
+    const otherForm: LinePopupModel = {
+      ...model("add"),
+      warnings: [
+        {
+          rule: "line_fit",
+          text: "This is your Arven's Toedscool line, and this is a regular Toedscool.",
+        },
+      ],
+    };
+    const { onConfirm, user } = mount({
+      joinCandidates: [CANDIDATE_HERE],
+      lineModel: vi.fn(async () => otherForm),
+    });
+    await user.click(backHalf());
+    const dialog = await screen.findByRole("dialog", { name: "Add to a line" });
+    expect(within(dialog).getByRole("alert").textContent).toContain(
+      "This is your Arven's Toedscool line, and this is a regular Toedscool.",
+    );
+    // The button says it; nothing else repeats it (the Senior BA's wording review).
+    expect(within(dialog).getByRole("alert").textContent).toContain("You can still put it here.");
+    expect(within(dialog).queryByText(/your call/)).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: /^Add to line/ })).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: /^Put it here anyway/ }));
+    expect(onConfirm.mock.calls[0][1]).toEqual({
+      mode: "join",
+      lineId: "L1",
+      slotId: "S1",
+      overrides: ["line_fit"],
+    });
   });
 });

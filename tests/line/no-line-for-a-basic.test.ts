@@ -21,7 +21,7 @@ import { formsALine, type CatalogCard } from "@/lib/engine";
 import { applyMove } from "@/lib/line";
 import { BackLineRefused, commitBackLine } from "@/lib/backfill";
 import { loadLinePopupModel } from "@/lib/line/popup-load";
-import { NOT_A_LINE } from "@/lib/line/popup";
+import { LINE_WARNING, NOT_A_LINE } from "@/lib/line/popup";
 import {
   buildHaulCommitPayload,
   clearCatalogCache,
@@ -59,7 +59,12 @@ const LONER: CatalogCard = {
   evolveFrom: null,
   artworkGroupId: "art-loner",
 };
-const names = { binderName: () => "KB-001", collectionName: () => null, bandName: () => "Red" };
+const names = {
+  binderName: () => "KB-001",
+  collectionName: () => null,
+  bandName: () => "Red",
+  bandDisplay: () => "Red",
+};
 
 let db: PGlite;
 beforeEach(async () => {
@@ -187,15 +192,21 @@ describe("every writer refuses a line for it, with nothing written", () => {
     );
   });
 
-  it("the popup's model for a start refuses too: every screen's backstop", async () => {
+  it("the popup's model for a start warns instead (UIL-135): a line of one card, hers to start", async () => {
     await db.exec(`
       insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band)
         values ('${COPY}', '${OWNER}', '${LONER.tcgdexId}', 'normal', 'shelved', '${KB1}', 'front', 'red');
     `);
     await asOwner(db);
-    await expect(
-      loadLinePopupModel(pgliteClient(db), COPY, { kind: "start", binderId: KB1, band: "red" }),
-    ).rejects.toThrow(NOT_A_LINE);
+    const m = await loadLinePopupModel(pgliteClient(db), COPY, {
+      kind: "start",
+      binderId: KB1,
+      band: "red",
+    });
+    expect(m.warnings).toEqual([
+      { rule: "line_min_stages", text: LINE_WARNING.singleStage("Loner") },
+    ]);
+    expect(m.stages.map((st) => st.state)).toEqual(["incoming"]);
   });
 
   it("Backfill's back-half line for it, with her copy left waiting in the haul", async () => {
@@ -224,6 +235,81 @@ describe("every writer refuses a line for it, with nothing written", () => {
     await asSuperuser(db);
     expect((await db.query(`select role from copy where id = $1`, [COPY])).rows).toEqual([
       { role: "haul" },
+    ]);
+  });
+});
+
+describe("UIL-135: with her “Put it here anyway”, a line of one card is hers, recorded with the move", () => {
+  async function decisionsOverriding() {
+    await asSuperuser(db);
+    const rows = (
+      await db.query<{ decision: string; overrides: string[] }>(
+        `select decision, overrides from placement_decision where overrides <> '{}' order by decision`,
+      )
+    ).rows;
+    await asOwner(db);
+    return rows;
+  }
+  async function linesWritten() {
+    await asSuperuser(db);
+    const rows = (
+      await db.query<{ slots: number; form: string }>(
+        `select (select count(*)::int from line_slot s where s.line_id = l.id) slots, form from evolution_line l`,
+      )
+    ).rows;
+    await asOwner(db);
+    return rows;
+  }
+
+  it("the Move sheet's line popup START: a one-slot line, and line_min_stages on the move's decision", async () => {
+    await db.exec(`
+      insert into copy (id, owner_id, catalog_card_id, variant, role, binder_id, binder_half, color_band)
+        values ('${COPY}', '${OWNER}', '${LONER.tcgdexId}', 'normal', 'shelved', '${KB1}', 'front', 'red');
+    `);
+    await asOwner(db);
+    await applyMove(
+      pgliteClient(db),
+      {
+        copyId: COPY,
+        destination: { kind: "shelf", binderId: KB1, half: "back", band: "red" },
+        lineChoice: {
+          mode: "start",
+          binderId: KB1,
+          band: "red",
+          pulls: [],
+          stages: {},
+          thirdPocket: { material: "empty" },
+          overrides: ["line_min_stages"],
+        },
+      },
+      names as never,
+    );
+    expect(await linesWritten()).toEqual([{ slots: 1, form: "plain" }]);
+    expect(await decisionsOverriding()).toEqual([
+      { decision: "placement-move", overrides: ["line_min_stages"] },
+    ]);
+  });
+
+  it("the Haul Plan's line popup START: the same, on this card's own decision", async () => {
+    const card: DraftItem = haulRow("d0000000-0000-4000-8000-0000000000d5", LONER.tcgdexId);
+    await seedHaulRows(db, [card]);
+    await asOwner(db);
+    await commitCardPlacement(pgliteClient(db), {
+      card,
+      override: { kind: "shelf", binderId: KB1, half: "back", band: "red" },
+      lineChoice: {
+        mode: "start",
+        binderId: KB1,
+        band: "red",
+        pulls: [],
+        stages: {},
+        thirdPocket: { material: "empty" },
+        overrides: ["line_min_stages"],
+      },
+    });
+    expect(await linesWritten()).toEqual([{ slots: 1, form: "plain" }]);
+    expect(await decisionsOverriding()).toEqual([
+      { decision: "line-start", overrides: ["line_min_stages"] },
     ]);
   });
 });

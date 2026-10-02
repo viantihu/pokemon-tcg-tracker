@@ -46,6 +46,7 @@ import type { Locale } from "@/lib/sync/types";
 import { bandMeta } from "./plan-meta";
 import {
   NOT_A_LINE,
+  ONE_CARD_LINE,
   defaultChoiceFor,
   type LineChoice,
   type LinePopupModel,
@@ -495,7 +496,9 @@ export function MovePanel({
             <div className="ol">HALF</div>
             <div className="ochips">
               {(["front", "back"] as const).map((h) => {
-                const dead = h === "back" && (backHalfNeedsLine || !formsALine);
+                // UIL-135: a card with no evolutions can still go into a line of one card, through the line popup's
+                // warning; only the older inline picker (no popup) keeps it out.
+                const dead = h === "back" && (backHalfNeedsLine || (!formsALine && !lineModel));
                 return (
                   <button
                     key={h}
@@ -518,7 +521,7 @@ export function MovePanel({
                 );
               })}
               {!formsALine ? (
-                <span className="oskip">{NOT_A_LINE}</span>
+                <span className="oskip">{lineModel ? ONE_CARD_LINE : NOT_A_LINE}</span>
               ) : backHalfNeedsLine ? (
                 <span className="oskip">{backHalfReason}</span>
               ) : null}

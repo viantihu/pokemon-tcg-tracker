@@ -16,9 +16,23 @@ import type { BulkUnitView } from "@/lib/repo/bulk-unit";
 import type { Language } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
 import type { CardForm } from "@/lib/engine/form";
+import type { OverrideRule } from "@/lib/repo/write-ops";
 import type { CardIdentity, ExistingLineBlock, MoveDestination, MoveOptions } from "./types";
 
 /* --------------------------------------- what she chooses --------------------------------------- */
+
+/**
+ * The line rules she can put a card past (UIL-135, Karvi 2026-10-01: "The rules should exist only for the
+ * recommendation engine. Users should always be able to override all rules"): a card that is not the stage's own
+ * (species, stage, branch, trainer or region, language), a line of one card, a line left with stages to decide.
+ */
+export type LineRule = Extract<OverrideRule, "line_fit" | "line_min_stages" | "line_completion">;
+
+/** A rule this card breaks here, in her words, shown before she confirms; her "Put it here anyway" overrides it. */
+export interface LineWarning {
+  rule: LineRule;
+  text: string;
+}
 
 /** Her choice in the popup: the ONE input every back-half write takes. */
 export type LineChoice =
@@ -36,6 +50,8 @@ export type LineChoice =
       thirdPocket?: ThirdPocketChoice;
       /** UIL-121: haul copies the screen routes to this same line: their stages are not asked on this confirm. */
       comingCopyIds?: string[];
+      /** UIL-135: the line rules she puts this card past ("Put it here anyway"), recorded with the write. */
+      overrides?: LineRule[];
     }
   /**
    * Join an existing line's open slot. `foreignLocale` is her second confirm for a line in another language;
@@ -64,6 +80,8 @@ export type LineChoice =
        * with the move. Absent: none, and a full box refuses.
        */
       returnOverFull?: string[];
+      /** UIL-135: the line rules she puts this card past ("Put it here anyway"), recorded with the write. */
+      overrides?: LineRule[];
     }
   /**
    * A copy for a filled slot: keep the one that's there (nothing in the line moves). NOT a line write: the builder
@@ -88,6 +106,8 @@ export type LineChoice =
       /** As a join's: her choice for the line's other open stages she has not decided yet (UIL-121). */
       stages?: Record<number, StageDecision>;
       comingCopyIds?: string[];
+      /** UIL-135: the line rules she puts this card past ("Put it here anyway"), recorded with the write. */
+      overrides?: LineRule[];
     };
 
 /** Where a card coming out of a line goes when that is another back half: a line it starts or joins. */
@@ -312,6 +332,11 @@ export interface LinePopupModel {
   line: LinePopupLine;
   stages: LinePopupStage[];
   existingLines: LinePopupExistingLine[];
+  /**
+   * UIL-135: the line rules this card breaks here, in her words. Shown before she confirms, and her confirm reads
+   * "Put it here anyway": a recommendation, never a refusal. Absent or empty: none.
+   */
+  warnings?: LineWarning[];
   /** Present exactly when `mode` is "replace". */
   replace?: LinePopupReplace;
   /**
@@ -423,6 +448,32 @@ export function leavesLineText(l: LeavesLine): string {
 /** Her words when a card's species has no evolutions: it is never a line (Karvi's ruling, 2026-09-27). */
 export const NOT_A_LINE =
   "A Basic with no evolutions can't start a line. Put it in a front half, a collection or the bulk box.";
+
+/**
+ * UIL-135: the line rules as warnings, in her words (the Senior BA's), for a card she can still put there anyway. The
+ * refusals above stay for a request that does not say she chose to (an older tab).
+ */
+export const LINE_WARNING = {
+  singleStage: (name: string) =>
+    `${name} has no evolutions, so this line would hold just this one card.`,
+  /** The stage's own species when the line names it, else the line's (the Senior BA's wording, 2026-10-02). */
+  wrongCard: (expected: string | null, stage: string, card: string, line: string) =>
+    expected
+      ? `This spot is for ${expected} (${stage}). This card is ${card}.`
+      : `This spot is for another stage of the ${line} line.`,
+  unconfirmed:
+    "We can't confirm this card's evolution from the catalog yet, so it may not be this stage's card.",
+  /** "This is your Arven's Toedscool line, and this is a regular Toedscool." */
+  otherForm: (line: string, card: string) => `This is your ${line} line, and this is ${card}.`,
+  otherLanguage: (line: string, card: string) => `This line is ${line}, and this card is ${card}.`,
+  languageFlip: (language: string) => `This would make the line read as ${language}.`,
+} as const;
+
+/** The Move sheet's note for a card with no evolutions, where the back half still opens the line popup (UIL-135). */
+export const ONE_CARD_LINE = "No evolutions: a line here would hold just this card. Your call.";
+
+/** The confirm when she puts a card past a line rule. */
+export const PUT_IT_HERE_ANYWAY = "Put it here anyway";
 
 /** A join the catalog cannot confirm (its earlier stages are not mirrored yet): not a wrong card, so said as such. */
 export const JOIN_UNCONFIRMED =

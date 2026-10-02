@@ -22,16 +22,23 @@
  */
 
 import {
+  chainFor,
+  formFit,
+  formLabel,
   generateSlots,
+  lineFormOf,
   lineLocaleOf,
+  nameInForm,
+  ownFormOf,
   stageFit,
+  storedOr,
   testViability,
   type Band,
+  type CardForm,
   type CatalogCard,
   type IncomingCard,
   type LineSlotRecord,
   type OwnedCopy,
-  type StageFit,
   type TypeColorMap,
 } from "@/lib/engine";
 import { isStandInId, localeOfId, standInIdFor } from "@/lib/catalog/locale";
@@ -46,8 +53,12 @@ import {
   lineReadsClosed,
   lineStatusOf,
   JOIN_UNCONFIRMED,
+  LINE_WARNING,
   NOT_A_LINE,
+  stageLabel,
   type LineChoice,
+  type LineRule,
+  type LineWarning,
   type StageDecision,
 } from "./popup";
 import {
@@ -113,6 +124,11 @@ export interface LineChoiceWrite {
   slotId: string;
   /** Where the moving copy goes: the LINE's binder and band, back half. */
   placement: { binder_id: string | null; binder_half: "back"; color_band: string };
+  /**
+   * UIL-135: the line rules this write puts a card past, by her choice. The caller declares them on the payload and
+   * records them on its own decision (0037: an override no decision records is refused).
+   */
+  overrides: LineRule[];
 }
 
 const LANGUAGE: Record<string, string> = { en: "English", ja: "Japanese" };
@@ -163,8 +179,15 @@ function startLine(
   // The engine's own chain walk and slot generation, as the cascade's new line uses, with the band SHE chose and
   // viability forced: starting a line from one card is her call, not a proposal the engine must be sure of.
   const chainViability = testViability(state.incoming, owned, state.catalog, state.typeColorMap);
-  // A species with no evolutions is never a line (Karvi's ruling, 2026-09-27), however she asks.
-  if (chainViability.chain.length < 2) throw new Error(NOT_A_LINE);
+  // A species with no evolutions makes a line of one card: her call (UIL-135, over Karvi's 2026-09-27 rule, which now
+  // only keeps the app from suggesting it). Without her "Put it here anyway" an older request is still refused.
+  const overrides: LineRule[] =
+    chainViability.chain.length < 2
+      ? heldTo(
+          [{ rule: "line_min_stages", text: NOT_A_LINE, refusal: NOT_A_LINE }],
+          choice.overrides,
+        )
+      : [];
   const viability = { ...chainViability, band: choice.band as Band, viable: true };
   const gen = generateSlots(state.incoming, viability, owned, state.catalog, state.typeColorMap);
 
@@ -289,6 +312,7 @@ function startLine(
     lineId,
     slotId: ownSlotId,
     placement: { binder_id: choice.binderId, binder_half: "back", color_band: choice.band },
+    overrides,
   };
 }
 
@@ -341,40 +365,193 @@ function pullInto(
 /* ----------------------------------------------- join ----------------------------------------------- */
 
 /**
- * Whether this card is the slot's own stage of this line, by the ONE rule (`stageFit`, lib/engine/line.ts): the same
- * rule every screen's offer uses, so no screen proposes an Add this refuses. What is known around the slot: a card in
- * it, or the card she CHASES there (an undecided stage's leftover engine target is not known).
+ * What a line check reads: the card, the line and its slots, and the card each copy is. Read the same way by the
+ * line builder (fresh state, before a write) and by the popup's loader (before she confirms), so the warning she sees
+ * and the rule the write holds are one rule.
  */
-function fitOfSlot(
-  state: LineWriteState,
-  line: Row<"evolution_line">,
-  slots: Row<"line_slot">[],
-  slot: Row<"line_slot">,
-): StageFit {
-  const catalogById = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
+export interface LineFitInput {
+  card: CatalogCard;
+  catalog: CatalogCard[];
+  line: Row<"evolution_line">;
+  slots: Row<"line_slot">[];
+  slotId: string;
+  cardOfCopy: (copyId: string) => string | null;
+  /** A swap into a filled slot: the card there now names the stage. */
+  replacing?: boolean;
+}
+
+/** A broken line rule: her warning, and the refusal an older request that did not choose to override it gets. */
+interface LineCheck extends LineWarning {
+  refusal: string;
+  /**
+   * Passed only by her own confirm for it, never by the rule's key: a card in another language than the line takes
+   * her "Join the … line anyway" (`foreignLocale`), which the popup asks for in its own words. The key alone would let
+   * a card that ALSO breaks another rule join without her ever seeing the language (the Tech Lead's review of #462).
+   */
+  confirmOnly?: true;
+}
+
+const WRONG_CARD = "That slot is for a different card — pick the slot for this card's own stage.";
+
+/**
+ * The line rules a card breaks in a line's slot (UIL-135: each a recommendation she can put a card past).
+ *
+ *   - The ONE stage rule (`stageFit`): the slot's own species, stage, branch and neighbours, or the catalog cannot
+ *     tell. A swap is the slot's species, which the card there names.
+ *   - Trainer and region (UIL-133): a card of another form than the line's (its stored form, 0038).
+ *   - Language (UIL-090): a card in another language takes her "Join the … line anyway" (`foreignLocale`), and even
+ *     then a line whose language would flip is one more rule.
+ */
+function lineFitChecks(i: LineFitInput, foreignLocale: boolean): LineCheck[] {
+  const catalogById = new Map(i.catalog.map((c) => [c.tcgdexId, c]));
   const knownAt = (s: Row<"line_slot"> | undefined) => {
     const id = s?.copy_id
-      ? state.copiesById.get(s.copy_id)?.catalog_card_id
+      ? i.cardOfCopy(s.copy_id)
       : s?.stage_choice === "chase"
         ? s.target_catalog_card_id
         : null;
     return (id ? catalogById.get(id) : undefined) ?? null;
   };
-  const at = (i: number) => slots.find((s) => s.stage_index === i);
-  const seed =
-    [...slots]
-      .filter((s) => s.id !== slot.id)
-      .sort((a, b) => b.stage_index - a.stage_index)
-      .map(knownAt)
-      .find((c) => c !== null) ?? null;
-  return stageFit(state.incoming.card, state.catalog, {
-    rootDexId: line.root_dex_id,
-    stageIndex: slot.stage_index,
-    chased: slot.stage_choice === "chase" ? knownAt(slot) : null,
-    before: knownAt(at(slot.stage_index - 1)),
-    after: knownAt(at(slot.stage_index + 1)),
-    seed,
+  const slot = i.slots.find((s) => s.id === i.slotId);
+  if (!slot) return [];
+  const checks: LineCheck[] = [];
+  const ordered = [...i.slots].sort((a, b) => a.stage_index - b.stage_index);
+  const lineForm = storedOr(i.line.form, () =>
+    lineFormOf(
+      ordered.map((s) => (s.id === slot.id && !i.replacing ? null : knownAt(s))),
+      i.catalog,
+    ),
+  );
+  // The line's own chain, from its root in its language, to name the line and the stage in her words.
+  const lineLocale = lineLocaleOf(ordered.map(toRecord), i.cardOfCopy);
+  const rootCard = i.catalog.find(
+    (c) =>
+      !c.isDigitalOnly &&
+      c.dexId.includes(i.line.root_dex_id) &&
+      localeOfId(c.tcgdexId) === lineLocale,
+  );
+  const chain = rootCard ? chainFor(rootCard, i.catalog) : [];
+  const lineName = chain[0]
+    ? nameWithForm(nameInForm(chain[0].cards, lineForm, i.catalog), lineForm, rootCard!.tcgdexId)
+    : "evolution";
+  const wrongCard = (expected: string | null): LineCheck => ({
+    rule: "line_fit",
+    text: LINE_WARNING.wrongCard(expected, stageLabel(slot.stage), i.card.name, lineName),
+    refusal: WRONG_CARD,
   });
+  if (i.replacing) {
+    const slotCard =
+      catalogById.get(slot.target_catalog_card_id ?? "") ??
+      (slot.copy_id ? catalogById.get(i.cardOfCopy(slot.copy_id) ?? "") : undefined);
+    if (!slotCard || !i.card.dexId.some((d) => slotCard.dexId.includes(d))) {
+      checks.push(wrongCard(slotCard?.name ?? null));
+    }
+  } else {
+    const at = (n: number) => i.slots.find((s) => s.stage_index === n);
+    const seed =
+      [...i.slots]
+        .filter((s) => s.id !== slot.id)
+        .sort((a, b) => b.stage_index - a.stage_index)
+        .map(knownAt)
+        .find((c) => c !== null) ?? null;
+    const fit = stageFit(i.card, i.catalog, {
+      rootDexId: i.line.root_dex_id,
+      stageIndex: slot.stage_index,
+      chased: slot.stage_choice === "chase" ? knownAt(slot) : null,
+      before: knownAt(at(slot.stage_index - 1)),
+      after: knownAt(at(slot.stage_index + 1)),
+      seed,
+    });
+    if (fit === "unknown") {
+      checks.push({ rule: "line_fit", text: LINE_WARNING.unconfirmed, refusal: JOIN_UNCONFIRMED });
+    }
+    if (fit === "wrong") {
+      // The species the stage is for: her chase there, else the line's chain at that depth (none past a branch).
+      const chased = slot.stage_choice === "chase" ? knownAt(slot) : null;
+      const node = chain[slot.stage_index];
+      checks.push(
+        wrongCard(chased?.name ?? (node ? nameInForm(node.cards, lineForm, i.catalog) : null)),
+      );
+    }
+  }
+  // Another trainer's or region's card: only said of a card that is otherwise the stage's own.
+  if (checks.length === 0 && formFit(i.card, lineForm, i.catalog) === "other") {
+    const cardForm = formOfCard(i.card, i.catalog);
+    const text = LINE_WARNING.otherForm(
+      lineName,
+      cardForm === null ? `a regular ${i.card.name}` : i.card.name,
+    );
+    checks.push({
+      rule: "line_fit",
+      text,
+      refusal: `${text} Put it there from the line popup, or pick its own line.`,
+    });
+  }
+  // A card in another language: her confirm, and then the line's language must not flip (UIL-090).
+  const cardLocale = localeOfId(i.card.tcgdexId);
+  if (cardLocale !== lineLocale) {
+    if (!foreignLocale) {
+      checks.push({
+        rule: "line_fit",
+        confirmOnly: true,
+        text: LINE_WARNING.otherLanguage(languageName(lineLocale), languageName(cardLocale)),
+        refusal:
+          `That line is in another language (${languageName(lineLocale)}) than this card (${languageName(cardLocale)}). ` +
+          "Confirm joining it anyway, or start a line in the card's own language.",
+      });
+    } else {
+      const anchored = i.slots.some(
+        (s) =>
+          s.state === "filled" &&
+          s.stage_index < slot.stage_index &&
+          s.copy_id !== null &&
+          localeOfId(i.cardOfCopy(s.copy_id) ?? "") === lineLocale,
+      );
+      if (!anchored) {
+        checks.push({
+          rule: "line_fit",
+          text: LINE_WARNING.languageFlip(languageName(cardLocale)),
+          refusal: `This would make the line read as ${languageName(cardLocale)}. Start ${withArticle(cardLocale)} line instead.`,
+        });
+      }
+    }
+  }
+  return checks;
+}
+
+/**
+ * The warnings the popup shows before she confirms (UIL-135): every rule this card breaks in that slot but the plain
+ * language one, which the popup asks with its own "Join the … line anyway".
+ */
+export function lineFitWarnings(i: LineFitInput, foreignLocale = true): LineWarning[] {
+  return lineFitChecks(i, foreignLocale)
+    .filter((c) => !c.confirmOnly)
+    .map(({ rule, text }) => ({ rule, text }));
+}
+
+/**
+ * Hold a write to the line rules (UIL-135): a rule she has not put the card past refuses it in its own words; the ones
+ * she has are returned, for the write to declare and record. Her "Join the … line anyway" is her override of the
+ * language rule, so it is recorded the same way.
+ */
+function heldTo(
+  checks: LineCheck[],
+  overrides: readonly LineRule[] | undefined,
+  extra: LineRule[] = [],
+): LineRule[] {
+  const chosen = new Set(overrides ?? []);
+  for (const c of checks) if (c.confirmOnly || !chosen.has(c.rule)) throw new Error(c.refusal);
+  return [...new Set([...checks.map((c) => c.rule), ...extra])];
+}
+
+/** A line's name in her words, its form said when its root's name does not say it: "Hisuian Rowlet". */
+function nameWithForm(rootName: string, form: CardForm, tcgdexId: string): string {
+  const label = formLabel(form);
+  return label && ownFormOf(rootName, tcgdexId) !== form ? `${label} ${rootName}` : rootName;
+}
+
+function formOfCard(card: CatalogCard, catalog: CatalogCard[]): CardForm {
+  return lineFormOf([card], catalog);
 }
 
 function joinLine(
@@ -391,14 +568,23 @@ function joinLine(
     throw new Error("That slot has already been filled — reload the screen and pick again.");
   }
 
-  const fit = fitOfSlot(state, line, slots, slot);
-  if (fit === "unknown") throw new Error(JOIN_UNCONFIRMED);
-  if (fit === "wrong") {
-    throw new Error("That slot is for a different card — pick the slot for this card's own stage.");
-  }
-
+  // UIL-135: every line rule this card breaks here is one she put it past, or the write is refused in its words.
   const cardOf = (id: string) => state.copiesById.get(id)?.catalog_card_id ?? null;
-  assertLanguageHolds(state, slots, slot, cardOf, choice.foreignLocale === true);
+  const overrides = heldTo(
+    lineFitChecks(
+      {
+        card: state.incoming.card,
+        catalog: state.catalog,
+        line,
+        slots,
+        slotId: slot.id,
+        cardOfCopy: cardOf,
+      },
+      choice.foreignLocale === true,
+    ),
+    choice.overrides,
+    usesForeignLocale(state, slots, cardOf, choice.foreignLocale === true),
+  );
 
   // UIL-121: her choice for the line's other open stages she has not decided (Karvi's ruling: with the last card she
   // has placed, she is asked about what is still missing); then the line reads closed once no stage waits, and a card
@@ -451,53 +637,20 @@ function joinLine(
     lineId: line.id,
     slotId: slot.id,
     placement: { binder_id: line.binder_id, binder_half: "back", color_band: line.color_band },
+    overrides,
   };
 }
 
-/**
- * UIL-090's derivation: a line's language is its lowest filled stage's (else its lowest target's). A card in another
- * language takes her second confirm, and even then only where a card of the LINE's language already fills a LOWER
- * stage, so the line's language never flips (the Senior BA's ruling on Q1). Shared by join and replace.
- */
-function assertLanguageHolds(
+/** Her "Join the … line anyway": the language rule she put this card past (UIL-135 records it as line_fit). */
+function usesForeignLocale(
   state: LineWriteState,
   slots: Row<"line_slot">[],
-  slot: Row<"line_slot">,
   cardOf: (copyId: string) => string | null,
   confirmed: boolean,
-): void {
-  const cardLocale = localeOfId(state.incoming.card.tcgdexId);
-  const lineLocale = lineLocaleOf(
-    slots.map((s) => ({
-      id: s.id,
-      stageIndex: s.stage_index,
-      stage: s.stage,
-      state: s.state as LineSlotRecord["state"],
-      copyId: s.copy_id,
-      dexId: null,
-      targetCatalogCardId: s.target_catalog_card_id,
-    })),
-    cardOf,
-  );
-  if (cardLocale === lineLocale) return;
-  if (!confirmed) {
-    throw new Error(
-      `That line is in another language (${languageName(lineLocale)}) than this card (${languageName(cardLocale)}). ` +
-        "Confirm joining it anyway, or start a line in the card's own language.",
-    );
-  }
-  const anchored = slots.some(
-    (s) =>
-      s.state === "filled" &&
-      s.stage_index < slot.stage_index &&
-      s.copy_id !== null &&
-      localeOfId(cardOf(s.copy_id) ?? "") === lineLocale,
-  );
-  if (!anchored) {
-    throw new Error(
-      `This would make the line read as ${languageName(cardLocale)}. Start ${withArticle(cardLocale)} line instead.`,
-    );
-  }
+): LineRule[] {
+  if (!confirmed) return [];
+  const lineLocale = lineLocaleOf(slots.map(toRecord), cardOf);
+  return localeOfId(state.incoming.card.tcgdexId) === lineLocale ? [] : ["line_fit"];
 }
 
 /* ----------------------------------------------- replace ----------------------------------------------- */
@@ -520,16 +673,24 @@ function replaceInLine(
   if (!outgoingRow)
     throw new Error("The card in that slot is no longer in the collection — reload the screen.");
 
-  const catalogById = new Map(state.catalog.map((c) => [c.tcgdexId, c]));
-  const slotCard =
-    catalogById.get(slot.target_catalog_card_id ?? "") ??
-    catalogById.get(outgoingRow.catalog_card_id);
-  if (!slotCard || !state.incoming.card.dexId.some((d) => slotCard.dexId.includes(d))) {
-    throw new Error("That slot is for a different card — pick the slot for this card's own stage.");
-  }
-
+  // UIL-135: as a join's, checked against the slot the card there names.
   const cardOf = (id: string) => state.copiesById.get(id)?.catalog_card_id ?? null;
-  assertLanguageHolds(state, slots, slot, cardOf, choice.foreignLocale === true);
+  const overrides = heldTo(
+    lineFitChecks(
+      {
+        card: state.incoming.card,
+        catalog: state.catalog,
+        line,
+        slots,
+        slotId: slot.id,
+        cardOfCopy: cardOf,
+        replacing: true,
+      },
+      choice.foreignLocale === true,
+    ),
+    choice.overrides,
+    usesForeignLocale(state, slots, cardOf, choice.foreignLocale === true),
+  );
 
   // Where the card coming out goes: anywhere she picked, or into another line built by these same rules.
   const out = choice.outgoing;
@@ -556,6 +717,7 @@ function replaceInLine(
     shareClaims(state, state.outgoing);
     const nested = buildLineChoiceOps(state.outgoing, outgoingId, choice.outgoingLine);
     outOps.push(...nested.ops);
+    overrides.push(...nested.overrides.filter((r) => !overrides.includes(r)));
     outPatch = { role: "shelved", ...nested.placement, line_slot_id: nested.slotId };
   }
 
@@ -616,6 +778,7 @@ function replaceInLine(
     lineId: line.id,
     slotId: slot.id,
     placement: { binder_id: line.binder_id, binder_half: "back", color_band: line.color_band },
+    overrides,
   };
 }
 
