@@ -4111,16 +4111,16 @@ html.tour-open .app {
   }
 }
 
-/* UIL-130 (QA's pass on #450, items 2 and 3): tap targets of 40px on the new box surfaces. The binder rows and the
-   other popup chips share these classes and follow in their own change. */
-.binderrow.bulkrow .editcollbtn {
+/* Tap targets of at least 40px (UIL-130, QA's pass on #450; the Senior BA's follow-up): every binder and box row's
+   buttons, every chip in the popups (bands, boxes, "Add anyway"), and the line popup's footer buttons, whose phone
+   padding (below) would otherwise leave Cancel and "Put it here anyway" at 39px. */
+.editcollbtn,
+.lp-band,
+.lp-foot .btn {
   min-height: 40px;
 }
 .binderrow.bulkrow .bxdel {
   min-width: 40px;
-}
-.lp-dest .lp-bands .lp-band {
-  min-height: 40px;
 }
 
 /* 0037 (Karvi, 2026-10-01: "Users should always be able to override all rules"): a full box can be picked anyway, and a
