@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import { applyCollectionRemoval } from "@/lib/coll";
+import { clearCatalogCache } from "@/lib/plan";
 import type { MoveNameLookups } from "@/lib/line";
 import type { LineChoice } from "@/lib/line/popup";
 import {
@@ -175,6 +176,8 @@ describe("UIL-135 · Collections → a line of one card, with her “Put it here
          values ($1, $2, 'loneling', 'shelved', $3, 'front', 'red')`,
       [LONER_COPY, OWNER, SPEC],
     );
+    // Every catalog read goes through the shared cache (#461): this test's card is new to it.
+    clearCatalogCache();
     await asOwner(db);
   });
   const removeLoner = (overrides?: ["line_min_stages"]) =>
