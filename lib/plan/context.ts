@@ -312,6 +312,7 @@ export async function loadPlanContext(
         const id = unitId ?? bulkUnitForRoute(bulkUnits);
         return bulkUnits.find((u) => u.id === id)?.name ?? null;
       },
+      bulkFull: () => bulkUnits.length > 0 && bulkUnitForRoute(bulkUnits) === null,
       binderNameById,
       bandDisplayByKey,
       collectionNameById,

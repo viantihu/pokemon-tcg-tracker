@@ -11,7 +11,7 @@
  *   - a pick that is not one of the binder's collections is refused;
  *   - a specialty binder with no collections keeps today's placement.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import {
   clearCatalogCache,
@@ -26,12 +26,19 @@ import {
   asSuperuser,
   freshRpcDb,
   haulRow,
+  OWNER,
   seedBinders,
   seedCatalogCardsFull,
   seedCollections,
   seedHaulRows,
 } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
+import { shelveCardAction } from "@/app/(ui)/plan/actions";
+
+// The action's owner seam needs a real request; hand it the PGlite client instead (as tests/plan/line-done.test.ts).
+vi.mock("@/lib/plan/session", () => ({
+  getOwnerContext: async () => ({ db: pgliteClient(db), ownerId: OWNER }),
+}));
 
 const B1 = "1c000000-0000-0000-0000-0000000000b1";
 const SPEC = "1c000000-0000-0000-0000-00000000c5ec";
@@ -206,5 +213,112 @@ describe("UIL-053 · a specialty binder with no collections is unchanged", () =>
     );
     await commitCardPlacement(pgliteClient(db), { card: INCOMING });
     expect(await copyRow()).toEqual({ role: "shelved", binder_id: SPEC });
+  });
+});
+
+/**
+ * 0037 (Karvi, 2026-10-01: "Users should always be able to override all rules"): she can shelve the card in that
+ * binder with no collection, as her explicit choice. It is recorded as an override (collection_pick) on the card's
+ * decision, declared on the write. A pick that is no longer one of the binder's collections is still refused.
+ */
+describe("0037 · she shelves it without a collection, knowingly", () => {
+  async function overridesOf() {
+    const r = await db.query<{ overrides: string[]; resolved_by: string }>(
+      `select overrides, resolved_by from placement_decision where copy_id = $1`,
+      [INCOMING.existingCopyId],
+    );
+    return r.rows;
+  }
+  const withCollections = () =>
+    seeded(() =>
+      seedCollections(db, [
+        { id: CHARIZARDS, name: "Charizards", currentBinderIds: [SPEC], mode: "open" },
+        { id: FIRE, name: "Fire art", currentBinderIds: [SPEC] },
+      ]),
+    );
+
+  it("with her override: shelved in the binder on no collection's list, and recorded as hers", async () => {
+    await withCollections();
+    await commitCardPlacement(pgliteClient(db), { card: INCOMING, noCollection: true });
+    expect(await copyRow()).toEqual({ role: "shelved", binder_id: SPEC });
+    expect(await listOf(CHARIZARDS)).toEqual([]);
+    expect(await listOf(FIRE)).toEqual([]);
+    expect(await overridesOf()).toEqual([{ overrides: ["collection_pick"], resolved_by: "user" }]);
+    // Her words, spoken to her as every other reason is ("your call").
+    expect((await decisions())[0]?.reason).toBe(
+      "Specialty card shelved in its binder with no collection (your call): it counts toward none.",
+    );
+  });
+
+  it("the write DECLARES collection_pick, not only records it (QA's V7 on #459)", async () => {
+    // 0037 checks declared ⊆ recorded, and collection_pick relaxes no database rule, so a write that only recorded it
+    // would still pass. The contract is that every override is declared on the payload too: pinned on the RPC itself.
+    await withCollections();
+    const sent: { payload: { overrides?: string[] } }[] = [];
+    const client = pgliteClient(db) as unknown as {
+      rpc(fn: string, args: { payload: { overrides?: string[] } }): Promise<unknown>;
+    };
+    const rpc = client.rpc.bind(client);
+    client.rpc = (fn, args) => {
+      sent.push(args);
+      return rpc(fn, args);
+    };
+    await commitCardPlacement(client as unknown as Parameters<typeof commitCardPlacement>[0], {
+      card: INCOMING,
+      noCollection: true,
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].payload.overrides).toEqual(["collection_pick"]);
+  });
+
+  it("through the screen's own action: her override reaches the write", async () => {
+    await withCollections();
+    const res = await shelveCardAction({
+      card: {
+        id: INCOMING.id,
+        tcgdexId: INCOMING.tcgdexId,
+        variant: INCOMING.variant,
+        existingCopyId: INCOMING.id,
+      },
+      noCollection: true,
+    });
+    expect(res).toMatchObject({ ok: true });
+    expect(await overridesOf()).toEqual([{ overrides: ["collection_pick"], resolved_by: "user" }]);
+  });
+
+  it("without it: still asked to pick, and nothing is written", async () => {
+    await withCollections();
+    await expect(
+      commitCardPlacement(pgliteClient(db), { card: INCOMING, noCollection: false }),
+    ).rejects.toThrow(COLLECTION_PICK.missing);
+    expect(await copyRow()).toEqual({ role: "haul", binder_id: null });
+    expect(await overridesOf()).toEqual([]);
+  });
+
+  it("a stale pick is still refused, even with the override", async () => {
+    await seeded(() => seedBinders(db, [{ id: SPEC2, type: "specialty", name: "Specialty B" }]));
+    await withCollections();
+    await seeded(() =>
+      seedCollections(db, [{ id: ELSEWHERE, name: "Elsewhere", currentBinderIds: [SPEC2] }]),
+    );
+    await expect(
+      commitCardPlacement(pgliteClient(db), {
+        card: INCOMING,
+        collectionChoice: ELSEWHERE,
+        noCollection: true,
+      }),
+    ).rejects.toThrow(COLLECTION_PICK.notHere);
+    expect(await copyRow()).toEqual({ role: "haul", binder_id: null });
+  });
+
+  it("with a collection picked, the override changes nothing: it joins that one, as before", async () => {
+    await withCollections();
+    await commitCardPlacement(pgliteClient(db), {
+      card: INCOMING,
+      collectionChoice: FIRE,
+      noCollection: true,
+    });
+    expect(await listOf(FIRE)).toEqual([CHARIZARD_EX_SV035_006.tcgdexId]);
+    expect(await overridesOf()).toEqual([{ overrides: [], resolved_by: "user" }]);
   });
 });

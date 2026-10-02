@@ -51,6 +51,13 @@ import {
   type StageDecision,
 } from "./popup";
 import {
+  fillerReturnedDecision,
+  overLimitNote,
+  overridesFor,
+  recordOverrides,
+  returnDestination,
+} from "./overrides";
+import {
   stageWriteOps,
   thirdPocketWriteOps,
   validateStageDecision,
@@ -78,6 +85,8 @@ export interface LineWriteState {
   blocksByLine: Map<string, Row<"binder_block">[]>;
   /** REPLACE into another back half: the same state for the card coming out, which `outgoingLine` places. */
   outgoing?: LineWriteState;
+  /** 0037: her box names by id, for a spare card she sends into a full box knowingly (loaded only then). */
+  boxNames?: ReadonlyMap<string, string>;
 }
 
 export interface LineChoiceWrite {
@@ -406,7 +415,7 @@ function joinLine(
     ops: [
       // A stage that held a filler: the card takes its pocket, so the filler comes out (a spare card back to the
       // bulk box), in the same write.
-      ...fillerOutOps(state, line.id, slot, choice.returnBoxes),
+      ...fillerOutOps(state, line.id, slot, choice),
       ...buildExistingLineJoinOps({
         copyId: state.copy.id,
         lineId: line.id,
@@ -552,16 +561,22 @@ function replaceInLine(
   ];
   const joinList = collectionTargetJoinOp(out, outgoingRow.catalog_card_id);
   if (joinList) ops.push(joinList);
-  ops.push({
-    op: "insert_decision",
-    haul_id: null,
-    copy_id: outgoingId,
-    decision: "line-replaced-out",
-    reason:
-      `Swapped out of its ${line.color_band} line at your confirmation, for ${state.incoming.card.name}; ` +
-      `now ${describePatch(outPatch)}.`,
-    resolved_by: "user",
-  });
+  // 0037: a full box she picked for it knowingly is recorded on this card's own decision.
+  ops.push(
+    recordOverrides(
+      {
+        op: "insert_decision",
+        haul_id: null,
+        copy_id: outgoingId,
+        decision: "line-replaced-out",
+        reason:
+          `Swapped out of its ${line.color_band} line at your confirmation, for ${state.incoming.card.name}; ` +
+          `now ${describePatch(outPatch)}.${overLimitNote([out])}`,
+        resolved_by: "user",
+      },
+      overridesFor([out]),
+    ),
+  );
   // UIL-121: a swap places her card in the line too, so the line's other open stages she has not decided are asked.
   const others = decideOtherStages(
     state,
@@ -665,8 +680,11 @@ function fillerOutOps(
   state: LineWriteState,
   lineId: string,
   slot: Row<"line_slot">,
-  /** UIL-130: the box she picked for a spare card coming out, by copy id (absent: its home box). */
-  returnBoxes: Record<string, string> = {},
+  /**
+   * UIL-130: the box she picked for a spare card coming out, by copy id (absent: its home box); 0037: the ones she
+   * sends into a full box knowingly.
+   */
+  choice: { returnBoxes?: Record<string, string>; returnOverFull?: string[] },
 ): WriteOp[] {
   if (slot.state !== "block") return [];
   const ops: WriteOp[] = [];
@@ -674,6 +692,7 @@ function fillerOutOps(
     if (b.line_slot_id !== slot.id) continue;
     ops.push({ op: "delete_binder_block", id: b.id, line_id: lineId });
     if (b.copy_id) {
+      const dest = returnDestination(b.copy_id, choice);
       ops.push({
         op: "update_copy",
         id: b.copy_id,
@@ -683,9 +702,14 @@ function fillerOutOps(
           binder_half: null,
           color_band: null,
           line_slot_id: null,
-          ...(returnBoxes[b.copy_id] ? { bulk_unit_id: returnBoxes[b.copy_id] } : {}),
+          ...(dest.unitId ? { bulk_unit_id: dest.unitId } : {}),
         },
       });
+      // Into a full box she picked knowingly: recorded on a decision of its own (a return wrote none before 0037).
+      if (dest.overFull) {
+        const box = dest.unitId ?? state.copiesById.get(b.copy_id)?.bulk_unit_id ?? "";
+        ops.push(fillerReturnedDecision(b.copy_id, state.boxNames?.get(box) ?? "its box", dest));
+      }
     }
   }
   return ops;

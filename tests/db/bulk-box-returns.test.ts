@@ -7,6 +7,9 @@
  *     with a box she picked → it goes there. The model says which spare cards a line holds and where they live.
  *   - An Add into the stage a spare card fills (the line builder, through the real Move): the same, and the popup's
  *     model names the spare card coming out with its home box.
+ *
+ * 0037: the refusals below still hold for a card she did not knowingly send to the full box. Her "Add anyway" into a
+ * full box lands, recorded with the move: tests/db/override-full-box.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";

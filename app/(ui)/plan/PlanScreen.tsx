@@ -69,6 +69,8 @@ import {
 import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
 import { lineModelAction } from "../_components/line-popup-actions";
 import { PlanLinePopup } from "./PlanLinePopup";
+import { SwapBoxPicker, swapBoxReady } from "./SwapBoxPicker";
+import { initialBox, type BulkUnitView } from "@/lib/plan/bulk-units";
 import {
   inLineOrder,
   lineKeyFor,
@@ -152,9 +154,25 @@ export function pickedCollection(item: PlanItem, chosen: Record<string, string>)
   const pick = item.collectionPick;
   if (!pick) return null;
   const c = chosen[item.incomingId];
+  // 0037: her "Shelve without a collection" picks none, even in a binder with only one.
+  if (c === NO_COLLECTION) return null;
   if (c && pick.collections.some((x) => x.id === c)) return c;
   return pick.collections.length === 1 ? pick.collections[0].id : null;
 }
+
+/**
+ * 0037 (Karvi, 2026-10-01: "Users should always be able to override all rules"): her "Shelve without a collection",
+ * kept with her picks. The card goes in the binder on no collection's list, recorded as her override (collection_pick).
+ */
+export const NO_COLLECTION = "__no-collection__";
+
+/** Whether she chose to shelve this specialty card without a collection (0037). */
+export function shelvesWithoutCollection(item: PlanItem, chosen: Record<string, string>): boolean {
+  return !!item.collectionPick && chosen[item.incomingId] === NO_COLLECTION;
+}
+
+/** A bulk place: where the card a swap displaces goes when she picks its box (0037). */
+type BulkDestination = Extract<MoveDestination, { kind: "bulk" }>;
 
 export function subgroupKey(bandKey: string, kind: "basic" | "nonbasic"): string {
   return `${bandKey}:${kind}`;
@@ -415,6 +433,11 @@ export function PlanScreen({
   );
   const [moveOptions, setMoveOptions] = useState<MoveOptions | null>(null);
   const [moveTarget, setMoveTarget] = useState<MoveTargetCard | null>(null);
+  /**
+   * 0037: the box she picks for the card a swap displaces when every box is full, by draft id ("Pick a box…" on a
+   * swap row). Sent with Done; the server records an `overFull` pick on the swap's decision.
+   */
+  const [displaced, setDisplaced] = useState<Record<string, BulkDestination>>({});
   const [toast, setToast] = useState<string | null>(null);
   // Pending-placement queue (UIL-003). Seeded from the server render, then re-read after a commit.
   const [pendingState, setPendingState] = useState<"loading" | "ready">("ready");
@@ -485,7 +508,8 @@ export function PlanScreen({
     window.setTimeout(() => setToast((t) => (t === msg ? null : t)), 2600);
   }
 
-  async function openMove(item: PlanItem) {
+  /** Her Move sheet for a card. `initial`: where it opens, when not on her Move or a front half (0037: "Pick a box…"). */
+  async function openMove(item: PlanItem, initial?: MoveDestination) {
     let opts = moveOptions;
     if (!opts) {
       try {
@@ -512,11 +536,38 @@ export function PlanScreen({
         item,
         join,
         existing ??
+          initial ??
           (gen
             ? { kind: "shelf", binderId: gen.id, half: "front", band: item.bandKey }
             : undefined),
         plan?.blockNeeds,
       ),
+    );
+  }
+
+  /**
+   * 0037, a swap row with every box full: "Pick a box…" opens the picker for the card it swaps out, in the spotlight,
+   * on her default box (the Move sheet would move the holo instead and skip the swap).
+   */
+  async function openSwapBox(item: PlanItem) {
+    let opts = moveOptions;
+    if (!opts) {
+      try {
+        opts = await getMoveOptions();
+        setMoveOptions(opts);
+      } catch {
+        setError("Could not load the placement options.");
+        return;
+      }
+    }
+    const first = initialBox(opts.bulkUnits ?? []);
+    setDisplaced((prev) =>
+      prev[item.incomingId]
+        ? prev
+        : {
+            ...prev,
+            [item.incomingId]: first ? { kind: "bulk", unitId: first } : { kind: "bulk" },
+          },
     );
   }
 
@@ -799,6 +850,15 @@ export function PlanScreen({
                   (fresh?.id === item.incomingId && fresh.item) || item,
                   collectionChoice,
                 ),
+            // 0037: the box she picked for the card a swap displaces (every box full). Her Move skips the swap.
+            displacedTo: overrides[item.incomingId] ? null : (displaced[item.incomingId] ?? null),
+            // …or her "Shelve without a collection" (0037), which the server records as her override.
+            noCollection:
+              !overrides[item.incomingId] &&
+              shelvesWithoutCollection(
+                (fresh?.id === item.incomingId && fresh.item) || item,
+                collectionChoice,
+              ),
           }),
         LOST.action,
       );
@@ -876,6 +936,7 @@ export function PlanScreen({
     setError(null);
     setOverrides({});
     setCollectionChoice({});
+    setDisplaced({});
     setMoveTarget(null);
     setPlanIsResumed(false);
     setLiveStamp(stateStamp);
@@ -1345,6 +1406,10 @@ export function PlanScreen({
           overrides={overrides}
           overrideNames={overrideNames}
           onMove={openMove}
+          displaced={displaced}
+          bulkUnits={moveOptions?.bulkUnits ?? null}
+          onOpenSwapBox={(item) => void openSwapBox(item)}
+          onPickSwapBox={(draftId, dest) => setDisplaced((prev) => ({ ...prev, [draftId]: dest }))}
           resumed={planIsResumed}
           collapsed={collapsed}
           setCollapsed={setCollapsed}
@@ -1633,7 +1698,12 @@ function PlanView(props: {
   overrides: Record<string, MoveDestination>;
   /** Name maps for override destination sentences (UIL-037); null until options load. */
   overrideNames: MoveNameLookups | null;
-  onMove: (item: PlanItem) => void;
+  onMove: (item: PlanItem, initial?: MoveDestination) => void;
+  /** 0037: her box for the card each swap displaces, by draft id; her boxes; and the picker's two actions. */
+  displaced: Record<string, BulkDestination>;
+  bulkUnits: BulkUnitView[] | null;
+  onOpenSwapBox: (item: PlanItem) => void;
+  onPickSwapBox: (draftId: string, dest: BulkDestination) => void;
   /** True when this plan was restored from a parked run rather than just computed (UIL-006). */
   resumed: boolean;
   /** Band keys currently folded away (UIL-018). */
@@ -1673,6 +1743,10 @@ function PlanView(props: {
     overrides,
     overrideNames,
     onMove,
+    displaced,
+    bulkUnits,
+    onOpenSwapBox,
+    onPickSwapBox,
     resumed,
     collapsed,
     setCollapsed,
@@ -1954,8 +2028,9 @@ function PlanView(props: {
               onShelve={(it) =>
                 it.lineProposal && !overrides[it.incomingId]
                   ? onOpenLine(it) // ticked only when she confirms in the popup (the UX Dev's guard)
-                  : it.collectionPick && !overrides[it.incomingId]
-                    ? selectFromList(flatIndex.get(it.incomingId) ?? cur)
+                  : (it.collectionPick || it.boxesFull) && !overrides[it.incomingId]
+                    ? // 0037: every box full is hers to decide there too (Pick a box…).
+                      selectFromList(flatIndex.get(it.incomingId) ?? cur)
                     : void shelveCard(it)
               }
               onOpenLine={onOpenLine}
@@ -1964,6 +2039,7 @@ function PlanView(props: {
               overrideNames={overrideNames}
               arrived={arrived}
               collectionChoice={collectionChoice}
+              boxPicked={(id) => swapBoxReady(displaced[id], bulkUnits ?? [])}
               collapsedSubgroups={collapsedSubgroups}
               onToggleSubgroupCollapse={toggleSubgroupCollapse}
             />
@@ -2006,6 +2082,22 @@ function PlanView(props: {
               overrideNames={overrideNames}
               blockNeeds={plan.blockNeeds}
               onMove={() => flatItems[cur] && onMove(flatItems[cur])}
+              onPickBox={() => {
+                const it = flatItems[cur];
+                if (!it) return;
+                // A swap's card coming out gets its box here; this card itself goes to bulk on the Move sheet.
+                if (it.action === "SWAP") onOpenSwapBox(it);
+                else onMove(it, { kind: "bulk" });
+              }}
+              swapBox={
+                flatItems[cur] && displaced[flatItems[cur].incomingId] && bulkUnits
+                  ? {
+                      boxes: bulkUnits,
+                      value: displaced[flatItems[cur].incomingId],
+                      onPick: (dest) => onPickSwapBox(flatItems[cur].incomingId, dest),
+                    }
+                  : undefined
+              }
               onSwapIntoLine={() => flatItems[cur] && onSwapIntoLine(flatItems[cur])}
               // Only when the reply belongs to the card actually in the spotlight (UIL-045).
               freshItem={
@@ -2071,6 +2163,8 @@ export function BandSection(props: {
   arrived?: Set<string>;
   /** Her collection picks (UIL-053), so a row can say it still needs one. Optional for the render tests. */
   collectionChoice?: Record<string, string>;
+  /** 0037: whether a swap row's card coming out has its box picked (so the row no longer asks). */
+  boxPicked?: (draftId: string) => boolean;
   /** Open a line card's popup from its badge (UIL-117). Optional for the render tests. */
   onOpenLine?: (item: PlanItem) => void;
   /**
@@ -2098,6 +2192,7 @@ export function BandSection(props: {
     overrideNames,
     arrived,
     collectionChoice,
+    boxPicked,
     onOpenLine,
     collapsedSubgroups,
     onToggleSubgroupCollapse,
@@ -2182,7 +2277,13 @@ export function BandSection(props: {
                       needsCollection={
                         !!it.collectionPick &&
                         !overrides[it.incomingId] &&
-                        !pickedCollection(it, collectionChoice ?? {})
+                        !pickedCollection(it, collectionChoice ?? {}) &&
+                        !shelvesWithoutCollection(it, collectionChoice ?? {})
+                      }
+                      needsBox={
+                        !!it.boxesFull &&
+                        !overrides[it.incomingId] &&
+                        !(boxPicked?.(it.incomingId) ?? false)
                       }
                     />
                   ))}
@@ -2211,6 +2312,8 @@ export function PlanRow(props: {
   isNew?: boolean;
   /** A specialty card that still needs her pick of collection (UIL-053). */
   needsCollection?: boolean;
+  /** A card for bulk with every box full (0037): she picks a box, anyway. */
+  needsBox?: boolean;
   /** Open this card's line popup from its badge (UIL-117). */
   onOpenLine?: () => void;
 }) {
@@ -2225,6 +2328,7 @@ export function PlanRow(props: {
     overrideNames,
     isNew = false,
     needsCollection = false,
+    needsBox = false,
     onOpenLine,
   } = props;
   // Show where she MOVED the card, not where the cascade proposed — same source as the spotlight, so
@@ -2303,6 +2407,7 @@ export function PlanRow(props: {
         {override ? <span className="moved u">{done ? "Moved" : "Will move"}</span> : null}
         {item.needsDecision ? <span className="needs u">Decide</span> : null}
         {needsCollection && !done ? <span className="needs u">Pick collection</span> : null}
+        {needsBox && !done ? <span className="needs u">Pick a box</span> : null}
         {/* UIL-117 (v3 section 1): every card headed into a back half says what it would do to a line, and needs
             her OK; the badge opens its popup. Gone once shelved, or once she moved it instead. */}
         {showBadge && item.lineProposal ? (
@@ -2351,6 +2456,16 @@ export function Spotlight(props: {
   /** UIL-030: the plan's open block needs, so the offer can say what is open and lead to the sheet. */
   blockNeeds?: BlockNeedCandidate[];
   onMove: () => void;
+  /**
+   * 0037, every box full: her Move sheet opened on the bulk box, where she adds it to a box anyway; on a swap row, the
+   * picker for the card it swaps out (`swapBox`, once opened).
+   */
+  onPickBox?: () => void;
+  swapBox?: {
+    boxes: BulkUnitView[];
+    value: BulkDestination;
+    onPick: (dest: BulkDestination) => void;
+  };
   /** UIL-126: a plain extra copy's "⇄ Swap this one into the line…". Absent: not offered. */
   onSwapIntoLine?: () => void;
   /**
@@ -2383,6 +2498,8 @@ export function Spotlight(props: {
     overrideNames,
     blockNeeds,
     onMove,
+    onPickBox,
+    swapBox,
     onSwapIntoLine,
     freshItem,
     refreshing = false,
@@ -2404,7 +2521,18 @@ export function Spotlight(props: {
   const collectionPick = !override ? (item.collectionPick ?? null) : null;
   const pickedId = collectionPick ? pickedCollection(item, collectionChoice) : null;
   const pickedName = collectionPick?.collections.find((c) => c.id === pickedId)?.name ?? null;
-  const pendingCollection = !!collectionPick && !pickedId && !done;
+  // 0037: or her "Shelve without a collection", which Done sends as her override.
+  const without = !!collectionPick && shelvesWithoutCollection(item, collectionChoice);
+  const pendingCollection = !!collectionPick && !pickedId && !without && !done;
+  /**
+   * 0037: the plan sends it to bulk and every box is full, so it names none (the server would refuse it). Done waits,
+   * and "Pick a box…" opens her Move sheet on the bulk box, where adding it anyway is hers. Her Move names its own.
+   */
+  const pendingBox =
+    !override &&
+    !!item.boxesFull &&
+    !done &&
+    !(swapBox && swapBoxReady(swapBox.value, swapBox.boxes));
   // Only worth telling her when the pocket actually moved; a reworded reason is not news.
   const movedFrom =
     freshItem && !override && freshItem.destination !== forecast.destination
@@ -2463,7 +2591,11 @@ export function Spotlight(props: {
       <div className="doit">
         <b>{pendingCollection ? "Which collection? Pick one below" : disp.big}</b>
         <span className="sg u">
-          {pickedName ? `${disp.destination} · ${pickedName}` : disp.destination}
+          {pickedName
+            ? `${disp.destination} · ${pickedName}`
+            : without
+              ? `${disp.destination} · No collection`
+              : disp.destination}
         </span>
       </div>
 
@@ -2504,7 +2636,11 @@ export function Spotlight(props: {
           <span className="oskip">
             This binder holds collections. The card goes on the list of the one you pick.
           </span>
-          <div className="ochips" role="group" aria-label="Which collection this card belongs to">
+          <div
+            className="ochips collchips"
+            role="group"
+            aria-label="Which collection this card belongs to"
+          >
             {collectionPick.collections.map((c) => (
               <button
                 key={c.id}
@@ -2517,8 +2653,44 @@ export function Spotlight(props: {
                 {c.name}
               </button>
             ))}
+            {/* 0037: the pick is the recommendation; none is hers too (Karvi: "Users should always be able to
+                override all rules"). */}
+            <button
+              type="button"
+              className={"ochip" + (without ? " on" : "")}
+              aria-pressed={without}
+              onClick={() => onPickCollection?.(NO_COLLECTION)}
+              disabled={busy}
+            >
+              Shelve without a collection
+            </button>
           </div>
+          {without ? (
+            <span className="oskip" role="note">
+              It won&apos;t count toward any collection.
+            </span>
+          ) : null}
         </div>
+      ) : null}
+
+      {pendingBox && !swapBox ? (
+        <div className="orow boxfull">
+          <span className="oskip" role="alert">
+            Every bulk box is full. Pick a box to add it to anyway, or move it somewhere else.
+          </span>
+          <button type="button" className="btn sm" onClick={onPickBox} disabled={busy}>
+            Pick a box…
+          </button>
+        </div>
+      ) : null}
+      {/* A swap row's card coming out, once she opened its picker (0037): its box, until Done writes it. */}
+      {swapBox && !override && !done ? (
+        <SwapBoxPicker
+          boxes={swapBox.boxes}
+          value={swapBox.value}
+          onPick={swapBox.onPick}
+          busy={busy}
+        />
       ) : null}
 
       {/* "Moved" as its own label because Done is now the commit (UIL-027) — there is no separate
@@ -2604,7 +2776,7 @@ export function Spotlight(props: {
           type="button"
           className="btn btn-primary go"
           onClick={onShelve}
-          disabled={done || busy || refreshing || pendingCollection}
+          disabled={done || busy || refreshing || pendingCollection || pendingBox}
         >
           {done
             ? "Shelved ✓"
@@ -2614,9 +2786,11 @@ export function Spotlight(props: {
                 ? "Checking…"
                 : pendingCollection
                   ? "Pick a collection above"
-                  : lineCard
-                    ? "Confirm its line ▶"
-                    : "Done, next card"}
+                  : pendingBox
+                    ? "Pick a box above"
+                    : lineCard
+                      ? "Confirm its line ▶"
+                      : "Done, next card"}
         </button>
         <button type="button" className="btn" onClick={onBackCard}>
           ◀ Back

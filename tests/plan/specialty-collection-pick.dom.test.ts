@@ -208,3 +208,66 @@ describe("UIL-053 · Which collection?", () => {
     expect(shelveCardAction.mock.calls[0][0].collectionChoice).toBe("c-zards");
   });
 });
+
+/**
+ * 0037 — Karvi, 2026-10-01: "Users should always be able to override all rules." Picking a collection is the
+ * recommendation; "Shelve without a collection" is hers, warned in her words, and Done then commits with her override.
+ */
+describe("0037 · Shelve without a collection", () => {
+  it("her choice, with the warning; Done commits it with the override and no collection", async () => {
+    park([
+      { id: "c-zards", name: "Charizards" },
+      { id: "c-fire", name: "Fire art" },
+    ]);
+    const user = await mount();
+    expect(done().disabled).toBe(true);
+    const without = chip("Shelve without a collection");
+    expect(without.getAttribute("aria-pressed")).toBe("false");
+    expect(within(spot()).queryByText("It won't count toward any collection.")).toBeNull();
+    await user.click(without);
+    expect(chip("Shelve without a collection").getAttribute("aria-pressed")).toBe("true");
+    expect(within(spot()).getByText("It won't count toward any collection.")).toBeTruthy();
+    expect(spot().textContent).toContain("Specialty A · No collection");
+    expect(document.getElementById("plan-row-id-Charizard")?.textContent).not.toContain(
+      "Pick collection",
+    );
+    expect(done().disabled).toBe(false);
+    await user.click(done());
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
+    expect(shelveCardAction.mock.calls[0][0]).toMatchObject({
+      card: { id: "id-Charizard" },
+      collectionChoice: null,
+      noCollection: true,
+    });
+  });
+
+  it("a binder's ONLY collection is pre-selected, and she can still shelve it without", async () => {
+    park([{ id: "c-zards", name: "Charizards" }]);
+    const user = await mount();
+    expect(chip("Charizards").getAttribute("aria-pressed")).toBe("true");
+    await user.click(chip("Shelve without a collection"));
+    expect(chip("Charizards").getAttribute("aria-pressed")).toBe("false");
+    await user.click(done());
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
+    expect(shelveCardAction.mock.calls[0][0]).toMatchObject({
+      collectionChoice: null,
+      noCollection: true,
+    });
+  });
+
+  it("she changes her mind and picks one: no override is sent", async () => {
+    park([
+      { id: "c-zards", name: "Charizards" },
+      { id: "c-fire", name: "Fire art" },
+    ]);
+    const user = await mount();
+    await user.click(chip("Shelve without a collection"));
+    await user.click(chip("Fire art"));
+    expect(chip("Shelve without a collection").getAttribute("aria-pressed")).toBe("false");
+    expect(within(spot()).queryByText("It won't count toward any collection.")).toBeNull();
+    await user.click(done());
+    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
+    expect(shelveCardAction.mock.calls[0][0]).toMatchObject({ collectionChoice: "c-fire" });
+    expect(shelveCardAction.mock.calls[0][0].noCollection).toBeFalsy();
+  });
+});

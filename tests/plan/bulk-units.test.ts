@@ -1,9 +1,20 @@
 /**
  * UIL-130 — where the Haul Plan sends a card to bulk on its own: her default box with room, else her first box with
  * room (in her order), else none, so the database refuses in her words rather than overfill a box. Pure.
+ *
+ * 0037 — that stays the recommendation (the plan never overfills a box on its own). She can add a card to a full box
+ * herself: the words a picker says for it are pinned at the end.
  */
 import { describe, expect, it } from "vitest";
-import { bulkUnitForRoute, bulkUnitViews, hasRoom, type BulkUnitView } from "@/lib/plan/bulk-units";
+import {
+  addAnywayLabel,
+  addAnywayWarning,
+  bulkUnitForRoute,
+  bulkUnitViews,
+  hasRoom,
+  overBy,
+  type BulkUnitView,
+} from "@/lib/plan/bulk-units";
 
 const box = (over: Partial<BulkUnitView> & { id: string }): BulkUnitView => ({
   name: over.id,
@@ -66,5 +77,25 @@ describe("bulkUnitViews and hasRoom", () => {
     expect(hasRoom(views[1])).toBe(true);
     expect(hasRoom(views[1], 2)).toBe(false);
     expect(hasRoom(views[0], 1000)).toBe(true);
+  });
+});
+
+describe("0037 · a full box she adds a card to anyway", () => {
+  const full = box({ id: "s", name: "Shoebox", capacity: 2, held: 2 });
+
+  it("says how far over its limit the box will be", () => {
+    expect(overBy(full)).toBe(1);
+    expect(overBy(full, 3)).toBe(3);
+    expect(overBy(box({ id: "o", capacity: 2, held: 3 }))).toBe(2);
+    expect(overBy(box({ id: "r", capacity: 5, held: 1 }))).toBe(0);
+    expect(overBy(box({ id: "u", held: 900 }))).toBe(0);
+  });
+
+  it("the warning keeps the full-box reason first; the confirm says Add anyway · N over", () => {
+    expect(addAnywayWarning(full)).toBe(
+      "Shoebox is full (2 of 2 cards). Pick another box. Or add it anyway: it will be 1 over.",
+    );
+    expect(addAnywayLabel(full)).toBe("Add anyway · 1 over");
+    expect(addAnywayLabel(full, 2)).toBe("Add anyway · 2 over");
   });
 });

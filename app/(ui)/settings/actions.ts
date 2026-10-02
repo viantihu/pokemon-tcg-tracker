@@ -33,6 +33,7 @@ import {
 import { readShelvedBySection } from "@/lib/binders/save";
 import type { CatalogCard as EngineCatalogCard } from "@/lib/engine";
 import { errorMessage } from "@/lib/errors";
+import { deleteBoxWrite } from "@/lib/plan/bulk-units";
 import type {
   BinderInput,
   BulkUnitInput,
@@ -167,12 +168,19 @@ export async function setDefaultBulkUnit(id: string): Promise<SettingsResult> {
 
 /**
  * Delete a box, its cards going to `moveTo` (UIL-130): one write. The database refuses her last box, and a box with a
- * card limit that cannot take them all, before anything moves, in her words.
+ * card limit that cannot take them all, before anything moves, in her words. 0037: `anyway` is her "Delete anyway"
+ * into such a box; the write declares bulk_box_full and records it on a decision naming both boxes (`deleteBoxWrite`,
+ * from her boxes as they are now).
  */
-export async function deleteBulkUnit(id: string, moveTo: string): Promise<SettingsResult> {
+export async function deleteBulkUnit(
+  id: string,
+  moveTo: string,
+  anyway = false,
+): Promise<SettingsResult> {
   try {
     const { db } = await getOwnerContext();
-    await applyWriteOps(db, { ops: [{ op: "delete_bulk_unit", id, move_to: moveTo }] });
+    const units = anyway ? await bulkUnitRepo.views(db) : [];
+    await applyWriteOps(db, deleteBoxWrite(id, moveTo, units, anyway));
     return { ok: true };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };

@@ -190,6 +190,10 @@ export async function shelveCardAction(input: {
   bandChoice?: "line" | "own-color" | null;
   /** The collection she picked for a specialty card whose binder holds collections (UIL-053). */
   collectionChoice?: string | null;
+  /** Her "Shelve without a collection" for that card instead (0037: her override, recorded). */
+  noCollection?: boolean | null;
+  /** The box she picked for the card a swap displaces, when every box is full (0037: `overFull` is recorded). */
+  displacedTo?: Extract<MoveDestination, { kind: "bulk" }> | null;
   /** Her choice in the line popup, for a card headed into a line (UIL-117). */
   lineChoice?: LineChoice | null;
 }): Promise<
@@ -219,6 +223,8 @@ export async function shelveCardAction(input: {
       expectedDigest: input.expectedDigest ?? null,
       bandChoice: input.bandChoice ?? null,
       collectionChoice: input.collectionChoice ?? null,
+      noCollection: input.noCollection === true,
+      displacedTo: input.displacedTo ?? null,
       lineChoice: input.lineChoice ?? null,
     });
     const stamp = await loadPlanFingerprint(db, input.pendingCopyIds ?? []);

@@ -78,6 +78,12 @@ export interface PlanItem {
   lineStage?: number | null;
   /** False for a species with no evolutions: never a line, so her Move offers no back half (Karvi, 2026-09-27). */
   formsALine?: boolean;
+  /**
+   * UIL-130 / 0037: the plan sends this card to bulk, or a SWAP sends the copy it replaces there, and none of her boxes
+   * has room, so it names none (the database would refuse it). Not a dead end: she picks a box and adds it anyway (for
+   * this card on her Move sheet; for a swap's copy in the spotlight, `displacedTo`). Absent on an older plan.
+   */
+  boxesFull?: boolean;
 }
 
 /** The line a plain extra copy duplicates, in her words (UIL-126). */

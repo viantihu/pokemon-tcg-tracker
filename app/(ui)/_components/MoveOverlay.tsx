@@ -41,6 +41,11 @@ export interface MoveTargetCard {
    */
   leaves?: LeavesLine;
   initial?: MoveDestination;
+  /**
+   * 0037: the bulk box this card is in now, when it is in one (Lookup knows it). Its load leaves the card out, so its
+   * own box is never "full" for it and offers no Add anyway.
+   */
+  homeBoxId?: string;
   /** Line screen only (UIL-056/064): existing lines this card could join, flat across every band —
    *  present (even if empty) turns the picker's line-first flow on; absent (a card already filling a
    *  slot elsewhere) keeps today's plain binder/half/band flow. */
@@ -160,6 +165,7 @@ export function MoveOverlay({
           <MovePanel
             options={options}
             initial={card.initial}
+            homeBoxId={card.homeBoxId}
             allowLineJoin={lineJoinOn}
             joinCandidates={card.joinCandidates}
             existingLines={card.existingLines}

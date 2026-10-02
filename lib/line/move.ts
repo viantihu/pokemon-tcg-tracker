@@ -36,6 +36,7 @@ import {
 import type { WriteOp } from "@/lib/repo";
 import type { CopyPlacementPatch, LineJoinChoice, MoveDestination, MoveOptions } from "./types";
 import { NOT_A_LINE } from "./popup";
+import { overLimitNote, overridesFor, recordOverrides } from "./overrides";
 
 /** Derive the four placement columns (+ cleared line link) for a moved copy. */
 export function placementForMove(dest: MoveDestination): CopyPlacementPatch {
@@ -253,7 +254,8 @@ export function moveDecisionReason(dest: MoveDestination, destLabel: string): st
         : dest.kind === "block"
           ? "a reserved pocket, as a repurposed binder block"
           : "a binder half + band";
-  return `Manual placement override (your call, no rule applied): moved to ${where} — ${destLabel}.`;
+  // 0037: a full box she picked knowingly says so.
+  return `Manual placement override (your call, no rule applied): moved to ${where} — ${destLabel}.${overLimitNote([dest])}`;
 }
 
 /** Validate a destination before it is applied (guards the empty picker states the panel allows). */
@@ -503,14 +505,20 @@ export function buildMoveOps(plan: MovePlan): WriteOp[] {
   const join = collectionTargetJoinOp(plan.destination, plan.catalogCardId);
   if (join) ops.push(join);
 
-  ops.push({
-    op: "insert_decision",
-    haul_id: null,
-    copy_id: plan.copyId,
-    decision: "placement-move",
-    reason: moveDecisionReason(plan.destination, plan.destinationLabel),
-    resolved_by: "user",
-  });
+  // 0037: a full box she picked knowingly is recorded on this move's decision (lib/line/overrides).
+  ops.push(
+    recordOverrides(
+      {
+        op: "insert_decision",
+        haul_id: null,
+        copy_id: plan.copyId,
+        decision: "placement-move",
+        reason: moveDecisionReason(plan.destination, plan.destinationLabel),
+        resolved_by: "user",
+      },
+      overridesFor([plan.destination]),
+    ),
+  );
 
   return ops;
 }

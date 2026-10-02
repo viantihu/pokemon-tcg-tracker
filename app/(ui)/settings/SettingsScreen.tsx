@@ -244,7 +244,12 @@ export function SettingsScreen() {
         busy={busy}
         onSave={(input) => run(() => saveBulkUnit(input), input.id ? "Box saved" : "Box added")}
         onMakeDefault={(id) => void run(() => setDefaultBulkUnit(id), "Default box changed")}
-        onDelete={(id, moveTo) => run(() => deleteBulkUnit(id, moveTo), "Box deleted")}
+        onDelete={(id, moveTo, anyway) =>
+          run(
+            () => (anyway ? deleteBulkUnit(id, moveTo, true) : deleteBulkUnit(id, moveTo)),
+            "Box deleted",
+          )
+        }
       />
 
       {/* ---- Rainbow order ---- */}

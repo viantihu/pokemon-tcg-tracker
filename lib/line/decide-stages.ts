@@ -13,6 +13,7 @@ import { buildChain, type CatalogCard, type TypeColorMap } from "@/lib/engine";
 import { localeOfId } from "@/lib/catalog/locale";
 import type { Row, WriteOp } from "@/lib/repo";
 import { stageStateFor, typeOfBand } from "./line-choice";
+import { fillerReturnedDecision, returnDestination } from "./overrides";
 import { lineReadsClosed, lineStatusOf, type StageDecision, type ThirdPocketChoice } from "./popup";
 import {
   hasThirdPocket,
@@ -32,6 +33,8 @@ export interface DecideStagesChoice {
    * box is full). Absent: it goes back to its home box.
    */
   returnBoxes?: Record<string, string>;
+  /** 0037: the spare cards (by copy id) she sends into a FULL box knowingly ("Add anyway"). Absent: none. */
+  returnOverFull?: string[];
 }
 
 /** Fresh state for one line. */
@@ -42,6 +45,8 @@ export interface DecideStagesState {
   catalog: CatalogCard[];
   copiesById: Map<string, Row<"copy">>;
   typeColorMap: TypeColorMap;
+  /** 0037: her box names by id, for a spare card she sends into a full box knowingly (loaded only then). */
+  boxNames?: ReadonlyMap<string, string>;
 }
 
 /** Her words, for the two refusals this adds to the shared rule's. */
@@ -63,6 +68,24 @@ const toBulk = (copyId: string, box?: string): WriteOp => ({
     ...(box ? { bulk_unit_id: box } : {}),
   },
 });
+
+/**
+ * A spare card out of its pocket, back to bulk (`toBulk`). Into a full box she picked knowingly (0037), it is recorded
+ * on a decision of its own, naming the box.
+ */
+function returnToBulk(
+  copyId: string,
+  st: DecideStagesState,
+  choice: DecideStagesChoice,
+): WriteOp[] {
+  const dest = returnDestination(copyId, choice);
+  if (!dest.overFull) return [toBulk(copyId, dest.unitId)];
+  const box = dest.unitId ?? st.copiesById.get(copyId)?.bulk_unit_id ?? "";
+  return [
+    toBulk(copyId, dest.unitId),
+    fillerReturnedDecision(copyId, st.boxNames?.get(box) ?? "its box", dest),
+  ];
+}
 
 export function buildDecideStagesOps(st: DecideStagesState, choice: DecideStagesChoice): WriteOp[] {
   const { line, slots, blocks } = st;
@@ -93,7 +116,7 @@ export function buildDecideStagesOps(st: DecideStagesState, choice: DecideStages
     // What the stage had comes out first: a filler's block (a spare card back to bulk).
     for (const b of blocks.filter((x) => x.line_slot_id === slot.id)) {
       ops.push({ op: "delete_binder_block", id: b.id, line_id: line.id });
-      if (b.copy_id) ops.push(toBulk(b.copy_id, choice.returnBoxes?.[b.copy_id]));
+      if (b.copy_id) ops.push(...returnToBulk(b.copy_id, st, choice));
     }
 
     if (d.kind === "later") {
@@ -149,7 +172,7 @@ export function buildDecideStagesOps(st: DecideStagesState, choice: DecideStages
     if (!hasThirdPocket(t)) validateThirdPocket(shared, t, choice.thirdPocket); // refuses, in her words
     for (const b of blocks.filter((x) => x.line_slot_id === null && x.purpose === "line-filler")) {
       ops.push({ op: "delete_binder_block", id: b.id, line_id: line.id });
-      if (b.copy_id) ops.push(toBulk(b.copy_id, choice.returnBoxes?.[b.copy_id]));
+      if (b.copy_id) ops.push(...returnToBulk(b.copy_id, st, choice));
     }
     if (choice.thirdPocket.material === "later") {
       ops.push({ op: "update_line", id: line.id, patch: { extra_pocket: null } });
