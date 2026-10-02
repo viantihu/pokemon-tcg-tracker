@@ -21,6 +21,7 @@ and the irreversible ones (A5, B5) wait for Karvi's explicit go on the day.
 
 | # | Step | Runs it | Reversible? |
 |---|---|---|---|
+| A0 | Recreate the (empty) Production project in **us-east-1**, beside the app's functions | Karvi (dashboard), Tech Lead verifies | yes: the old project is untouched until after B6 |
 | A1 | Karvi's three decisions: hosting tier / backups, go-live date, UAT closed | Karvi | n/a |
 | A2 | Measure the gap: what `main` lacks, what Production's DB holds | Tech Lead | read-only |
 | A3 | Vercel **Production** environment variables set | Karvi (dashboard) | yes |
@@ -40,6 +41,46 @@ and the irreversible ones (A5, B5) wait for Karvi's explicit go on the day.
 ---
 
 # Part A: standing Production up
+
+## A0. Production's database in the same region as the app (do this first)
+
+**Why.** The app's server functions run in Vercel's `iad1` (Washington, D.C.: every
+response's `x-vercel-id` reads `…::iad1::…`). Testing's database `cpmwdcmokbgcpmkvbtsw`
+is in `us-east-1` (North Virginia), next door. The Production project
+`bqqerxpdxywnpvndhxbs` was created in **`us-west-2`** (Oregon). Every database round trip
+from `iad1` to Oregon adds about 65–70 ms. A line confirm on the Haul Plan makes 50–100
+round trips one after another (perf review, 2026-10-01), so on that project the same tap
+would take **3.5–7 s longer** than it does on Testing. A Supabase project's region cannot
+be changed, and this one holds nothing yet (it is paused, and nothing has been promoted),
+so it is recreated, not moved.
+
+Steps for Karvi, in the Supabase dashboard (no step can be scripted: the deploy token gets
+401 from the Management API):
+
+- [ ] **Rename the old project** so the two are never confused: open
+      `bqqerxpdxywnpvndhxbs` → Project Settings → General → Project name =
+      `tcg-tracker-prod-old-us-west-2`. Leave it paused. Do not delete it yet.
+- [ ] **Create the new project:** New project → same organization → Name
+      `tcg-tracker-prod` → **Region: East US (North Virginia), `us-east-1`** → generate a
+      database password and keep it in your password manager only → the plan and compute
+      you chose in A1 (backups / PITR).
+- [ ] When it finishes provisioning, send the Tech Lead the **project ref** (the id in the
+      dashboard URL, `…/project/<ref>`) and the **session pooler host** (Connect → Session
+      pooler, e.g. `aws-0-us-east-1.pooler.supabase.com`). Never send a key or the
+      password; those go only into the settings in A3 and A4.
+
+Then, before anything else in Part A:
+
+- [ ] Tech Lead: one docs PR replacing `bqqerxpdxywnpvndhxbs` with the new ref everywhere
+      below (A3, A4, A7, B4), and the pooler host in A4. Until it lands, the old ref
+      below names the project being retired.
+- [ ] Tech Lead verifies (read-only): the new project's region is `us-east-1`
+      (`supabase projects list`), and after A6 `curl -sI <APP_URL>/api/health` shows
+      `iad1` in `x-vercel-id`, so the functions and the database sit together. A3, A4 and
+      A7 are all done against the **new** project.
+- [ ] After B6 (her collection verified in the new Production app), delete
+      `tcg-tracker-prod-old-us-west-2`. That is irreversible, so it happens only after B6,
+      and only by Karvi.
 
 ## A1. Decisions that belong to Karvi
 
@@ -402,8 +443,9 @@ the day:
   instead: `postgres.<ref>@aws-0-<region>.pooler.supabase.com:5432`. Session mode holds
   a multi-statement transaction correctly; the **transaction-mode pooler on 6543 does
   not** and is the one the header is warning about.
-- Regions differ: Testing `cpmwdcmokbgcpmkvbtsw` is `us-east-1`, Production
-  `bqqerxpdxywnpvndhxbs` is `us-west-2`.
+- Regions: Testing `cpmwdcmokbgcpmkvbtsw` is `us-east-1`. Production is `us-east-1` too once
+  A0 is done (the retired `bqqerxpdxywnpvndhxbs` was `us-west-2`); its pooler host is
+  `aws-0-us-east-1…`, from the new project's Connect panel.
 
 Both passwords are the projects' database passwords (Karvi holds them; the Production
 one is also the GitHub `production` secret). They are never pasted into a chat or a PR.
