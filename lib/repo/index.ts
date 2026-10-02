@@ -5,8 +5,9 @@
 export type { DbClient, TableName, ViewName, Row, Insert, Update, ViewRow } from "./base";
 export { createRepo } from "./base";
 export type { Database, Json } from "./database.types";
-export { applyWriteOps } from "./write-ops";
+export { applyWriteOps, OVERRIDE_RULES } from "./write-ops";
 export type {
+  OverrideRule,
   WriteOp,
   WritePayload,
   CopyPatch,

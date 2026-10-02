@@ -753,6 +753,7 @@ export type Database = {
           catalog_card_id: string | null;
           variant: string | null;
           dex_variant_raw: string | null;
+          overrides: string[];
         };
         Insert: {
           id?: string;
@@ -768,6 +769,7 @@ export type Database = {
           catalog_card_id?: string | null;
           variant?: string | null;
           dex_variant_raw?: string | null;
+          overrides?: string[];
         };
         Update: {
           id?: string;
@@ -783,6 +785,7 @@ export type Database = {
           catalog_card_id?: string | null;
           variant?: string | null;
           dex_variant_raw?: string | null;
+          overrides?: string[];
         };
         Relationships: [
           {

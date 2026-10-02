@@ -50,6 +50,10 @@ const REWRITTEN: Record<string, { lines: string[]; why: string }> = {
     ],
     why: "the set_alias upsert and delete are keyed by owner (UIL-127b)",
   },
+  "0037_rule_overrides.sql": {
+    lines: ["if dest.capacity is not null then"],
+    why: "delete_bulk_unit's room check gives way to a declared bulk_box_full (Karvi, 2026-10-01: every rule can be overridden)",
+  },
 };
 
 /** A line as SQL reads it: whitespace collapsed, a trailing comma dropped. */
