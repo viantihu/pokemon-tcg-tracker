@@ -4119,7 +4119,8 @@ html.tour-open .app {
 .lp-foot .btn {
   min-height: 40px;
 }
-.binderrow.bulkrow .bxdel {
+/* …and at least 40px wide: a row's ✕ (a binder's or a box's) is an editcollbtn of one glyph (QA on #464: 33px). */
+.editcollbtn {
   min-width: 40px;
 }
 
