@@ -12,11 +12,16 @@ import { bulkUnitForRoute, bulkUnitViews, type BulkUnitView } from "./bulk-units
  */
 
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
+import { localeOfId } from "@/lib/catalog/locale";
 import {
+  formOf,
   formsALine,
   assertBandConfig,
   band,
+  lineFormOf,
+  nameInForm,
   placeCard,
+  type CardForm,
   type CascadeResult,
   type CatalogCard,
   type EngineContext,
@@ -226,6 +231,32 @@ export async function loadPlanContext(
     if (!had || (en && !had.en)) nameByDex.set(d, { name: r.name, en });
   }
   const dexNameOf = (dexId: number): string | null => nameByDex.get(dexId)?.name ?? null;
+  /**
+   * A species' name in a form and a language (UIL-133): "Arven's Toedscruel" for an Arven's line, "Toedscruel" for a
+   * plain one, whichever printing the catalog happened to list first.
+   */
+  const cardsByDex = new Map<number, CatalogCard[]>();
+  for (const c of catalogById.values()) {
+    const d = c.dexId[0];
+    if (d === undefined || c.isDigitalOnly) continue;
+    cardsByDex.set(d, [...(cardsByDex.get(d) ?? []), c]);
+  }
+  const dexNameIn = (dexId: number, form: CardForm, locale: string): string | null => {
+    const cards = (cardsByDex.get(dexId) ?? []).filter((c) => localeOfId(c.tcgdexId) === locale);
+    return cards.length > 0 ? nameInForm(cards, form, ctx.catalog) : dexNameOf(dexId);
+  };
+  /** A line's form (UIL-133), from what it holds or chases. */
+  const lineFormOfRow = (lineId: string): CardForm =>
+    lineFormOf(
+      [...(slotsByLine.get(lineId) ?? [])]
+        .sort((a, b) => a.stage_index - b.stage_index)
+        .map((s) => {
+          const viaCopy = s.copy_id ? copyRowById.get(s.copy_id)?.catalog_card_id : undefined;
+          const id = viaCopy ?? (s.stage_choice === "chase" ? s.target_catalog_card_id : null);
+          return id ? catalogById.get(id) : undefined;
+        }),
+      ctx.catalog,
+    );
   /** A copy as she would name it, "Charmeleon 027/197", with its variant (UIL-126). */
   const copyLabelOf = (copyId: string): { label: string; variant: string } | null => {
     const row = copyRowById.get(copyId);
@@ -289,13 +320,22 @@ export async function loadPlanContext(
         lineOfSlot: (slotId) =>
           [...slotsByLine.values()].flat().find((s) => s.id === slotId)?.line_id ?? null,
         lineName: (lineId) => {
-          const top = [...(slotsByLine.get(lineId) ?? [])].sort(
+          const ordered = [...(slotsByLine.get(lineId) ?? [])].sort(
             (a, b) => b.stage_index - a.stage_index,
-          )[0];
+          );
+          const top = ordered[0];
           const dexId = top ? dexIdForSlot(top) : null;
-          return dexId === null ? null : dexNameOf(dexId);
+          if (dexId === null) return null;
+          // In the line's form and language (UIL-133): "Adds to Arven's Toedscruel line".
+          const known = ordered
+            .map((s) => (s.copy_id ? copyRowById.get(s.copy_id)?.catalog_card_id : null))
+            .find((id): id is string => !!id);
+          return dexNameIn(dexId, lineFormOfRow(lineId), known ? localeOfId(known) : "en");
         },
-        dexName: (dexId) => dexNameOf(dexId),
+        dexName: (dexId, like) =>
+          like
+            ? dexNameIn(dexId, formOf(like, ctx.catalog), localeOfId(like.tcgdexId))
+            : dexNameOf(dexId),
         lineWhere: (lineId) => {
           const line = lineRowById.get(lineId);
           if (!line) return null;
@@ -312,6 +352,7 @@ export async function loadPlanContext(
       },
       copyLabel: (copyId) => copyLabelOf(copyId),
       formsALine: (card) => formsALine(card, ctx.catalog),
+      formOf: (card) => formOf(card, ctx.catalog),
     },
   };
 }

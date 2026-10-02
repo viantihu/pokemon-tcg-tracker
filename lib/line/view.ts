@@ -46,6 +46,8 @@ export interface LineViewInput {
   slots: SlotInput[];
   /** UIL-121: what she chose for the third pocket, or null. */
   extraPocket?: string | null;
+  /** The line's label in its form (UIL-133: "ARVEN'S TOEDSCOOL LINE", "ROWLET LINE · HISUIAN"); else from its slots. */
+  speciesLabel?: string;
 }
 
 const cap = (s: string) => s.toUpperCase();
@@ -154,7 +156,7 @@ export function buildLineView(input: LineViewInput): LineView {
   return {
     lineId: input.lineId,
     rootDexId: input.rootDexId,
-    speciesLabel: speciesLabel(ordered),
+    speciesLabel: input.speciesLabel ?? speciesLabel(ordered),
     bandKey: input.bandKey,
     binderId: input.binderId,
     binderLabel: input.binderLabel,

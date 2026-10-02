@@ -15,6 +15,7 @@
 import type { BulkUnitView } from "@/lib/repo/bulk-unit";
 import type { Language } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
+import type { CardForm } from "@/lib/engine/form";
 import type { CardIdentity, ExistingLineBlock, MoveDestination, MoveOptions } from "./types";
 
 /* --------------------------------------- what she chooses --------------------------------------- */
@@ -149,6 +150,8 @@ export interface StandInDraft {
 export interface StageOption {
   card: CardIdentity;
   sameColour: boolean;
+  /** Of the line's form (UIL-133): listed and suggested first. */
+  sameForm?: boolean;
   /** A specialty-class printing: it lives in the specialty binder. */
   special: boolean;
   priceMarket: number | null;
@@ -245,6 +248,8 @@ export interface LinePopupLine {
   bandKey: string;
   bandDisplay: string;
   locale: Locale;
+  /** The line's form (UIL-133): what its stages suggest first. Null is plain; absent, nothing is preferred. */
+  form?: CardForm;
   /** Filled slots now, and after the confirm, of `total`. */
   filledBefore: number;
   filledAfter: number;

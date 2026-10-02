@@ -12,11 +12,14 @@
 
 import {
   buildChain,
+  formOf,
   formsALine,
   generateSlots,
+  lineFormOf,
   lineLocaleOf,
   testViability,
   type Band,
+  type CardForm,
   type CatalogCard,
   type IncomingCard,
   type LineSlotRecord,
@@ -152,6 +155,8 @@ export async function loadLinePopupModel(
   let model: Omit<LinePopupModel, "existingLines">;
   let hereBinder: string | null;
   let hereBand: string;
+  /** The line's form (UIL-133): a new line takes the card's; an existing one, what it holds or chases. */
+  let lineForm: CardForm = null;
 
   /** UIL-121: a stage she may decide carries its species and its suggestion (shown, never selected). */
   const decidableIn = (dexId: number, locale: string, bandKey: string) => ({
@@ -161,7 +166,7 @@ export async function loadLinePopupModel(
         catalogRows
           .filter((r) => r.dex_id.includes(dexId))
           .map((r) => printingFromRow(r, typeColorMap)),
-        { locale: locale as typeof cardLocale, bandKey },
+        { locale: locale as typeof cardLocale, bandKey, form: lineForm },
       ),
     ),
   });
@@ -183,6 +188,7 @@ export async function loadLinePopupModel(
     const general = binders.filter((b) => b.type === "general");
     hereBinder = proposal.binderId ?? general[0]?.id ?? null;
     hereBand = proposal.band;
+    lineForm = formOf(card, catalog);
     const owned = copies
       .filter((c) => c.id !== copy.id)
       .map((c) => toOwnedCopy(c, catalogById))
@@ -255,6 +261,7 @@ export async function loadLinePopupModel(
         bandKey: hereBand,
         bandDisplay: bandDisplay.get(hereBand) ?? hereBand,
         locale: cardLocale,
+        form: lineForm,
         filledBefore: 0,
         filledAfter: 1,
         total: stages.length,
@@ -278,6 +285,19 @@ export async function loadLinePopupModel(
     }
     hereBinder = line.binder_id;
     hereBand = line.color_band;
+    lineForm = lineFormOf(
+      [...lineSlots]
+        .sort((a, b) => a.stage_index - b.stage_index)
+        .map((s) => {
+          const id = s.copy_id
+            ? cardOfCopy(s.copy_id)
+            : s.stage_choice === "chase"
+              ? s.target_catalog_card_id
+              : null;
+          return id ? catalogById.get(id) : undefined;
+        }),
+      catalog,
+    );
     const chain = testViability(incoming, [], catalog, typeColorMap).chain;
     const lineLocale = localeOfLine(line.id);
     const stages: LinePopupStage[] = lineSlots.map((s) => {
@@ -353,6 +373,7 @@ export async function loadLinePopupModel(
         bandKey: hereBand,
         bandDisplay: bandDisplay.get(hereBand) ?? hereBand,
         locale: localeOfLine(line.id),
+        form: lineForm,
         filledBefore,
         filledAfter: replacing ? filledBefore : filledBefore + 1,
         total: lineSlots.length,
@@ -520,9 +541,18 @@ function familyLinesFrom(
     const target = top ? catalogById.get(top) : undefined;
     return target ? identity(target, bandKey) : null;
   };
+  // A line where she chases this exact printing first, then the lines of its own form (UIL-133, the Senior BA's ruling).
+  const chasesThis = (lineId: string) =>
+    options?.joinCandidates.some(
+      (c) => c.lineId === lineId && c.chasedCatalogCardId === card.tcgdexId,
+    ) ?? false;
+  const rank = (l: { lineId: string; sameForm?: boolean }) =>
+    chasesThis(l.lineId) ? 0 : l.sameForm === false ? 2 : 1;
   return (options?.existingLines ?? [])
     .filter((l) => l.lineId !== excludeLineId)
-    .map((l) => ({
+    .map((l, i) => ({ l, i }))
+    .sort((a, b) => rank(a.l) - rank(b.l) || a.i - b.i)
+    .map(({ l }) => ({
       ...l,
       binderName: l.binderId ? (names.binderName.get(l.binderId) ?? "A binder") : "No binder",
       bandDisplay: names.bandDisplay.get(l.bandKey) ?? l.bandKey,

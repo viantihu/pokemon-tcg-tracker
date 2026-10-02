@@ -167,7 +167,14 @@ export function LineStagesPopup({
                   value={stages[s.stageIndex] ?? null}
                   onChange={(d) => setStages((prev) => ({ ...prev, [s.stageIndex]: d }))}
                   loadOptions={(): Promise<StageOption[]> =>
-                    unwrap(stageOptionsAction(s.dexId!, model.line.locale, model.line.bandKey))
+                    unwrap(
+                      stageOptionsAction(
+                        s.dexId!,
+                        model.line.locale,
+                        model.line.bandKey,
+                        model.line.form,
+                      ),
+                    )
                   }
                   loadBulk={loadBulk}
                   busy={busy}

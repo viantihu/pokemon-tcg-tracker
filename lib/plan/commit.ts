@@ -32,7 +32,14 @@
 
 import { localeOfId } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
-import { buildChain, effectiveType, isPlaced, type Role } from "@/lib/engine";
+import {
+  buildChain,
+  effectiveType,
+  formOf,
+  isPlaced,
+  type CardForm,
+  type Role,
+} from "@/lib/engine";
 import {
   applyWriteOps,
   evolutionLineRepo,
@@ -961,7 +968,13 @@ function writeOverriddenCard(
     // one in this binder and band is her call. The key below is kept only for the in-pass bookkeeping, so
     // a later card in THIS payload can find the line just created — it no longer decides anything.
     const locale = localeOfId(p.tcgdexId);
-    const key = passLineKey(dest.binderId, built.rootDexId, dest.band, locale);
+    const key = passLineKey(
+      dest.binderId,
+      built.rootDexId,
+      dest.band,
+      locale,
+      formOf(card, pc.ctx.catalog),
+    );
     ops.push(...built.ops);
     if (built.slotId) {
       ops.push({ op: "update_copy", id: copyId, patch: { line_slot_id: built.slotId } });
@@ -1066,6 +1079,7 @@ function passLineKey(
   rootDexId: number,
   colorBand: string,
   locale: Locale,
+  form: CardForm,
 ): string {
-  return newLineKey(binderId, rootDexId, colorBand, locale);
+  return newLineKey(binderId, rootDexId, colorBand, locale, form);
 }

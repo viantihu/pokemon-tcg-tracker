@@ -10,4 +10,5 @@ export * from "./types";
 export * from "./bands";
 export * from "./duplicate";
 export * from "./line";
+export * from "./form";
 export * from "./cascade";

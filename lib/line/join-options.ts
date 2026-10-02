@@ -15,8 +15,13 @@
 import {
   band as bandOf,
   buildChain,
+  formFit,
+  lineFormOf,
+  lineLabel,
   lineLocaleOf,
+  nameInForm,
   stageFit,
+  type CardForm,
   type CatalogCard,
   type ChainNode,
   type IncomingCard,
@@ -33,6 +38,8 @@ export interface JoinIndexLine {
   rootDexId: number;
   colorBand: string;
   binderId: string | null;
+  /** The line's stored form, once it has one; absent, it is worked out from the cards known at its stages. */
+  form?: CardForm;
 }
 
 /** The slot columns the index reads — a raw `Row<"line_slot">` satisfies this structurally. */
@@ -70,6 +77,10 @@ export interface LineJoinIndex {
   linesByRoot: Map<number, ExistingLineBlock[]>;
   /** Each line's chain rebuilt from its root, by line id — so the caller never walks it twice. */
   chains: Map<string, ChainNode[]>;
+  /** Each line's form (UIL-133), by line id. */
+  forms: Map<string, CardForm>;
+  /** Each line's stage names in its form, by line id ("Arven's Toedscool", not whichever name is shortest). */
+  stageNames: Map<string, string[]>;
   /**
    * The open slots past a branch, by `${locale}:${rootDexId}:${stageIndex}` (the Senior BA's ruling on the TL's
    * finding). A card is offered one when ITS own chain has that root and puts it at that depth, and its neighbours
@@ -149,6 +160,8 @@ export function buildLineJoinIndex(
   const openSlotsByDexId = new Map<string, LineJoinCandidate[]>();
   const linesByRoot = new Map<number, ExistingLineBlock[]>();
   const chains = new Map<string, ChainNode[]>();
+  const forms = new Map<string, CardForm>();
+  const stageNames = new Map<string, string[]>();
   const openSlotsPastBranch = new Map<string, PastBranchSlot[]>();
   const catalogById = new Map(catalog.map((c) => [c.tcgdexId, c]));
   /** The card a slot is known to hold: the card in it, or the one she chases there. */
@@ -201,8 +214,12 @@ export function buildLineJoinIndex(
       : [];
     chains.set(line.id, chain);
 
-    const rootName = chain[0]?.name;
-    const speciesLabel = rootName ? `${rootName.toUpperCase()} LINE` : "EVOLUTION LINE";
+    // Its form (UIL-133): what it holds or chases names it, so an Arven's line reads as one and is offered as one.
+    const form = line.form !== undefined ? line.form : lineFormOf(slots.map(knownAt), catalog);
+    forms.set(line.id, form);
+    const names = chain.map((n) => nameInForm(n.cards, form, catalog));
+    stageNames.set(line.id, names);
+    const speciesLabel = lineLabel(names[0] ?? "", form, seed?.tcgdexId ?? "");
     const filledCount = slots.filter((s) => s.state === "filled").length;
     const totalCount = slots.length;
     const forRoot = linesByRoot.get(line.rootDexId) ?? [];
@@ -214,6 +231,7 @@ export function buildLineJoinIndex(
       binderId: line.binderId,
       bandKey: line.colorBand,
       locale,
+      form,
     });
     linesByRoot.set(line.rootDexId, forRoot);
     for (const s of slots) {
@@ -227,6 +245,8 @@ export function buildLineJoinIndex(
         stage: s.stage,
         filledCount,
         totalCount,
+        form,
+        chasedCatalogCardId: s.stage_choice === "chase" ? (s.target_catalog_card_id ?? null) : null,
       };
       const dexId = chain[s.stage_index]?.dexId;
       if (dexId === undefined) {
@@ -261,7 +281,7 @@ export function buildLineJoinIndex(
     }
   }
 
-  return { openSlotsByDexId, linesByRoot, chains, openSlotsPastBranch };
+  return { openSlotsByDexId, linesByRoot, chains, forms, stageNames, openSlotsPastBranch };
 }
 
 /**
@@ -302,30 +322,44 @@ export function joinOptionsFor(
   )
     .filter((p) => stageFit(card, catalog, p.around) === "fits")
     .map((p) => p.candidate);
+  // Trainer and region (UIL-133): a line of this card's form first, and above that a stage where she chases this exact
+  // printing (the Senior BA's ruling). A line of another form stays on offer, after them: a recommendation (UIL-135).
+  const sameForm = (form: CardForm | undefined) => formFit(card, form ?? null, catalog) === "same";
+  const rank = (c: LineJoinCandidate) =>
+    c.chasedCatalogCardId === card.tcgdexId ? 0 : sameForm(c.form) ? 1 : 2;
   const joinCandidates = sortJoinCandidates([
     ...(index.openSlotsByDexId.get(candidateKey(locale, dexId)) ?? []),
     ...pastBranch,
-  ]);
+  ])
+    .map((c, i) => ({ c: { ...c, sameForm: sameForm(c.form) }, i }))
+    .sort((a, b) => rank(a.c) - rank(b.c) || a.i - b.i)
+    .map(({ c }) => c);
+
+  // Unfiltered on purpose (UIL-096): every binder, band and locale. The panel decides what to say about
+  // each; filtering here would decide for it, which is how the old record came to hide lines elsewhere.
+  const existingLines = [
+    ...(index.linesByRoot.get(cardRootDexId) ?? []),
+    // A card whose own chain cannot walk back names no family: the lines it can join are its family's (QA's F7).
+    ...(whole
+      ? []
+      : [...index.linesByRoot.values()]
+          .flat()
+          .filter(
+            (l) =>
+              joinCandidates.some((c) => c.lineId === l.lineId) &&
+              !(index.linesByRoot.get(cardRootDexId) ?? []).some((b) => b.lineId === l.lineId),
+          )),
+  ].map((l) => ({ ...l, sameForm: sameForm(l.form) }));
 
   return {
     dexId,
     locale,
     naturalBandKey: bandOf(card, typeColorMap),
     joinCandidates,
-    // Unfiltered on purpose (UIL-096): every binder, band and locale. The panel decides what to say about
-    // each; filtering here would decide for it, which is how the old record came to hide lines elsewhere.
+    // The lines of its own form first, oldest first within each (UIL-133).
     existingLines: [
-      ...(index.linesByRoot.get(cardRootDexId) ?? []),
-      // A card whose own chain cannot walk back names no family: the lines it can join are its family's (QA's F7).
-      ...(whole
-        ? []
-        : [...index.linesByRoot.values()]
-            .flat()
-            .filter(
-              (l) =>
-                joinCandidates.some((c) => c.lineId === l.lineId) &&
-                !(index.linesByRoot.get(cardRootDexId) ?? []).some((b) => b.lineId === l.lineId),
-            )),
+      ...existingLines.filter((l) => l.sameForm),
+      ...existingLines.filter((l) => !l.sameForm),
     ],
   };
 }

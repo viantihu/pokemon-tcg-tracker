@@ -208,10 +208,11 @@ export function LinePopup({
       : model.stages;
   const lineName = model.stages.at(-1)?.card?.name ?? card.name;
   /** On a START, the line she already has with room for this card (the one here first), for the note at the top. */
+  // Only a line of this card's own form (UIL-133): another trainer's or form's line is listed below, never "room".
   const roomy =
     model.mode === "start"
-      ? (model.existingLines.find((l) => l.joinSlotId && l.sameHere) ??
-        model.existingLines.find((l) => l.joinSlotId))
+      ? (model.existingLines.find((l) => l.joinSlotId && l.sameForm !== false && l.sameHere) ??
+        model.existingLines.find((l) => l.joinSlotId && l.sameForm !== false))
       : undefined;
   const title =
     model.mode === "start"
@@ -223,7 +224,7 @@ export function LinePopup({
     confirmLabel ??
     (model.mode === "start"
       ? // A line she has already has room for this card: starting another is still hers, said as such (UIL-096).
-        model.existingLines.some((l) => l.joinSlotId)
+        model.existingLines.some((l) => l.joinSlotId && l.sameForm !== false)
         ? "Start a new line anyway"
         : "Start line"
       : model.mode === "add"
@@ -371,7 +372,7 @@ export function LinePopup({
                 loadOptions={(): Promise<StageOption[]> =>
                   s.dexId === undefined
                     ? Promise.resolve([])
-                    : unwrap(stageOptionsAction(s.dexId, line.locale, line.bandKey))
+                    : unwrap(stageOptionsAction(s.dexId, line.locale, line.bandKey, line.form))
                 }
                 loadBulk={loadBulk}
                 busy={busy}
@@ -532,13 +533,14 @@ export function LinePopup({
           </div>
         ) : null}
 
-        {model.mode === "start" ? (
+        {model.mode === "start" || model.mode === "add" ? (
           <ExistingLinesBlock
             existingLines={model.existingLines}
             lineName={lineName}
             cardLocale={card.locale}
             onSwitch={onSwitch}
             busy={busy}
+            mode={model.mode}
           />
         ) : null}
 
