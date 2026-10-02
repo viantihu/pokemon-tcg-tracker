@@ -17,6 +17,8 @@ import {
   formsALine,
   band as bandOf,
   lineLocaleOf,
+  physicalIndex,
+  printingsOfDex,
   rankAlternates,
   type Band,
   type CardForm,
@@ -24,8 +26,7 @@ import {
   type TypeColorMap,
 } from "@/lib/engine";
 import { formFromStored } from "@/lib/engine/form";
-import { toCatalogCard } from "@/lib/plan/adapt";
-import { loadCatalogCached } from "@/lib/plan/catalog-cache";
+import { catalogCardsOf, loadCatalogCached } from "@/lib/plan/catalog-cache";
 import {
   binderBlockRepo,
   binderRepo,
@@ -139,9 +140,9 @@ export async function buildScreenModel(
     binderBlockRepo.listAll(db),
   ]);
 
-  const catalogById = new Map<string, CatalogCard>();
-  for (const r of catalogRows) catalogById.set(r.tcgdex_id, toCatalogCard(r));
-  const catalog = [...catalogById.values()];
+  // The same card array while her catalog is unchanged, so the chain index and every chain carry over between loads.
+  const catalog = catalogCardsOf(catalogRows);
+  const catalogById = new Map<string, CatalogCard>(catalog.map((c) => [c.tcgdexId, c]));
 
   const copyById = new Map<string, Row<"copy">>();
   for (const r of copyRows) copyById.set(r.id, r);
@@ -228,7 +229,9 @@ export async function buildScreenModel(
 
   function stageFacts(dexId: number | null, bandKey: string, locale: Locale): StageFacts {
     if (dexId === null) return EMPTY_FACTS;
-    const phys = catalog.filter((c) => !c.isDigitalOnly && c.dexId.includes(dexId));
+    // The species' physical printings in every language, in catalog order, from the chain index (the TL's profile,
+    // 2026-10-02): this was a scan of the whole catalog for every open stage of every line.
+    const phys = printingsOfDex(physicalIndex(catalog), dexId);
     const sameBand = phys.filter((c) => bandOf(c, typeColorMap) === bandKey);
     const std = sameBand.filter((c) => c.cardClass === "standard");
     const spec = sameBand.filter((c) => c.cardClass === "specialty");

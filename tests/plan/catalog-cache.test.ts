@@ -15,11 +15,14 @@
  * assertion does on a shared runner.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { chainFor } from "@/lib/engine";
 import {
   CATALOG_CACHE_TTL_MS,
   catalogCacheIsWarm,
+  catalogCardsOf,
   clearCatalogCache,
   loadCatalogCached,
+  toCatalogCard,
 } from "@/lib/plan";
 import type { DbClient } from "@/lib/repo";
 
@@ -205,5 +208,241 @@ describe("concurrent commits share one load", () => {
     // The in-flight promise must be cleared on failure, or every later commit inherits the rejection.
     expect(catalogCacheIsWarm()).toBe(false);
     await expect(loadCatalogCached(db)).resolves.toEqual([]);
+  });
+});
+
+/* ------------------------- her catalog keeps its identity (the TL's profile, 2026-10-02) ------------------------- */
+
+/**
+ * Every per-catalog index the engine keeps is a WeakMap keyed by the catalog ARRAY, so a new array per request was a
+ * cold index per request. These pin when the array is the same one and when it must not be.
+ */
+describe("her merged catalog is the same array while nothing changed, and a new one when anything did", () => {
+  const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const standIn = (owner: string, n: number, name = `Mine ${n}`) => ({
+    tcgdex_id: `user:en:${owner.slice(0, 8)}-${n}`,
+    name,
+    dex_id: [5],
+    evolve_from: "Charmander",
+    types: ["Fire"],
+    variants: { normal: true },
+    source: "user",
+    owner_id: owner,
+    is_digital_only: false,
+  });
+
+  /** The mirror, paged, and each owner's stand-ins, read FRESH (new objects) on every call, as a real read is. */
+  function ownersDb(mirrorCount: number) {
+    let mirrorRows = Array.from({ length: mirrorCount }, (_, i) => ({
+      tcgdex_id: `card-${String(i).padStart(5, "0")}`,
+      name: i % 2 === 0 ? "Charmander" : "Charmeleon",
+      dex_id: [4 + (i % 2)],
+      evolve_from: i % 2 === 0 ? null : "Charmander",
+      types: ["Fire"],
+      variants: { normal: true },
+      source: "tcgdex",
+      owner_id: null,
+      is_digital_only: false,
+    }));
+    const theirs = new Map<string, Record<string, unknown>[]>([
+      [A, []],
+      [B, []],
+    ]);
+    /** When set, the next stand-in read waits for it: a request still reading while another reloads the mirror. */
+    let hold: Promise<void> | null = null;
+    const client = (owner: string) =>
+      ({
+        from: () => {
+          const q: Record<string, unknown> = {
+            select: () => q,
+            eq: () => q,
+            order: () => q,
+            then: (resolve: (v: unknown) => void) => {
+              const rows = structuredClone(theirs.get(owner) ?? []);
+              const gate = hold;
+              hold = null;
+              const answer = () => resolve({ data: rows, error: null, count: rows.length });
+              if (gate) void gate.then(answer);
+              else answer();
+            },
+            range: (from: number, to: number) =>
+              Promise.resolve({ data: mirrorRows.slice(from, to + 1), error: null }),
+          };
+          return q;
+        },
+      }) as unknown as DbClient;
+    return {
+      as: client,
+      theirs,
+      /** The mirror job lands a card: the next mirror load reads it. */
+      mirrorGains: (id: string) => {
+        mirrorRows = [...mirrorRows, { ...mirrorRows[0], tcgdex_id: id }];
+      },
+      /** Hold the next stand-in read open until the returned release is called. */
+      holdNextStandInRead: () => {
+        let release!: () => void;
+        hold = new Promise<void>((r) => (release = r));
+        return release;
+      },
+    };
+  }
+
+  it("with her stand-ins read back the same, every call hands back the same array", async () => {
+    const { as, theirs } = ownersDb(4);
+    theirs.set(A, [standIn(A, 1), standIn(A, 2)]);
+    const first = await loadCatalogCached(as(A));
+    const second = await loadCatalogCached(as(A));
+    expect(first.map((r) => r.tcgdex_id)).toEqual([
+      "card-00000",
+      "card-00001",
+      "card-00002",
+      "card-00003",
+      `user:en:${A.slice(0, 8)}-1`,
+      `user:en:${A.slice(0, 8)}-2`,
+    ]);
+    expect(second).toBe(first);
+    // ...and so the card array the engine reads, and every index keyed by it.
+    expect(catalogCardsOf(second)).toBe(catalogCardsOf(first));
+  });
+
+  it("a stand-in added, edited or removed makes a new array, holding exactly what she has now", async () => {
+    const { as, theirs } = ownersDb(2);
+    theirs.set(A, [standIn(A, 1)]);
+    const before = await loadCatalogCached(as(A));
+
+    theirs.set(A, [standIn(A, 1), standIn(A, 2)]);
+    const added = await loadCatalogCached(as(A));
+    expect(added).not.toBe(before);
+    expect(added.map((r) => r.tcgdex_id)).toContain(`user:en:${A.slice(0, 8)}-2`);
+
+    // The same id, one column changed: a signature of ids alone would miss this.
+    theirs.set(A, [standIn(A, 1), standIn(A, 2, "Renamed")]);
+    const edited = await loadCatalogCached(as(A));
+    expect(edited).not.toBe(added);
+    expect(edited.at(-1)?.name).toBe("Renamed");
+
+    theirs.set(A, [standIn(A, 2, "Renamed")]);
+    const removed = await loadCatalogCached(as(A));
+    expect(removed).not.toBe(edited);
+    expect(removed.map((r) => r.tcgdex_id)).not.toContain(`user:en:${A.slice(0, 8)}-1`);
+    expect(await loadCatalogCached(as(A))).toBe(removed);
+  });
+
+  it("an owner with no stand-ins left gets the mirror itself, as before", async () => {
+    const { as, theirs } = ownersDb(2);
+    theirs.set(A, [standIn(A, 1)]);
+    const mine = await loadCatalogCached(as(A));
+    theirs.set(A, []);
+    const none = await loadCatalogCached(as(A));
+    expect(none).not.toBe(mine);
+    expect(none).toBe(await loadCatalogCached(as(B)));
+    expect(none.map((r) => r.tcgdex_id)).toEqual(["card-00000", "card-00001"]);
+  });
+
+  it("a new mirror load makes a new array: after it expires, and after the cache is cleared", async () => {
+    const { as, theirs } = ownersDb(2);
+    theirs.set(A, [standIn(A, 1)]);
+    const t0 = 1_000_000;
+    const first = await loadCatalogCached(as(A), { now: t0 });
+    expect(await loadCatalogCached(as(A), { now: t0 + CATALOG_CACHE_TTL_MS - 1 })).toBe(first);
+    const reloaded = await loadCatalogCached(as(A), { now: t0 + CATALOG_CACHE_TTL_MS });
+    expect(reloaded).not.toBe(first);
+    expect(reloaded).toEqual(first);
+    clearCatalogCache();
+    expect(await loadCatalogCached(as(A), { now: t0 + CATALOG_CACHE_TTL_MS })).not.toBe(reloaded);
+  });
+
+  it("a request that read the mirror before a reload never hands its catalog to one after it", async () => {
+    const { as, theirs, mirrorGains, holdNextStandInRead } = ownersDb(2);
+    theirs.set(A, [standIn(A, 1)]);
+    const t0 = 1_000_000;
+    await loadCatalogCached(as(A), { now: t0 });
+    // Her request reads the cached mirror, and is still reading her stand-ins...
+    const release = holdNextStandInRead();
+    const slow = loadCatalogCached(as(A), { now: t0 + 1 });
+    // ...while another request finds the entry expired and loads the mirror again, with a new card in it.
+    mirrorGains("card-new");
+    await loadCatalogCached(as(B), { now: t0 + CATALOG_CACHE_TTL_MS });
+    release();
+    const old = await slow;
+    expect(old.map((r) => r.tcgdex_id)).not.toContain("card-new");
+    // Her next request is on the new load: a catalog made from the one before is not hers to keep.
+    const next = await loadCatalogCached(as(A), { now: t0 + CATALOG_CACHE_TTL_MS });
+    expect(next).not.toBe(old);
+    expect(next.map((r) => r.tcgdex_id)).toContain("card-new");
+  });
+
+  it("two owners never share an array, whoever reads first, and each keeps her own while unchanged", async () => {
+    for (const [first, second] of [
+      [A, B],
+      [B, A],
+    ]) {
+      clearCatalogCache();
+      const { as, theirs } = ownersDb(2);
+      theirs.set(A, [standIn(A, 1)]);
+      theirs.set(B, [standIn(B, 1)]);
+      const x1 = await loadCatalogCached(as(first));
+      const y1 = await loadCatalogCached(as(second));
+      const x2 = await loadCatalogCached(as(first));
+      const y2 = await loadCatalogCached(as(second));
+      expect(y1).not.toBe(x1);
+      expect(x2).toBe(x1);
+      expect(y2).toBe(y1);
+      const idsOf = (rows: readonly { tcgdex_id: string }[]) => rows.map((r) => r.tcgdex_id);
+      expect(idsOf(x1)).toContain(`user:en:${first.slice(0, 8)}-1`);
+      expect(idsOf(x1)).not.toContain(`user:en:${second.slice(0, 8)}-1`);
+      expect(idsOf(y1)).toContain(`user:en:${second.slice(0, 8)}-1`);
+      expect(idsOf(y1)).not.toContain(`user:en:${first.slice(0, 8)}-1`);
+      // The mirror's cards are made once and shared by both; each owner's own are hers.
+      const xc = catalogCardsOf(x1);
+      const yc = catalogCardsOf(y1);
+      expect(yc[0]).toBe(xc[0]);
+      expect(yc.at(-1)).not.toBe(xc.at(-1));
+    }
+  });
+
+  it("the engine reads the same cards a fresh adaptation would make, and its chain carries over between requests", async () => {
+    const { as, theirs } = ownersDb(6);
+    theirs.set(A, [standIn(A, 1)]);
+    const rows = await loadCatalogCached(as(A));
+    const cards = catalogCardsOf(rows);
+    expect(cards).toEqual(rows.map(toCatalogCard));
+    const charmeleon = cards.find((c) => c.tcgdexId === "card-00001")!;
+    const chain = chainFor(charmeleon, cards);
+    expect(chain.map((n) => n.dexId)).toEqual([4, 5]);
+    // The next request: a new read of her stand-ins, the same catalog, the same chain object (not rebuilt).
+    const next = catalogCardsOf(await loadCatalogCached(as(A)));
+    expect(
+      chainFor(
+        next.find((c) => c.tcgdexId === "card-00001")!,
+        next,
+      ),
+    ).toBe(chain);
+  });
+
+  it("her shared rows and cards are frozen outside production, and left unfrozen in it", async () => {
+    const { as, theirs } = ownersDb(2);
+    theirs.set(A, [standIn(A, 1)]);
+    const rows = await loadCatalogCached(as(A));
+    const cards = catalogCardsOf(rows);
+    expect(Object.isFrozen(rows.at(-1))).toBe(true);
+    expect(Object.isFrozen(cards)).toBe(true);
+    expect(cards.every((c) => Object.isFrozen(c) && Object.isFrozen(c.variants))).toBe(true);
+    expect(() => {
+      (cards[0] as { name: string }).name = "Renamed";
+    }).toThrow(TypeError);
+
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      clearCatalogCache();
+      const prodRows = await loadCatalogCached(as(A));
+      const prodCards = catalogCardsOf(prodRows);
+      expect(Object.isFrozen(prodRows)).toBe(false);
+      expect(Object.isFrozen(prodCards)).toBe(false);
+      expect(Object.isFrozen(prodCards.at(-1))).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

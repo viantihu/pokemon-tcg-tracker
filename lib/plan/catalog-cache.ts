@@ -43,9 +43,22 @@
  * may: copy a row before changing it. Outside production every cached row, everything in it (`dex_id`, `types`,
  * `variants`) and the array are FROZEN, so a write throws in the test suite and in `next dev`. Production is left
  * unfrozen, so a write nothing caught cannot become a crash there.
+ *
+ * HER CATALOG KEEPS ITS IDENTITY (the Tech Lead's profile, 2026-10-02). Every per-catalog index the engine keeps
+ * (`chainFor`, the chain index, the form index, the cascade's catalog by id) is a WeakMap keyed by the catalog ARRAY,
+ * and this handed out a new merged array on every call, and each loader adapted it into a new card array, so every
+ * one of them was cold on every request: seconds of server CPU on her data, rebuilding what the last request had
+ * built. Now, with no stand-ins, she gets the mirror's own array, as before. With stand-ins, her merged array is kept
+ * per owner and handed back for as long as the mirror load is the same one and her stand-ins read back the same, row
+ * for row and column for column (`catalog_card` has no updated-at to go by). A new mirror load, or any change to a
+ * stand-in (one added, edited or removed), makes a new array. Kept by the owner her stand-ins name, and her rows are
+ * compared as well, so one account's array can never come back to another. `catalogCardsOf` adapts an array once, so
+ * the card array the engine reads keeps the same identity; a mirror row's card is made once and shared.
  */
 
+import type { CatalogCard } from "@/lib/engine";
 import { catalogCardRepo, type DbClient, type Row } from "@/lib/repo";
+import { toCatalogCard } from "./adapt";
 
 /** Five minutes: long enough to cover a sorting sitting, short enough that a mirror run lands. */
 export const CATALOG_CACHE_TTL_MS = 5 * 60_000;
@@ -61,6 +74,15 @@ interface CacheEntry {
 let entry: CacheEntry | null = null;
 /** Concurrent callers share one in-flight load rather than each starting their own. */
 let inFlight: Promise<readonly CachedCatalogRow[]> | null = null;
+
+/** A merged catalog, and the mirror load and stand-in rows it was made from. */
+interface MergedEntry {
+  mirror: readonly CachedCatalogRow[];
+  mine: readonly CachedCatalogRow[];
+  merged: readonly CachedCatalogRow[];
+}
+/** Each owner's merged catalog, by the owner her stand-ins name. Emptied when the mirror is loaded again. */
+const mergedByOwner = new Map<string, MergedEntry>();
 
 /** Outside production, a shared row is frozen through and through, so a caller that writes to one throws. */
 function freezesShared(): boolean {
@@ -96,10 +118,81 @@ export async function loadCatalogCached(
     catalogCardRepo.listStandIns(db),
   ]);
   if (mine.length === 0) return mirror;
-  // Her stand-ins are hers and this request's alone; the array is frozen too, so a caller cannot sort it in place
-  // in a test with stand-ins and corrupt the shared one in a test without.
+  return mergedFor(mirror, mine);
+}
+
+/**
+ * Her merged catalog: the one she was handed last, while the mirror load is the same and her stand-ins read back the
+ * same; else a new one, kept for next time. Shared by her requests, so frozen like the mirror outside production.
+ */
+function mergedFor(
+  mirror: readonly CachedCatalogRow[],
+  mine: readonly CachedCatalogRow[],
+): readonly CachedCatalogRow[] {
+  const owner = ownerOf(mine);
+  const had = mergedByOwner.get(owner);
+  if (had && had.mirror === mirror && sameRows(had.mine, mine)) return had.merged;
+  // The array is frozen too, so a caller cannot sort it in place in a test with stand-ins and corrupt the shared one
+  // in a test without.
   const merged = [...mirror, ...mine];
-  return freezesShared() ? Object.freeze(merged) : merged;
+  if (freezesShared()) {
+    deepFreeze(mine);
+    Object.freeze(merged);
+  }
+  mergedByOwner.set(owner, { mirror, mine, merged });
+  return merged;
+}
+
+/** The owner (or owners: a client RLS does not scope) the stand-ins name, as one key. */
+function ownerOf(mine: readonly CachedCatalogRow[]): string {
+  return [...new Set(mine.map((r) => r.owner_id ?? ""))].sort().join(",");
+}
+
+/** The same stand-ins, in the same order, every column the same. */
+function sameRows(a: readonly CachedCatalogRow[], b: readonly CachedCatalogRow[]): boolean {
+  return a.length === b.length && a.every((r, i) => sameValue(r, b[i]));
+}
+
+/** Deep equality over what a row holds: scalars, arrays, `jsonb` objects, and the Date a raw pg wire may send. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (a instanceof Date || b instanceof Date) {
+    return a instanceof Date && b instanceof Date && a.getTime() === b.getTime();
+  }
+  if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  const x = a as Record<string, unknown>;
+  const y = b as Record<string, unknown>;
+  return keys.every((k) => Object.prototype.hasOwnProperty.call(y, k) && sameValue(x[k], y[k]));
+}
+
+/** Each cached row's engine card, made once: the mirror's cards are shared by every owner's catalog on the instance. */
+const cardOfRow = new WeakMap<CachedCatalogRow, CatalogCard>();
+/** Each catalog's card array, made once per array. */
+const cardsOfCatalog = new WeakMap<readonly CachedCatalogRow[], CatalogCard[]>();
+
+/**
+ * The catalog as the engine reads it (`toCatalogCard` over every row, in order), the SAME array for the same rows, so
+ * the engine's per-catalog indexes carry over from one request to the next. For the arrays `loadCatalogCached` hands
+ * out, which nothing writes to. Shared, so read-only: frozen outside production, like the rows.
+ */
+export function catalogCardsOf(rows: readonly CachedCatalogRow[]): CatalogCard[] {
+  const hit = cardsOfCatalog.get(rows);
+  if (hit) return hit;
+  const cards = rows.map((r) => {
+    let card = cardOfRow.get(r);
+    if (!card) {
+      card = toCatalogCard(r);
+      if (freezesShared()) deepFreeze(card);
+      cardOfRow.set(r, card);
+    }
+    return card;
+  });
+  if (freezesShared()) Object.freeze(cards);
+  cardsOfCatalog.set(rows, cards);
+  return cards;
 }
 
 async function loadMirror(
@@ -118,6 +211,8 @@ async function loadMirror(
     .then((rows) => {
       if (freezesShared()) deepFreeze(rows);
       entry = { rows, loadedAt: now };
+      // Every merged catalog was made from the load before: none can be handed out again.
+      mergedByOwner.clear();
       return rows;
     })
     .finally(() => {
@@ -130,6 +225,7 @@ async function loadMirror(
 export function clearCatalogCache(): void {
   entry = null;
   inFlight = null;
+  mergedByOwner.clear();
 }
 
 /** Whether a fresh entry is currently held — for assertions and diagnostics, not control flow. */

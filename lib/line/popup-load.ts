@@ -28,8 +28,8 @@ import {
 } from "@/lib/engine";
 import { localeOfId } from "@/lib/catalog/locale";
 import { formFromStored, storedOr } from "@/lib/engine/form";
-import { toCatalogCard, toOwnedCopy } from "@/lib/plan/adapt";
-import { loadCatalogCached } from "@/lib/plan/catalog-cache";
+import { toOwnedCopy } from "@/lib/plan/adapt";
+import { catalogCardsOf, loadCatalogCached } from "@/lib/plan/catalog-cache";
 import {
   binderBlockRepo,
   binderRepo,
@@ -87,7 +87,7 @@ export async function loadLinePopupModel(
   /** UIL-130: her boxes by id, for where a bulk card is now. */
   const boxName = new Map(boxes.map((u) => [u.id, u.name]));
   if (!copy) throw new Error("That card is no longer in the collection.");
-  const catalog = catalogRows.map(toCatalogCard);
+  const catalog = catalogCardsOf(catalogRows);
   const catalogById = new Map(catalog.map((c) => [c.tcgdexId, c]));
   const imageUrlById = new Map(catalogRows.map((r) => [r.tcgdex_id, r.image_url]));
   const card = catalogById.get(copy.catalog_card_id);
@@ -474,7 +474,7 @@ export async function loadFamilyLines(
     binderRepo.list(db),
     colorBandRepo.listOrdered(db),
   ]);
-  const catalog = catalogRows.map(toCatalogCard);
+  const catalog = catalogCardsOf(catalogRows);
   const catalogById = new Map(catalog.map((c) => [c.tcgdexId, c]));
   const card = catalogById.get(seedTcgdexId);
   if (!card) throw new Error("That card's catalog entry is missing — reload and try again.");

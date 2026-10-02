@@ -44,8 +44,8 @@ import {
   binderBlockRepo,
   bulkUnitRepo,
 } from "@/lib/repo";
-import { loadCatalogCached } from "./catalog-cache";
-import { toBinder, toCatalogCard, toCollection, toEvolutionLine, toOwnedCopy } from "./adapt";
+import { catalogCardsOf, loadCatalogCached } from "./catalog-cache";
+import { toBinder, toCollection, toEvolutionLine, toOwnedCopy } from "./adapt";
 import { toPlanItem, type AssembleLookups } from "./assemble";
 import type { PlanItem, PlannedCard } from "./types";
 
@@ -143,8 +143,10 @@ export async function loadPlanContext(
     bulkUnitRepo.listOrdered(db),
   ]);
 
-  const catalogById = new Map<string, CatalogCard>();
-  for (const r of catalogRows) catalogById.set(r.tcgdex_id, toCatalogCard(r));
+  // The same card array while her catalog is unchanged, so the engine's per-catalog indexes (chains, forms, the chain
+  // index) carry over from one request to the next (lib/plan/catalog-cache.ts).
+  const catalog = catalogCardsOf(catalogRows);
+  const catalogById = new Map<string, CatalogCard>(catalog.map((c) => [c.tcgdexId, c]));
 
   const copyRowById = new Map<string, Row<"copy">>();
   for (const r of copyRows) copyRowById.set(r.id, r);
@@ -304,7 +306,7 @@ export async function loadPlanContext(
 
   const ctx: EngineContext = {
     typeColorMap,
-    catalog: [...catalogById.values()],
+    catalog,
     owned,
     binders,
     lines,
