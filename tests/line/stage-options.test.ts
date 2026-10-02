@@ -97,3 +97,57 @@ describe("stageSuggestion", () => {
     ).toBeNull();
   });
 });
+
+describe("UIL-133 · the line's form first", () => {
+  // Real printings (TCGdex, 2026-10-01): both Fighting, so both in an orange line's colour.
+  const plain = p({
+    tcgdexId: "sv09-089",
+    name: "Toedscruel",
+    bandKey: "orange",
+    priceMarket: 0.2,
+  });
+  const arvens = p({
+    tcgdexId: "sv10-110",
+    name: "Arven's Toedscruel",
+    bandKey: "orange",
+    priceMarket: 0.9,
+  });
+  const ARVEN_LINE = { locale: "en" as const, bandKey: "orange", form: "trainer:arven" };
+
+  it("an Arven's line lists Arven's printings first, however cheap the plain one is; a plain line the reverse", () => {
+    expect(ids(stageOptionsFrom([plain, arvens], ARVEN_LINE))).toEqual(["sv10-110", "sv09-089"]);
+    expect(ids(stageOptionsFrom([arvens, plain], { ...ARVEN_LINE, form: null }))).toEqual([
+      "sv09-089",
+      "sv10-110",
+    ]);
+    expect(stageOptionsFrom([plain, arvens], ARVEN_LINE).map((o) => o.sameForm)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("suggests the line's own form even when it is only a special printing and a plain one is standard", () => {
+    const special = { ...arvens, cardClass: "specialty" };
+    expect(stageSuggestion(stageOptionsFrom([plain, special], ARVEN_LINE))).toEqual({
+      card: expect.objectContaining({ tcgdexId: "sv10-110" }),
+      special: true,
+    });
+  });
+
+  it("a stage with no printing of the form is the form's own (the plain Pikachu under an Alolan Raichu)", () => {
+    const pikachu = p({ tcgdexId: "base1-58", name: "Pikachu", bandKey: "yellow" });
+    const out = stageOptionsFrom([pikachu], {
+      locale: "en",
+      bandKey: "yellow",
+      form: "region:alolan",
+    });
+    expect(out.map((o) => o.sameForm)).toEqual([true]);
+    expect(stageSuggestion(out)?.card.tcgdexId).toBe("base1-58");
+  });
+
+  it("no form given: nothing is preferred, as before", () => {
+    expect(
+      stageOptionsFrom([plain, arvens], { locale: "en", bandKey: "orange" })[0],
+    ).not.toHaveProperty("sameForm");
+  });
+});

@@ -5,7 +5,14 @@
  * she confirms (./decide-stages).
  */
 
-import { buildChain, band, type CatalogCard, type TypeColorMap } from "@/lib/engine";
+import {
+  buildChain,
+  band,
+  lineFormOf,
+  type CardForm,
+  type CatalogCard,
+  type TypeColorMap,
+} from "@/lib/engine";
 import { localeOfId } from "@/lib/catalog/locale";
 import { toCatalogCard } from "@/lib/plan/adapt";
 import {
@@ -40,6 +47,8 @@ export interface LineStagesModel {
     bandKey: string;
     bandDisplay: string;
     locale: Locale;
+    /** The line's form (UIL-133): what its stages suggest first. */
+    form?: CardForm;
     total: number;
   };
   /** Every stage, in order: the cards she has ("here") and the open ones she decides. */
@@ -95,6 +104,18 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
   const anchor = anchorId ? byId.get(anchorId) : undefined;
   const chain = anchor ? buildChain({ id: "line", card: anchor, variant: "normal" }, catalog) : [];
   const locale = (anchor ? localeOfId(anchor.tcgdexId) : "en") as Locale;
+  // Its form (UIL-133), from what it holds or chases.
+  const form = lineFormOf(
+    ordered.map((s) => {
+      const id = s.copy_id
+        ? copyById.get(s.copy_id)?.catalog_card_id
+        : s.stage_choice === "chase"
+          ? s.target_catalog_card_id
+          : null;
+      return id ? byId.get(id) : undefined;
+    }),
+    catalog,
+  );
   const lineBlocks = blocks.filter((b) => b.line_id === line.id);
 
   const current: Record<number, StageDecision> = {};
@@ -140,7 +161,7 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
                 catalogRows
                   .filter((r) => r.dex_id.includes(node.dexId))
                   .map((r) => printingFromRow(r, map)),
-                { locale, bandKey: line.color_band },
+                { locale, bandKey: line.color_band, form },
               ),
             ),
           }
@@ -179,6 +200,7 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
       bandKey: line.color_band,
       bandDisplay: bands.find((b) => b.band === line.color_band)?.display_name ?? line.color_band,
       locale,
+      form,
       total: ordered.length,
     },
     stages,

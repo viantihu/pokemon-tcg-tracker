@@ -25,6 +25,7 @@
 import { localeOfId } from "@/lib/catalog/locale";
 import { band, type Band } from "./bands";
 import { isUpgradeOver, resolveDuplicate, type HoloSwap } from "./duplicate";
+import { formFit, lineFormOf, type CardForm } from "./form";
 import {
   generateSlots,
   rankAlternates,
@@ -215,6 +216,12 @@ function newLineBinderId(ctx: EngineContext): string | null {
  * The order, decided by the Senior BA: a line whose band matches the card's own natural band wins;
  * then one with an OPEN slot for this stage; then the oldest.
  *
+ * TRAINER AND REGION (UIL-133, Karvi 2026-10-01: "The evolution line can only belong to the trainer/ region"). A line
+ * of another form is not this card's line, so it is never proposed (`formFit`: a recommendation, UIL-135; she can
+ * still choose it on the popup). Above everything, the Senior BA's ruling: an open stage where she CHASES this exact
+ * printing is the strongest thing she has said, so that line wins. Her Arven's Toedscool went to her plain Toedscool
+ * line because both Basics were chased dex 948 in one binder and band, and the plain line was 5 minutes older.
+ *
  * CONTRACT: `ctx.lines` is supplied OLDEST FIRST (`loadPlanContext` sorts by created_at, then id), so
  * "the oldest" is "the first still standing" here. `EvolutionLine` deliberately carries no timestamp —
  * adding one would widen a type every fixture in the suite builds — so this function cannot re-derive
@@ -237,7 +244,7 @@ function existingLineSlot(
    * "the line already has this stage" refusal reached a card that was not in that line at all.
    */
   const locale = localeOfId(incoming.card.tcgdexId);
-  const matches: { line: EvolutionLine; slot: LineSlotRecord }[] = [];
+  const matches: { line: EvolutionLine; slot: LineSlotRecord; chasedHere: boolean }[] = [];
   for (const line of ctx.lines) {
     if (lineLocaleOf(line.slots, (id: string) => ownedCardIdOf(ctx, id)) !== locale) continue;
     const slot =
@@ -247,17 +254,67 @@ function existingLineSlot(
       line.slots.find(
         (s) => s.dexId === null && s.state !== "filled" && fitsUnnamedStage(incoming, line, s, ctx),
       );
-    if (slot) matches.push({ line, slot });
+    if (!slot) continue;
+    const chasedHere = chasesPrinting(slot, incoming.card.tcgdexId);
+    if (!chasedHere && formFit(incoming.card, lineFormIn(line, ctx), ctx.catalog) !== "same")
+      continue;
+    matches.push({ line, slot, chasedHere });
   }
-  if (matches.length < 2) return matches[0] ?? null;
+  const chased = matches.filter((m) => m.chasedHere);
+  const pool = chased.length > 0 ? chased : matches;
+  if (pool.length < 2) return pool[0] ?? null;
   const own = band(incoming.card, ctx.typeColorMap);
   const open = (m: { slot: LineSlotRecord }) => m.slot.state !== "filled";
   return (
-    matches.find((m) => m.line.colorBand === own && open(m)) ??
-    matches.find((m) => m.line.colorBand === own) ??
-    matches.find(open) ??
-    matches[0]
+    pool.find((m) => m.line.colorBand === own && open(m)) ??
+    pool.find((m) => m.line.colorBand === own) ??
+    pool.find(open) ??
+    pool[0]
   );
+}
+
+/**
+ * An open stage where she chases this exact printing. A stage the plan context names without a card in it is named by
+ * her chase (`dexIdForSlot`, lib/plan/context.ts: a copy or the card she chases, nothing else).
+ */
+function chasesPrinting(slot: LineSlotRecord, tcgdexId: string): boolean {
+  return (
+    slot.state !== "filled" &&
+    !slot.copyId &&
+    slot.dexId !== null &&
+    slot.targetCatalogCardId === tcgdexId
+  );
+}
+
+/**
+ * A line's form (UIL-133), from what is known at its stages: a card in a slot, or the card she chases there. Once per
+ * line while its slots and her copies are unchanged (the TL's review of #454): the cascade asks it for every card of a
+ * haul against the same lines, and finding a copy's card is a scan of everything she owns.
+ */
+const lineForms = new WeakMap<
+  EvolutionLine,
+  { owned: EngineContext["owned"]; sig: string; form: CardForm }
+>();
+function lineFormIn(line: EvolutionLine, ctx: EngineContext): CardForm {
+  const sig = line.slots
+    .map((s) => `${s.stageIndex}:${s.copyId ?? ""}:${s.dexId ?? ""}:${s.targetCatalogCardId ?? ""}`)
+    .join("|");
+  const hit = lineForms.get(line);
+  if (hit && hit.owned === ctx.owned && hit.sig === sig) return hit.form;
+  const byId = catalogById(ctx);
+  const known = [...line.slots]
+    .sort((a, b) => a.stageIndex - b.stageIndex)
+    .map((s) => {
+      const id = s.copyId
+        ? ownedCardIdOf(ctx, s.copyId)
+        : s.dexId !== null
+          ? s.targetCatalogCardId
+          : null;
+      return (id ? byId.get(id) : undefined) ?? null;
+    });
+  const form = lineFormOf(known, ctx.catalog);
+  lineForms.set(line, { owned: ctx.owned, sig, form });
+  return form;
 }
 
 /** The catalog by id, once per catalog slice (the cascade routes every card of a haul against the same one). */

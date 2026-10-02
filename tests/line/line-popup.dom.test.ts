@@ -682,3 +682,116 @@ describe("UIL-121 · UX on #429: a picked choice and an open panel look differen
     expect(tile().textContent).toContain("Filler");
   });
 });
+
+describe("UIL-133 · a line of another trainer or regional form", () => {
+  /** Her plain Toedscool line, as the Arven's line's ADD lists it: room at its Basic, another form. */
+  const plainLine = {
+    lineId: "line-plain",
+    speciesLabel: "TOEDSCOOL LINE",
+    filledCount: 1,
+    totalCount: 2,
+    binderId: "b1",
+    bandKey: "orange",
+    locale: "en" as const,
+    form: null,
+    sameForm: false,
+    binderName: "KB-001",
+    bandDisplay: "Orange",
+    joinSlotId: "slot-plain-0",
+    sameHere: true,
+    face: identity("sv09-089", "Toedscruel"),
+  };
+  const ARVEN_ADD: LinePopupModel = {
+    ...START,
+    mode: "add",
+    card: { ...identity("sv10-109", "Arven's Toedscool"), locale: "en" },
+    line: {
+      ...START.line,
+      lineId: "line-arven",
+      bandKey: "orange",
+      bandDisplay: "Orange",
+      form: "trainer:arven",
+      filledBefore: 1,
+      filledAfter: 2,
+    },
+    stages: [
+      {
+        stageIndex: 0,
+        stage: "Basic",
+        state: "incoming",
+        card: identity("sv10-109", "Arven's Toedscool"),
+      },
+      {
+        stageIndex: 1,
+        stage: "Stage1",
+        state: "here",
+        card: identity("sv10-110", "Arven's Toedscruel"),
+        copyId: "arven-cruel",
+      },
+    ],
+    existingLines: [plainLine],
+  };
+
+  it("an ADD lists the family's other lines, named, nothing picked: her confirm still adds here, a tile switches", async () => {
+    const onSwitch = vi.fn();
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    const join: LineChoice = { mode: "join", lineId: "line-arven", slotId: "slot-arven-0" };
+    render(createElement(Harness, { model: ARVEN_ADD, initial: join, onConfirm, onSwitch }));
+    const also = document.querySelector(".lp-also") as HTMLElement;
+    expect(also.textContent).toContain("You have 1 other line for this family");
+    expect(also.textContent).toContain("Nothing is picked for you");
+    expect(also.textContent).toContain("TOEDSCOOL LINE");
+    expect(also.textContent).toContain("Has room · another trainer or form");
+    expect(also.textContent).not.toContain("Has room for this card");
+    // Nothing is chosen for her: the confirm is this line's Add, untouched by the list.
+    await user.click(screen.getByRole("button", { name: /^Add to line/ }));
+    expect(onConfirm).toHaveBeenCalledWith(expect.objectContaining({ lineId: "line-arven" }));
+    expect(onSwitch).not.toHaveBeenCalled();
+    await user.click(within(also).getByRole("button", { name: "Add it there instead" }));
+    expect(onSwitch).toHaveBeenCalledWith({
+      kind: "add",
+      lineId: "line-plain",
+      slotId: "slot-plain-0",
+    });
+  });
+
+  it("from the plain line's ADD (where she was stuck), her Arven's line is offered as hers, with room", () => {
+    const arvenLine = {
+      ...plainLine,
+      lineId: "line-arven",
+      speciesLabel: "ARVEN'S TOEDSCOOL LINE",
+      form: "trainer:arven",
+      sameForm: true,
+      joinSlotId: "slot-arven-0",
+    };
+    render(
+      createElement(Harness, {
+        model: { ...ARVEN_ADD, existingLines: [arvenLine] },
+        initial: { mode: "join", lineId: "line-plain", slotId: "slot-plain-0" },
+        onConfirm: vi.fn(),
+        onSwitch: vi.fn(),
+      }),
+    );
+    const also = document.querySelector(".lp-also") as HTMLElement;
+    expect(also.textContent).toContain("ARVEN'S TOEDSCOOL LINE");
+    expect(also.textContent).toContain("Has room for this card");
+  });
+
+  it("on a START, another form's line with room is listed, but is never the 'room' note or 'Start a new line anyway'", () => {
+    render(
+      createElement(Harness, {
+        model: { ...START, existingLines: [plainLine] },
+        initial: { mode: "start", binderId: "b1", band: "orange", pulls: [], stages: {} },
+        onConfirm: vi.fn(),
+        onSwitch: vi.fn(),
+      }),
+    );
+    expect(document.querySelector(".lp-room")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Start a new line anyway/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Start line/ })).toBeTruthy();
+    expect((document.querySelector(".lp-also") as HTMLElement).textContent).toContain(
+      "Has room · another trainer or form",
+    );
+  });
+});

@@ -19,6 +19,7 @@ import {
   lineLocaleOf,
   rankAlternates,
   type Band,
+  type CardForm,
   type CatalogCard,
   type TypeColorMap,
 } from "@/lib/engine";
@@ -246,9 +247,26 @@ export async function buildScreenModel(
     };
   }
 
-  function altOptions(dexId: number | null, bandKey: string, locale: Locale): WishlistOption[] {
+  function altOptions(
+    dexId: number | null,
+    bandKey: string,
+    locale: Locale,
+    /** The line's form (UIL-133): its own printings first. */
+    form: CardForm,
+  ): WishlistOption[] {
     if (dexId === null) return [];
-    const alt = rankAlternates(dexId, bandKey as Band, locale, catalog, typeColorMap);
+    const alt = rankAlternates(
+      dexId,
+      bandKey as Band,
+      locale,
+      catalog,
+      typeColorMap,
+      undefined,
+      [],
+      {
+        form,
+      },
+    );
     const ids = [alt.chosenCatalogCardId, ...alt.alternateCatalogCardIds].filter((x): x is string =>
       Boolean(x),
     );
@@ -285,6 +303,10 @@ export async function buildScreenModel(
     catalog,
     (id) => copyById.get(id)?.catalog_card_id ?? null,
   );
+  /** Each line's label in its form (UIL-133), as the join index names it for every screen. */
+  const speciesLabelOf = new Map(
+    [...joinIndex.linesByRoot.values()].flat().map((l) => [l.lineId, l.speciesLabel] as const),
+  );
 
   for (const line of lineRows) {
     const bandKey = line.color_band;
@@ -294,13 +316,15 @@ export async function buildScreenModel(
       .slice()
       .sort((a, b) => a.stage_index - b.stage_index);
 
-    // The chain from the root names every slot (incl. blocks with no stored species).
+    // The chain from the root names every slot (incl. blocks with no stored species), in the line's form (UIL-133).
     const chain = joinIndex.chains.get(line.id) ?? [];
+    const names = joinIndex.stageNames.get(line.id) ?? [];
+    const lineForm = joinIndex.forms.get(line.id) ?? null;
 
     const resolved: ResolvedSlot[] = slots.map((s) => {
       const node = chain[s.stage_index];
       let dexId: number | null = node?.dexId ?? null;
-      let speciesName: string | null = node?.name ?? null;
+      let speciesName: string | null = names[s.stage_index] || (node?.name ?? null);
       let card: CardIdentity | null = null;
       let copyId: string | null = null;
       let variant: string | null = null;
@@ -326,7 +350,7 @@ export async function buildScreenModel(
         const targetCc = s.target_catalog_card_id
           ? catalogById.get(s.target_catalog_card_id)
           : null;
-        const alt = altOptions(dexId, bandKey, lineLocale);
+        const alt = altOptions(dexId, bandKey, lineLocale, lineForm);
         alternates = alt;
         const chosen = targetCc ?? (alt[0] ? catalogById.get(alt[0].tcgdexId) : null);
         if (chosen) {
@@ -386,6 +410,8 @@ export async function buildScreenModel(
         binderLabel: `${binderName} · BACK`,
         status: line.status as LineView["status"],
         extraPocket: line.extra_pocket,
+        // Only where its chain has a root: otherwise its slots still name it, as before.
+        speciesLabel: chain[0] ? speciesLabelOf.get(line.id) : undefined,
         // UIL-121: an open stage shows a card only when she is chasing it; an engine's pick (or the cheapest at
         // load) is never shown as hers. What she decides is her choice, and "Not decided" until she does.
         slots: resolved.map((r): SlotInput => {

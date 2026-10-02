@@ -4,7 +4,7 @@
  * on the server when she confirms (`validateStageDecision`).
  */
 
-import { band, type TypeColorMap } from "@/lib/engine";
+import { band, type CardForm, type TypeColorMap } from "@/lib/engine";
 import { toCatalogCard } from "@/lib/plan/adapt";
 import {
   catalogCardRepo,
@@ -47,11 +47,13 @@ export async function loadStageOptions(
   dexId: number,
   locale: Locale,
   lineBandKey: string,
+  /** The line's form (UIL-133): its own printings first. */
+  form?: CardForm,
 ): Promise<StageOption[]> {
   const [rows, map] = await Promise.all([catalogCardRepo.findByDexId(db, dexId), colourMap(db)]);
   return stageOptionsFrom(
     rows.map((r) => printingFromRow(r, map)),
-    { locale, bandKey: lineBandKey },
+    { locale, bandKey: lineBandKey, ...(form !== undefined ? { form } : {}) },
   );
 }
 

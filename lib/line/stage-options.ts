@@ -8,6 +8,7 @@
 
 import { languageOfId, localeOfId } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
+import { ownFormOf, type CardForm } from "@/lib/engine/form";
 import type { StageOption } from "./popup";
 
 /** A printing as this reads it. */
@@ -34,10 +35,18 @@ const languageOf = (id: string) => languageOfId(id) ?? localeOfId(id);
  */
 export function stageOptionsFrom(
   printings: readonly StagePrinting[],
-  line: { locale: Locale; bandKey: string },
+  /**
+   * The line's form (UIL-133): its own printings first. A stage none of whose printings is of the form (the plain
+   * Pikachu under an Alolan Raichu) is the form's own, whatever they are. Absent: nothing is preferred.
+   */
+  line: { locale: Locale; bandKey: string; form?: CardForm },
 ): StageOption[] {
-  return printings
-    .filter((p) => !p.isDigitalOnly && languageOf(p.tcgdexId) === line.locale)
+  const inLanguage = printings.filter(
+    (p) => !p.isDigitalOnly && languageOf(p.tcgdexId) === line.locale,
+  );
+  const formOfP = (p: StagePrinting) => ownFormOf(p.name, p.tcgdexId);
+  const hasForm = line.form !== undefined && inLanguage.some((p) => formOfP(p) === line.form);
+  return inLanguage
     .map((p) => ({
       card: {
         tcgdexId: p.tcgdexId,
@@ -50,11 +59,13 @@ export function stageOptionsFrom(
         bandKey: p.bandKey,
       },
       sameColour: p.bandKey === line.bandKey,
+      ...(line.form !== undefined ? { sameForm: !hasForm || formOfP(p) === line.form } : {}),
       special: p.cardClass === "specialty",
       priceMarket: p.priceMarket,
     }))
     .sort(
       (a, b) =>
+        Number(b.sameForm !== false) - Number(a.sameForm !== false) ||
         Number(b.sameColour) - Number(a.sameColour) ||
         Number(a.special) - Number(b.special) ||
         (a.priceMarket ?? Infinity) - (b.priceMarket ?? Infinity) ||
@@ -69,6 +80,12 @@ export function stageOptionsFrom(
 export function stageSuggestion(
   options: readonly StageOption[],
 ): { card: StageOption["card"]; special: boolean } | null {
-  const pick = options.find((o) => o.sameColour && !o.special) ?? options.find((o) => o.sameColour);
+  // The line's own form first (UIL-133), then any same-colour printing as before.
+  const own = options.filter((o) => o.sameForm !== false);
+  const pick =
+    own.find((o) => o.sameColour && !o.special) ??
+    own.find((o) => o.sameColour) ??
+    options.find((o) => o.sameColour && !o.special) ??
+    options.find((o) => o.sameColour);
   return pick ? { card: pick.card, special: pick.special } : null;
 }

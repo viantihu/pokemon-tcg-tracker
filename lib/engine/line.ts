@@ -20,6 +20,7 @@ import { localeOfId } from "@/lib/catalog/locale";
 import type { Locale } from "@/lib/sync/types";
 import type { LineSlotRecord } from "./types";
 import { band, type Band } from "./bands";
+import { formFit, formOf, type CardForm } from "./form";
 import { isPlaced } from "./types";
 import type {
   CatalogCard,
@@ -158,14 +159,23 @@ function sameColour(node: ChainNode, b: Band, map: TypeColorMap) {
  * are two different cards with two placements (sync-architecture L5), so a Japanese copy never fills an
  * English line's slot and is never counted as already filling one.
  */
-function ownedAt(node: ChainNode, b: Band, owned: OwnedCopy[], map: TypeColorMap, locale: Locale) {
+function ownedAt(
+  node: ChainNode,
+  b: Band,
+  owned: OwnedCopy[],
+  map: TypeColorMap,
+  locale: Locale,
+  /** A new line's form (UIL-133): only a card of that form is proposed to pull into it. Absent: any. */
+  inForm?: { form: CardForm; catalog: CatalogCard[] },
+) {
   return owned.find(
     (o) =>
       o.role !== "block" &&
       isPlaced(o.role) &&
       localeOfId(o.card.tcgdexId) === locale &&
       o.card.dexId.includes(node.dexId) &&
-      band(o.card, map) === b,
+      band(o.card, map) === b &&
+      (!inForm || formFit(o.card, inForm.form, inForm.catalog) === "same"),
   );
 }
 
@@ -366,6 +376,8 @@ export function rankAlternates(
   map: TypeColorMap,
   priceOf: PriceOf = defaultPriceOf,
   exclude: readonly string[] = [],
+  /** The line's form (UIL-133): its own printings are ranked first, the others after. Absent: price alone. */
+  inForm?: { form: CardForm },
 ): PricedAlternates {
   const excluded = new Set(exclude);
   const phys = physicalIn(catalog, locale).filter(
@@ -375,8 +387,15 @@ export function rankAlternates(
     const p = priceOf(c);
     return p === null || p === undefined ? Number.POSITIVE_INFINITY : p;
   };
+  const otherForm = (c: CatalogCard) =>
+    inForm && formFit(c, inForm.form, catalog) !== "same" ? 1 : 0;
   const sortByPrice = (list: CatalogCard[]) =>
-    [...list].sort((a, b2) => price(a) - price(b2) || a.tcgdexId.localeCompare(b2.tcgdexId));
+    [...list].sort(
+      (a, b2) =>
+        otherForm(a) - otherForm(b2) ||
+        price(a) - price(b2) ||
+        a.tcgdexId.localeCompare(b2.tcgdexId),
+    );
 
   const standard = sortByPrice(phys.filter((c) => c.cardClass === "standard"));
   const specialty = sortByPrice(phys.filter((c) => c.cardClass === "specialty"));
@@ -456,12 +475,16 @@ export function generateSlots(
   const incomingStageIndex = viability.chain.findIndex((n) => n.dexId === incomingDex);
   /** The line's locale is the incoming card's: it is the card that starts it (UIL-090). */
   const locale = localeOfId(incoming.card.tcgdexId);
+  /** And so is its form (UIL-133): an Arven's Toedscool starts an Arven's line, with Arven's cards proposed in it. */
+  const form = formOf(incoming.card, catalog);
 
   viability.chain.forEach((node, stageIndex) => {
     const isRoot = stageIndex === 0;
     const sc = sameColour(node, b, map);
     const isIncoming = node.dexId === incomingDex;
-    const ownedCopy = isIncoming ? undefined : ownedAt(node, b, owned, map, locale);
+    const ownedCopy = isIncoming
+      ? undefined
+      : ownedAt(node, b, owned, map, locale, { form, catalog });
 
     // Filled: the incoming card, or an owned same-colour copy (pulled from a front half if shelved).
     if (isIncoming) {
@@ -508,7 +531,7 @@ export function generateSlots(
 
     // Not owned: placeholder (standard or specialty-only) or block (no same-colour printing).
     if (sc.all.length > 0) {
-      const alt = rankAlternates(node.dexId, b, locale, catalog, map, priceOf);
+      const alt = rankAlternates(node.dexId, b, locale, catalog, map, priceOf, [], { form });
       if (alt.willLiveInSpecialty) capped = true;
       slots.push({
         stageIndex,

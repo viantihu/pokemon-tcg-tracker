@@ -16,7 +16,7 @@
  * database.
  */
 
-import type { CascadeResult } from "@/lib/engine";
+import type { CascadeResult, CatalogCard } from "@/lib/engine";
 import type { LineProposal } from "@/lib/line/popup";
 import type { ExtraCopyOf } from "./types";
 
@@ -31,8 +31,11 @@ export interface LineLookups {
   lineOfSlot(slotId: string): string | null;
   /** A line's name, as the popup names it: its top stage's card ("Charizard"). Optional for hand-built lookups. */
   lineName?(lineId: string): string | null;
-  /** A species' card name by dex id ("Charizard"), for a line not written yet. Optional for hand-built lookups. */
-  dexName?(dexId: number): string | null;
+  /**
+   * A species' card name by dex id ("Charizard"), for a line not written yet: in the form and language of `like`, the
+   * card that starts it (UIL-133: "Starts Arven's Toedscruel line"). Optional for hand-built lookups.
+   */
+  dexName?(dexId: number, like?: CatalogCard): string | null;
 }
 
 export function lineProposalFor(result: CascadeResult, l: LineLookups): LineProposal | null {
@@ -88,10 +91,15 @@ export function extraCopyOfFor(result: CascadeResult, l: LineLookups): ExtraCopy
  * The name the row badge gives a line (v3 section 1: "＋ Starts Charizard line", "◆ Adds to Toedscruel line"): its
  * top stage, the way the popup names it. Null for a replace, which stays generic, and when it cannot be named.
  */
-export function lineNameFor(result: CascadeResult, l: LineLookups): string | null {
+export function lineNameFor(
+  result: CascadeResult,
+  l: LineLookups,
+  /** The card starting a new line: the line takes its form (UIL-133). */
+  card?: CatalogCard,
+): string | null {
   if (result.step === "line-new" && result.newLine) {
     const top = result.newLine.slots.at(-1);
-    return top ? (l.dexName?.(top.dexId) ?? null) : null;
+    return top ? (l.dexName?.(top.dexId, card) ?? null) : null;
   }
   const open = result.step === "line-existing" ? result.filledExistingSlot : null;
   return open ? (l.lineName?.(open.lineId) ?? null) : null;

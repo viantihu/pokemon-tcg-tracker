@@ -569,7 +569,12 @@ export function LineStageTile({
  * UIL-096's warning, render-only: every line this family already has, anywhere. A line with an open slot for this
  * card is marked "Has room for this card" and listed first, with "Add it there instead" (the Senior BA's ruling: a
  * warning, never a block; nothing is picked for her, and starting a new line anyway stays hers). Renders nothing when
- * there are none. Shared by the line popup's START and Backfill's confirm sheet (UIL-117 PR 5).
+ * there are none. Shared by the line popup's START and ADD, and Backfill's confirm sheet (UIL-117 PR 5).
+ *
+ * UIL-133: a line of another trainer or regional form is not this card's line. It is listed after hers, named, and
+ * still one tap away (a recommendation, UIL-135), but it never reads "Has room for this card". On an ADD (her
+ * Arven's Toedscool, proposed into her plain Toedscool line, had no way to her Arven's line) the block lists the
+ * family's OTHER lines, nothing picked for her.
  */
 export function ExistingLinesBlock({
   existingLines,
@@ -577,6 +582,7 @@ export function ExistingLinesBlock({
   cardLocale,
   onSwitch,
   busy = false,
+  mode = "start",
 }: {
   existingLines: readonly LinePopupExistingLine[];
   /** The family's name as the header says it ("Charmeleon"). */
@@ -585,19 +591,31 @@ export function ExistingLinesBlock({
   /** "Add to that line": the screen opens that line. Absent, the tiles carry no button. */
   onSwitch?(proposal: LineProposal): void;
   busy?: boolean;
+  /** The popup's mode: a START warns about a second line; an ADD offers her other lines instead of this one. */
+  mode?: "start" | "add";
 }) {
   if (existingLines.length === 0) return null;
-  // The lines with room first; otherwise as they came (oldest first).
-  const ordered = [...existingLines].sort(
-    (a, b) => Number(!!b.joinSlotId) - Number(!!a.joinSlotId),
-  );
+  // Her lines with room for this card first, then other lines with room, then the rest; otherwise as they came.
+  const rank = (l: LinePopupExistingLine) => (l.joinSlotId ? (l.sameForm === false ? 1 : 0) : 2);
+  const ordered = [...existingLines].sort((a, b) => rank(a) - rank(b));
+  const n = existingLines.length;
   return (
     <div className="lp-also">
-      <b className="u">
-        You already have {existingLines.length} {lineName} line
-        {existingLines.length === 1 ? "" : "s"}
-      </b>
-      Adding to one instead of starting another is one tap. Starting a second one is fine too.
+      {mode === "add" ? (
+        <>
+          <b className="u">
+            You have {n} other line{n === 1 ? "" : "s"} for this family
+          </b>
+          Nothing is picked for you. Add it to one of these instead, or keep this one.
+        </>
+      ) : (
+        <>
+          <b className="u">
+            You already have {n} {lineName} line{n === 1 ? "" : "s"}
+          </b>
+          Adding to one instead of starting another is one tap. Starting a second one is fine too.
+        </>
+      )}
       <div className="lp-minigrid">
         {ordered.map((l) => (
           <div className="lp-mini" key={l.lineId}>
@@ -610,6 +628,8 @@ export function ExistingLinesBlock({
               />
             ) : null}
             <span className="u">
+              {l.speciesLabel}
+              <br />
               {l.binderName} · Back · {l.bandDisplay}
               <br />
               {language(l.locale).flag} {language(l.locale).name} · {l.filledCount}/{l.totalCount}{" "}
@@ -617,7 +637,11 @@ export function ExistingLinesBlock({
               {l.joinSlotId ? (
                 <>
                   <br />
-                  <b>Has room for this card</b>
+                  {l.sameForm === false ? (
+                    <b>Has room · another trainer or form</b>
+                  ) : (
+                    <b>Has room for this card</b>
+                  )}
                 </>
               ) : null}
             </span>

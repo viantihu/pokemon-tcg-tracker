@@ -9,7 +9,7 @@
  */
 
 import type { Locale } from "@/lib/sync/types";
-import type { LineStatus, Role, SlotState } from "@/lib/engine";
+import type { CardForm, LineStatus, Role, SlotState } from "@/lib/engine";
 import type { BulkUnitView } from "@/lib/repo/bulk-unit";
 
 /* ------------------------------- line detail ------------------------------- */
@@ -334,6 +334,12 @@ export interface LineJoinCandidate {
   stage: string;
   filledCount: number;
   totalCount: number;
+  /** The line's form (UIL-133): a trainer's, a regional form, Dark or Light; null is plain. */
+  form?: CardForm;
+  /** The printing she chases at this slot, when she chases one. */
+  chasedCatalogCardId?: string | null;
+  /** Whether THIS card is of the line's form (`formFit`), set per card by `joinOptionsFor`. */
+  sameForm?: boolean;
 }
 
 /**
@@ -359,6 +365,10 @@ export interface ExistingLineBlock {
    * happens to be shorter.
    */
   locale: Locale;
+  /** The line's form (UIL-133); null is plain. */
+  form?: CardForm;
+  /** Whether THIS card is of the line's form (`formFit`), set per card by `joinOptionsFor`. */
+  sameForm?: boolean;
 }
 
 /** The client-facing line-screen payload (loaded server-side, rendered client-side). */

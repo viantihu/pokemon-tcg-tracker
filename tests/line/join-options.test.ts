@@ -69,6 +69,9 @@ describe("buildLineJoinIndex", () => {
         stage: "Stage1",
         filledCount: 1,
         totalCount: 3,
+        // UIL-133: the line's form (plain), and no chase at this stage.
+        form: null,
+        chasedCatalogCardId: null,
       },
     ]);
     expect(
@@ -89,6 +92,7 @@ describe("buildLineJoinIndex", () => {
         binderId: "b1",
         bandKey: "red",
         locale: "en",
+        form: null,
       },
     ]);
     expect(index.chains.get("L1")?.map((n) => n.name)).toEqual([
@@ -141,6 +145,9 @@ describe("joinOptionsFor", () => {
         bandKey: "red",
         // UIL-090: each line carries the regional variant it belongs to.
         locale: "en",
+        // UIL-133: and its form, and whether this card is of it.
+        form: null,
+        sameForm: true,
       },
       {
         lineId: "L2",
@@ -150,6 +157,8 @@ describe("joinOptionsFor", () => {
         binderId: "b2",
         bandKey: "green",
         locale: "en",
+        form: null,
+        sameForm: true,
       },
     ]);
   });

@@ -11,6 +11,7 @@ import type { FillerCardOption, LinePopupModel, LineProposal, StageOption } from
 import { loadLinePopupModel } from "@/lib/line/popup-load";
 import { loadBulkFillers, loadStageOptions } from "@/lib/line/stage-options-load";
 import type { Locale } from "@/lib/sync/types";
+import type { CardForm } from "@/lib/engine/form";
 
 /** The line popup's model for a card headed into a back half, built from fresh state. */
 export async function lineModelAction(
@@ -32,10 +33,12 @@ export async function stageOptionsAction(
   dexId: number,
   locale: Locale,
   lineBandKey: string,
+  /** The line's form (UIL-133): its own printings first. */
+  form?: CardForm,
 ): Promise<{ ok: true; options: StageOption[] } | { ok: false; error: string }> {
   try {
     const { db } = await getOwnerContext();
-    return { ok: true, options: await loadStageOptions(db, dexId, locale, lineBandKey) };
+    return { ok: true, options: await loadStageOptions(db, dexId, locale, lineBandKey, form) };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };
   }

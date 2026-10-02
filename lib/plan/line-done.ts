@@ -47,8 +47,10 @@ export function newLineKey(
   rootDexId: number,
   colorBand: string,
   locale: string,
+  /** The line's form (UIL-133): an Arven's line and a plain one of one species are two lines. Null is plain. */
+  form: string | null,
 ): string {
-  return `${binderId ?? ""}:${rootDexId}:${colorBand}:${locale}`;
+  return `${binderId ?? ""}:${rootDexId}:${colorBand}:${locale}:${form ?? ""}`;
 }
 
 /** A card still waiting in this haul, as the step-through reads it: its species, and the line it is proposed into. */

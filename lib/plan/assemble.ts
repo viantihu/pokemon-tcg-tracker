@@ -7,7 +7,13 @@
  */
 
 import { extraCopyOfFor, lineNameFor, lineProposalFor, type LineLookups } from "./line-proposal";
-import type { CascadeResult, CatalogCard, IncomingCard, PlacementTarget } from "@/lib/engine";
+import type {
+  CardForm,
+  CascadeResult,
+  CatalogCard,
+  IncomingCard,
+  PlacementTarget,
+} from "@/lib/engine";
 import { actionForResult, resultNeedsDecision } from "./action";
 import type { PlanItem } from "./types";
 import { localeOfId } from "@/lib/catalog/locale";
@@ -37,6 +43,8 @@ export interface AssembleLookups {
   copyLabel?(copyId: string): { label: string; variant: string } | null;
   /** Whether a card's species forms a line at all (Karvi, 2026-09-27). Optional for hand-built lookups. */
   formsALine?(card: CatalogCard): boolean;
+  /** A card's form (UIL-133), part of a new line's identity. Optional for hand-built lookups (then: plain). */
+  formOf?(card: CatalogCard): CardForm;
 }
 
 const binderName = (id: string | null, l: AssembleLookups) =>
@@ -169,7 +177,7 @@ export function toPlanItem(
     collectionPick: result.collectionPick ?? null,
     // UIL-117: the badge, and what the line popup opens on. Null for every card with no line.
     lineProposal: l.lines ? lineProposalFor(result, l.lines) : null,
-    lineName: l.lines ? lineNameFor(result, l.lines) : null,
+    lineName: l.lines ? lineNameFor(result, l.lines, incoming.card) : null,
     extraCopyOf: l.lines ? extraCopyOfFor(result, l.lines) : null,
     dexIds: [...incoming.card.dexId],
     lineStage: result.target.kind === "back-half-line" ? result.target.stageIndex : null,
@@ -180,6 +188,7 @@ export function toPlanItem(
             result.newLine.rootDexId,
             result.newLine.colorBand,
             localeOfId(incoming.card.tcgdexId),
+            l.formOf ? l.formOf(incoming.card) : null,
           )
         : null,
     formsALine: l.formsALine ? l.formsALine(incoming.card) : true,

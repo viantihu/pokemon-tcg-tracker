@@ -151,7 +151,7 @@ async function seedLine(opts: {
 describe("sameLineWaiting, the one next-card rule (UIL-120): a POSITIVE match on the line (the Senior BA's ruling on #430)", () => {
   const A = lineKeyFor("A");
   const B = lineKeyFor("B");
-  const STARTS = newLineKey("kb1", 4, "red", "en");
+  const STARTS = newLineKey("kb1", 4, "red", "en", null);
   const waiting = [
     {
       id: "czd-a",
@@ -186,8 +186,16 @@ describe("sameLineWaiting, the one next-card rule (UIL-120): a POSITIVE match on
 
   it("a start's new line is its own line, matched by the identity the commit gives it, before it has an id", () => {
     expect(sameLineWaiting(`new:${STARTS}`, [6], waiting)).toEqual(["czd-new"]);
-    expect(sameLineWaiting(`new:${newLineKey("kb1", 4, "red", "ja")}`, [6], waiting)).toEqual([]);
-    expect(sameLineWaiting(`new:${newLineKey("kb2", 4, "red", "en")}`, [6], waiting)).toEqual([]);
+    expect(sameLineWaiting(`new:${newLineKey("kb1", 4, "red", "ja", null)}`, [6], waiting)).toEqual(
+      [],
+    );
+    expect(sameLineWaiting(`new:${newLineKey("kb2", 4, "red", "en", null)}`, [6], waiting)).toEqual(
+      [],
+    );
+    // Trainer and region (UIL-133): an Arven's line and a plain one of one species are two new lines.
+    expect(
+      sameLineWaiting(`new:${newLineKey("kb1", 4, "red", "en", "trainer:arven")}`, [6], waiting),
+    ).toEqual([]);
   });
 
   it("a line it cannot key has no next card", () => {
@@ -289,7 +297,9 @@ describe("UIL-120 (a) · a join or a start that leaves the line done", () => {
     // Before the write both would start the SAME new line: the popup's "· next" forecast matches them on it.
     const [cmlBefore, czdBefore] = [await itemFor(CML), await itemFor(CZD)];
     expect(czdBefore?.lineProposal?.kind).toBe("start");
-    expect(cmlBefore?.startsLine).toBe(newLineKey(KB1, CHARMANDER_SV03_026.dexId[0], "red", "en"));
+    expect(cmlBefore?.startsLine).toBe(
+      newLineKey(KB1, CHARMANDER_SV03_026.dexId[0], "red", "en", null),
+    );
     expect(czdBefore?.startsLine).toBe(cmlBefore?.startsLine);
     const first = await commit({
       card: CML,
