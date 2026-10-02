@@ -9495,7 +9495,10 @@ recommendation-not-refusal ruling this entry's fix now has to follow).
 
 - **Reported:** 2026-10-01 (Karvi). In her words: "I feel that the app is too slow. Please do a
   performance review." Screens she named: Haul Plan, Lines page, Lookup/Collections, and every page.
-- **Status:** Open, assigned to the Tech Lead. Measure first; no fix proposed yet.
+- **Status:** Open, assigned to the Tech Lead. Findings in; Karvi approved the fix order (catalog
+  cache and the 1,000-row list cap first, then keyset paging, duplicate-work cuts, and Haul Plan
+  memoisation).
+- **Status (before 2026-10-02):** Open, assigned to the Tech Lead. Measure first; no fix proposed yet.
 - **Priority:** High.
 - **Area:** Performance, App-wide
 - **Env:** Testing
@@ -9504,10 +9507,25 @@ recommendation-not-refusal ruling this entry's fix now has to follow).
 server time, network time, and client time; region and cold-start effects; query counts; the catalog
 cache; and bundle size. It closes with the top 5 fixes, ranked, not every finding treated equally.
 
-**Not independently investigated in this pass — this entry records the ask, the measurement is the
-Tech Lead's own work.** No source reading or profiling done here; writing up findings before the Tech
-Lead has actually measured would be guessing at numbers that need to come from a real run, not a code
-read.
+**The Tech Lead's findings, reported 2026-10-02, not independently re-measured here.** Nine loaders
+bypass the catalog cache ([`lib/plan/catalog-cache.ts`](../lib/plan/catalog-cache.ts)) and instead
+re-download the whole mirror, roughly 36k rows across 38 OFFSET-paginated pages (about 25 MB), on every
+line action — about 76% of the app's total DB time by the Tech Lead's measurement. The second finding is
+a 1,000-row cap on certain list reads, framed as "an outage one import away" once a collection crosses
+it. Karvi approved fixing both first, then keyset paging, cutting duplicate work, and memoising the Haul
+Plan, in that order.
+
+**Independently confirmed, from source, what each finding describes.** The cache exists exactly where
+cited: `loadCatalogCached` in `catalog-cache.ts` holds a process-local, five-minute-TTL copy of the
+mirror precisely so that committing one card does not re-page all 23,548+ mirror rows per click (its own
+header comment names `loadPlanContext` as the caller that pages the whole mirror on every commit — the
+loader class the Tech Lead's "nine loaders" finding points at). The 1,000-row cap risk is real and
+currently unmitigated in at least two reads: [`copyRepo.listShelved`](../lib/repo/copy.ts:25) and
+[`copyRepo.listUnplaced`](../lib/repo/copy.ts:94) both call `.select("*").eq(...)` with no `.range()` or
+`.limit()`, so either would silently truncate at PostgREST's default 1,000-row cap once her shelved or
+unplaced copies cross that count — contrast `copyRepo.listBulk` (`copy.ts:35`), which already pages via
+`.range(from, to)`. The exact loader count, byte figures, and 76% share are the Tech Lead's own
+measurement, not reproduced here.
 
 **Cross-reference:** none yet — first performance-specific entry in the log; later screen-specific
 findings from this review should cite back to this one rather than opening unrelated new entries, per
