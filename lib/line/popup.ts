@@ -180,6 +180,8 @@ export interface StageOption {
   /** A specialty-class printing: it lives in the specialty binder. */
   special: boolean;
   priceMarket: number | null;
+  /** She holds a copy of this printing anywhere (every role but a block). Absent: not known. */
+  owned?: boolean;
 }
 
 /** One of her spare copies that could fill a pocket, and where it is now ("Bulk box", "This haul"). */

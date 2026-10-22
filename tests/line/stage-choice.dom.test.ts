@@ -37,7 +37,7 @@ const STAGE: LinePopupStage = {
 };
 const OPTIONS: StageOption[] = [
   { card: SUGGESTED, sameColour: true, special: false, priceMarket: 0.1 },
-  { card: card("sv03-228", "228"), sameColour: true, special: true, priceMarket: 30 },
+  { card: card("sv03-228", "228"), sameColour: true, special: true, priceMarket: 30, owned: true },
   {
     card: card("sv08-012", "012", "dark_blue"),
     sameColour: false,
@@ -140,6 +140,7 @@ describe("StageChoice · her other choices", () => {
         b.getAttribute("aria-label"),
       );
     expect(grid.textContent).toMatch(/\$30\.00/);
+    expect(screen.getAllByText("Owned")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Priciest" }));
     expect(order()[0]).toBe("Chase Charmeleon 228/197");
     await user.click(screen.getByRole("button", { name: "This line's colour" }));

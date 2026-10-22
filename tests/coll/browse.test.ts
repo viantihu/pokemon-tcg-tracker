@@ -165,6 +165,21 @@ describe("copyRepo.ownedCatalogCardIdSet", () => {
   });
 });
 
+describe("copyRepo.ownedAmong", () => {
+  it("answers for the asked printings only, with the same predicate: anywhere but a block", async () => {
+    await seedCards([{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }]);
+    await db.exec(`
+      insert into copy (id, owner_id, catalog_card_id, role)
+        values ('e0000000-0000-0000-0000-000000000001', '${OWNER}', 'a', 'haul'),
+               ('e0000000-0000-0000-0000-000000000002', '${OWNER}', 'b', 'block'),
+               ('e0000000-0000-0000-0000-000000000003', '${OWNER}', 'd', 'shelved');
+    `);
+    await asOwner(db);
+    const owned = await copyRepo.ownedAmong(pgliteClient(db), ["a", "b", "c"], 2);
+    expect(owned).toEqual(new Set(["a"]));
+  });
+});
+
 describe("applyCardBrowse", () => {
   it("expands a color-band key to its raw types before querying", async () => {
     await seedCards([

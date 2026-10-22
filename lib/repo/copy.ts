@@ -75,6 +75,25 @@ export const copyRepo = {
   },
 
   /**
+   * Of these printings, the ones she holds anywhere: `ownedCatalogCardIdSet`'s predicate (every role but `block`), asked
+   * of a few ids rather than the whole collection. "Pick another" badges its tiles with it.
+   */
+  async ownedAmong(db: DbClient, catalogCardIds: string[], chunkSize = 100): Promise<Set<string>> {
+    const out = new Set<string>();
+    const unique = [...new Set(catalogCardIds)];
+    for (let i = 0; i < unique.length; i += chunkSize) {
+      const { data, error } = await db
+        .from("copy")
+        .select("catalog_card_id")
+        .neq("role", "block")
+        .in("catalog_card_id", unique.slice(i, i + chunkSize));
+      if (error) throw error;
+      for (const r of data ?? []) out.add(r.catalog_card_id);
+    }
+    return out;
+  },
+
+  /**
    * Copies that hold NO placement: in the bulk box, in no binder, in no line slot. This is the raw
    * candidate set for the Haul Plan's pending-placement queue (UIL-003) — the shape sync's `creates`
    * and manual-match leave behind (`role: 'bulk'`, everything else null; lib/sync/exec.ts). It also

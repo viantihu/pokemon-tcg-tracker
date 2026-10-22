@@ -4,7 +4,7 @@
  * "Pick another" for an empty stage, as a place to browse (Karvi, 2026-10-22: "she should be almost shopping for the
  * next card for her collection"). Every printing of the stage's species in the line's language, as the app's card
  * tiles (`.cgrid`/`.ccard`, the Collections search grid's look): big art she can tap to enlarge, the set, the number,
- * the price, and what is different about it. A find box, a colour filter and a sort let her look around; "Chase" on a
+ * the price, whether she owns it, and what is different about it. A find box, a colour filter and a sort let her look around; "Chase" on a
  * tile is her pick.
  *
  * Render and report only: the options come from the stage's `loadOptions`, and `onPick` hands the chosen one back.
@@ -156,6 +156,7 @@ export function PrintingShop({
               <div className="cno">{setOf(o)}</div>
               {number ? <div className="cno">{number}</div> : null}
               <div className="lp-price u">{fmtPrice(o.priceMarket) ?? "No price"}</div>
+              {o.owned ? <span className="cpill have u">Owned</span> : null}
               {!o.sameColour ? <span className="cpill u">Different colour</span> : null}
               {o.special ? <span className="cpill wish u">Special</span> : null}
               <button
