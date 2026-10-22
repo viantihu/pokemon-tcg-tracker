@@ -43,6 +43,7 @@ import {
   restoreWithheldAction,
   retryUnresolvedNow,
   searchCatalog,
+  swapStandInAction,
   undismissEntryAction,
   undoLastSync,
 } from "./actions";
@@ -56,6 +57,7 @@ import type {
 } from "./sync-types";
 import { LOST, reach } from "../_components/reach";
 import { CountCheckPanel } from "./CountCheckPanel";
+import { StandInSwapPanel } from "./StandInSwapPanel";
 
 type Phase = "idle" | "parsing" | "preview" | "working";
 
@@ -104,11 +106,18 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
    * one action that returns them, and it stays until she chooses.
    */
   const [withheld, setWithheld] = useState<WithheldView | null>(null);
+  /**
+   * Stand-ins swapped for their real cards (UIL-060 Half 2). A swap happens on the load that finds it, so each load's
+   * swaps are kept here until she has seen them, not replaced by the next load's (which finds none).
+   */
+  const [swapped, setSwapped] = useState(initialState.standIns.swapped);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
     try {
-      setState(await loadSyncState());
+      const next = await loadSyncState();
+      setState(next);
+      if (next.standIns.swapped.length > 0) setSwapped((had) => [...had, ...next.standIns.swapped]);
     } catch {
       setError(LOST_REFRESH);
     }
@@ -244,6 +253,18 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
       ) : null}
 
       <CountCheckPanel check={state.countCheck} />
+
+      <StandInSwapPanel
+        swapped={swapped}
+        unsure={state.standIns.unsure}
+        busy={busy}
+        onSwap={(standInId, realId) =>
+          run("Swapped your stand-in for the real card.", () =>
+            swapStandInAction(standInId, realId),
+          )
+        }
+        onDismissSwapped={() => setSwapped([])}
+      />
 
       {withheld ? (
         <WithheldNotice

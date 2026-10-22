@@ -10,7 +10,7 @@
  * searches the LOCAL mirror via the shared `lookupCatalog` action.
  */
 
-import { getOwnerContext } from "@/lib/plan";
+import { getOwnerContext, loadCatalogCached } from "@/lib/plan";
 import {
   aliasKey,
   dismissEntry,
@@ -29,7 +29,9 @@ import {
   type SyncPreview,
   manualMatchStandIn,
   knownSetIdForEntry,
+  reconcileStandIns,
   StandInTwinError,
+  swapStandInFor,
 } from "@/lib/sync";
 import {
   applyWriteOps,
@@ -231,6 +233,9 @@ function toAliasViews(
  */
 export async function loadSyncState(): Promise<SyncState> {
   const { db } = await getOwnerContext();
+  // UIL-060 Half 2: swap any stand-in TCGdex now carries BEFORE the reads below, so the queue, the undo record and
+  // the count check all read the real card.
+  const standIns = await reconcileStandIns(db, await loadCatalogCached(db));
   const [entries, snapshots, aliases, typeRows, countCheck] = await Promise.all([
     unresolvedEntryRepo.list(db),
     lastSyncSnapshotRepo.list(db),
@@ -263,7 +268,25 @@ export async function loadSyncState(): Promise<SyncState> {
     aliases: toAliasViews(aliases, entries),
     cardTypes: [...new Set(typeRows.map((t) => t.card_type))].sort(),
     countCheck,
+    standIns,
   };
+}
+
+/**
+ * UIL-060 Half 2: her pick for a stand-in the swap was not sure of — swap it for that real card, in one transaction
+ * (0039 `swap_stand_in`). The screen reloads its state afterwards.
+ */
+export async function swapStandInAction(
+  standInId: string,
+  realId: string,
+): Promise<{ ok: true } | ActionError> {
+  try {
+    const { db } = await getOwnerContext();
+    await swapStandInFor(db, standInId, realId);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
 }
 
 /**

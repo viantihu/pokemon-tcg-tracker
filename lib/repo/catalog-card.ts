@@ -114,6 +114,15 @@ export const catalogCardRepo = {
     return rows;
   },
 
+  /**
+   * Swap her stand-in for the real TCGdex card (UIL-060 Half 2, 0039 `swap_stand_in`): every reference repointed and
+   * the stand-in deleted, in one transaction. Throws on any DB error, including the function's refusals.
+   */
+  async swapStandIn(db: DbClient, standInId: string, realId: string): Promise<void> {
+    const { error } = await db.rpc("swap_stand_in", { stand_in_id: standInId, real_id: realId });
+    if (error) throw error;
+  },
+
   /** Whether the mirror holds ANY card of `setId` — "the set is known" for a stand-in's set id (UIL-060). */
   async setExists(db: DbClient, setId: string): Promise<boolean> {
     const { data, error } = await db
