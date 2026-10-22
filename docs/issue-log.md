@@ -9643,3 +9643,33 @@ preview is pending, so the two controls are never both live on screen at once.
 
 **Cross-reference:** none yet — first entry on this confusion; UIL-116 and UIL-113 are the nearest
 precedent for a stale-looking control sitting next to current state, though neither is the same bug.
+
+## UIL-137 — The Haul Plan's "N new cards joined the plan" banner names every card and its destination, so a 35-card import is a wall of text
+
+- **Reported:** 2026-10-22 (Karvi, with a screenshot of Testing's Haul Plan after her first import since
+  Sep 26: 35 arrivals). In her words: "I don't like this message at the top. It's poor UX."
+- **Status:** **In progress.** Karvi chose the fix 2026-10-22 (see below); the PR is not merged yet.
+- **Priority:** Low.
+- **Area:** Haul Plan
+- **Env:** Testing
+
+**What she saw.** One yellow banner, `+ 35 new cards joined the plan: Chimchar → KB-002 · Front · Red ·
+Cynthia's Gible → KB-001 · Back · Orange · …`, filling about eight lines above the list. The banner
+([`PlanScreen.tsx`](<../app/(ui)/plan/PlanScreen.tsx>)) joins `name → destination` for every arrival
+with no cap. It repeats what the list already shows: each arrival has its own row, a **NEW** chip, and
+its destination, and the header already tallies Front / Back / Specialty / Bulk.
+
+**The same pattern sits right above it.** The "N cards got a new home after that change" banner
+(UIL-114) builds its text the same way and would grow the same way after a large re-route. Unlike the
+arrivals, a moved card carries no marker in the list, which is why the fix below still names cards when
+there are few of them.
+
+**Karvi's ruling, 2026-10-22 (two choices, both the recommended option).**
+1. The "joined the plan" banner becomes a count only: `+ 35 new cards joined the plan (marked NEW
+   below).` Names appear only when 3 or fewer cards arrive, as today.
+2. The "got a new home" banner gets the same treatment: a count, with names only for 3 or fewer.
+
+**Not changed:** the OK button, when the banners show, and what they count (UIL-114's behavior).
+
+**Cross-reference:** UIL-114 (live arrivals and the re-route banner), UIL-116 (a banner Karvi called
+irrelevant and had removed).

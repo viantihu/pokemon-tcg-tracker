@@ -66,6 +66,34 @@ export interface MovedCard {
   destination: string;
 }
 
+/** A banner names its cards only up to here; past it, the list below the banner already says it (UIL-137). */
+export const BANNER_NAMES_MAX = 3;
+
+const namedCards = (cards: readonly MovedCard[]): string =>
+  cards.map((m) => `${m.name} → ${m.destination}`).join(" · ");
+
+const cardsOf = (n: number): string => `${n} card${n === 1 ? "" : "s"}`;
+
+/**
+ * The "joined the plan" banner's line (UIL-137). A handful of arrivals are named with where each goes; a big
+ * import is a count, because every arrival already has its own row, a New chip and its destination.
+ */
+export function joinedBannerText(cards: readonly MovedCard[]): string {
+  const head = `${cards.length} new card${cards.length === 1 ? "" : "s"} joined the plan`;
+  return cards.length <= BANNER_NAMES_MAX
+    ? `${head}: ${namedCards(cards)}`
+    : `${head} (marked New below)`;
+}
+
+/**
+ * The "got a new home" banner's line (UIL-137). Same rule as the arrivals. A moved card carries no marker in the
+ * list, so a few are still named; past that it is a count.
+ */
+export function movedBannerText(cards: readonly MovedCard[]): string {
+  const head = `${cardsOf(cards.length)} got a new home after that change`;
+  return cards.length <= BANNER_NAMES_MAX ? `${head}: ${namedCards(cards)}` : head;
+}
+
 /**
  * The plan after a re-route: every card she has SHELVED kept exactly as it was (it is written; the server
  * routed only the waiting ones), every waiting card as the server now routes it, the waiting cards whose

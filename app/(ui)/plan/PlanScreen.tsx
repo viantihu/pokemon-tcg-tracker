@@ -64,6 +64,8 @@ import {
   dropFromPlan,
   flattenPlan,
   mergeReroute,
+  joinedBannerText,
+  movedBannerText,
   type MovedCard,
 } from "./reroute";
 import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
@@ -1933,10 +1935,7 @@ function PlanView(props: {
       {moved && moved.length > 0 ? (
         <div className="alertbar" role="status">
           <span>↻</span>
-          <b>
-            {moved.length} card{moved.length === 1 ? "" : "s"} got a new home after that change:{" "}
-            {moved.map((m) => `${m.name} → ${m.destination}`).join(" · ")}
-          </b>
+          <b>{movedBannerText(moved)}</b>
           <button
             type="button"
             className="btn sm"
@@ -1951,10 +1950,7 @@ function PlanView(props: {
       {joined && joined.length > 0 ? (
         <div className="alertbar" role="status">
           <span>+</span>
-          <b>
-            {joined.length} new card{joined.length === 1 ? "" : "s"} joined the plan:{" "}
-            {joined.map((m) => `${m.name} → ${m.destination}`).join(" · ")}
-          </b>
+          <b>{joinedBannerText(joined)}</b>
           <button
             type="button"
             className="btn sm"
