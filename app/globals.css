@@ -4144,3 +4144,42 @@ html.tour-open .app {
 .lp-returns .lp-mrow > .lp-note {
   flex: 1 1 100%;
 }
+
+/* "Pick another" as a place to browse (PrintingShop): the Collections search grid's tiles, art large, with a find
+   box, a colour filter and a sort above. The grid is capped and scrolls, so the popup's buttons stay in reach. */
+.lp-shop {
+  margin-top: 8px;
+}
+.lp-shopbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.lp-shopbar .lp-find {
+  flex: 1 1 180px;
+  width: auto;
+  margin-top: 0;
+}
+.lp-shopgrid {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  margin-top: 8px;
+  max-height: 520px;
+  overflow-y: auto;
+  align-content: start;
+}
+.lp-shopcard .cn {
+  font-size: 11px;
+}
+.lp-shopcard .cno {
+  font-size: 9px;
+}
+.lp-price {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.lp-shopcard .btn {
+  margin-top: auto;
+  width: 100%;
+}

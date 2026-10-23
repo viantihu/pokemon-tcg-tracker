@@ -4,7 +4,7 @@
  * Her choice for one unfilled stage of a line, and for a complete short line's third pocket (UIL-121). Karvi,
  * 2026-09-27: nothing is written for her. Each empty stage shows a SUGGESTION (the cheapest same-colour printing in
  * the line's language, else the special one), never selected, and waits for her to:
- *   - chase it, or pick another printing (the species in the line's language; another colour is tagged);
+ *   - chase it, or browse every printing and pick another (PrintingShop: the species in the line's language);
  *   - make a placeholder card when the catalog lacks it (a catalog-only stand-in, in the line's language);
  *   - leave the stage empty;
  *   - or record what fills its pocket: a basic energy, or a spare card from her bulk box.
@@ -29,6 +29,7 @@ import {
 import type { CardIdentity } from "@/lib/line/types";
 import type { Locale } from "@/lib/sync/types";
 import { CardFace } from "./CardFace";
+import { PrintingShop } from "./PrintingShop";
 
 type Panel = "pick" | "standin" | "filler" | null;
 
@@ -527,17 +528,10 @@ export function StageChoice({
         ) : options.items && options.items.length === 0 ? (
           <div className="lp-note">No printing of this card in this line&apos;s language.</div>
         ) : options.items ? (
-          <CardGrid
+          <PrintingShop
             label={`Printings for the ${stageLabel(stage.stage)} slot`}
             items={options.items}
-            keyOf={(o) => o.card.tcgdexId}
-            cardOf={(o) => o.card}
-            tagOf={(o) =>
-              [o.sameColour ? null : "Different colour", o.special ? "Special" : null]
-                .filter(Boolean)
-                .join(" · ") || null
-            }
-            selected={chasing}
+            chosen={chasing}
             onPick={(o) => pick({ kind: "chase", catalogCardId: o.card.tcgdexId })}
             busy={busy}
           />

@@ -41,7 +41,7 @@ async function colourMap(db: DbClient): Promise<TypeColorMap> {
   return map;
 }
 
-/** The species' printings in the line's language, same colour first. */
+/** The species' printings in the line's language, same colour first, each marked if she owns it. */
 export async function loadStageOptions(
   db: DbClient,
   dexId: number,
@@ -51,10 +51,15 @@ export async function loadStageOptions(
   form?: CardForm,
 ): Promise<StageOption[]> {
   const [rows, map] = await Promise.all([catalogCardRepo.findByDexId(db, dexId), colourMap(db)]);
-  return stageOptionsFrom(
+  const options = stageOptionsFrom(
     rows.map((r) => printingFromRow(r, map)),
     { locale, bandKey: lineBandKey, ...(form !== undefined ? { form } : {}) },
   );
+  const owned = await copyRepo.ownedAmong(
+    db,
+    options.map((o) => o.card.tcgdexId),
+  );
+  return options.map((o) => ({ ...o, owned: owned.has(o.card.tcgdexId) }));
 }
 
 /**

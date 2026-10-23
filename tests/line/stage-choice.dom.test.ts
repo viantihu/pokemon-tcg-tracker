@@ -37,7 +37,7 @@ const STAGE: LinePopupStage = {
 };
 const OPTIONS: StageOption[] = [
   { card: SUGGESTED, sameColour: true, special: false, priceMarket: 0.1 },
-  { card: card("sv03-228", "228"), sameColour: true, special: true, priceMarket: 30 },
+  { card: card("sv03-228", "228"), sameColour: true, special: true, priceMarket: 30, owned: true },
   {
     card: card("sv08-012", "012", "dark_blue"),
     sameColour: false,
@@ -127,8 +127,26 @@ describe("StageChoice · her other choices", () => {
     expect(loadOptions).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Different colour")).toBeTruthy();
     expect(screen.getByText("Special")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: /Charmeleon 012\/197/ }));
+    await user.click(screen.getByRole("button", { name: "Chase Charmeleon 012/197" }));
     expect(onChange).toHaveBeenCalledWith({ kind: "chase", catalogCardId: "sv08-012" });
+  });
+
+  it("Pick another is a place to browse: prices, a colour filter, a find box and a sort", async () => {
+    const { user } = renderStage();
+    await user.click(screen.getByRole("button", { name: "Pick another" }));
+    const grid = await screen.findByRole("group", { name: /Printings for the Stage 1 slot/ });
+    const order = () =>
+      Array.from(grid.querySelectorAll("button[aria-label^='Chase']")).map((b) =>
+        b.getAttribute("aria-label"),
+      );
+    expect(grid.textContent).toMatch(/\$30\.00/);
+    expect(screen.getAllByText("Owned")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Priciest" }));
+    expect(order()[0]).toBe("Chase Charmeleon 228/197");
+    await user.click(screen.getByRole("button", { name: "This line's colour" }));
+    expect(order()).not.toContain("Chase Charmeleon 012/197");
+    await user.type(screen.getByRole("searchbox", { name: "Find a printing" }), "027");
+    expect(order()).toEqual(["Chase Charmeleon 027/197"]);
   });
 
   it("a placeholder card: her name, set and number, in the LINE's language; nothing else travels", async () => {
