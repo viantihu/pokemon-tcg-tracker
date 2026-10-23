@@ -954,6 +954,15 @@ export type Database = {
         Args: { payload: Json };
         Returns: undefined;
       };
+      /**
+       * Fills a mirror printing's empty `dex_id` / NULL `evolve_from` from its other printings (same language,
+       * name and stage) when they all agree (migration 0039). One set's rows, or every row when `p_set_id` is
+       * omitted. Service role only. Returns how many values it filled.
+       */
+      fill_catalog_species_gaps: {
+        Args: { p_set_id?: string };
+        Returns: number;
+      };
     };
     Enums: Record<never, never>;
     CompositeTypes: Record<never, never>;

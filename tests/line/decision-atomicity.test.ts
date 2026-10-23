@@ -186,7 +186,7 @@ describe("UIL-095 · the real path is one transaction", () => {
       rpc: (fn: "apply_write_ops", args: { payload: unknown }) => {
         const payload = args.payload as { ops: { op: string }[] };
         seen.push(payload.ops.map((o) => o.op));
-        return client.rpc(fn, args as Parameters<typeof client.rpc>[1]);
+        return client.rpc(fn, args as { payload: never });
       },
     } as unknown as ReturnType<typeof pgliteClient>;
 

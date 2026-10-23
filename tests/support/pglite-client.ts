@@ -555,6 +555,18 @@ export function pgliteClient(
       return new PgQuery(db, table, maxRows);
     },
     async rpc(fn: string, args: Record<string, unknown>) {
+      if (fn === "fill_catalog_species_gaps") {
+        // The mirror's gap fill (0039), after each set it upserts.
+        try {
+          const { rows } = await db.query<{ n: number }>(
+            `select fill_catalog_species_gaps($1) as n`,
+            [args.p_set_id ?? null],
+          );
+          return { data: rows[0].n, error: null };
+        } catch (err) {
+          return { data: null, error: err as unknown };
+        }
+      }
       if (fn !== "apply_write_ops") throw new Error(`pglite-client: unsupported rpc ${fn}`);
       try {
         await db.query(`select ${quoteIdent(fn)}($1::jsonb)`, [JSON.stringify(args.payload)]);

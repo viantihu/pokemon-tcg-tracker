@@ -228,6 +228,12 @@ export async function syncSet(
     await catalogCardRepo.upsertMany(db, batch);
     upserted += batch.length;
   }
+  // TCGdex can send a new set before its data is whole (the 30th set's Cherrim: no dexId, no evolveFrom), and the
+  // upsert has just written those gaps back. Fill them from the card's other printings (migration 0039).
+  const { error } = await db.rpc("fill_catalog_species_gaps", {
+    p_set_id: namespaceId(opts.locale ?? "en", set.id),
+  });
+  if (error) throw error;
   opts.onProgress?.(`${set.id} (${set.name}): ${upserted} cards`);
   return { setId: set.id, setName: set.name, isDigitalOnly, fetched: fulls.length, upserted };
 }

@@ -227,6 +227,117 @@ describe("syncSet — idempotent mirror", () => {
     }
   });
 
+  it("fills a card's missing species and prior stage from its other printings (0039)", async () => {
+    // The 30th set's Cherrim and Cherubi as TCGdex sent them (2026-10-23): no dexId, no evolveFrom. Every other
+    // English Cherrim says 421 and "Cherubi", so `buildChain` could not find the Cherubi behind this one.
+    const cherubi: TcgdexCardFull = {
+      ...CHARMANDER,
+      id: "30th-006",
+      localId: "006",
+      name: "Cherubi",
+      types: ["Grass"],
+      dexId: undefined,
+      set: { id: "30th", name: "30th" },
+    };
+    const cherrim: TcgdexCardFull = {
+      ...CHARMELEON,
+      id: "30th-007",
+      localId: "007",
+      name: "Cherrim",
+      types: ["Grass"],
+      evolveFrom: undefined,
+      dexId: undefined,
+      set: { id: "30th", name: "30th" },
+    };
+    const set: TcgdexSet = {
+      id: "30th",
+      name: "30th",
+      serie: { id: "me", name: "Mega Evolution" },
+      cards: [cherubi, cherrim].map((c) => ({ id: c.id, localId: c.localId, name: c.name })),
+    };
+    const { db, pg } = await mirrorDb();
+    try {
+      await catalogCardRepo.upsertMany(db, [
+        toCatalogRow(
+          {
+            ...CHARMANDER,
+            id: "swsh5-7",
+            name: "Cherubi",
+            dexId: [420],
+            set: { id: "swsh5", name: "Battle Styles" },
+          },
+          { isDigitalOnly: false },
+        ),
+        toCatalogRow(
+          {
+            ...CHARMELEON,
+            id: "swsh5-8",
+            name: "Cherrim",
+            evolveFrom: "Cherubi",
+            dexId: [421],
+            set: { id: "swsh5", name: "Battle Styles" },
+          },
+          { isDigitalOnly: false },
+        ),
+        // A Lapras TCGdex printed with Magikarp's dex id, beside a right one: they disagree, so neither fills.
+        toCatalogRow(
+          {
+            ...CHARMANDER,
+            id: "xy1-35",
+            name: "Lapras",
+            dexId: [131],
+            set: { id: "xy1", name: "XY" },
+          },
+          { isDigitalOnly: false },
+        ),
+        toCatalogRow(
+          {
+            ...CHARMANDER,
+            id: "pgo-20",
+            name: "Lapras",
+            dexId: [129],
+            set: { id: "pgo", name: "Pokémon GO" },
+          },
+          { isDigitalOnly: false },
+        ),
+        toCatalogRow(
+          {
+            ...CHARMANDER,
+            id: "30th-017",
+            name: "Lapras",
+            dexId: undefined,
+            set: { id: "30th", name: "30th" },
+          },
+          { isDigitalOnly: false },
+        ),
+        // Another set's gap is left for its own sync.
+        toCatalogRow(
+          {
+            ...CHARMANDER,
+            id: "sv01-099",
+            name: "Cherubi",
+            dexId: undefined,
+            set: { id: "sv01", name: "SVI" },
+          },
+          { isDigitalOnly: false },
+        ),
+      ]);
+
+      await syncSet(db, fakeTcgdex(set, [cherubi, cherrim]), "30th");
+
+      const c = (await rowOf(pg, "30th-007"))!;
+      expect(c.dex_id).toEqual([421]);
+      expect(c.evolve_from).toBe("Cherubi");
+      const b = (await rowOf(pg, "30th-006"))!;
+      expect(b.dex_id).toEqual([420]);
+      expect(b.evolve_from).toBeNull(); // a Basic never takes one
+      expect((await rowOf(pg, "30th-017"))!.dex_id).toEqual([]);
+      expect((await rowOf(pg, "sv01-099"))!.dex_id).toEqual([]);
+    } finally {
+      await pg.close();
+    }
+  });
+
   it("flags every card in a TCG Pocket set as digital-only", async () => {
     const pocket: TcgdexCardFull = {
       ...CHARMANDER,
