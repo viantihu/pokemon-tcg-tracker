@@ -4,7 +4,7 @@ import type { StandInInput } from "@/lib/sync";
  * Plain serializable types only — no server imports — so the client component can hold them. The
  * richer engine types (SyncPreview, SyncPlanBundle) come from `@/lib/sync` via `import type`.
  */
-import type { SyncCounts } from "@/lib/sync";
+import type { StandInSwapReport, SyncCounts } from "@/lib/sync";
 
 /** One unresolved-queue entry, flattened for the queue list + detail (sync-ui-spec §A.3). */
 export interface QueueEntryView {
@@ -58,6 +58,8 @@ export interface SyncState {
   aliases: LearnedAliasView[];
   /** UIL-100: does the collection add up to her last Dex file, and which cards do not. */
   countCheck: CountCheckView;
+  /** UIL-060 Half 2: stand-ins swapped for their real cards on this load, and the ones waiting for her pick. */
+  standIns: StandInSwapReport;
 }
 
 /** Result of an apply (fast-path or gated) — carries the fast-path notification text. */

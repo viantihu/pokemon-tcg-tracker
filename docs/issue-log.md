@@ -4739,7 +4739,18 @@ convenience, not a defect.
   disclosure, pick a kind, Create; the row leaves the queue and the card appears in the Haul Plan as bulk.
   The Tech Lead's next read should then show `source = user` 1 and catalog_card 23,549. **Half 2** (detect
   the real record and swap the stand-in for it, repointing the seven referencing sites in one transaction)
-  remains the named follow-on; nothing in Half 1 forecloses it. **Part 1**, migration `0015` and the
+  remains the named follow-on; nothing in Half 1 forecloses it. **Half 2 built 2026-10-22** (branch
+  `claude/bold-wozniak-4u1zir`, migration `0039_stand_in_swap`): Karvi asked for stand-ins to be matched
+  automatically once TCGdex adds them, after her two "30th Celebration" stand-ins sat beside the real cards the
+  catalog sync had just brought in. She cannot know a set id when making a stand-in, so the match reads the SET
+  NAME (case, accents and punctuation ignored, "&" = "and") and the printed number ("15/128" reads as "015").
+  Her rulings: build the full swap; swap on its own only when CERTAIN (one printing in that set with that number
+  and her card name), otherwise show the candidates on the Sync screen for her to pick. The swap repoints all ten
+  places a card id lives (seven foreign keys, `placement_decision.catalog_card_id`, the two id arrays) plus the
+  undo record, then deletes the stand-in, in one transaction; a clash (she already holds the real card under the
+  same Dex variant) is refused and shown, not merged. Runs when the Sync screen loads. Pinned by
+  `tests/catalog/stand-in-match.test.ts`, `tests/catalog/stand-in-swap.test.ts` and
+  `tests/sync/stand-in-swap-panel.dom.test.ts`. **Part 1**, migration `0015` and the
   write path: PR [#272](https://github.com/viantihu/pokemon-tcg-tracker/pull/272) MERGED to `develop`
   2026-09-20 (squash `ecf34b6`), QA-gated (1005 tests; 0015's function is 0014's text plus the 31-line
   `insert_catalog_stand_in` branch; stamping a stand-in 'tcgdex' fails 4 tests on the check constraint;
