@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * UIL-138 — a failed Apply says so where she is looking. Apply sits at the bottom of a preview that can run to
+ * UIL-139 — a failed Apply says so where she is looking. Apply sits at the bottom of a preview that can run to
  * hundreds of rows; the error used to render in an amber panel at the TOP of the page, so a refused Apply read as
  * a button that did nothing, with no error text. Driven through the REAL SyncScreen: the error shows inside the
  * preview directly above Apply and Cancel, as an alert, scrolled into view; a retry or a cancel clears it; and an
@@ -82,7 +82,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("UIL-138 · a refused Apply reports beside Apply", () => {
+describe("UIL-139 · a refused Apply reports beside Apply", () => {
   it("shows the refusal inside the preview, directly above Apply and Cancel, as the only alert", async () => {
     m.applySync.mockResolvedValue({ ok: false, error: REFUSED });
     const user = userEvent.setup();
@@ -158,7 +158,7 @@ describe("UIL-138 · a refused Apply reports beside Apply", () => {
   });
 });
 
-describe("UIL-138 · an error with no preview stays at the top", () => {
+describe("UIL-139 · an error with no preview stays at the top", () => {
   it("a file that could not be read is an alert at the top of the page, not inside a preview", async () => {
     m.previewSync.mockResolvedValue({ ok: false, error: "That file is not a Dex export." });
     const user = userEvent.setup();

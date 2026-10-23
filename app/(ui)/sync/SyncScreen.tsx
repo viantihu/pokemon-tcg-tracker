@@ -248,7 +248,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
         {busy ? <ProgressBar label={busyLabel} /> : null}
       </div>
 
-      {/* While a preview is open its error shows beside Apply, where she is looking (UIL-138). */}
+      {/* While a preview is open its error shows beside Apply, where she is looking (UIL-139). */}
       {error && preview === null ? <ErrorPanel message={error} /> : null}
 
       <CountCheckPanel check={state.countCheck} />
@@ -610,7 +610,7 @@ function UndoBar({
 }
 
 /**
- * A refusal or a lost call, in words, announced to a screen reader (UIL-138). `reveal` scrolls it into view when
+ * A refusal or a lost call, in words, announced to a screen reader (UIL-139). `reveal` scrolls it into view when
  * it appears: the Apply button is at the bottom of a preview that can run to hundreds of rows, so an error
  * somewhere else on the page reads as a button that did nothing.
  */
@@ -645,7 +645,7 @@ export function PreviewPanel({
   preview: SyncPreview;
   overrides: SyncOverrides;
   busy: boolean;
-  /** Why the last Apply did not go through; shown right above Apply, not at the top of the page (UIL-138). */
+  /** Why the last Apply did not go through; shown right above Apply, not at the top of the page (UIL-139). */
   error?: string | null;
   onToggleReject: (migrationKey: string) => void;
   onChooseRetire: (presenceKey: string, copyId: string) => void;

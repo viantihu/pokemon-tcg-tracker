@@ -9689,7 +9689,38 @@ there are few of them.
 **Cross-reference:** UIL-114 (live arrivals and the re-route banner), UIL-116 (a banner Karvi called
 irrelevant and had removed).
 
-## UIL-138 — A failed Apply reports its error at the top of the Sync page, far from the Apply button, so the button looks dead
+## UIL-138 — A 30th Celebration Vivillon says "Not enough same-colour cards yet (0 same-colour cards) to start a line" when her Green Vivillon line already exists
+
+- **Reported:** 2026-10-22 (Karvi, Haul Plan, with a screenshot). In her words: "The reason for not
+  proposing a line is incorrect. The reason the system suggested not adding a line is because a line
+  already exists for this Pokemon."
+- **Status:** **In progress.** Branch `claude/quirky-rubin-y85q5i`.
+- **Priority:** Medium (proposed). Every Pokémon in the newest set routes as if it had no species.
+- **Area:** Plan, Catalog
+- **Env:** Testing, `develop` `0ae2a70`
+
+**What she saw.** Vivillon 008/128 (`30th-008`, Stage 2, Grass), NOW HANDLING: "Place in the front half,
+KB-002 · Front · Green", reason "Not enough same-colour cards yet (0 same-colour cards) to start a line".
+Testing holds her Green Vivillon line (`2dc35b44…`, closed, plain): Scatterbug `sv08-005`, Spewpa
+`me03-008` and Vivillon `me03-009`, all three filled.
+
+**Root cause: the catalog row, not the engine's rule.** TCGdex sent `30th-008` with `dex_id = '{}'`
+and `evolve_from = null`. The cascade matches a line by species (`existingLineSlot`,
+`lib/engine/cascade.ts`), so a card of no species matches no line, falls to the new-line test, and
+counts 0 members. The whole set is like this on Testing: 155 of 155 Pokémon in `30th` and 28 of 28 in
+`30th-c` have no Pokédex number (several Japanese sets have smaller gaps of the same kind).
+
+**Fix.** `lib/catalog/species-fill.ts`: where the catalog becomes engine cards (`catalogCardsOf`, which
+every plan, line, backfill and lookup loader reads through), a Pokémon printing with no species takes
+it, and a missing "evolves from", from a printing of the same name in the same language ("Vivillon ex"
+counts as Vivillon). A name whose printings disagree is left alone. Read-time only; once TCGdex fills
+the number in, it changes nothing. Her Vivillon now reads "The Green line already has this stage — the
+extra copy goes to the front half." Pinned by `tests/catalog/species-fill.test.ts`.
+
+**Cross-reference UIL-060** (PR #472 swaps her 30th Celebration stand-ins for these same mirrored rows,
+which without this would still carry no species).
+
+## UIL-139 — A failed Apply reports its error at the top of the Sync page, far from the Apply button, so the button looks dead
 
 - **Reported:** 2026-10-22 (Karvi). In her words: after importing a Dex file and getting a preview, "when I
   click ... nothing happens ... There's no error text." The Haul Plan stayed unchanged. Read from Testing
