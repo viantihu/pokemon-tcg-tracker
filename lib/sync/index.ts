@@ -42,3 +42,4 @@ export {
   type ForgetAliasResult,
 } from "./exec";
 export * from "./alias";
+export * from "./stand-in-swap";

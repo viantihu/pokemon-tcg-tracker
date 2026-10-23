@@ -233,13 +233,16 @@ describe("UIL-127b · the RLS census (QA item 3; the Tech Lead's C5)", () => {
     ]);
   });
 
-  it("catalog_card: the mirror is readable by all, a stand-in only by its owner, and only its owner may create or edit one", async () => {
+  it("catalog_card: the mirror is readable by all, a stand-in only by its owner, and only its owner may create, edit or delete one", async () => {
     db = await freshRpcDb();
     const pol = await rows<{ cmd: string; qual: string | null; with_check: string | null }>(`
       select cmd, qual, with_check from pg_policies
       where schemaname = 'public' and tablename = 'catalog_card' order by cmd`);
-    expect(pol.map((p) => p.cmd)).toEqual(["INSERT", "SELECT", "UPDATE"]);
-    const [ins, sel, upd] = pol;
+    // DELETE is 0039's: the stand-in swap (UIL-060 Half 2) deletes her stand-in once the real card replaces it.
+    expect(pol.map((p) => p.cmd)).toEqual(["DELETE", "INSERT", "SELECT", "UPDATE"]);
+    const [del, ins, sel, upd] = pol;
+    expect(del.qual).toMatch(/source = 'user'/);
+    expect(del.qual).toMatch(/owner_id = auth\.uid\(\)/);
     expect(sel.qual).toMatch(/owner_id IS NULL/);
     expect(sel.qual).toMatch(/owner_id = auth\.uid\(\)/);
     expect(ins.with_check).toMatch(/owner_id = auth\.uid\(\)/);

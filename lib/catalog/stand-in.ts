@@ -1,10 +1,8 @@
 /**
- * The real card a stand-in stands in for, once TCGdex carries it (UIL-108; the rule UIL-060's "Half 2" swap
- * will use when it is built).
+ * The real card a stand-in stands in for, once TCGdex carries it (UIL-108; UIL-060 Half 2's swap asks
+ * `standInMatch` below, which keeps every rule here and adds the set NAME for a stand-in with no set id).
  *
- * Karvi: when TCGdex later adds the real card, the swap must pick the SAME-LANGUAGE printing. Nothing swaps
- * today: a row she matched to a stand-in stays on it (UIL-099 E4; her match wins, UIL-082). This is only the
- * question the swap will ask, pinned now so that recording a stand-in's language is not decoration.
+ * Karvi: when TCGdex later adds the real card, the swap must pick the SAME-LANGUAGE printing.
  *
  * A candidate is a mirrored printing:
  *   - in the stand-in's language — English is the bare id space, Japanese the `ja:` one. A language the
@@ -60,6 +58,148 @@ export function realPrintingFor(
   return hit?.tcgdexId ?? null;
 }
 
+/* ------------------------------ the swap: which real card is it, and is it certain? ------------------------------ */
+
+/**
+ * The collector number she typed, as the importer's candidates. A card's printed number often carries the set's
+ * size ("15/128"); TCGdex stores only the card's own part ("015"), so the part after a "/" is dropped first.
+ */
+export function collectorNumberCandidates(localId: string): string[] {
+  const own = localId.split("/")[0].trim();
+  return own ? localIdCandidates(own) : [];
+}
+
+/**
+ * A set name as compared across her typing and TCGdex's: case, accents, punctuation and spacing do not count, and
+ * "&" is "and" ("Sun & Moon" is "sun and moon"). Japanese is kept as written, voiced marks included.
+ */
+export function setNameKey(name: string | null | undefined): string {
+  return (name ?? "")
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^\p{L}\p{N}\p{M}]+/gu, " ")
+    .trim();
+}
+
+/** Two set names that are close without being the same: one's words inside the other's, or nearly the same letters. */
+function setNamesClose(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const wordsA = a.split(" ");
+  const wordsB = new Set(b.split(" "));
+  if (wordsA.every((w) => wordsB.has(w)) || [...wordsB].every((w) => wordsA.includes(w)))
+    return true;
+  return letterPairSimilarity(a.replace(/ /g, ""), b.replace(/ /g, "")) >= 0.75;
+}
+
+/** Sørensen–Dice over adjacent letter pairs: 1 for the same string, 0 for nothing in common. */
+function letterPairSimilarity(a: string, b: string): number {
+  if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
+  const pairs = new Map<string, number>();
+  for (let i = 0; i < a.length - 1; i++) {
+    const p = a.slice(i, i + 2);
+    pairs.set(p, (pairs.get(p) ?? 0) + 1);
+  }
+  let shared = 0;
+  for (let i = 0; i < b.length - 1; i++) {
+    const p = b.slice(i, i + 2);
+    const n = pairs.get(p) ?? 0;
+    if (n > 0) {
+      shared++;
+      pairs.set(p, n - 1);
+    }
+  }
+  return (2 * shared) / (a.length - 1 + b.length - 1);
+}
+
+const cardNameKey = (v: string | null | undefined) => setNameKey(v);
+
+/** A stand-in as the swap reads it: what she typed when she made it. */
+export interface StandInForMatch {
+  tcgdexId: string;
+  name: string;
+  setId: string | null;
+  setName: string | null;
+  localId: string | null;
+}
+
+/** A mirrored catalog row as the swap reads it. */
+export interface MatchableCard extends MirroredPrinting {
+  name: string;
+  setName: string | null;
+}
+
+/**
+ * What the swap does with a stand-in (UIL-060 Half 2; Karvi 2026-10-22: swap on its own only when certain, else ask).
+ *   certain — swap it now, without asking;
+ *   unsure  — show her these real cards (at most five) and let her pick, or leave it;
+ *   none    — TCGdex does not carry it yet (or it cannot be told): leave it alone.
+ */
+export type StandInMatch =
+  | { kind: "certain"; realId: string }
+  | { kind: "unsure"; candidateIds: string[] }
+  | { kind: "none" };
+
+const MAX_CANDIDATES = 5;
+
+/**
+ * Which real card a stand-in is. Every candidate keeps `realPrintingFor`'s rules — the stand-in's language, a
+ * physical mirrored printing, the same collector number — and then the SET decides. She cannot know TCGdex's set
+ * id when she makes a stand-in, so most carry only the set name she typed:
+ *   - with a set id, the set is that id;
+ *   - without one, the set is every set whose name is hers once case, accents and punctuation are ignored.
+ * CERTAIN needs exactly one printing in that set with that number, carrying her card name too. Anything less — two
+ * printings, another name, or a set name only close to hers ("Celebrations" for "30th Celebration") — is UNSURE,
+ * and goes to her with the candidates.
+ */
+export function standInMatch(
+  standIn: StandInForMatch,
+  catalog: readonly MatchableCard[],
+): StandInMatch {
+  const none = { kind: "none" } as const;
+  if (!isStandInId(standIn.tcgdexId)) return none;
+  const language = languageOfId(standIn.tcgdexId);
+  if (!language || !standIn.localId) return none;
+  const numbers = new Set(collectorNumberCandidates(standIn.localId));
+  if (numbers.size === 0) return none;
+
+  const pool = catalog.filter(
+    (c) =>
+      !isStandInId(c.tcgdexId) &&
+      !c.isDigitalOnly &&
+      c.locale === language &&
+      c.localId !== null &&
+      localIdCandidates(c.localId).some((n) => numbers.has(n)),
+  );
+  if (pool.length === 0) return none;
+
+  const mySet = setNameKey(standIn.setName);
+  const myName = cardNameKey(standIn.name);
+  const inSet = standIn.setId
+    ? pool.filter((c) => c.setId === standIn.setId)
+    : mySet
+      ? pool.filter((c) => setNameKey(c.setName) === mySet)
+      : [];
+
+  if (inSet.length === 1 && cardNameKey(inSet[0].name) === myName) {
+    return { kind: "certain", realId: inSet[0].tcgdexId };
+  }
+
+  const close = mySet
+    ? pool.filter(
+        (c) => cardNameKey(c.name) === myName && setNamesClose(setNameKey(c.setName), mySet),
+      )
+    : [];
+  const candidateIds = [...new Set([...inSet, ...close].map((c) => c.tcgdexId))].slice(
+    0,
+    MAX_CANDIDATES,
+  );
+  return candidateIds.length > 0 ? { kind: "unsure", candidateIds } : none;
+}
+
 /* ------------------------------ a new stand-in: is it one she already has? ------------------------------ */
 
 /** What she typed for a new stand-in, and the language it is printed in (UIL-108). */
@@ -111,7 +251,7 @@ export function mirrorPrintingLike<T extends StandInCheckRow & { locale: string 
   key: StandInKey,
 ): T | undefined {
   if (!norm(key.setName) || !norm(key.localId)) return undefined;
-  const numbers = new Set(localIdCandidates(key.localId ?? ""));
+  const numbers = new Set(collectorNumberCandidates(key.localId ?? ""));
   return catalog.find(
     (c) =>
       !isStandInId(c.tcgdexId) &&

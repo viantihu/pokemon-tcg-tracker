@@ -954,6 +954,14 @@ export type Database = {
         Args: { payload: Json };
         Returns: undefined;
       };
+      /**
+       * Swap her stand-in for the real TCGdex card (0039_stand_in_swap.sql, UIL-060 Half 2). SECURITY INVOKER;
+       * repoints every reference, then deletes the stand-in, in one transaction.
+       */
+      swap_stand_in: {
+        Args: { stand_in_id: string; real_id: string };
+        Returns: undefined;
+      };
     };
     Enums: Record<never, never>;
     CompositeTypes: Record<never, never>;

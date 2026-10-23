@@ -555,9 +555,19 @@ export function pgliteClient(
       return new PgQuery(db, table, maxRows);
     },
     async rpc(fn: string, args: Record<string, unknown>) {
-      if (fn !== "apply_write_ops") throw new Error(`pglite-client: unsupported rpc ${fn}`);
+      if (fn !== "apply_write_ops" && fn !== "swap_stand_in") {
+        throw new Error(`pglite-client: unsupported rpc ${fn}`);
+      }
       try {
-        await db.query(`select ${quoteIdent(fn)}($1::jsonb)`, [JSON.stringify(args.payload)]);
+        if (fn === "swap_stand_in") {
+          // UIL-060 Half 2's swap (0039): two text arguments, by name as PostgREST passes them.
+          await db.query(`select swap_stand_in(stand_in_id => $1, real_id => $2)`, [
+            args.stand_in_id,
+            args.real_id,
+          ]);
+        } else {
+          await db.query(`select ${quoteIdent(fn)}($1::jsonb)`, [JSON.stringify(args.payload)]);
+        }
         return { data: null, error: null };
       } catch (err) {
         // supabase-js reports DB failures in `error` rather than throwing; `applyWriteOps` rethrows.

@@ -63,6 +63,7 @@ const AFTER_LAST_SYNC: SyncState = {
   },
   aliases: [],
   countCheck: emptyCountCheck(),
+  standIns: { swapped: [], unsure: [] },
 };
 /** After she applies this import: the bar is this sync's. */
 const AFTER_THIS_SYNC: SyncState = {

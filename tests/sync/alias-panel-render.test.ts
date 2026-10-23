@@ -41,6 +41,7 @@ function state(over: Partial<SyncState>): SyncState {
     waiting: { unknownSet: [], unknownCard: [] },
     cardTypes: [],
     countCheck: emptyCountCheck(),
+    standIns: { swapped: [], unsure: [] },
     dismissed: [],
     counts: { waiting: 0, dismissed: 0 },
     undo: { available: false, createdAt: null, summary: null },

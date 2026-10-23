@@ -23,6 +23,7 @@ import path from "node:path";
 import { applyDecision } from "@/lib/line";
 import { asOwner, asSuperuser, freshRpcDb, OWNER, seedBinders } from "../support/pglite-rpc";
 import { pgliteClient } from "../support/pglite-client";
+import type { Json } from "@/lib/repo/database.types";
 
 const GEN = "b0000000-0000-0000-0000-0000000000c1";
 const LINE = "10000000-0000-0000-0000-0000000000c1";
@@ -186,7 +187,7 @@ describe("UIL-095 · the real path is one transaction", () => {
       rpc: (fn: "apply_write_ops", args: { payload: unknown }) => {
         const payload = args.payload as { ops: { op: string }[] };
         seen.push(payload.ops.map((o) => o.op));
-        return client.rpc(fn, args as Parameters<typeof client.rpc>[1]);
+        return client.rpc(fn, args as { payload: Json });
       },
     } as unknown as ReturnType<typeof pgliteClient>;
 
