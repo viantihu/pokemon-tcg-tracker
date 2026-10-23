@@ -9,7 +9,7 @@
  */
 
 import Link from "next/link";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   FlagFixRow,
   ReturningRow,
@@ -173,6 +173,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
 
   async function onApply() {
     if (!bundle) return;
+    setError(null);
     setPhase("working");
     const res = await reach(() => applySync(bundle, overrides), LOST_APPLY);
     if (!res.ok) {
@@ -188,6 +189,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
   }
 
   function onCancel() {
+    setError(null);
     setPreview(null);
     setBundle(null);
     setOverrides({});
@@ -246,11 +248,8 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
         {busy ? <ProgressBar label={busyLabel} /> : null}
       </div>
 
-      {error ? (
-        <div className="panel" style={{ padding: 12, background: "#F4C86B", fontSize: 12 }}>
-          {error}
-        </div>
-      ) : null}
+      {/* While a preview is open its error shows beside Apply, where she is looking (UIL-139). */}
+      {error && preview === null ? <ErrorPanel message={error} /> : null}
 
       <CountCheckPanel check={state.countCheck} />
 
@@ -302,6 +301,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
           preview={preview}
           overrides={overrides}
           busy={busy}
+          error={error}
           onToggleReject={toggleReject}
           onChooseRetire={chooseRetire}
           onApply={onApply}
@@ -609,11 +609,34 @@ function UndoBar({
   );
 }
 
+/**
+ * A refusal or a lost call, in words, announced to a screen reader (UIL-139). `reveal` scrolls it into view when
+ * it appears: the Apply button is at the bottom of a preview that can run to hundreds of rows, so an error
+ * somewhere else on the page reads as a button that did nothing.
+ */
+export function ErrorPanel({ message, reveal }: { message: string; reveal?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (reveal) ref.current?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  }, [message, reveal]);
+  return (
+    <div
+      ref={ref}
+      className="panel"
+      role="alert"
+      style={{ padding: 12, background: "#F4C86B", fontSize: 12 }}
+    >
+      {message}
+    </div>
+  );
+}
+
 /** Exported so the collector-number rendering can be pinned without driving a sync (UIL-077). */
 export function PreviewPanel({
   preview,
   overrides,
   busy,
+  error,
   onToggleReject,
   onChooseRetire,
   onApply,
@@ -622,6 +645,8 @@ export function PreviewPanel({
   preview: SyncPreview;
   overrides: SyncOverrides;
   busy: boolean;
+  /** Why the last Apply did not go through; shown right above Apply, not at the top of the page (UIL-139). */
+  error?: string | null;
   onToggleReject: (migrationKey: string) => void;
   onChooseRetire: (presenceKey: string, copyId: string) => void;
   onApply: () => void;
@@ -811,6 +836,8 @@ export function PreviewPanel({
       <div style={{ fontSize: 11, color: "var(--ink-2)" }}>
         {sections.unchanged} cards unchanged — left exactly as they are.
       </div>
+
+      {error ? <ErrorPanel message={error} reveal /> : null}
 
       <div style={{ display: "flex", gap: 10 }}>
         <button type="button" className="btn btn-primary" disabled={busy} onClick={onApply}>

@@ -9719,3 +9719,36 @@ extra copy goes to the front half." Pinned by `tests/catalog/species-fill.test.t
 
 **Cross-reference UIL-060** (PR #472 swaps her 30th Celebration stand-ins for these same mirrored rows,
 which without this would still carry no species).
+
+## UIL-139 — A failed Apply reports its error at the top of the Sync page, far from the Apply button, so the button looks dead
+
+- **Reported:** 2026-10-22 (Karvi). In her words: after importing a Dex file and getting a preview, "when I
+  click ... nothing happens ... There's no error text." The Haul Plan stayed unchanged. Read from Testing
+  the same day, with the connector and no app run: the last copy, the last `dex_import` row and the last
+  `last_sync_snapshot` were all from 2026-09-26, so no Apply had written anything since. She re-ran the
+  import later and it landed (35 copies, 2026-10-22 19:32Z); she did not report what had gone wrong the first
+  time, so **the refusal behind the original failure is not known.**
+- **Status:** **In progress.** Karvi approved the fix 2026-10-23; the PR is not merged yet.
+- **Priority:** Medium.
+- **Area:** Sync
+- **Env:** Testing
+
+**The defect, from source** ([`SyncScreen.tsx`](<../app/(ui)/sync/SyncScreen.tsx>)). `onApply` sets
+`error` and returns to the preview when `applySync` refuses or the call is lost. `error` renders as an amber
+panel directly under the "Import Dex export" card, at the top of the page. The preview that follows can
+hold hundreds of rows, and its Apply button is at the very bottom. Nothing scrolls the panel into view and it
+is not announced to a screen reader. So a refused Apply leaves her at the bottom of a long page with a
+button that did something she cannot see. The refusals she could have hit all carry readable text: the
+count check (UIL-100), the stale-preview guard (UIL-099 E5: "Your collection changed since this
+preview..."), the already-applied guard, or a lost connection (`LOST_APPLY`).
+
+**Karvi's ruling, 2026-10-23: fix it.** The fix is where the error shows, not what it says:
+1. While a preview is open, an error shows **inside the preview, directly above Apply and Cancel**, as an
+   alert, and the page scrolls it into view. The top panel is not also shown for the same message.
+2. Every other error (outside a preview) keeps its place at the top, now also announced as an alert.
+
+**Not changed:** what any refusal says, when Apply is allowed, or the apply-once guard. Physical integrity
+and the Dex count check stay hard refusals; this only makes them readable.
+
+**Cross-reference:** UIL-105 (the import spinner that never ended), UIL-106 (the shared `reach` family
+for lost calls), UIL-136 (the other way an import looked like it had failed on the same screen).
