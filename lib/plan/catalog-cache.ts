@@ -58,6 +58,7 @@
 
 import type { CatalogCard } from "@/lib/engine";
 import { catalogCardRepo, type DbClient, type Row } from "@/lib/repo";
+import { fillMissingSpecies } from "@/lib/catalog/species-fill";
 import { toCatalogCard } from "./adapt";
 
 /** Five minutes: long enough to cover a sorting sitting, short enough that a mirror run lands. */
@@ -190,9 +191,11 @@ export function catalogCardsOf(rows: readonly CachedCatalogRow[]): CatalogCard[]
     }
     return card;
   });
-  if (freezesShared()) Object.freeze(cards);
-  cardsOfCatalog.set(rows, cards);
-  return cards;
+  // UIL-138: a printing TCGdex has not finished (no Pokédex number) takes its species from a same-name printing.
+  const filled = fillMissingSpecies(cards);
+  if (freezesShared()) deepFreeze(filled);
+  cardsOfCatalog.set(rows, filled);
+  return filled;
 }
 
 async function loadMirror(
