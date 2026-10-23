@@ -9659,7 +9659,11 @@ precedent for a stale-looking control sitting next to current state, though neit
 
 - **Reported:** 2026-10-22 (Karvi, with a screenshot of Testing's Haul Plan after her first import since
   Sep 26: 35 arrivals). In her words: "I don't like this message at the top. It's poor UX."
-- **Status:** **In progress.** Karvi chose the fix 2026-10-22 (see below); the PR is not merged yet.
+- **Status:** **Fixed, awaiting Karvi's test.** #469 (`fdccfc6`): both banners name their cards only
+  for 3 or fewer and are a count past that, pinned by `tests/plan/banner-text.test.ts`. CI was green
+  on the PR (`verify`, `migration-order`); not yet seen on a deployed Testing build.
+- **Status (before 2026-10-22):** **In progress.** Karvi chose the fix 2026-10-22 (see below); the PR is
+  not merged yet.
 - **Priority:** Low.
 - **Area:** Haul Plan
 - **Env:** Testing
