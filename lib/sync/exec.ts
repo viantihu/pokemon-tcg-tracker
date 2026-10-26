@@ -1418,7 +1418,7 @@ export interface StandInMatchResult extends ManualMatchResult {
  * are (UIL-090). A stand-in made before UIL-108 recorded no language, so it is nobody's twin. 0027's unique
  * index enforces the same key in the database, for two entries racing each other.
  */
-async function findStandInTwin(
+export async function findStandInTwin(
   db: DbClient,
   input: Pick<StandInInput, "name" | "setName" | "localId" | "language">,
 ): Promise<Row<"catalog_card"> | undefined> {

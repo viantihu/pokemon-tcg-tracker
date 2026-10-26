@@ -32,9 +32,17 @@ import type { LineChoice } from "@/lib/line/popup";
 import { loadMoveOptions, type MoveOptions } from "@/lib/line";
 import type { LineJoinOptions } from "@/lib/line/join-options";
 import type { MoveDestination } from "@/lib/line/types";
-import { catalogCardRepo, type Row } from "@/lib/repo";
+import { catalogCardRepo, typeColorMapRepo, type DbClient, type Row } from "@/lib/repo";
+import { rematchCopy, rematchCopyToStandIn, type RematchStandInInput } from "@/lib/copy";
+import { StandInTwinError } from "@/lib/sync";
 import { errorMessage } from "@/lib/errors";
-import type { CommitCounts, DraftCard, LookupCard, RunPlanResult } from "./plan-types";
+import type {
+  CommitCounts,
+  DraftCard,
+  LookupCard,
+  RematchOutcome,
+  RunPlanResult,
+} from "./plan-types";
 import type { DraftPayloadItem } from "./plan-types";
 
 /** A `catalog_card` row trimmed to what the intake UI renders. */
@@ -312,4 +320,61 @@ export async function getLineJoinOptions(tcgdexId: string): Promise<LineJoinOpti
   const { db } = await getOwnerContext();
   const pc = await loadPlanContext(db);
   return lineJoinOptionsFromContext(pc, tcgdexId);
+}
+
+/**
+ * "Wrong card?" on a waiting card (Karvi, 2026-10-26): point its copy at the card it really is. One copy, in one
+ * transaction (0040 `rematch_copy`); a shelved copy is refused. Answers with the new card so the screen can show it
+ * and route it again; the plan's other rows do not change until that re-route.
+ */
+export async function rematchCopyAction(copyId: string, tcgdexId: string): Promise<RematchOutcome> {
+  try {
+    const { db } = await getOwnerContext();
+    await rematchCopy(db, copyId, tcgdexId);
+    return await rematchedCard(db, tcgdexId);
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/**
+ * The same, for a printing the catalog does not carry: make her stand-in, then point the copy at it. A stand-in she
+ * already made for this card is refused with that stand-in returned, so the screen offers "rematch to it instead":
+ * the condition named, the remedy beside it.
+ */
+export async function rematchToStandInAction(
+  copyId: string,
+  input: RematchStandInInput,
+): Promise<RematchOutcome> {
+  try {
+    const { db } = await getOwnerContext();
+    const standInId = await rematchCopyToStandIn(db, copyId, input);
+    return await rematchedCard(db, standInId);
+  } catch (err) {
+    if (err instanceof StandInTwinError) {
+      return {
+        ok: false,
+        twin: {
+          tcgdexId: err.twin.tcgdex_id,
+          name: err.twin.name,
+          setName: err.twin.set_name,
+          localId: err.twin.local_id,
+        },
+        error: err.message,
+      };
+    }
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+async function rematchedCard(db: DbClient, tcgdexId: string): Promise<RematchOutcome> {
+  const row = await catalogCardRepo.getByPk(db, tcgdexId);
+  if (!row) return { ok: false, error: "That card is not in the catalog." };
+  return { ok: true, card: toLookupCard(row) };
+}
+
+/** Every card type the band map knows: the Pokémon stand-in form's type pick (the Sync page loads the same list). */
+export async function loadStandInCardTypes(): Promise<string[]> {
+  const { db } = await getOwnerContext();
+  return [...new Set((await typeColorMapRepo.list(db)).map((t) => t.card_type))].sort();
 }

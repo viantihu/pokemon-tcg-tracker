@@ -123,6 +123,19 @@ export const catalogCardRepo = {
     if (error) throw error;
   },
 
+  /**
+   * Delete one of her own stand-ins (0039's `catalog_card_user_delete`). Only ever used to take back a stand-in made a
+   * moment ago for a rematch the database then refused; a stand-in with copies is protected by `copy`'s restrict FK.
+   */
+  async deleteStandIn(db: DbClient, standInId: string): Promise<void> {
+    const { error } = await db
+      .from("catalog_card")
+      .delete()
+      .eq("tcgdex_id", standInId)
+      .eq("source", "user");
+    if (error) throw error;
+  },
+
   /** Whether the mirror holds ANY card of `setId` — "the set is known" for a stand-in's set id (UIL-060). */
   async setExists(db: DbClient, setId: string): Promise<boolean> {
     const { data, error } = await db

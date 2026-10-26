@@ -5,3 +5,4 @@
  * here rather than growing a mode flag on lib/coll's collection-scoped removal.
  */
 export * from "./remove";
+export * from "./rematch";

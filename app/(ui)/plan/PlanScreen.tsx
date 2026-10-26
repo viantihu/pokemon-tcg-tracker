@@ -56,7 +56,8 @@ import {
   refreshSpotlightAction,
   runHaulPlan,
 } from "./actions";
-import type { DraftCard, DraftPayloadItem, RunPlanResult } from "./plan-types";
+import type { DraftCard, DraftPayloadItem, LookupCard, RunPlanResult } from "./plan-types";
+import { RematchOverlay } from "./RematchOverlay";
 import { createArrivalWatch } from "./arrivals";
 import { HaulSearch, type HaulSearchTile } from "./HaulSearch";
 import {
@@ -320,6 +321,11 @@ export const LEAVE_FOR_LATER = "Leave for later";
 export const LEAVE_FOR_LATER_HINT =
   "Takes it off this plan. It stays waiting in your haul; nothing is deleted.";
 
+/** "Wrong card?" (Karvi, 2026-10-26): the sync matched this copy to the wrong card; rematch it, or give it a stand-in. */
+export const WRONG_CARD = "Wrong card?";
+const WRONG_CARD_HINT =
+  "The sync matched this to the wrong card. Pick the right one, or make a stand-in if the catalog does not have it.";
+
 export function PlanScreen({
   initialPending = [],
   stateStamp = "",
@@ -402,6 +408,12 @@ export function PlanScreen({
   const [collectionChoice, setCollectionChoice] = useState<Record<string, string>>({});
   /** The card whose line popup is open (UIL-117), by draft id; nothing is written until she confirms. */
   const [linePop, setLinePop] = useState<string | null>(null);
+  /**
+   * The card whose "Wrong card?" sheet is open, by draft id. A rematch changes which card the copy is, so it counts
+   * up `rematched` to route the plan again once the screen holds the new card (the effect below).
+   */
+  const [rematching, setRematching] = useState<string | null>(null);
+  const [rematched, setRematched] = useState(0);
   /**
    * UIL-126: "⇄ Swap this one into the line…" on a plain extra copy opens the popup on THIS replace, Swap picked. Not a
    * line card, so it is not in the step-through: set only by that button, cleared whenever the popup closes.
@@ -791,6 +803,32 @@ export function PlanScreen({
     takeOffPlan(item.incomingId);
     flashToast(`Left for later · ${item.name}`);
   }
+
+  /**
+   * "Wrong card?" finished (Karvi, 2026-10-26): the copy is now `card`. The draft takes the new card (its variant is
+   * Dex's and stays); everything she decided against the old card (her Move, her collection pick, the re-check) is
+   * dropped, as it described a different card; and the plan routes again, from the effect below, once the draft holds it.
+   */
+  function rematchDone(id: string, card: LookupCard, was: string) {
+    setDraft((d) => d.map((x) => (x.id === id ? { ...x, card } : x)));
+    const omit = <T,>(m: Record<string, T>) => {
+      if (!(id in m)) return m;
+      const out = { ...m };
+      delete out[id];
+      return out;
+    };
+    setOverrides(omit);
+    setCollectionChoice(omit);
+    setFresh((f) => (f?.id === id ? null : f));
+    setRematching(null);
+    setRematched((n) => n + 1);
+    flashToast(`Rematched · ${was} → ${card.name}`);
+  }
+  // After the screen holds the rematched card: route the waiting cards again so its row, band and home are the new
+  // card's, and the spotlight stays on it (`reroute` keeps the cursor on the card it was on).
+  useEffect(() => {
+    if (rematched > 0) void rerouteRef.current();
+  }, [rematched]);
 
   /**
    * Shelve ONE card, now (UIL-027). This is what "Done" means: the placement is written before the
@@ -1397,6 +1435,7 @@ export function PlanScreen({
           onReset={resetAll}
           onNotMine={notMine}
           onLeaveForLater={leaveForLater}
+          onRematch={(item) => setRematching(item.incomingId)}
           updating={updating}
           moved={moved}
           onDismissMoved={() => setMoved(null)}
@@ -1467,6 +1506,21 @@ export function PlanScreen({
           onCancel={closeLinePopup}
         />
       ) : null}
+
+      {rematching && plan
+        ? (() => {
+            const it = flattenPlan(plan).find((x) => x.incomingId === rematching);
+            const row = draft.find((d) => d.id === rematching);
+            return it && row ? (
+              <RematchOverlay
+                item={it}
+                copyId={row.existingCopyId}
+                onClose={() => setRematching(null)}
+                onDone={(card) => rematchDone(row.id, card, it.name)}
+              />
+            ) : null;
+          })()
+        : null}
 
       {moveTarget && moveOptions ? (
         <MoveOverlay
@@ -1683,6 +1737,8 @@ function PlanView(props: {
   onNotMine: (item: PlanItem) => void;
   /** "Leave for later" from the spotlight (UIL-114): off this plan, still waiting, nothing deleted. */
   onLeaveForLater: (item: PlanItem) => void;
+  /** "Wrong card?" from the spotlight: opens the rematch sheet for this waiting card. */
+  onRematch: (item: PlanItem) => void;
   /** A background re-route is running; the plan stays usable meanwhile (UIL-114). */
   updating: boolean;
   /** Waiting cards whose home the last re-route changed. */
@@ -1734,6 +1790,7 @@ function PlanView(props: {
     onReset,
     onNotMine,
     onLeaveForLater,
+    onRematch,
     updating,
     moved,
     onDismissMoved,
@@ -2073,6 +2130,7 @@ function PlanView(props: {
               onSkip={() => setCur(Math.min(total - 1, cur + 1))}
               onNotMine={() => flatItems[cur] && onNotMine(flatItems[cur])}
               onLeaveForLater={() => flatItems[cur] && onLeaveForLater(flatItems[cur])}
+              onRematch={() => flatItems[cur] && onRematch(flatItems[cur])}
               isNew={flatItems[cur] ? arrived.has(flatItems[cur].incomingId) : false}
               override={flatItems[cur] ? overrides[flatItems[cur].incomingId] : undefined}
               overrideNames={overrideNames}
@@ -2444,6 +2502,8 @@ export function Spotlight(props: {
   /** UIL-114: "Not mine" and "Leave for later", once the haul has run. Absent: neither is offered. */
   onNotMine?: () => void;
   onLeaveForLater?: () => void;
+  /** "Wrong card?": rematch this waiting card to the card it really is, or to a stand-in. Absent: not offered. */
+  onRematch?: () => void;
   /** Arrived while the page was open (UIL-114 part C). */
   isNew?: boolean;
   override: MoveDestination | undefined;
@@ -2489,6 +2549,7 @@ export function Spotlight(props: {
     onSkip,
     onNotMine,
     onLeaveForLater,
+    onRematch,
     isNew = false,
     override,
     overrideNames,
@@ -2798,8 +2859,19 @@ export function Spotlight(props: {
 
       {/* UIL-114: the two ways a card leaves the plan, now the haul has run. Different on purpose: "Not
           mine" deletes the copy (UIL-089, for this haul only, UIL-111); "Leave for later" deletes nothing. */}
-      {!done && (onNotMine || onLeaveForLater) ? (
+      {!done && (onNotMine || onLeaveForLater || onRematch) ? (
         <div className="spotbtns" style={{ marginTop: 8 }}>
+          {onRematch ? (
+            <button
+              type="button"
+              className="btn sm"
+              onClick={onRematch}
+              disabled={busy}
+              title={WRONG_CARD_HINT}
+            >
+              {WRONG_CARD}
+            </button>
+          ) : null}
           {onLeaveForLater ? (
             <button
               type="button"
