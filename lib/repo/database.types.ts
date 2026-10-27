@@ -962,6 +962,14 @@ export type Database = {
         Args: { stand_in_id: string; real_id: string };
         Returns: undefined;
       };
+      /**
+       * Point ONE waiting copy at a different catalog card, moving its count between the two Dex keys
+       * (0040_rematch_copy.sql). SECURITY INVOKER; refuses a shelved copy.
+       */
+      rematch_copy: {
+        Args: { p_copy_id: string; p_card_id: string };
+        Returns: undefined;
+      };
     };
     Enums: Record<never, never>;
     CompositeTypes: Record<never, never>;

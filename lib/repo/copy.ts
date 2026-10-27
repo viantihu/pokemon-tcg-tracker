@@ -5,6 +5,16 @@ export const copyRepo = {
   ...createRepo("copy"),
 
   /**
+   * Point ONE waiting copy at a different catalog card (0040 `rematch_copy`): the card the sync matched wrongly, fixed
+   * from the Haul Plan. Moves the copy's count between the two Dex keys in one transaction. Throws on any DB error,
+   * including the function's refusals, whose message is already in her words.
+   */
+  async rematch(db: DbClient, copyId: string, cardId: string): Promise<void> {
+    const { error } = await db.rpc("rematch_copy", { p_copy_id: copyId, p_card_id: cardId });
+    if (error) throw error;
+  },
+
+  /**
    * Shelved copies in one section of one binder — the duplicate check compares against shelved
    * only. `half: null` is a specialty binder's single section, which stores no half at all (see
    * migration 0002: `binder_half` is NULL for those rows, never a literal "single").

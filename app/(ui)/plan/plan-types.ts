@@ -76,3 +76,16 @@ export interface DraftPayloadItem {
   /** The copy waiting in her haul (UIL-003). Required: the server refuses a row without one (UIL-098). */
   existingCopyId: string;
 }
+
+/**
+ * What "Wrong card?" answers (Karvi, 2026-10-26): the card the copy now is, a stand-in she already made for this card
+ * (to rematch to instead of creating a twin), or a plain failure. Mirrors the Sync page's `StandInOutcome`.
+ */
+export type RematchOutcome =
+  | { ok: true; card: LookupCard }
+  | {
+      ok: false;
+      twin: { tcgdexId: string; name: string; setName: string | null; localId: string | null };
+      error: string;
+    }
+  | { ok: false; error: string };

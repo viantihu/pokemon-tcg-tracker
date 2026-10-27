@@ -29,6 +29,7 @@ export {
   isStandInId,
   STAND_IN_ID_PREFIX,
   StandInTwinError,
+  findStandInTwin,
   forgetSetAlias,
   dismissEntry,
   undismissEntry,

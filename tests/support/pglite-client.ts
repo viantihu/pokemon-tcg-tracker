@@ -146,7 +146,7 @@ class PgQuery {
   private orders: { col: string; asc: boolean; nullsFirst?: boolean }[] = [];
   private limitOffset: { from: number; to: number } | null = null;
   private wantCount = false;
-  private mode: "select" | "insert" | "update" | "upsert" = "select";
+  private mode: "select" | "insert" | "update" | "upsert" | "delete" = "select";
   private conflictCol: string | null = null;
   private writeValues: Row | Row[] | null = null;
   private wantSingle = false;
@@ -187,6 +187,12 @@ class PgQuery {
   update(patch: Row): this {
     this.mode = "update";
     this.writeValues = patch;
+    return this;
+  }
+
+  /** `delete().eq(...)` — a delete with no filter is refused, as pg_safeupdate refuses it on Supabase (0026). */
+  delete(): this {
+    this.mode = "delete";
     return this;
   }
 
@@ -475,6 +481,18 @@ class PgQuery {
     return res.rows;
   }
 
+  private async runDelete(): Promise<Row[]> {
+    if (this.filters.length === 0) {
+      throw new Error(
+        "pglite-client: delete() needs a filter (pg_safeupdate refuses a bare DELETE)",
+      );
+    }
+    const params: unknown[] = [];
+    const sql = `delete from ${quoteIdent(this.table)}` + this.whereClause(params) + ` returning *`;
+    const res = await this.db.query<Row>(sql, params, { parsers: PARSERS });
+    return res.rows;
+  }
+
   /**
    * PostgREST's `maybeSingle`: zero rows → `data: null`; ONE row → that row; MORE than one → an error
    * (PGRST116, "JSON object requested, multiple (or no) rows returned"), because the caller asked for an
@@ -511,7 +529,9 @@ class PgQuery {
         ? this.runInsert()
         : this.mode === "update"
           ? this.runUpdate()
-          : this.rows();
+          : this.mode === "delete"
+            ? this.runDelete()
+            : this.rows();
     return (
       run
         // `async` because the count below is a second query (see its note); #119's version needed none.
@@ -555,7 +575,7 @@ export function pgliteClient(
       return new PgQuery(db, table, maxRows);
     },
     async rpc(fn: string, args: Record<string, unknown>) {
-      if (fn !== "apply_write_ops" && fn !== "swap_stand_in") {
+      if (fn !== "apply_write_ops" && fn !== "swap_stand_in" && fn !== "rematch_copy") {
         throw new Error(`pglite-client: unsupported rpc ${fn}`);
       }
       try {
@@ -564,6 +584,12 @@ export function pgliteClient(
           await db.query(`select swap_stand_in(stand_in_id => $1, real_id => $2)`, [
             args.stand_in_id,
             args.real_id,
+          ]);
+        } else if (fn === "rematch_copy") {
+          // "Wrong card?" (0040): a uuid and a text argument, by name as PostgREST passes them.
+          await db.query(`select rematch_copy(p_copy_id => $1::uuid, p_card_id => $2)`, [
+            args.p_copy_id,
+            args.p_card_id,
           ]);
         } else {
           await db.query(`select ${quoteIdent(fn)}($1::jsonb)`, [JSON.stringify(args.payload)]);
