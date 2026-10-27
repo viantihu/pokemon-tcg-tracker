@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -20,7 +21,16 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        {/* BugDrop: in-app "report a problem" widget that files GitHub issues on this repo.
+            Requires the BugDrop GitHub App installed on the repo. Do not add `async`/`defer`:
+            the widget reads its data-* config at load. */}
+        <Script
+          src="https://bugdrop.neonwatty.workers.dev/widget.js"
+          data-repo="viantihu/pokemon-tcg-tracker"
+        />
+      </body>
     </html>
   );
 }
