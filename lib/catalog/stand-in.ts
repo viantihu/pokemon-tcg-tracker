@@ -130,6 +130,8 @@ export interface StandInForMatch {
 export interface MatchableCard extends MirroredPrinting {
   name: string;
   setName: string | null;
+  /** The set's printed size, the "128" of "15/128" (TCGdex's official count); absent when unknown. */
+  setCardCount?: number | null;
 }
 
 /**
@@ -145,15 +147,27 @@ export type StandInMatch =
 
 const MAX_CANDIDATES = 5;
 
+/** The set size printed after the "/" of her number ("15/128" is 128), or null when she typed none. */
+export function printedSetSize(localId: string): number | null {
+  const m = /\/\s*(\d+)\s*$/.exec(localId);
+  return m ? Number(m[1]) : null;
+}
+
 /**
  * Which real card a stand-in is. Every candidate keeps `realPrintingFor`'s rules — the stand-in's language, a
- * physical mirrored printing, the same collector number — and then the SET decides. She cannot know TCGdex's set
- * id when she makes a stand-in, so most carry only the set name she typed:
+ * physical mirrored printing — and then the SET decides. She cannot know TCGdex's set id when she makes a stand-in,
+ * so most carry only the set name she typed:
  *   - with a set id, the set is that id;
  *   - without one, the set is every set whose name is hers once case, accents and punctuation are ignored.
- * CERTAIN needs exactly one printing in that set with that number, carrying her card name too. Anything less — two
- * printings, another name, or a set name only close to hers ("Celebrations" for "30th Celebration") — is UNSURE,
- * and goes to her with the candidates.
+ * CERTAIN needs exactly one printing in that set with that number, carrying her card name too.
+ *
+ * Anything less is UNSURE, and every card offered carries HER card name: a different Pokémon that happens to share
+ * the number is never her card ("Hisuian Zoroark #123" for her "Hisuian Zorua #123/128"). Offered, in order:
+ *   1. her number in a set whose name is close to hers ("Celebrations" for "30th Celebration");
+ *   2. her number in a set whose printed size is the one after her "/" — her set name was wrong, the number was
+ *      right ("Mew VMAX 114/264" filed under 30th Celebration is Fusion Strike's, 264 cards);
+ *   3. only when neither finds one: her set, another number — the set was right, the number was mistyped ("Hisuian Zorua 123/128" in 30th
+ *      Celebration is #122 or #145).
  */
 export function standInMatch(
   standIn: StandInForMatch,
@@ -166,34 +180,34 @@ export function standInMatch(
   const numbers = new Set(collectorNumberCandidates(standIn.localId));
   if (numbers.size === 0) return none;
 
-  const pool = catalog.filter(
+  const printings = catalog.filter(
     (c) =>
-      !isStandInId(c.tcgdexId) &&
-      !c.isDigitalOnly &&
-      c.locale === language &&
-      c.localId !== null &&
-      localIdCandidates(c.localId).some((n) => numbers.has(n)),
+      !isStandInId(c.tcgdexId) && !c.isDigitalOnly && c.locale === language && c.localId !== null,
   );
-  if (pool.length === 0) return none;
-
   const mySet = setNameKey(standIn.setName);
   const myName = cardNameKey(standIn.name);
-  const inSet = standIn.setId
-    ? pool.filter((c) => c.setId === standIn.setId)
-    : mySet
-      ? pool.filter((c) => setNameKey(c.setName) === mySet)
-      : [];
+  const isMySet = (c: MatchableCard) =>
+    standIn.setId ? c.setId === standIn.setId : !!mySet && setNameKey(c.setName) === mySet;
+  const hasMyNumber = (c: MatchableCard) =>
+    localIdCandidates(c.localId as string).some((n) => numbers.has(n));
 
+  const inSet = printings.filter((c) => isMySet(c) && hasMyNumber(c));
   if (inSet.length === 1 && cardNameKey(inSet[0].name) === myName) {
     return { kind: "certain", realId: inSet[0].tcgdexId };
   }
 
-  const close = mySet
-    ? pool.filter(
-        (c) => cardNameKey(c.name) === myName && setNamesClose(setNameKey(c.setName), mySet),
-      )
-    : [];
-  const candidateIds = [...new Set([...inSet, ...close].map((c) => c.tcgdexId))].slice(
+  const named = printings.filter((c) => cardNameKey(c.name) === myName);
+  const size = printedSetSize(standIn.localId);
+  const sameNumber = named.filter(
+    (c) =>
+      hasMyNumber(c) &&
+      (isMySet(c) ||
+        (!!mySet && setNamesClose(setNameKey(c.setName), mySet)) ||
+        (size !== null && c.setCardCount === size)),
+  );
+  const otherNumber =
+    sameNumber.length === 0 ? named.filter((c) => isMySet(c) && !hasMyNumber(c)) : [];
+  const candidateIds = [...new Set([...sameNumber, ...otherNumber].map((c) => c.tcgdexId))].slice(
     0,
     MAX_CANDIDATES,
   );

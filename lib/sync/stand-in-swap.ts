@@ -57,6 +57,7 @@ function matchable(row: CatalogRow): MatchableCard {
     name: row.name,
     setId: row.set_id,
     setName: row.set_name,
+    setCardCount: row.set_card_count_official,
     localId: row.local_id,
     locale: row.locale,
     isDigitalOnly: row.is_digital_only,

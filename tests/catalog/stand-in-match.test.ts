@@ -93,11 +93,40 @@ describe("standInMatch", () => {
     });
   });
 
-  it("is UNSURE when the card in that set and number has another name", () => {
-    expect(standInMatch(standIn({ name: "Fuecoco" }), CATALOG)).toEqual({
+  it("never offers a card of another name, even at her set and number", () => {
+    expect(standInMatch(standIn({ name: "Fuecoco" }), CATALOG)).toEqual({ kind: "none" });
+    expect(standInMatch(standIn({ name: "Espeon ex" }), CATALOG)).toEqual({
       kind: "unsure",
-      candidateIds: ["30th-015"],
+      candidateIds: ["30th-070"],
     });
+  });
+
+  it("offers her card at her number in the set whose printed size is after her '/' (wrong set name)", () => {
+    const mewVmax = card({
+      tcgdexId: "swsh8-114",
+      name: "Mew VMAX",
+      setId: "swsh8",
+      setName: "Fusion Strike",
+      localId: "114",
+      setCardCount: 264,
+    });
+    const kangaskhan = card({ tcgdexId: "30th-114", name: "Kangaskhan", localId: "114" });
+    expect(
+      standInMatch(standIn({ name: "Mew VMAX", localId: "114/264" }), [kangaskhan, mewVmax]),
+    ).toEqual({ kind: "unsure", candidateIds: ["swsh8-114"] });
+  });
+
+  it("offers her card at another number in her set (mistyped number)", () => {
+    const zorua = card({ tcgdexId: "30th-122", name: "Hisuian Zorua", localId: "122" });
+    const zoruaAlt = card({ tcgdexId: "30th-145", name: "Hisuian Zorua", localId: "145" });
+    const zoroark = card({ tcgdexId: "30th-123", name: "Hisuian Zoroark", localId: "123" });
+    expect(
+      standInMatch(standIn({ name: "Hisuian Zorua", localId: "123/128" }), [
+        zoroark,
+        zorua,
+        zoruaAlt,
+      ]),
+    ).toEqual({ kind: "unsure", candidateIds: ["30th-122", "30th-145"] });
   });
 
   it("is UNSURE when two printings fit (two sets of one name, both with the number)", () => {
@@ -108,8 +137,10 @@ describe("standInMatch", () => {
     });
   });
 
-  it("finds NONE when TCGdex does not carry the number in any set like hers", () => {
-    expect(standInMatch(standIn({ localId: "999/128" }), CATALOG)).toEqual({ kind: "none" });
+  it("finds NONE when TCGdex does not carry her card in any set like hers", () => {
+    expect(standInMatch(standIn({ name: "Sprigatito", localId: "999/128" }), CATALOG)).toEqual({
+      kind: "none",
+    });
     expect(standInMatch(standIn({ setName: "Obsidian Flames" }), CATALOG)).toEqual({
       kind: "none",
     });
