@@ -162,6 +162,30 @@ export interface SyncPreview {
    * with a removal; the UI offers a swap when there are more copies than the shrink retires.
    */
   retireOptions: Record<string, { copyId: string; label: string }[]>;
+  /**
+   * Per presence key with a removal, the "where did it leave from?" question (Karvi, 2026-11-11). `ambiguous`
+   * means she must answer before Apply: the copies that could have left sit in more than one place. `options`
+   * are those copies (never one a variant migration carries), each with where it sits. Absent on a preview
+   * built before this existed, which then reads as nothing to ask.
+   */
+  removalAsks?: Record<string, RemovalAsk>;
+  /**
+   * Per presence key with a removal, the bulk copies that could refill the spot the card left (a binder pocket or
+   * a line slot). Offered only for a copy that left a shelved spot; empty or absent means nothing to offer.
+   */
+  refillOptions?: Record<string, RefillOption[]>;
+}
+
+export interface RemovalAsk {
+  ambiguous: boolean;
+  leaving: number;
+  options: { copyId: string; label: string; refillable: boolean }[];
+}
+
+export interface RefillOption {
+  copyId: string;
+  /** "Bulk box KB-1 · Reverse Holo" — which box to dig in, and which one to take out. */
+  label: string;
 }
 
 const CONSEQUENCE_LABEL: Record<RemovalConsequence, string> = {
@@ -210,6 +234,10 @@ export interface PreviewEnrichment {
   counts: SyncCounts;
   /** Dismissed rows this import forgets because the file no longer lists them (UIL-104). */
   forgottenDismissed?: number;
+  /** The which-copy-left questions (removal-source.ts), with placement labels. */
+  removalAsks?: Record<string, RemovalAsk>;
+  /** Bulk refill choices per presence key with a removal (removal-source.ts). */
+  refillOptions?: Record<string, RefillOption[]>;
 }
 
 /** Build the full preview view-model from a (possibly override-adjusted) plan (PURE). */
@@ -367,6 +395,8 @@ export function buildPreview(plan: ReconcilePlan, enr: PreviewEnrichment): SyncP
       unchanged: enr.counts.unchanged,
     },
     retireOptions,
+    removalAsks: enr.removalAsks ?? {},
+    refillOptions: enr.refillOptions ?? {},
   };
 }
 

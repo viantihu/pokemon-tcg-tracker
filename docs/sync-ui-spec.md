@@ -206,9 +206,17 @@ consequential first, with a summary line at the top:
 
 The preview is not read-only; it's where she corrects the snapshot's inevitable ambiguity:
 
-- **Which copy left (on a shrink).** When a group goes 3→2 and copies sit in different places,
-  the engine's default retires the least-committed copy (architecture §1.6). The preview shows
-  that choice and lets her pick a different physical copy instead.
+- **Where it left from (on a shrink) — asked, not guessed (UIL-140, Karvi 2026-11-11).** A card
+  removed in Dex was traded or given away. When the copies that could have left sit in more than one
+  place (binder pocket, line slot, bulk box), the preview asks "Where did this one leave from?" for each
+  copy that left, and **Apply stays disabled until she answers**; the executor refuses an unanswered
+  apply too. When every candidate is in one place, or every copy leaves, nothing is asked. A copy a
+  variant migration carries is never a candidate. (`lib/sync/removal-source.ts`.)
+- **Refill from bulk (UIL-140).** When the copy that left held a binder pocket or line slot and a
+  duplicate of it (the cascade's own rule: same artwork or same set + number; any variant) is in a bulk
+  box, the preview offers to pull it into the Haul Plan ("No, leave it in the box" by default). A pulled
+  card is an ordinary Haul Plan row: its reason starts "Pulled from <box> to replace a card you
+  traded.", and the cascade suggests its spot. Undo puts it back in its box.
 - **Confirm / reject a variant migration.** The migration pass pairs a `REMOVED` with an
   `ADDED` on the same card to carry placement across (this is what makes the phantom-fix clean).
   The preview surfaces each pairing so she can reject a coincidental pairing that isn't really
@@ -216,8 +224,8 @@ The preview is not read-only; it's where she corrects the snapshot's inevitable 
 - **Block consequences.** A removal that would strand a repurposed binder block is flagged for a
   keep-or-free decision (never auto-reverted).
 
-Line-slot reversions and bulk removals apply as specified without asking; they're shown, not
-gated per-item.
+Line-slot reversions and bulk removals apply as specified once she has said where each card left
+from (above).
 
 ## B.4 Apply and the undo snapshot
 

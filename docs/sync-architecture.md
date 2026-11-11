@@ -188,7 +188,10 @@ When a `(tcgdexId, dexVariantRaw)` group's count drops (or the group disappears 
   with the system-design line engine). The line is not torn down.
 - If it was **shelved (front-half, no line)** → its binder/half assignment is cleared; the card
   leaves the collection.
-- If it was in the **bulk box** → removed silently; bulk has no structure to preserve.
+- If it was in the **bulk box** → removed; bulk has no structure to preserve.
+- **Which copy, and refilling (UIL-140).** The least-committed default below is no longer applied
+  silently: when the candidates sit in more than one place she says where each left from. When a
+  shelved copy left and a duplicate is in bulk, she may pull it into the Haul Plan, which places it.
 - If it was a **repurposed binder block** → **do not auto-revert.** The physical block still
   exists in the binder; a card leaving Dex doesn't un-repurpose a page. Flag it for her review
   instead ("the card recorded as this block is gone from Dex — keep the block or free it?").

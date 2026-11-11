@@ -128,6 +128,11 @@ export interface AppliedSnapshot {
    * it always did.
    */
   priorRemovedMemories?: { catalog_card_id: string; dex_variant_raw: string; count: number }[];
+  /**
+   * Bulk copies this sync pulled into the Haul Plan to refill a spot (Karvi, 2026-11-11), with the box each came
+   * from. Undo puts each back in its box. Absent when she accepted no refill, and on every older snapshot.
+   */
+  bulkPulls?: { copyId: string; bulkUnitId: string | null }[];
   /** Copies retired this sync — re-inserted verbatim on undo. */
   retiredCopies: SnapshotCopy[];
   /** Line slots freed by a retire — restored to their filled state on undo. */

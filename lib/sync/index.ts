@@ -7,6 +7,8 @@ export * from "./types";
 export * from "./reconcile";
 export { presenceKey } from "./diff";
 export * from "./apply";
+export * from "./removal-source";
+export * from "./removal-answers";
 export * from "./undo";
 export * from "./preview";
 export {
