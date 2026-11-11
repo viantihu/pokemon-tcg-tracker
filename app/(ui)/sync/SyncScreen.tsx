@@ -33,6 +33,7 @@ import {
   loadSyncState,
   manualMatchEntry,
   previewSync,
+  restoreRemovedAction,
   restoreWithheldAction,
   retryUnresolvedNow,
   searchCatalog,
@@ -51,6 +52,7 @@ import type {
 import { LOST, reach } from "../_components/reach";
 import { CountCheckPanel } from "./CountCheckPanel";
 import { StandInSwapPanel } from "./StandInSwapPanel";
+import { RemovedCardsPanel } from "./RemovedCardsPanel";
 
 type Phase = "idle" | "parsing" | "preview" | "working";
 
@@ -256,6 +258,26 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
           )
         }
         onDismissSwapped={() => setSwapped([])}
+      />
+
+      <RemovedCardsPanel
+        removed={state.removed}
+        busy={busy}
+        onAddBack={(card) =>
+          run(null, async () => {
+            const r = await restoreRemovedAction(card.catalogCardId, card.dexVariantRaw);
+            if (r.ok) {
+              setToast(
+                r.alreadyRestored
+                  ? "Already added back."
+                  : r.restored > 0
+                    ? `Added back ${r.restored} ${card.name}. Ready to place.`
+                    : "Nothing to add back: your Dex file no longer lists it.",
+              );
+            }
+            return r;
+          })
+        }
       />
 
       {withheld ? (

@@ -30,6 +30,7 @@ vi.mock("@/app/(ui)/sync/actions", () => ({
   manualMatchEntry: vi.fn(),
   previewSync: vi.fn(),
   restoreWithheldAction: vi.fn(),
+  restoreRemovedAction: vi.fn(),
   retryUnresolvedNow: vi.fn(),
   searchCatalog: vi.fn(async () => []),
   swapStandInAction: vi.fn(),
@@ -62,6 +63,7 @@ function state(standIns: SyncState["standIns"]): SyncState {
     aliases: [],
     countCheck: emptyCountCheck(),
     standIns,
+    removed: [],
   };
 }
 
@@ -134,5 +136,40 @@ describe("UIL-060 Half 2 · the Sync screen shows stand-in swaps", () => {
     expect(
       (screen.getByRole("button", { name: "Swap for this card" }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+});
+
+describe("the count check's 'you removed', card by card", () => {
+  it("lists each removed card and adds the one she picks back", async () => {
+    m.restoreRemovedAction.mockResolvedValue({ ok: true, restored: 1, alreadyRestored: false });
+    const user = userEvent.setup();
+    render(
+      createElement(SyncScreen, {
+        initialState: {
+          ...EMPTY,
+          removed: [
+            {
+              catalogCardId: "30th-123",
+              dexVariantRaw: "Holo",
+              count: 1,
+              name: "Hisuian Zoroark",
+              setName: "30th Celebration",
+              localId: "123",
+              imageUrl: null,
+            },
+          ],
+        },
+      }),
+    );
+    const panel = screen.getByTestId("removed-cards");
+    expect(panel.textContent).toContain("Hisuian Zoroark · 30th Celebration · #123 · Holo");
+    await user.click(screen.getByRole("button", { name: "Add it back" }));
+    expect(m.restoreRemovedAction).toHaveBeenCalledWith("30th-123", "Holo");
+    expect(await screen.findByText("Added back 1 Hisuian Zoroark. Ready to place.")).toBeTruthy();
+  });
+
+  it("shows nothing when she has removed nothing", () => {
+    render(createElement(SyncScreen, { initialState: EMPTY }));
+    expect(screen.queryByTestId("removed-cards")).toBeNull();
   });
 });

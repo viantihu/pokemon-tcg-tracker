@@ -4,7 +4,8 @@
  *
  *  1. Every column that can hold a card id is repointed, then the stand-in is deleted — and the list of foreign keys
  *     to catalog_card is pinned, so a new one cannot be added without the swap learning about it.
- *  2. A clash (she already holds the real card under the same Dex variant) is refused whole and shown to her.
+ *  2. A shared Dex key (she already holds the real card under the same variant) merges (0041): her copies join the
+ *     real card's group, Dex quantities and removals add — including the empty group "Wrong card?" leaves behind.
  *  3. Only her own stand-in can be swapped.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -175,27 +176,43 @@ describe("UIL-060 Half 2 · the swap", () => {
     });
   });
 
-  it("refuses a clash whole and shows it to her: she already holds the real card under the same variant", async () => {
+  it("merges a shared Dex key: copies join the real group, Dex quantities and removals add (0041)", async () => {
     const standIn = await makeStandIn();
     await asSuperuser(db);
+    // The real card's side of the key: an EMPTY group (what "Wrong card?" leaves behind), a Dex count and a removal.
     await db.exec(`
       insert into presence_group (owner_id, catalog_card_id, dex_variant_raw, desired_count)
-        values ('${OWNER}', '${REAL}', 'Normal', 1);
+        values ('${OWNER}', '${REAL}', 'Normal', 0);
+      insert into dex_presence (owner_id, catalog_card_id, dex_variant_raw, quantity)
+        values ('${OWNER}', '${REAL}', 'Normal', 1),
+               ('${OWNER}', '${standIn}', 'Normal', 2);
+      insert into removed_presence (owner_id, catalog_card_id, dex_variant_raw, count)
+        values ('${OWNER}', '${REAL}', 'Normal', 1),
+               ('${OWNER}', '${standIn}', 'Normal', 1);
     `);
     await asOwner(db);
-    const before = await whereEverythingPoints();
 
     const report = await reconcileStandIns(pgliteClient(db), await catalog());
-    expect(report.swapped).toEqual([]);
-    expect(report.unsure).toHaveLength(1);
-    expect(report.unsure[0].candidates.map((c) => c.id)).toEqual([REAL]);
-    expect(report.unsure[0].blocked).toMatch(/already have the real card/);
+    expect(report.unsure).toEqual([]);
+    expect(report.swapped).toHaveLength(1);
 
-    expect(await whereEverythingPoints()).toEqual(before);
     await asSuperuser(db);
-    expect(await q(`select tcgdex_id from catalog_card where source = 'user'`)).toEqual([
-      { tcgdex_id: standIn },
+    expect(
+      await q(`select catalog_card_id, dex_variant_raw, desired_count from presence_group`),
+    ).toEqual([{ catalog_card_id: REAL, dex_variant_raw: "Normal", desired_count: 2 }]);
+    expect(
+      await q(
+        `select count(*)::int n from copy c join presence_group g on g.id = c.presence_group_id
+          where c.catalog_card_id = '${REAL}' and g.catalog_card_id = '${REAL}'`,
+      ),
+    ).toEqual([{ n: 2 }]);
+    expect(await q(`select catalog_card_id, quantity from dex_presence`)).toEqual([
+      { catalog_card_id: REAL, quantity: 3 },
     ]);
+    expect(await q(`select catalog_card_id, count from removed_presence`)).toEqual([
+      { catalog_card_id: REAL, count: 2 },
+    ]);
+    expect(await q(`select 1 from catalog_card where source = 'user'`)).toEqual([]);
   });
 
   it("swaps only her own stand-in", async () => {

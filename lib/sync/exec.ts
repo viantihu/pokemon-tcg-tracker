@@ -1391,6 +1391,93 @@ export async function restoreWithheldForEntry(
   return { restored: restore };
 }
 
+/** Why "Add it back" on a removed card is refused. */
+export const RESTORE_REMOVED_REFUSED = {
+  nothingRemoved:
+    "There is no removal recorded for this card any more, so there is nothing to add back. Reload the Sync page.",
+} as const;
+
+/**
+ * "Add it back" for ANY card she removed while Dex still lists it — the "you removed" part of the count check.
+ * `restoreWithheldForEntry` only reaches a removal through the Dex row a manual match held back; a card removed by
+ * mistake after an import (removed as "wrong", then a stand-in made instead) had no way back at all, and every
+ * import kept subtracting it.
+ *
+ * The same arithmetic as `restoreWithheldForEntry`, keyed by the card and Dex variant instead of a row. Recorded and
+ * adding up: the key is brought back to what Dex lists (record − copies held), never past it, and the memory keeps
+ * whatever of the record is still not held. Not recorded (or not adding up, which the check then refuses): the whole
+ * memory comes back.
+ *
+ * Once per removal: the copy ids derive from the memory row and its count, so a double press collides on the
+ * primary key and reports `alreadyRestored` rather than adding twice.
+ */
+export async function restoreRemovedCard(
+  db: DbClient,
+  catalogCardId: string,
+  dexVariantRaw: string,
+): Promise<RestoreWithheldResult> {
+  const memory = await removedPresenceRepo.findByKey(db, catalogCardId, dexVariantRaw);
+  if (!memory) throw new Error(RESTORE_REMOVED_REFUSED.nothingRemoved);
+  const copyId = (i: number) => derivedUuid(`restore-removed:${memory.id}:${memory.count}:${i}`);
+  if (await copyRepo.getByPk(db, copyId(0))) return { restored: 0, alreadyRestored: true };
+
+  const ops: WriteOp[] = [];
+  const existing = await presenceGroupRepo.findByKey(db, catalogCardId, dexVariantRaw);
+  const groupId = existing?.id ?? crypto.randomUUID();
+  if (!existing) {
+    ops.push({
+      op: "insert_presence_group",
+      id: groupId,
+      catalog_card_id: catalogCardId,
+      dex_variant_raw: dexVariantRaw,
+      desired_count: 0,
+    });
+  }
+  const k = await keyState(db, catalogCardId, dexVariantRaw, existing?.id ?? null);
+  const addsUp = k.current === Math.max(0, k.record - k.removed);
+  const restore =
+    k.armed && addsUp ? Math.min(k.removed, Math.max(0, k.record - k.current)) : k.removed;
+  const newMemory =
+    k.armed && addsUp ? Math.max(0, k.record - (k.current + restore)) : k.removed - restore;
+  const shrinkBy = k.removed - newMemory;
+  if (restore === 0 && shrinkBy === 0) return { restored: 0 };
+
+  const now = nowIso();
+  for (let i = 0; i < restore; i++) {
+    ops.push({
+      op: "insert_copy",
+      id: copyId(i),
+      catalog_card_id: catalogCardId,
+      variant: deriveVariantFlag(dexVariantRaw), // as matchOps and the import derive it (UIL-102)
+      dex_variant_raw: dexVariantRaw,
+      presence_group_id: groupId,
+      role: "haul",
+      acquired_at: now,
+    });
+  }
+  if (shrinkBy > 0) {
+    ops.push({
+      op: "shrink_removed_presence",
+      catalog_card_id: catalogCardId,
+      dex_variant_raw: dexVariantRaw,
+      by: shrinkBy,
+    });
+  }
+  ops.push({
+    op: "assert_presence_counts",
+    keys: [{ catalog_card_id: catalogCardId, dex_variant_raw: dexVariantRaw }],
+  });
+  try {
+    await applyWriteOps(db, { ops, resyncGroupIds: [groupId] });
+  } catch (err) {
+    if (restore > 0 && (await copyRepo.getByPk(db, copyId(0)))) {
+      return { restored: 0, alreadyRestored: true };
+    }
+    throw (await asCountRefusal(db, err, NEXT_STEP.restore)) ?? err;
+  }
+  return { restored: restore };
+}
+
 /**
  * The TCGdex set id a stand-in for `entry` should carry, or null. The form prefills it rather than asking:
  * the resolver already knows the set for an UNKNOWN_CARD entry (a passthrough code the mirror has, or a

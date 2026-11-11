@@ -47,6 +47,7 @@ vi.mock("@/app/(ui)/sync/actions", () => ({
   manualMatchEntry: vi.fn(),
   previewSync: vi.fn(),
   restoreWithheldAction: vi.fn(),
+  restoreRemovedAction: vi.fn(),
   retryUnresolvedNow: vi.fn(),
   searchCatalog: vi.fn(async () => [CARD]),
   undismissEntryAction: vi.fn(),
@@ -81,6 +82,7 @@ const STATE: SyncState = {
   aliases: [],
   countCheck: emptyCountCheck(),
   standIns: { swapped: [], unsure: [] },
+  removed: [],
 };
 
 const m = vi.mocked(actions);

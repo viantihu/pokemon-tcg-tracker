@@ -155,19 +155,25 @@ export function printedSetSize(localId: string): number | null {
 
 /**
  * Which real card a stand-in is. Every candidate keeps `realPrintingFor`'s rules — the stand-in's language, a
- * physical mirrored printing — and then the SET decides. She cannot know TCGdex's set id when she makes a stand-in,
- * so most carry only the set name she typed:
- *   - with a set id, the set is that id;
- *   - without one, the set is every set whose name is hers once case, accents and punctuation are ignored.
- * CERTAIN needs exactly one printing in that set with that number, carrying her card name too.
+ * physical mirrored printing, not itself a stand-in. She cannot know TCGdex's set id when she makes a stand-in, so
+ * most carry only the set name she typed:
+ *   - with a set id, her set is that id;
+ *   - without one, her set is every set whose name is hers once case, accents and punctuation are ignored.
+ * CERTAIN needs exactly one printing in her set with her number, carrying her card name too, and nothing she typed
+ * contradicting it.
  *
- * Anything less is UNSURE, and every card offered carries HER card name: a different Pokémon that happens to share
- * the number is never her card ("Hisuian Zoroark #123" for her "Hisuian Zorua #123/128"). Offered, in order:
- *   1. her number in a set whose name is close to hers ("Celebrations" for "30th Celebration");
- *   2. her number in a set whose printed size is the one after her "/" — her set name was wrong, the number was
- *      right ("Mew VMAX 114/264" filed under 30th Celebration is Fusion Strike's, 264 cards);
- *   3. only when neither finds one: her set, another number — the set was right, the number was mistyped ("Hisuian Zorua 123/128" in 30th
- *      Celebration is #122 or #145).
+ * Anything less is UNSURE, and weighs EVIDENCE rather than trusting any one thing she typed: a stand-in is made by
+ * hand, so its name, set or number can each be the typo. What she typed gives three signals:
+ *   SET    her set, a set whose name is close to hers, or a set whose printed size is the one after her "/";
+ *   NAME   her card name;
+ *   NUMBER her collector number.
+ * A card is offered when the SET agrees and the NAME or the NUMBER does too, and the printed size does not contradict
+ * it (her "/264" rules out a 128-card set). So:
+ *   - "Hisuian Zorua 123/128" in 30th Celebration offers Hisuian Zoroark #123 (set, size and number agree; the name
+ *     was the typo) and Hisuian Zorua #122 / #145 (set and name agree; the number was the typo);
+ *   - "Mew VMAX 114/264" filed under 30th Celebration offers Fusion Strike's Mew VMAX #114 (its 264 cards are the
+ *     set evidence) and never 30th Celebration's Kangaskhan #114 (128 cards contradict her "/264").
+ * Ranked by how many signals agree, a name match first on a tie; at most five.
  */
 export function standInMatch(
   standIn: StandInForMatch,
@@ -180,37 +186,38 @@ export function standInMatch(
   const numbers = new Set(collectorNumberCandidates(standIn.localId));
   if (numbers.size === 0) return none;
 
-  const printings = catalog.filter(
-    (c) =>
-      !isStandInId(c.tcgdexId) && !c.isDigitalOnly && c.locale === language && c.localId !== null,
-  );
   const mySet = setNameKey(standIn.setName);
   const myName = cardNameKey(standIn.name);
+  const size = printedSetSize(standIn.localId);
   const isMySet = (c: MatchableCard) =>
     standIn.setId ? c.setId === standIn.setId : !!mySet && setNameKey(c.setName) === mySet;
   const hasMyNumber = (c: MatchableCard) =>
-    localIdCandidates(c.localId as string).some((n) => numbers.has(n));
+    c.localId !== null && localIdCandidates(c.localId).some((n) => numbers.has(n));
+  const sizeContradicts = (c: MatchableCard) =>
+    size !== null && c.setCardCount != null && c.setCardCount !== size;
 
-  const inSet = printings.filter((c) => isMySet(c) && hasMyNumber(c));
+  const printings = catalog.filter(
+    (c) => !isStandInId(c.tcgdexId) && !c.isDigitalOnly && c.locale === language,
+  );
+
+  const inSet = printings.filter((c) => isMySet(c) && hasMyNumber(c) && !sizeContradicts(c));
   if (inSet.length === 1 && cardNameKey(inSet[0].name) === myName) {
     return { kind: "certain", realId: inSet[0].tcgdexId };
   }
 
-  const named = printings.filter((c) => cardNameKey(c.name) === myName);
-  const size = printedSetSize(standIn.localId);
-  const sameNumber = named.filter(
-    (c) =>
-      hasMyNumber(c) &&
-      (isMySet(c) ||
-        (!!mySet && setNamesClose(setNameKey(c.setName), mySet)) ||
-        (size !== null && c.setCardCount === size)),
-  );
-  const otherNumber =
-    sameNumber.length === 0 ? named.filter((c) => isMySet(c) && !hasMyNumber(c)) : [];
-  const candidateIds = [...new Set([...sameNumber, ...otherNumber].map((c) => c.tcgdexId))].slice(
-    0,
-    MAX_CANDIDATES,
-  );
+  const scored = printings.flatMap((c, order) => {
+    if (sizeContradicts(c)) return [];
+    const set =
+      isMySet(c) ||
+      (!!mySet && setNamesClose(setNameKey(c.setName), mySet)) ||
+      (size !== null && c.setCardCount === size);
+    const name = cardNameKey(c.name) === myName;
+    const number = hasMyNumber(c);
+    if (!set || (!name && !number)) return [];
+    return [{ id: c.tcgdexId, score: 1 + Number(name) + Number(number), name, order }];
+  });
+  scored.sort((a, b) => b.score - a.score || Number(b.name) - Number(a.name) || a.order - b.order);
+  const candidateIds = [...new Set(scored.map((c) => c.id))].slice(0, MAX_CANDIDATES);
   return candidateIds.length > 0 ? { kind: "unsure", candidateIds } : none;
 }
 

@@ -24,6 +24,7 @@ function card(over: Partial<MatchableCard> & { tcgdexId: string }): MatchableCar
     localId: "015",
     locale: "en",
     isDigitalOnly: false,
+    setCardCount: 128,
     ...over,
   };
 }
@@ -82,26 +83,28 @@ describe("standInMatch", () => {
     expect(standInMatch(standIn({ setName: "30TH CELEBRATION!" }), CATALOG).kind).toBe("certain");
   });
 
-  it("is UNSURE when the set name is only close to hers", () => {
+  it("is UNSURE when the set name is only close to hers, best evidence first", () => {
     expect(standInMatch(standIn({ setName: "30th Celebrations" }), CATALOG)).toEqual({
       kind: "unsure",
-      candidateIds: ["30th-015"],
-    });
-    expect(standInMatch(standIn({ setName: "Celebration" }), CATALOG)).toEqual({
-      kind: "unsure",
-      candidateIds: ["30th-015"],
+      // Same number first; the same card's other printing in that set after it.
+      candidateIds: ["30th-015", "30th-147"],
     });
   });
 
-  it("never offers a card of another name, even at her set and number", () => {
-    expect(standInMatch(standIn({ name: "Fuecoco" }), CATALOG)).toEqual({ kind: "none" });
-    expect(standInMatch(standIn({ name: "Espeon ex" }), CATALOG)).toEqual({
-      kind: "unsure",
-      candidateIds: ["30th-070"],
-    });
+  it("offers the card at her set and number when only the NAME was the typo", () => {
+    const zoroark = card({ tcgdexId: "30th-123", name: "Hisuian Zoroark", localId: "123" });
+    const zorua = card({ tcgdexId: "30th-122", name: "Hisuian Zorua", localId: "122" });
+    const zoruaAlt = card({ tcgdexId: "30th-145", name: "Hisuian Zorua", localId: "145" });
+    expect(
+      standInMatch(standIn({ name: "Hisuian Zorua", localId: "123/128" }), [
+        zorua,
+        zoruaAlt,
+        zoroark,
+      ]),
+    ).toEqual({ kind: "unsure", candidateIds: ["30th-122", "30th-145", "30th-123"] });
   });
 
-  it("offers her card at her number in the set whose printed size is after her '/' (wrong set name)", () => {
+  it("offers her card in the set whose printed size is after her '/' when the SET NAME was the typo", () => {
     const mewVmax = card({
       tcgdexId: "swsh8-114",
       name: "Mew VMAX",
@@ -111,37 +114,31 @@ describe("standInMatch", () => {
       setCardCount: 264,
     });
     const kangaskhan = card({ tcgdexId: "30th-114", name: "Kangaskhan", localId: "114" });
+    // 30th Celebration's 128 cards contradict her "/264": Kangaskhan is never offered.
     expect(
       standInMatch(standIn({ name: "Mew VMAX", localId: "114/264" }), [kangaskhan, mewVmax]),
     ).toEqual({ kind: "unsure", candidateIds: ["swsh8-114"] });
   });
 
-  it("offers her card at another number in her set (mistyped number)", () => {
-    const zorua = card({ tcgdexId: "30th-122", name: "Hisuian Zorua", localId: "122" });
-    const zoruaAlt = card({ tcgdexId: "30th-145", name: "Hisuian Zorua", localId: "145" });
-    const zoroark = card({ tcgdexId: "30th-123", name: "Hisuian Zoroark", localId: "123" });
-    expect(
-      standInMatch(standIn({ name: "Hisuian Zorua", localId: "123/128" }), [
-        zoroark,
-        zorua,
-        zoruaAlt,
-      ]),
-    ).toEqual({ kind: "unsure", candidateIds: ["30th-122", "30th-145"] });
+  it("is never CERTAIN when the printed size contradicts the set", () => {
+    expect(standInMatch(standIn({ localId: "15/264" }), CATALOG)).toEqual({ kind: "none" });
   });
 
   it("is UNSURE when two printings fit (two sets of one name, both with the number)", () => {
     const twin = card({ tcgdexId: "30th-b-015", setId: "30th-b" });
     expect(standInMatch(standIn(), [...CATALOG, twin])).toEqual({
       kind: "unsure",
-      candidateIds: ["30th-015", "30th-b-015"],
+      candidateIds: ["30th-015", "30th-b-015", "30th-147"],
     });
   });
 
-  it("finds NONE when TCGdex does not carry her card in any set like hers", () => {
+  it("finds NONE when only one thing she typed agrees", () => {
+    // The set agrees, but neither the name nor the number.
     expect(standInMatch(standIn({ name: "Sprigatito", localId: "999/128" }), CATALOG)).toEqual({
       kind: "none",
     });
-    expect(standInMatch(standIn({ setName: "Obsidian Flames" }), CATALOG)).toEqual({
+    // Name and number agree, but nothing says it is this set (no close name, no printed size).
+    expect(standInMatch(standIn({ setName: "Obsidian Flames", localId: "15" }), CATALOG)).toEqual({
       kind: "none",
     });
   });
@@ -160,6 +157,8 @@ describe("standInMatch", () => {
   it("finds NONE for a stand-in with no language recorded, no number, or no set at all", () => {
     expect(standInMatch(standIn({ tcgdexId: `user:${UUID}` }), CATALOG)).toEqual({ kind: "none" });
     expect(standInMatch(standIn({ localId: null }), CATALOG)).toEqual({ kind: "none" });
-    expect(standInMatch(standIn({ setName: null }), CATALOG)).toEqual({ kind: "none" });
+    expect(standInMatch(standIn({ setName: null, localId: "15" }), CATALOG)).toEqual({
+      kind: "none",
+    });
   });
 });

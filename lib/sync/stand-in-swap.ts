@@ -71,8 +71,9 @@ function refusalMessage(err: unknown): string {
 
 /**
  * Look at every stand-in she has against `catalog` (the cached mirror plus her stand-ins, `loadCatalogCached`):
- * swap the certain ones, report the unsure ones. A certain swap the database refuses (she already holds the real
- * card under the same variant) is reported as unsure with the reason, never thrown: the Sync screen still loads.
+ * swap the certain ones, report the unsure ones. A real card she already holds under the same variant is merged, not
+ * refused (0041). A certain swap the database still refuses is reported as unsure with the reason, never thrown: the
+ * Sync screen still loads.
  */
 export async function reconcileStandIns(
   db: DbClient,

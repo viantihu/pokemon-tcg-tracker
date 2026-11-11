@@ -42,6 +42,7 @@ function state(over: Partial<SyncState>): SyncState {
     cardTypes: [],
     countCheck: emptyCountCheck(),
     standIns: { swapped: [], unsure: [] },
+    removed: [],
     dismissed: [],
     counts: { waiting: 0, dismissed: 0 },
     undo: { available: false, createdAt: null, summary: null },

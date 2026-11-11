@@ -60,6 +60,19 @@ export interface SyncState {
   countCheck: CountCheckView;
   /** UIL-060 Half 2: stand-ins swapped for their real cards on this load, and the ones waiting for her pick. */
   standIns: StandInSwapReport;
+  /** Cards she removed while Dex still lists them (the count check's "you removed"), each one she can add back. */
+  removed: RemovedCardView[];
+}
+
+/** One removed card, keyed like `removed_presence`. */
+export interface RemovedCardView {
+  catalogCardId: string;
+  dexVariantRaw: string;
+  count: number;
+  name: string;
+  setName: string | null;
+  localId: string | null;
+  imageUrl: string | null;
 }
 
 /** Result of an apply (fast-path or gated) — carries the fast-path notification text. */
