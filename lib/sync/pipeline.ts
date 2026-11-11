@@ -40,12 +40,22 @@ import {
   type UnresolvedRow,
 } from "./reconcile";
 import type { DexRow } from "./types";
-import type { RemovedPresence } from "./diff";
+import { presenceKey, type RemovedPresence } from "./diff";
 import { latestSnapshotId } from "./apply-guard";
 import { dexRecordFromRows, type DexRecord } from "./count-check";
 import type { DexRecordRow } from "@/lib/repo/write-ops";
 import type { SyncCounts } from "./undo";
-import { buildPreview, type CardMeta, type PreviewEnrichment, type SyncPreview } from "./preview";
+import {
+  buildPreview,
+  type CardMeta,
+  type PreviewEnrichment,
+  type RefillOption,
+  type RemovalAsk,
+  type SyncPreview,
+} from "./preview";
+import { consequenceOf } from "./apply";
+import { isRefillable, refillCandidates, removalQuestions } from "./removal-source";
+import type { CatalogCard } from "@/lib/engine";
 
 export type SyncMode = "import" | "retry";
 
@@ -451,7 +461,9 @@ async function loadEnrichment(
   const placementByCopyId: Record<string, string> = {};
   const groupCopies: Record<string, { copyId: string; label: string }[]> = {};
   for (const g of current) {
-    const gKey = `${g.catalogCardId} ${g.dexVariantRaw}`;
+    // `presenceKey`, the ONE spelling: this was a space-joined key while the preview looks it up by
+    // `presenceKey` (a NUL join), so every lookup missed and the which-copy-left choice never showed.
+    const gKey = presenceKey(g.catalogCardId, g.dexVariantRaw);
     const list: { copyId: string; label: string }[] = [];
     for (const c of g.copies) {
       const binderName = c.binderId ? (binderNameById.get(c.binderId) ?? "Binder") : null;
@@ -471,5 +483,69 @@ async function loadEnrichment(
     groupCopies[gKey] = list;
   }
 
-  return { cardMetaById, placementByCopyId, groupCopies, newParks: parks, stillWaiting, counts };
+  // "Where did it leave from?" and "refill from bulk?" (Karvi, 2026-11-11; lib/sync/removal-source.ts).
+  const questions = removalQuestions(plan, current);
+  const removalAsks: Record<string, RemovalAsk> = {};
+  let anyRefillable = false;
+  for (const qn of questions) {
+    const options = qn.candidates.map((c) => {
+      const refillable = isRefillable(consequenceOf(c).consequence);
+      anyRefillable ||= refillable;
+      return { copyId: c.copyId, label: placementByCopyId[c.copyId] ?? "", refillable };
+    });
+    removalAsks[qn.presenceKey] = { ambiguous: qn.ambiguous, leaving: qn.leaving, options };
+  }
+
+  const refillOptions: Record<string, RefillOption[]> = {};
+  if (anyRefillable) {
+    // Only the cards a refill could involve: the ones leaving, and every card she has a bulk copy of.
+    const bulkCardIds = current
+      .filter((g) => g.copies.some((c) => c.role === "bulk"))
+      .map((g) => g.catalogCardId);
+    const rows = await catalogCardRepo.listByIds(db, [
+      ...plan.retires.map((r) => r.catalogCardId),
+      ...bulkCardIds,
+    ]);
+    const catalogById = new Map<string, CatalogCard>(
+      rows.map((r) => [r.tcgdex_id, toCatalogCard(r)]),
+    );
+    // A copy that leaves whatever she answers (an unambiguous key's retire) is never a refill.
+    const ambiguousKeys = new Set(
+      questions.filter((qn) => qn.ambiguous).map((qn) => qn.presenceKey),
+    );
+    const fixedLeaving = new Set(
+      plan.retires
+        .filter((r) => !ambiguousKeys.has(presenceKey(r.catalogCardId, r.dexVariantRaw)))
+        .map((r) => r.copyId),
+    );
+    const cardIdByKey = new Map(
+      plan.retires.map((r) => [presenceKey(r.catalogCardId, r.dexVariantRaw), r.catalogCardId]),
+    );
+    for (const qn of questions) {
+      if (!removalAsks[qn.presenceKey].options.some((o) => o.refillable)) continue;
+      const card = catalogById.get(cardIdByKey.get(qn.presenceKey) ?? "");
+      if (!card) continue;
+      const opts = refillCandidates(card, current, catalogById, fixedLeaving).map((c) => {
+        const box = (c.bulkUnitId && boxNameById.get(c.bulkUnitId)) || "Bulk box";
+        const other = catalogById.get(c.catalogCardId);
+        const printing =
+          c.catalogCardId !== card.tcgdexId && other
+            ? ` · ${other.name}${other.localId ? ` ${other.localId}` : ""}`
+            : "";
+        return { copyId: c.copyId, label: `${box}${printing} · ${c.dexVariantRaw || "Normal"}` };
+      });
+      if (opts.length > 0) refillOptions[qn.presenceKey] = opts;
+    }
+  }
+
+  return {
+    cardMetaById,
+    placementByCopyId,
+    groupCopies,
+    newParks: parks,
+    stillWaiting,
+    counts,
+    removalAsks,
+    refillOptions,
+  };
 }

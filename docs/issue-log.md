@@ -9752,3 +9752,45 @@ and the Dex count check stay hard refusals; this only makes them readable.
 
 **Cross-reference:** UIL-105 (the import spinner that never ended), UIL-106 (the shared `reach` family
 for lost calls), UIL-136 (the other way an import looked like it had failed on the same screen).
+
+## UIL-140 — A card removed in Dex leaves from a place she names, and a bulk duplicate can refill its spot
+
+- **Reported:** 2026-11-11 (Karvi). In her words: "When a card gets removed in the Dex app, it means that it
+  got traded or given to someone. The same card can exist in multiple locations ... the user must be able to
+  specify where the card got removed from." And: when the traded card leaves a binder spot and a duplicate is
+  in a bulk box, offer to pull it into the haul plan, which suggests a binder location. No new kind of plan row
+  ("I want to keep the UI on the haul plan consistent").
+- **Status:** **Built**, awaiting Karvi's test. Branch `claude/card-removal-location-pqaxxb`.
+- **Area:** Sync, Haul Plan
+- **Rulings (2026-11-11):** she must answer before Apply (no pre-picked guess); the refill is the binder-copy
+  case (the traded copy was shelved, the duplicate is in bulk); a pulled card is an ordinary plan row.
+
+**What changed.**
+1. *Where did it leave from?* Asked per removed copy when the candidates sit in more than one place. Apply is
+   disabled until answered, and `executeApply` refuses an unanswered apply (`REMOVAL_UNANSWERED`), so no client
+   can apply a guess. Not asked when she owns one copy, when every copy leaves, or when all are in one place.
+2. *Refill from bulk.* Offered when the copy that left was shelved (binder pocket or line slot) and a duplicate
+   by `isDuplicateCard` is in a bulk box. Accepting it sets the bulk copy to `role = 'haul'` and records a
+   `placement_decision` `pulled-from-bulk` in the same apply transaction. `loadPendingPlacements` (the ONE
+   "waiting" definition) now reads the LATEST decision per copy: waiting = none, or a pull. No migration.
+3. *Undo* returns a pulled card to its own box (default box if that box is gone; a full box takes it, recorded
+   as a `bulk_box_full` override), wherever she has put it since, before the traded card is restored, so a line
+   slot never points two ways.
+
+**Two existing defects found and fixed on the way.**
+- The "Which copy leaves" dropdown never appeared: the pipeline keyed `groupCopies` with a space and the preview
+  looked it up with `presenceKey`'s NUL join, so every lookup missed.
+- When two copies of one card left in one sync, the dropdown wrote a one-copy choice, which `applyOverrides`
+  silently ignored (count mismatch). Choices are now per copy, must be distinct, and never name a copy a variant
+  migration carries.
+
+**Known, not changed here.** Undo re-inserts a retired BULK copy without its box (`insert_copy` carries no
+`bulk_unit_id`), so it lands in her default box. Pre-existing; now more visible because "it left the bulk box"
+is an answer she gives. A binder-block copy that leaves is still flagged for review and offered no refill.
+
+**Proof.** `tests/sync/removal-source.test.ts`, 21 scenarios on real PGlite through the real pipeline, apply,
+Undo and Haul Plan queue (one copy / all leaving / same place: not asked; refusal writes nothing; two leaving at
+once; duplicate answer refused; refill named by box; different-variant refill; changed mind drops the refill;
+stale refill refused; idempotent re-import; untouched bulk stays out of the plan; Undo while waiting, into a full
+box, after shelving, after filling the freed line slot; Undo with no pull unchanged).
+

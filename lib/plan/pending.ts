@@ -21,6 +21,7 @@
  */
 
 import type { Variant } from "@/lib/engine";
+import type { PlanItem } from "./types";
 import {
   catalogCardRepo,
   copyRepo,
@@ -28,6 +29,7 @@ import {
   type DbClient,
   type Row,
 } from "@/lib/repo";
+import { BULK_PULL_DECISION } from "@/lib/sync/removal-source";
 
 /** One unrouted copy, paired with the catalog printing it is a copy of. */
 export interface PendingPlacement {
@@ -67,11 +69,20 @@ export async function loadPendingPlacements(
   const unplaced = (await copyRepo.listUnplaced(db)).filter((c) => !except?.has(c.id));
   if (unplaced.length === 0) return [];
 
-  const decided = await placementDecisionRepo.listDecidedCopyIds(
+  /**
+   * Pending = no decision yet, OR the latest decision is a pull from bulk (Karvi, 2026-11-11): a bulk copy she
+   * asked the Sync page to pull back into her haul has an older decision (the one that sent it to bulk) and a
+   * newer one that pulled it out. Only the latest says where it stands. Any other latest decision keeps the copy
+   * out of the queue exactly as before, so no card that was out of the queue comes back into it.
+   */
+  const latest = await placementDecisionRepo.listLatestByCopy(
     db,
     unplaced.map((c) => c.id),
   );
-  const pending = unplaced.filter((c) => !decided.has(c.id));
+  const pending = unplaced.filter((c) => {
+    const d = latest.get(c.id);
+    return !d || d.decision === BULK_PULL_DECISION;
+  });
   if (pending.length === 0) return [];
 
   const cards = await catalogCardRepo.listByIds(
@@ -94,4 +105,25 @@ export async function loadPendingPlacements(
     });
   }
   return out;
+}
+
+/**
+ * The plan's reason for a card pulled out of a bulk box (Karvi, 2026-11-11): the pull's note, ahead of the
+ * cascade's own reason. The row is otherwise an ordinary plan row — same action, same destination, same layout —
+ * so the Haul Plan gains no new kind of row. PURE; the reason is display text and never part of the placement
+ * digest (lib/plan/spotlight.ts), so this cannot change where the card is written.
+ */
+export function withBulkPullNotes<T extends { items: PlanItem[] }>(
+  plan: T,
+  latest: ReadonlyMap<string, { decision: string; reason: string }>,
+): T {
+  return {
+    ...plan,
+    items: plan.items.map((it) => {
+      const d = latest.get(it.incomingId);
+      return d && d.decision === BULK_PULL_DECISION
+        ? { ...it, reason: `${d.reason} ${it.reason}` }
+        : it;
+    }),
+  };
 }

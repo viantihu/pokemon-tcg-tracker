@@ -32,7 +32,14 @@ import type { LineChoice } from "@/lib/line/popup";
 import { loadMoveOptions, type MoveOptions } from "@/lib/line";
 import type { LineJoinOptions } from "@/lib/line/join-options";
 import type { MoveDestination } from "@/lib/line/types";
-import { catalogCardRepo, typeColorMapRepo, type DbClient, type Row } from "@/lib/repo";
+import {
+  catalogCardRepo,
+  placementDecisionRepo,
+  typeColorMapRepo,
+  type DbClient,
+  type Row,
+} from "@/lib/repo";
+import { withBulkPullNotes } from "@/lib/plan/pending";
 import { rematchCopy, rematchCopyToStandIn, type RematchStandInInput } from "@/lib/copy";
 import { StandInTwinError } from "@/lib/sync";
 import { errorMessage } from "@/lib/errors";
@@ -146,7 +153,10 @@ export async function runHaulPlan(draft: DraftItem[]): Promise<RunPlanResult> {
   const { db } = await getOwnerContext();
   // Same exclusion the commit uses, so the plan she works from is the plan that gets written.
   const pc = await loadPlanContext(db, { excludeOwnedCopyIds: existingCopyIds(draft) });
-  const { items } = planFromDraft(pc, draft);
+  const { items } = withBulkPullNotes(
+    planFromDraft(pc, draft),
+    await placementDecisionRepo.listLatestByCopy(db, existingCopyIds(draft)),
+  );
   const groups = groupPlan(items, pc.orderedBandKeys);
 
   const byAction: Record<string, number> = {};

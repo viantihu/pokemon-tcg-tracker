@@ -37,4 +37,33 @@ export const placementDecisionRepo = {
     }
     return decided;
   },
+  /**
+   * The LATEST decision on each of `copyIds` (by `created_at`), for the copies that have one. The pending queue
+   * needs the latest, not just "any": a bulk copy pulled back into her haul (Karvi, 2026-11-11) carries the
+   * decision that once sent it to bulk AND the newer one that pulled it out, and only the newer says where it
+   * stands. Chunked like `listDecidedCopyIds`.
+   */
+  async listLatestByCopy(
+    db: DbClient,
+    copyIds: string[],
+    chunkSize = 100,
+  ): Promise<Map<string, { decision: string; reason: string }>> {
+    const latest = new Map<string, { decision: string; reason: string; at: string }>();
+    for (let i = 0; i < copyIds.length; i += chunkSize) {
+      const chunk = copyIds.slice(i, i + chunkSize);
+      const { data, error } = await db
+        .from("placement_decision")
+        .select("copy_id, decision, reason, created_at")
+        .in("copy_id", chunk);
+      if (error) throw error;
+      for (const r of data ?? []) {
+        if (!r.copy_id) continue;
+        const prior = latest.get(r.copy_id);
+        if (!prior || r.created_at > prior.at) {
+          latest.set(r.copy_id, { decision: r.decision, reason: r.reason, at: r.created_at });
+        }
+      }
+    }
+    return new Map([...latest].map(([id, v]) => [id, { decision: v.decision, reason: v.reason }]));
+  },
 };
