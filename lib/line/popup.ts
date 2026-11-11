@@ -75,11 +75,6 @@ export type LineChoice =
        * picked one (its home box is full). Absent: it goes back to its home box.
        */
       returnBoxes?: Record<string, string>;
-      /**
-       * 0037: the spare cards (by copy id) she sends into a FULL box knowingly ("Add anyway"): over its limit, recorded
-       * with the move. Absent: none, and a full box refuses.
-       */
-      returnOverFull?: string[];
       /** UIL-135: the line rules she puts this card past ("Put it here anyway"), recorded with the write. */
       overrides?: LineRule[];
     }

@@ -28,7 +28,7 @@ import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { BandChip } from "./BandChip";
 import { CardFace } from "./CardFace";
 import {
-  awaitsAddAnyway,
+  intoFullBox,
   ColourChoiceSection,
   destinationLabel,
   ExistingLinesBlock,
@@ -130,17 +130,15 @@ export function LinePopup({
   // UIL-130: a spare card this Add takes out of its pocket goes back to its home box, or one she picks (home full).
   const returning = value.mode === "join" ? (model.returning ?? []) : [];
   const returnBoxes = value.mode === "join" ? (value.returnBoxes ?? {}) : {};
-  // 0037: the spare cards she sends into a full box knowingly ("Add anyway").
-  const returnOverFull = value.mode === "join" ? (value.returnOverFull ?? []) : [];
   const canConfirm =
     !busy &&
     (!foreign || foreignConfirmed) &&
     (!cc || cc.picked !== null) &&
     stagesDecided &&
     (!pocketAsked || pocketValue !== undefined) &&
-    sparesReady(returning, model.boxes ?? [], returnBoxes, returnOverFull) &&
-    // 0037: a full box where a card goes waits for her knowing "Add anyway" (or another place).
-    !awaitsAddAnyway(
+    sparesReady(returning, model.boxes ?? [], returnBoxes) &&
+    // A full box takes no more cards: a card going into one waits for another place.
+    !intoFullBox(
       value.mode === "replace" ? (value.keep ? value.incoming : value.outgoing) : undefined,
       moveOptions?.bulkUnits ?? [],
     );
@@ -420,17 +418,10 @@ export function LinePopup({
             spares={returning}
             boxes={model.boxes ?? []}
             picked={returnBoxes}
-            overFull={returnOverFull}
             busy={busy}
-            onPick={(next, over) => {
+            onPick={(next) => {
               if (value.mode !== "join") return;
-              const { returnOverFull: _was, ...rest } = value;
-              void _was;
-              onChange({
-                ...rest,
-                returnBoxes: next,
-                ...(over.length > 0 ? { returnOverFull: over } : {}),
-              });
+              onChange({ ...value, returnBoxes: next });
             }}
           />
         ) : null}

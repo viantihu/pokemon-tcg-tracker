@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 /**
- * UIL-130 / 0037 — the Haul Plan's own route to bulk when every box is full. The plan never sends a card to a full
- * box on its own (the database refuses it: "Your Bulk box is full. Pick another box."), and that used to be a dead end
- * on the plan. Karvi, 2026-10-01/02: "Users should always be able to override all rules." So the spotlight says every
- * box is full, Done waits, and "Pick a box…" opens her Move sheet on the bulk box, where she adds it anyway; Done then
- * writes her Move with `overFull`. The real screen and Move sheet; only the server actions are stood in for.
+ * UIL-130 — the Haul Plan's own route to bulk when every box is full. The plan never sends a card to a full box on its
+ * own (the database refuses it: "Your Bulk box is full. Pick another box."), and a full box takes no more cards, so
+ * there is no "add anyway": the spotlight says every box is full, Done waits, and she either makes room in Settings or
+ * moves the card somewhere else on her Move sheet, where the full box is greyed. The real screen and Move sheet; only
+ * the server actions are stood in for.
  */
 import { createElement } from "react";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -89,7 +89,7 @@ function park(boxesFull: boolean) {
 const spot = () => document.querySelector(".spot") as HTMLElement;
 const doneBtn = () =>
   within(spot()).getByRole("button", {
-    name: /Done, next card|Pick a box above/,
+    name: /Done, next card|Every bulk box is full/,
   }) as HTMLButtonElement;
 
 beforeEach(() => {
@@ -111,30 +111,38 @@ async function mount() {
   return user;
 }
 
-describe("every box full: the Haul Plan's route to bulk is no dead end", () => {
-  it("it says so, Done waits, and Pick a box… adds it to a box anyway; Done writes her Move with overFull", async () => {
+describe("every box full: nothing is added to a full box", () => {
+  it("it says so, Done waits, and she moves the card somewhere else instead; the full box cannot be picked", async () => {
     park(true);
     const user = await mount();
     expect(within(spot()).getByRole("alert").textContent).toBe(
-      "Every bulk box is full. Pick a box to add it to anyway, or move it somewhere else.",
+      "Every bulk box is full. Raise a box's limit or add a box in Settings, or move it somewhere else.",
     );
     expect(doneBtn().disabled).toBe(true);
-    expect(doneBtn().textContent).toBe("Pick a box above");
-    expect(document.getElementById("plan-row-id-Machop")?.textContent).toContain("Pick a box");
+    expect(doneBtn().textContent).toBe("Every bulk box is full");
+    expect(document.getElementById("plan-row-id-Machop")?.textContent).toContain("Box full");
     // The row's box brings it here rather than sending a Done the server will refuse.
     await user.click(screen.getByRole("button", { name: "Shelve Machop" }));
     expect(shelveCardAction).not.toHaveBeenCalled();
+    // No way to add it to a box anyway.
+    expect(within(spot()).queryByRole("button", { name: /Pick a box|Add anyway/ })).toBeNull();
 
-    await user.click(within(spot()).getByRole("button", { name: "Pick a box…" }));
+    await user.click(within(spot()).getByRole("button", { name: "Move it somewhere else…" }));
     const sheet = await screen.findByRole("dialog", { name: "Move Machop" });
+    await user.click(within(sheet).getByRole("button", { name: /Bulk box/ }));
     const boxes = within(within(sheet).getByRole("group", { name: "Which bulk box" }));
-    expect(boxes.getByRole("button", { name: /Bulk box/ }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(within(sheet).getByRole("alert").textContent).toBe(
-      "Bulk box is full (1 of 1 cards). Pick another box. Or add it anyway: it will be 1 over.",
-    );
-    await user.click(within(sheet).getByRole("button", { name: "Add anyway · 1 over" }));
+    const full = boxes.getByRole("button", { name: /Bulk box/ }) as HTMLButtonElement;
+    expect(full.disabled).toBe(true);
+    expect(within(sheet).queryByRole("button", { name: /Add anyway/ })).toBeNull();
+    expect(
+      (within(sheet).getByRole("button", { name: "Place it here ▶" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    // Somewhere that is not a bulk box: a front half.
+    await user.click(within(sheet).getByRole("button", { name: "KB-001" }));
+    await user.click(within(sheet).getByRole("button", { name: "FRONT HALF" }));
+    await user.click(within(sheet).getByRole("button", { name: /Orange/ }));
+    await user.click(within(sheet).getByRole("button", { name: "Place it here ▶" }));
     expect(screen.queryByRole("dialog", { name: "Move Machop" })).toBeNull();
 
     // Her Move stands; nothing is written until Done.
@@ -145,7 +153,7 @@ describe("every box full: the Haul Plan's route to bulk is no dead end", () => {
     await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
     expect(shelveCardAction.mock.calls[0][0]).toMatchObject({
       card: { id: "id-Machop" },
-      override: { kind: "bulk", unitId: "d", overFull: true },
+      override: { kind: "shelf", binderId: "b1", half: "front", band: "orange" },
     });
   });
 
@@ -153,19 +161,15 @@ describe("every box full: the Haul Plan's route to bulk is no dead end", () => {
     park(false);
     const user = await mount();
     expect(within(spot()).queryByRole("alert")).toBeNull();
-    expect(within(spot()).queryByRole("button", { name: "Pick a box…" })).toBeNull();
+    expect(within(spot()).queryByRole("button", { name: "Move it somewhere else…" })).toBeNull();
     await user.click(doneBtn());
     await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
     expect(shelveCardAction.mock.calls[0][0].override).toBeNull();
   });
 });
 
-/**
- * The Tech Lead's "no dead ends": a holo swapped in for her normal sends the normal to bulk, and with every box full the
- * plan names no box for it. The row asks the same way, and "Pick a box…" picks the box for the card it swaps out, here
- * in the spotlight; Done sends it as `displacedTo` with `overFull` (the holo still takes the shelf, no Move).
- */
-describe("every box full: a swap row's card coming out is no dead end either", () => {
+/** A holo swapped in for her normal sends the normal to bulk: with every box full there is nowhere for it to go. */
+describe("every box full: a swap row's card coming out has nowhere to go either", () => {
   function parkSwap() {
     const base = routedPlan(DRAFT.map((d) => ({ ...d, tcgdexId: d.card.tcgdexId })));
     const items: PlanItem[] = flattenPlan(base).map((it) =>
@@ -197,39 +201,18 @@ describe("every box full: a swap row's card coming out is no dead end either", (
     );
   }
 
-  it("the row offers Pick a box; she adds the swapped-out card to a full box anyway, and Done sends it", async () => {
+  it("the row says so, Done waits, and there is no box picker to add it anyway", async () => {
     parkSwap();
-    const user = await mount();
+    await mount();
     expect(within(spot()).getByRole("alert").textContent).toBe(
-      "Every bulk box is full. Pick a box to add it to anyway, or move it somewhere else.",
+      "Every bulk box is full. Raise a box's limit or add a box in Settings, or move it somewhere else.",
     );
-    expect(document.getElementById("plan-row-id-Machop")?.textContent).toContain("Pick a box");
+    expect(document.getElementById("plan-row-id-Machop")?.textContent).toContain("Box full");
     expect(doneBtn().disabled).toBe(true);
-
-    await user.click(within(spot()).getByRole("button", { name: "Pick a box…" }));
-    // Not the Move sheet: the holo still takes the shelf; this is where the card it swaps out goes.
-    expect(screen.queryByRole("dialog", { name: "Move Machop" })).toBeNull();
-    const boxes = within(
-      within(spot()).getByRole("group", { name: "Which box for the card it swaps out" }),
-    );
-    expect(boxes.getByRole("button", { name: /Bulk box/ }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(within(spot()).getByRole("alert").textContent).toBe(
-      "Bulk box is full (1 of 1 cards). Pick another box. Or add it anyway: it will be 1 over.",
-    );
-    expect(doneBtn().disabled).toBe(true);
-    await user.click(boxes.getByRole("button", { name: "Add anyway · 1 over" }));
-    expect(within(spot()).queryByRole("alert")).toBeNull();
-    expect(spot().textContent).toContain("→ Bulk box · 1 over its limit");
-    expect(document.getElementById("plan-row-id-Machop")?.textContent).not.toContain("Pick a box");
-    expect(doneBtn().disabled).toBe(false);
-    await user.click(doneBtn());
-    await waitFor(() => expect(shelveCardAction).toHaveBeenCalledTimes(1));
-    expect(shelveCardAction.mock.calls[0][0]).toMatchObject({
-      card: { id: "id-Machop" },
-      override: null,
-      displacedTo: { kind: "bulk", unitId: "d", overFull: true },
-    });
+    expect(
+      within(spot()).queryByRole("group", { name: /Which box for the card it swaps out/ }),
+    ).toBeNull();
+    expect(within(spot()).queryByRole("button", { name: /Pick a box|Add anyway/ })).toBeNull();
+    expect(shelveCardAction).not.toHaveBeenCalled();
   });
 });

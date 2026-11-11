@@ -229,15 +229,29 @@ export async function seedCatalogCards(db: PGlite, ids: string[]): Promise<void>
 /** Insert binder rows owned by OWNER (superuser). */
 export async function seedBinders(
   db: PGlite,
-  binders: { id: string; type: "general" | "specialty"; name?: string }[],
+  binders: {
+    id: string;
+    type: "general" | "specialty";
+    name?: string;
+    /** Default 20: a binder with no pages has no pockets, and a section with none takes no card. */
+    pages?: number;
+    /** Default 11 for a general binder (10 front pages, 10 back); a specialty binder has no halves. */
+    backHalfStartPage?: number | null;
+  }[],
 ): Promise<void> {
   for (const b of binders) {
-    await db.query(`insert into binder (id, owner_id, name, type) values ($1, $2, $3, $4)`, [
-      b.id,
-      OWNER,
-      b.name ?? b.id,
-      b.type,
-    ]);
+    await db.query(
+      `insert into binder (id, owner_id, name, type, pages, back_half_start_page)
+       values ($1, $2, $3, $4, $5, $6)`,
+      [
+        b.id,
+        OWNER,
+        b.name ?? b.id,
+        b.type,
+        b.pages ?? 20,
+        b.backHalfStartPage !== undefined ? b.backHalfStartPage : b.type === "general" ? 11 : null,
+      ],
+    );
   }
 }
 

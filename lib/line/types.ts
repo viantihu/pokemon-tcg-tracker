@@ -11,6 +11,7 @@
 import type { Locale } from "@/lib/sync/types";
 import type { CardForm, LineStatus, Role, SlotState } from "@/lib/engine";
 import type { BulkUnitView } from "@/lib/repo/bulk-unit";
+import type { SectionRoom } from "./section-room";
 
 /* ------------------------------- line detail ------------------------------- */
 
@@ -268,11 +269,10 @@ export type MoveDestination =
     }
   | { kind: "collection"; binderId: string; collectionId: string }
   /**
-   * `unitId`: the box she picked (UIL-130). Absent: the card keeps its box, or goes to her default box. `overFull`: she
-   * picked a full box knowingly ("Add anyway", 0037's bulk_box_full): the write declares it and records it with the
-   * move. Karvi, 2026-10-01: "Users should always be able to override all rules."
+   * `unitId`: the box she picked (UIL-130). Absent: the card keeps its box, or goes to her default box. A full box
+   * takes no more cards: the pickers do not offer one, and the database refuses it (0035).
    */
-  | { kind: "bulk"; unitId?: string; overFull?: true }
+  | { kind: "bulk"; unitId?: string }
   /**
    * UIL-030: use the card as the physical BINDER BLOCK for a line's block slot — a reserved run of
    * pockets the engine decided can never be filled. The copy takes role 'block' in the line's binder
@@ -314,6 +314,12 @@ export interface MoveOptions {
   bands: { key: string; display: string }[];
   /** UIL-130: her bulk boxes, in her order. Absent (an older caller): the bulk box is picked as one place. */
   bulkUnits?: BulkUnitView[];
+  /**
+   * How many pockets are free in each binder section now (`binder_section`'s free_pockets). A section at 0 takes no
+   * more cards: the pickers grey it out, and the write refuses it (./section-room). Absent (an older caller): none is
+   * greyed, and the write still refuses.
+   */
+  sections?: SectionRoom[];
 }
 
 /**
@@ -400,6 +406,8 @@ export interface UnlinedCard {
   /** Its CURRENT half, straight off `copy.binder_half` — a data field, not parsed out of
    *  `currentLabel` (UIL-064 part 3's "stranded in the back half" split keys off this). */
   binderHalf: "front" | "back" | null;
+  /** The binder it is shelved in now: its section is already counted, so moving within it takes no new pocket. */
+  binderId?: string | null;
   /** This card's own type-derived band (`lib/engine` `band()`, same derivation the cascade uses) —
    *  the sane default for "start a new line"'s one remaining band pick (UIL-064 part 1), regardless
    *  of which band it happens to be shelved under right now. */

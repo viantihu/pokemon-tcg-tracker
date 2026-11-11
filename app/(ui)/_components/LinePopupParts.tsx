@@ -25,14 +25,7 @@ import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { BandChip } from "./BandChip";
 import { CardFace } from "./CardFace";
 import { MoveOverlay } from "./MoveOverlay";
-import {
-  addAnywayLabel,
-  addAnywayWarning,
-  hasRoom,
-  initialBox,
-  overBy,
-  type BulkUnitView,
-} from "@/lib/plan/bulk-units";
+import { fullBoxReason, hasRoom, initialBox, type BulkUnitView } from "@/lib/plan/bulk-units";
 import { useEscapeLayer } from "./escape-layer";
 
 type OutgoingLine = Extract<LineChoice, { mode: "start" } | { mode: "join" }>;
@@ -48,11 +41,9 @@ export function destinationLabel(dest: MoveDestination, options?: MoveOptions): 
   const band = (key: string) => options?.bands.find((b) => b.key === key)?.display ?? key;
   switch (dest.kind) {
     case "bulk": {
-      // UIL-130: the box she picked, by its name ("Shoebox"); none named: her bulk box. 0037: a full box she picked
-      // knowingly says how far over it will be.
+      // UIL-130: the box she picked, by its name ("Shoebox"); none named: her bulk box.
       const box = dest.unitId ? options?.bulkUnits?.find((u) => u.id === dest.unitId) : undefined;
-      if (!box) return "the bulk box";
-      return dest.overFull ? `${box.name} · ${overBy(box)} over its limit` : box.name;
+      return box ? box.name : "the bulk box";
     }
     case "shelf":
       return `${binder(dest.binderId)} · ${dest.half === "back" ? "Back" : "Front"} · ${band(dest.band)}`;
@@ -68,15 +59,15 @@ export function destinationLabel(dest: MoveDestination, options?: MoveOptions): 
 }
 
 /**
- * 0037: a bulk place naming a FULL box she has not yet said "Add anyway" to (one named by none is her default with
- * room, else her first with room, else her default: `initialBox`). The popup's confirm waits on it, so a box never goes
- * over its limit without her knowing tap; another place, or a box with room, needs nothing.
+ * A bulk place naming a FULL box (one named by none is her default with room, else her first with room, else her
+ * default: `initialBox`). A full box takes no more cards, so the popup's confirm waits on it until she picks another
+ * place, or a box with room.
  */
-export function awaitsAddAnyway(
+export function intoFullBox(
   dest: MoveDestination | undefined,
   boxes: readonly BulkUnitView[],
 ): boolean {
-  if (dest?.kind !== "bulk" || dest.overFull || boxes.length === 0) return false;
+  if (dest?.kind !== "bulk" || boxes.length === 0) return false;
   const box = boxes.find((u) => u.id === (dest.unitId ?? initialBox(boxes)));
   return !!box && !hasRoom(box);
 }
@@ -246,20 +237,9 @@ function DestinationPicker(props: {
     d.kind === "bulk" && !d.unitId && routeBox ? { ...d, unitId: routeBox } : d;
   suggested = named(suggested);
   value = named(value);
-  /**
-   * 0037: a full box is the recommendation's "no", not a wall (Karvi: "Users should always be able to override all
-   * rules"). Picked (or suggested, with every box full), it is warned in her words with "Add anyway · N over"; her tap
-   * sends it with `overFull`. The same box either way, so the suggestion stays picked.
-   */
-  const plain = (d: MoveDestination): MoveDestination => {
-    if (d.kind !== "bulk" || !d.overFull) return d;
-    const { overFull: _over, ...rest } = d;
-    void _over;
-    return rest;
-  };
+  /** A full box takes no more cards: when the box shown is full (every box, if the suggestion named none), say so. */
   const valueBox = value.kind === "bulk" ? boxes.find((u) => u.id === value.unitId) : undefined;
-  const overFull = value.kind === "bulk" && value.overFull === true;
-  const pendingFull = !!valueBox && !hasRoom(valueBox) && !overFull;
+  const pendingFull = !!valueBox && !hasRoom(valueBox);
   useEffect(() => {
     // The choice she confirms carries the box the screen shows (once, when it named none).
     if (value.kind === "bulk" && JSON.stringify(value) !== JSON.stringify(props.value))
@@ -270,7 +250,7 @@ function DestinationPicker(props: {
   const specialty = options?.binders.find(
     (b) => b.type === "specialty" && (options.collectionsByBinder[b.id]?.length ?? 0) > 0,
   );
-  const isSuggested = JSON.stringify(plain(value)) === JSON.stringify(suggested);
+  const isSuggested = JSON.stringify(value) === JSON.stringify(suggested);
   const isBulk = value.kind === "bulk";
   /** A bulk chip says which box: "Bulk box" when she has one, its name when she has several. */
   const bulkText = (d: MoveDestination) => {
@@ -354,18 +334,8 @@ function DestinationPicker(props: {
             {c.key === "suggested" ? <span className="lp-sugg">Suggested</span> : null}
           </button>
         ))}
-        {pendingFull && valueBox && value.kind === "bulk" ? (
-          <button
-            type="button"
-            className="lp-band u"
-            disabled={busy}
-            onClick={() => onPick({ ...value, overFull: true })}
-          >
-            {addAnywayLabel(valueBox)}
-          </button>
-        ) : null}
       </div>
-      {!isSuggested || overFull ? (
+      {!isSuggested ? (
         <div className="lp-note">
           → {destinationLabel(value, options)}
           {note}
@@ -373,7 +343,7 @@ function DestinationPicker(props: {
       ) : null}
       {pendingFull && valueBox ? (
         <div className="lp-error" role="alert">
-          {addAnywayWarning(valueBox)}
+          {fullBoxReason(valueBox)}
         </div>
       ) : null}
       {sheet && options ? (

@@ -32,6 +32,8 @@ import { catalogCardsOf, loadCatalogCached } from "@/lib/plan/catalog-cache";
 import type { TypeColorMap, Variant } from "@/lib/engine";
 import {
   applyWriteOps,
+  binderRepo,
+  binderSectionRepo,
   collectionRepo,
   copyRepo,
   evolutionLineRepo,
@@ -42,7 +44,6 @@ import {
   type SlotPatch,
   type WriteOp,
   binderBlockRepo,
-  bulkUnitRepo,
 } from "@/lib/repo";
 import { resolveDecisionWrites } from "./decisions";
 import { buildScreenModel } from "./load";
@@ -56,7 +57,13 @@ import {
 } from "./move";
 import type { DecisionChoiceId, LineJoinChoice, MoveDestination, MoveRequest } from "./types";
 import { buildLineChoiceOps, type LineWriteReads, type LineWriteState } from "./line-choice";
-import { lineChoiceDestinations, overridesFor, returnDestinations } from "./overrides";
+import {
+  sectionDemand,
+  sectionRooms,
+  sectionShortfalls,
+  shortfallMessage,
+  type CopyPlace,
+} from "./section-room";
 import { buildDecideStagesOps, DECIDE_REFUSAL, type DecideStagesChoice } from "./decide-stages";
 import type { LineChoice, LineRule } from "./popup";
 import { lineReadsClosed } from "./popup";
@@ -158,14 +165,8 @@ export async function buildBackHalfLineOps(
   }
   // ONE read for both cards of a swap: nothing is written between them, so the card coming out is checked against the
   // same rows (they used to be read twice, the whole catalog among them).
-  const outgoingLine = choice.mode === "replace" && !choice.keep ? choice.outgoingLine : undefined;
-  const reads =
-    opts.reads ??
-    (await loadLineWriteReads(
-      db,
-      needsBoxNames(choice) || (!!outgoingLine && needsBoxNames(outgoingLine)),
-    ));
-  const state = await loadLineWriteState(db, copy, choice, reads);
+  const reads = opts.reads ?? (await loadLineWriteReads(db));
+  const state = loadLineWriteState(copy, choice, reads);
   if (choice.mode === "replace" && !choice.keep && choice.outgoingLine) {
     const slot = [...state.slotsByLine.values()].flat().find((sl) => sl.id === choice.slotId);
     const outgoing = slot?.copy_id ? state.copiesById.get(slot.copy_id) : undefined;
@@ -174,7 +175,7 @@ export async function buildBackHalfLineOps(
     const next = choice.outgoingLine;
     if (next.mode === "join") await assertJoinMatchesLine(db, next.lineId, choice.outgoing);
     else assertStartMatchesDestination(next, choice.outgoing);
-    state.outgoing = await loadLineWriteState(db, outgoing, next, reads);
+    state.outgoing = loadLineWriteState(outgoing, next, reads);
   }
   const built = buildLineChoiceOps(state, copy.id, choice, { undecidedOk: opts.undecidedOk });
   return { ops: built.ops, slotId: built.slotId, overrides: built.overrides };
@@ -189,26 +190,20 @@ function lineChoiceFromJoin(join: LineJoinChoice | null, dest: MoveDestination):
       { mode: "start", binderId: dest.binderId, band: dest.band, pulls: [], stages: {} };
 }
 
-/** 0037: her box names are needed only for a spare card she sends into a full box knowingly (its decision names it). */
-function needsBoxNames(choice: LineChoice): boolean {
-  return choice.mode === "join" && (choice.returnOverFull?.length ?? 0) > 0;
-}
-
 /**
  * Everything `buildLineChoiceOps` reads, from fresh state, in one round: the catalog (through the shared cache) and
  * type map for a new line's slots, every copy (pull candidates), and every line, slot and block (for a joined line's
  * language, and the slots pulls leave). Paged: copies, lines and slots each pass the server's 1,000-row cap with her
  * collection, where a single-page `list` throws.
  */
-async function loadLineWriteReads(db: DbClient, withBoxNames: boolean): Promise<LineWriteReads> {
-  const [catalogRows, typeMapRows, copies, lines, slots, blocks, boxes] = await Promise.all([
+async function loadLineWriteReads(db: DbClient): Promise<LineWriteReads> {
+  const [catalogRows, typeMapRows, copies, lines, slots, blocks] = await Promise.all([
     loadCatalogCached(db),
     typeColorMapRepo.list(db),
     copyRepo.listAll(db),
     evolutionLineRepo.listAll(db),
     lineSlotRepo.listAll(db),
     binderBlockRepo.listAll(db),
-    withBoxNames ? boxNamesOf(db) : Promise.resolve(undefined),
   ]);
   const catalog = catalogCardsOf(catalogRows);
   const typeColorMap: TypeColorMap = {};
@@ -227,28 +222,20 @@ async function loadLineWriteReads(db: DbClient, withBoxNames: boolean): Promise<
     lines: new Map(lines.map((l) => [l.id, l])),
     slotsByLine,
     blocksByLine,
-    ...(boxes ? { boxNames: boxes } : {}),
   };
-}
-
-async function boxNamesOf(db: DbClient): Promise<ReadonlyMap<string, string>> {
-  return new Map((await bulkUnitRepo.listOrdered(db)).map((u) => [u.id, u.name]));
 }
 
 /**
  * State for `buildLineChoiceOps` over `reads`: the copy's card, and her other copies as the pull candidates a START can
  * propose. A new object every call, so a write's filler claims (line-choice.ts `stageStates`) never outlive it.
  */
-async function loadLineWriteState(
-  db: DbClient,
+function loadLineWriteState(
   copy: Row<"copy">,
   choice: LineChoice,
   reads: LineWriteReads,
-): Promise<LineWriteState> {
+): LineWriteState {
   const card = reads.catalogById.get(copy.catalog_card_id);
   if (!card) throw new Error("That card's catalog entry is missing — reload and try again.");
-  // A caller's own reads carry her box names when it has them; read here only when they do not and this one needs them.
-  const boxNames = needsBoxNames(choice) ? (reads.boxNames ?? (await boxNamesOf(db))) : undefined;
   return {
     copy,
     incoming: { id: copy.id, card, variant: (copy.variant as Variant) ?? "normal" },
@@ -265,7 +252,6 @@ async function loadLineWriteState(
     lines: reads.lines,
     slotsByLine: reads.slotsByLine,
     blocksByLine: reads.blocksByLine,
-    ...(boxNames ? { boxNames } : {}),
   };
 }
 
@@ -328,29 +314,50 @@ export async function applyMove(
   }
 
   const destinationLabel = describeMove(req.destination, names);
-  await applyWriteOps(db, {
-    ops: buildMoveOps({
-      copyId: req.copyId,
-      catalogCardId: copy.catalog_card_id,
-      destination: req.destination,
-      reopenSlotId,
-      demoteLineId,
-      destinationLabel,
-      lineJoinOps,
-      resolvedLineSlotId,
-      lineRules,
-    }),
-    // 0037: what she overrides, from every place this move sends a card, and (UIL-135) the line rules her choice put
-    // it past; each writer records its own.
-    overrides: [
-      ...new Set([
-        ...overridesFor([req.destination, ...lineChoiceDestinations(req.lineChoice)]),
-        ...lineRules,
-      ]),
-    ],
+  const moveOps = buildMoveOps({
+    copyId: req.copyId,
+    catalogCardId: copy.catalog_card_id,
+    destination: req.destination,
+    reopenSlotId,
+    demoteLineId,
+    destinationLabel,
+    lineJoinOps,
+    resolvedLineSlotId,
+    lineRules,
   });
+  // A binder section at its limit takes no more cards, however the card got here.
+  await assertSectionRoom(db, moveOps);
+  // 0037: the line rules (UIL-135) her choice put it past; each writer records its own.
+  await applyWriteOps(db, { ops: moveOps, overrides: [...new Set(lineRules)] });
 
   return { copyId: req.copyId, destinationLabel };
+}
+
+/**
+ * Refuse a write that would take more pockets than a binder section has free: a section at its limit takes no more
+ * cards (./section-room). Read fresh here, never trusted from the browser, and checked BEFORE anything is written, so a
+ * refusal leaves nothing half-done. Exported for the Haul Plan and Collections' removal, which write placements too.
+ */
+export async function assertSectionRoom(db: DbClient, ops: readonly WriteOp[]): Promise<void> {
+  // Where each copy this write shelves is now: a card already in a section is not entering it.
+  const ids = new Set<string>();
+  for (const op of ops) {
+    if (op.op === "update_copy" && op.patch.role === "shelved" && op.patch.binder_id)
+      ids.add(op.id);
+  }
+  const copies = new Map<string, CopyPlace>();
+  for (const id of ids) {
+    const row = await copyRepo.getByPk(db, id);
+    if (row) copies.set(id, row);
+  }
+  // Nothing enters a section: no need to read the sections at all.
+  if (sectionDemand(ops, copies).size === 0) return;
+  const [sections, binders] = await Promise.all([binderSectionRepo.list(db), binderRepo.list(db)]);
+  const full = sectionShortfalls(ops, copies, sectionRooms(sections));
+  if (full.length > 0) {
+    const names = new Map(binders.map((b) => [b.id, b.name]));
+    throw new Error(shortfallMessage(full, (id) => names.get(id) ?? "That binder"));
+  }
 }
 
 /**
@@ -561,9 +568,7 @@ export async function applyDecision(
  * fresh state and written in one call (./decide-stages).
  */
 export async function applyStageDecisions(db: DbClient, choice: DecideStagesChoice): Promise<void> {
-  // 0037: her box names, only for a spare card she sends into a full box knowingly (its decision names the box).
-  const namesBoxes = (choice.returnOverFull?.length ?? 0) > 0;
-  const [line, slots, blocks, catalogRows, typeMapRows, copies, boxes] = await Promise.all([
+  const [line, slots, blocks, catalogRows, typeMapRows, copies] = await Promise.all([
     evolutionLineRepo.getByPk(db, choice.lineId),
     lineSlotRepo.listByLine(db, choice.lineId),
     binderBlockRepo.listAll(db),
@@ -571,7 +576,6 @@ export async function applyStageDecisions(db: DbClient, choice: DecideStagesChoi
     typeColorMapRepo.list(db),
     // Paged: her copies pass the server's 1,000-row cap, where `list` throws.
     copyRepo.listAll(db),
-    namesBoxes ? bulkUnitRepo.listOrdered(db) : Promise.resolve([]),
   ]);
   if (!line) throw new Error(DECIDE_REFUSAL.noStage);
   const typeColorMap: TypeColorMap = {};
@@ -584,12 +588,8 @@ export async function applyStageDecisions(db: DbClient, choice: DecideStagesChoi
       catalog: catalogCardsOf(catalogRows),
       copiesById: new Map(copies.map((c) => [c.id, c])),
       typeColorMap,
-      ...(namesBoxes ? { boxNames: new Map(boxes.map((u) => [u.id, u.name])) } : {}),
     },
     choice,
   );
-  // 0037: the spare cards she sends into a full box knowingly; buildDecideStagesOps records each on its own decision.
-  if (ops.length > 0) {
-    await applyWriteOps(db, { ops, overrides: overridesFor(returnDestinations(choice)) });
-  }
+  if (ops.length > 0) await applyWriteOps(db, { ops });
 }

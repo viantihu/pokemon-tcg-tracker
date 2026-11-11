@@ -42,6 +42,12 @@ import type {
   MoveOptions,
 } from "@/lib/line/types";
 import { defaultMoveHalf, isMoveDestinationComplete } from "@/lib/line/move";
+import {
+  fullSectionReason,
+  isSectionFull,
+  sectionOfDestination,
+  type SectionHalf,
+} from "@/lib/line/section-room";
 import type { Locale } from "@/lib/sync/types";
 import { bandMeta } from "./plan-meta";
 import {
@@ -53,14 +59,7 @@ import {
   type LineProposal,
 } from "@/lib/line/popup";
 import { LinePopup } from "./LinePopup";
-import {
-  addAnywayLabel,
-  addAnywayWarning,
-  boxLoad,
-  fullBoxReason,
-  hasRoom,
-  initialBox,
-} from "@/lib/plan/bulk-units";
+import { boxLoad, fullBoxReason, hasRoom, initialBox } from "@/lib/plan/bulk-units";
 
 const BULK = "__bulk__";
 
@@ -78,6 +77,7 @@ export function MovePanel({
   options,
   initial,
   homeBoxId,
+  homeSection,
   confirmLabel = "Place it here ▶",
   allowLineJoin = false,
   joinCandidates,
@@ -94,10 +94,15 @@ export function MovePanel({
   initial?: MoveDestination;
   /**
    * 0037: the bulk box the card is in now (absent: none, or not known). The card is already counted in its load, so
-   * that box is shown without it: a card in a 60-of-60 box is not "1 over" there, and picking its own box offers no
-   * Add anyway and sends no override.
+   * that box is shown without it: a card in a 60-of-60 box is not "1 over" there, and picking its own box is not
+   * refused as full.
    */
   homeBoxId?: string;
+  /**
+   * The binder section the card is shelved in now (absent: none, or not known). It is already counted in that section,
+   * so moving within it takes no new pocket: a full section is not "full" for the card already in it.
+   */
+  homeSection?: { binderId: string; half: SectionHalf };
   confirmLabel?: string;
   allowLineJoin?: boolean;
   /** Flat across every band (UIL-064) — present (even empty) turns the line-first flow on. */
@@ -176,11 +181,14 @@ export function MovePanel({
   );
   const box = boxes.find((u) => u.id === unitId);
   /**
-   * A box with a card limit that is full is the recommendation's "no" (Karvi, 2026-09-29: "Stop it, ask for another"),
-   * and since 0037 not a wall: "Users should always be able to override all rules." She can pick it; the panel warns in
-   * her words and Confirm says "Add anyway · N over", and the Move carries `overFull` so the write records it.
+   * A box with a card limit that is full takes no more (Karvi, 2026-09-29: "Stop it, ask for another"): it is shown,
+   * greyed with why, and Confirm stays off if it is the one picked (every box full leaves her nowhere to send it here).
+   * The card's own box is never full for the card already in it (it is counted without it, above, and even a box over
+   * its limit lets the card stay): staying is not adding.
    */
-  const pickedFull = !!box && box.id !== homeBoxId && !hasRoom(box);
+  const noRoom = (u: (typeof boxes)[number]) => u.id !== homeBoxId && !hasRoom(u);
+  const pickedFull = !!box && noRoom(box);
+  const everyBoxFull = boxes.length > 0 && boxes.every(noRoom);
 
   /** UIL-030: the block need she picked (by slot id). A manual binder/bulk pick clears it. */
   const [blockPick, setBlockPick] = useState<string | null>(null);
@@ -228,7 +236,7 @@ export function MovePanel({
         binderId: blockNeed.binderId,
       }
     : isBulk
-      ? { kind: "bulk", ...(unitId ? { unitId } : {}), ...(pickedFull ? { overFull: true } : {}) }
+      ? { kind: "bulk", ...(unitId ? { unitId } : {}) }
       : isSpecialty
         ? { kind: "collection", binderId: binder!.id, collectionId: collectionId ?? "" }
         : {
@@ -241,8 +249,33 @@ export function MovePanel({
 
   // No line-uniqueness gate any more (UIL-096): starting a second line is her call, and the warning below
   // is how she makes it knowingly.
-  // A full box no longer blocks it either (0037): her Confirm is the knowing "Add anyway".
-  const canConfirm = isMoveDestinationComplete(destination);
+  /**
+   * A binder section at its limit takes no more cards, as a bulk box does not. A card already in that section is not
+   * entering it (`homeSection`), and one that joins an existing line fills a pocket the line already reserves.
+   */
+  const sectionFull = (binderId: string, half: SectionHalf) =>
+    isSectionFull(options.sections, binderId, half) &&
+    !(homeSection?.binderId === binderId && homeSection.half === half);
+  const joinsExistingLine =
+    destination.kind === "shelf" && destination.lineJoin?.mode === "existing";
+  const destSection = sectionOfDestination(destination);
+  const destFull =
+    !!destSection && !joinsExistingLine && sectionFull(destSection.binderId, destSection.half);
+  const nameOf = (binderId: string) =>
+    options.binders.find((b) => b.id === binderId)?.name ?? "That binder";
+  /** A binder with no room anywhere: a specialty binder at its limit, or a general one with both halves at theirs. */
+  const binderFull = (b: { id: string; type: "general" | "specialty" }) =>
+    b.type === "specialty"
+      ? sectionFull(b.id, "single")
+      : sectionFull(b.id, "front") && sectionFull(b.id, "back");
+  /** A full back half still takes a card into a line it already holds a slot for: only a NEW line is refused. */
+  const backFullForNewLine = (binderId: string) =>
+    sectionFull(binderId, "back") && !(joinCandidates ?? []).some((c) => c.binderId === binderId);
+  // A full box blocks it: no card goes into a bulk box at its limit.
+  const canConfirm =
+    isMoveDestinationComplete(destination) &&
+    !(destination.kind === "bulk" && pickedFull) &&
+    !destFull;
 
   const hasCandidates = (joinCandidates ?? []).length > 0;
 
@@ -300,6 +333,11 @@ export function MovePanel({
       (here
         ? { kind: "add", lineId: here.lineId, slotId: here.slotId }
         : { kind: "start", binderId, band: bandKey });
+    // A back half at its limit takes no new line: say so here rather than open a popup that cannot be confirmed.
+    if (p.kind === "start" && p.binderId && backFullForNewLine(p.binderId)) {
+      setLinePopError(fullSectionReason(nameOf(p.binderId), "back"));
+      return;
+    }
     setLinePopBusy(true);
     setLinePopError(null);
     try {
@@ -421,6 +459,7 @@ export function MovePanel({
               }}
             >
               {b.name}
+              {binderFull(b) ? " · full" : ""}
             </button>
           ))}
           <button
@@ -448,16 +487,22 @@ export function MovePanel({
                 type="button"
                 className={"ochip" + (unitId === u.id ? " on" : "")}
                 aria-pressed={unitId === u.id}
-                title={hasRoom(u) || u.id === homeBoxId ? undefined : fullBoxReason(u)}
+                disabled={noRoom(u)}
+                title={noRoom(u) ? fullBoxReason(u) : undefined}
                 onClick={() => setUnitId(u.id)}
               >
                 {u.name} · {boxLoad(u)}
               </button>
             ))}
-            {/* Every box full is no dead end (0037): her default is picked, and each box offers Add anyway. */}
-            {box && pickedFull ? (
+            {/* A full box cannot be picked. With every box full she is told how to make room. */}
+            {everyBoxFull ? (
               <span className="oskip" role="alert">
-                {addAnywayWarning(box)}
+                Every bulk box is full. Raise a box&apos;s limit or add a box in Settings, or pick
+                another place.
+              </span>
+            ) : box && pickedFull ? (
+              <span className="oskip" role="alert">
+                {fullBoxReason(box)}
               </span>
             ) : (
               <span className="oskip">
@@ -499,14 +544,27 @@ export function MovePanel({
                 // UIL-135: a card with no evolutions can still go into a line of one card, through the line popup's
                 // warning; only the older inline picker (no popup) keeps it out.
                 const dead = h === "back" && (backHalfNeedsLine || (!formsALine && !lineModel));
+                // A section at its limit takes no more cards (the back half still takes one into a line it holds a
+                // slot for). Not for a binder she has not picked, which has no halves to name.
+                const full =
+                  !!binder &&
+                  (h === "back" ? backFullForNewLine(binder.id) : sectionFull(binder.id, h));
                 return (
                   <button
                     key={h}
                     type="button"
                     className={"ochip" + (half === h ? " on" : "")}
                     aria-pressed={half === h}
-                    disabled={dead}
-                    title={dead ? (formsALine ? backHalfReason : NOT_A_LINE) : undefined}
+                    disabled={dead || full}
+                    title={
+                      full && binder
+                        ? fullSectionReason(binder.name, h)
+                        : dead
+                          ? formsALine
+                            ? backHalfReason
+                            : NOT_A_LINE
+                          : undefined
+                    }
                     onClick={() => {
                       if (h === "back" && lineModel) {
                         void openLinePopup();
@@ -721,6 +779,11 @@ export function MovePanel({
           manualBody
         )}
 
+        {destFull && destSection ? (
+          <div className="oskip" role="alert">
+            {fullSectionReason(nameOf(destSection.binderId), destSection.half)}
+          </div>
+        ) : null}
         <div className="osum">
           PLACING · <b>{summary()}</b>
         </div>
@@ -734,10 +797,7 @@ export function MovePanel({
               says so, rather than a neutral "Place it here" that reads as if nothing was said. */}
           {orderedWarnLines.length > 0 && destination.kind === "shelf"
             ? "Start a new line anyway ▶"
-            : destination.kind === "bulk" && box && pickedFull
-              ? // 0037: a full box she picked knowingly; the label says how far over it will be.
-                addAnywayLabel(box)
-              : confirmLabel}
+            : confirmLabel}
         </button>
         {linePopError && !linePop ? (
           <div className="oskip" role="alert">

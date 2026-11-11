@@ -2,7 +2,7 @@
 /**
  * 0037 (the Tech Lead's call on #453's UI) — the Move sheet knows which box the card is already in. Lookup opens a
  * bulk card's Move on its own box; a card already in a 60-of-60 box is not "1 over", and its own box is not full for
- * it: no warning, no "Add anyway", and no override sent. Any OTHER full box is still an Add anyway (the card goes in).
+ * it: no warning, and nothing refused. Any OTHER full box takes no more cards: it is greyed with the reason.
  * The real Lookup screen and Move sheet in a DOM; only the server actions are stood in for.
  */
 import { createElement } from "react";
@@ -129,14 +129,17 @@ describe("0037 · Lookup: a card already in its own full box", () => {
     expect(moveFromLookup.mock.calls[0][1]).toEqual({ kind: "bulk", unitId: "s" });
   });
 
-  it("another full box is still hers to add it to anyway, 1 over", async () => {
+  it("another full box takes no more: greyed with the reason, and the card stays where it is", async () => {
     const { user, sheet, boxes } = await openMove();
-    await user.click(boxes.getByRole("button", { name: "Tin · 5 of 5 cards · full" }));
-    expect(within(sheet).getByRole("alert").textContent).toBe(
-      "Tin is full (5 of 5 cards). Pick another box. Or add it anyway: it will be 1 over.",
-    );
-    await user.click(within(sheet).getByRole("button", { name: "Add anyway · 1 over" }));
+    const tin = boxes.getByRole("button", {
+      name: "Tin · 5 of 5 cards · full",
+    }) as HTMLButtonElement;
+    expect(tin.disabled).toBe(true);
+    expect(tin.title).toBe("Tin is full (5 of 5 cards). Pick another box.");
+    await user.click(tin);
+    expect(within(sheet).queryByRole("button", { name: /Add anyway/ })).toBeNull();
+    await user.click(within(sheet).getByRole("button", { name: "Place it here ▶" }));
     await waitFor(() => expect(moveFromLookup).toHaveBeenCalledTimes(1));
-    expect(moveFromLookup.mock.calls[0][1]).toEqual({ kind: "bulk", unitId: "t", overFull: true });
+    expect(moveFromLookup.mock.calls[0][1]).toEqual({ kind: "bulk", unitId: "s" });
   });
 });

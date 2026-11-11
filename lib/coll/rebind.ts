@@ -52,6 +52,7 @@ import {
 } from "@/lib/repo";
 import { placementForMove, releaseSlotOps } from "@/lib/line/move";
 import { lineReadsClosed } from "@/lib/line/popup";
+import { assertSectionRoom } from "@/lib/line/write";
 
 /* ------------------------------- pure planning ------------------------------ */
 
@@ -389,6 +390,8 @@ export async function applyCollectionRebindMove(
     stayingNames: staying.map((s) => s.name),
   });
 
+  // The new binder is a section too: it takes no more cards than it has room for.
+  await assertSectionRoom(db, ops);
   await applyWriteOps(db, { ops });
 
   return {

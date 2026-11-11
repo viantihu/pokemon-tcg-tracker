@@ -4,9 +4,8 @@
  * full (the Senior BA's condition: asked, never silently). The real Choose popup and line popup in a DOM; only the
  * server actions are stood in for.
  *
- * 0037 — Karvi, 2026-10-01/02: "Users should always be able to override all rules." A full box (her full home too) is
- * offered: picking one warns in her words, and Save / Confirm wait for her knowing "Add anyway · N over", which rides
- * with the choice as `returnOverFull`.
+ * A full box takes no more cards, her full home too (no "add anyway"): it is shown greyed with the reason and cannot be
+ * picked, and with every box full Save / Confirm stay off and she is told how to make room.
  */
 import { createElement, useState } from "react";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
@@ -92,8 +91,12 @@ describe("Choose: a spare card she takes out goes back to a box", () => {
     const ask = within(dialog).getByRole("group", { name: "Where Charmander goes" });
     expect(ask.textContent).toMatch(/Box B is full \(1 of 1 card · full\)/);
     expect(save(dialog).disabled).toBe(true);
-    // 0037: the full box IS offered now (it was hidden); a box with room is still the plain pick.
-    expect(within(ask).getByRole("button", { name: "Box B · 1 of 1 card · full" })).toBeTruthy();
+    // The full box is shown, greyed with why; a box with room is the pick.
+    const fullB = within(ask).getByRole("button", {
+      name: "Box B · 1 of 1 card · full",
+    }) as HTMLButtonElement;
+    expect(fullB.disabled).toBe(true);
+    expect(fullB.title).toBe("Box B is full (1 of 1 cards). Pick another box.");
     await user.click(within(ask).getByRole("button", { name: /Box C/ }));
     expect(save(dialog).disabled).toBe(false);
     await user.click(save(dialog));
@@ -104,40 +107,74 @@ describe("Choose: a spare card she takes out goes back to a box", () => {
     });
   });
 
-  it("home full: she puts it back in its full home anyway; Save waits for her Add anyway, and it is sent", async () => {
-    const { user, onConfirm, dialog } = await mount("b");
+  it("home full: she cannot put it back in its full home; Save waits for a box with room", async () => {
+    const { user, dialog, onConfirm } = await mount("b");
     const ask = within(dialog).getByRole("group", { name: "Where Charmander goes" });
     await user.click(within(ask).getByRole("button", { name: "Box B · 1 of 1 card · full" }));
-    expect(within(ask).getByRole("alert").textContent).toBe(
-      "Box B is full (1 of 1 cards). Pick another box. Or add it anyway: it will be 1 over.",
-    );
-    // Picked, but not yet knowingly: Save waits.
+    expect(within(ask).queryByRole("alert")).toBeNull(); // Box C has room: nothing to warn of
     expect(save(dialog).disabled).toBe(true);
-    await user.click(within(ask).getByRole("button", { name: "Add anyway · 1 over" }));
-    expect(within(ask).queryByRole("alert")).toBeNull();
-    expect(ask.textContent).toContain("→ Box B · 1 over its limit");
-    expect(save(dialog).disabled).toBe(false);
     await user.click(save(dialog));
-    expect(onConfirm).toHaveBeenCalledWith({
-      lineId: "L1",
-      stages: { 1: { kind: "empty" } },
-      returnBoxes: { spare: "b" },
-      returnOverFull: ["spare"],
-    });
+    expect(onConfirm).not.toHaveBeenCalled();
   });
+});
 
-  it("a knowing Add anyway is dropped when she then picks a box with room", async () => {
-    const { user, onConfirm, dialog } = await mount("b");
+describe("Choose: every box is full", () => {
+  it("there is nowhere to send the spare: Save stays off and she is told how to make room", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    render(
+      createElement(LineStagesPopup, {
+        lineId: "L1",
+        loadModel: async (): Promise<LineStagesModel> => ({
+          line: {
+            lineId: "L1",
+            name: "Charmander",
+            binderName: "KB-001",
+            bandKey: "red",
+            bandDisplay: "Red",
+            locale: "en",
+            total: 3,
+          },
+          stages: [
+            {
+              stageIndex: 0,
+              stage: "Basic",
+              state: "here",
+              card: card("sv03-026", "Charmander", "026"),
+            },
+            {
+              stageIndex: 1,
+              stage: "Stage1",
+              state: "blocked",
+              card: null,
+              choice: "filler",
+              dexId: 5,
+            },
+            { stageIndex: 2, stage: "Stage2", state: "wanted", card: null, choice: null, dexId: 6 },
+          ],
+          current: { 1: { kind: "filler", filler: { material: "card", copyId: "spare" } } },
+          thirdPocket: null,
+          spares: { spare: { name: "Charmander", homeBoxId: "b" } },
+          boxes: [
+            { id: "b", name: "Box B", capacity: 1, held: 1, isDefault: true },
+            { id: "e", name: "Box E", capacity: 2, held: 2, isDefault: false },
+          ],
+        }),
+        onConfirm,
+        onClose: vi.fn(),
+      }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Choose for this line" });
+    const stage1 = await within(dialog).findByRole("region", { name: /Stage 1/ });
+    await user.click(within(stage1).getByRole("button", { name: "Leave empty" }));
     const ask = within(dialog).getByRole("group", { name: "Where Charmander goes" });
-    await user.click(within(ask).getByRole("button", { name: /Box B/ }));
-    await user.click(within(ask).getByRole("button", { name: "Add anyway · 1 over" }));
-    await user.click(within(ask).getByRole("button", { name: /Box C/ }));
-    await user.click(save(dialog));
-    expect(onConfirm).toHaveBeenCalledWith({
-      lineId: "L1",
-      stages: { 1: { kind: "empty" } },
-      returnBoxes: { spare: "c" },
-    });
+    expect(within(ask).getByRole("alert").textContent).toBe(
+      "Every bulk box is full. Raise a box's limit or add a box in Settings first.",
+    );
+    const saveBtn = within(dialog).getByRole("button", { name: /Save/ }) as HTMLButtonElement;
+    expect(saveBtn.disabled).toBe(true);
+    await user.click(saveBtn);
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 });
 
@@ -199,10 +236,9 @@ describe("an Add into the stage a spare card fills: it goes back to a box", () =
       mode: "join",
       returnBoxes: { spare: "c" },
     });
-    expect(onConfirm.mock.calls[0][0].returnOverFull).toBeUndefined();
   });
 
-  it("0037 · home full: she adds it to its full home anyway; Confirm waits for her Add anyway, and it rides with the Add", async () => {
+  it("home full: its full home cannot be picked, and Confirm stays off", async () => {
     const onConfirm = vi.fn();
     const user = userEvent.setup();
     render(createElement(Harness, { onConfirm }));
@@ -211,16 +247,11 @@ describe("an Add into the stage a spare card fills: it goes back to a box", () =
         .getAllByRole("button")
         .at(-1)! as HTMLButtonElement;
     const ask = screen.getByRole("group", { name: "Where Charmander goes" });
-    await user.click(within(ask).getByRole("button", { name: /Box B/ }));
-    expect(within(ask).getByRole("alert").textContent).toMatch(/^Box B is full/);
+    const fullB = within(ask).getByRole("button", { name: /Box B/ }) as HTMLButtonElement;
+    expect(fullB.disabled).toBe(true);
+    await user.click(fullB);
     expect(confirm().disabled).toBe(true);
-    await user.click(within(ask).getByRole("button", { name: "Add anyway · 1 over" }));
-    await waitFor(() => expect(confirm().disabled).toBe(false));
     await user.click(confirm());
-    expect(onConfirm.mock.calls[0][0]).toMatchObject({
-      mode: "join",
-      returnBoxes: { spare: "b" },
-      returnOverFull: ["spare"],
-    });
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 });

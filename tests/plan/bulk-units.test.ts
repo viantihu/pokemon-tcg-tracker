@@ -2,17 +2,15 @@
  * UIL-130 — where the Haul Plan sends a card to bulk on its own: her default box with room, else her first box with
  * room (in her order), else none, so the database refuses in her words rather than overfill a box. Pure.
  *
- * 0037 — that stays the recommendation (the plan never overfills a box on its own). She can add a card to a full box
- * herself: the words a picker says for it are pinned at the end.
+ * A full box takes no more cards, however she got there: there is no "add anyway" (the words a picker says for a full
+ * box are pinned at the end).
  */
 import { describe, expect, it } from "vitest";
 import {
-  addAnywayLabel,
-  addAnywayWarning,
   bulkUnitForRoute,
   bulkUnitViews,
   hasRoom,
-  overBy,
+  fullBoxReason,
   type BulkUnitView,
 } from "@/lib/plan/bulk-units";
 
@@ -80,22 +78,16 @@ describe("bulkUnitViews and hasRoom", () => {
   });
 });
 
-describe("0037 · a full box she adds a card to anyway", () => {
+describe("a full box takes no more cards", () => {
   const full = box({ id: "s", name: "Shoebox", capacity: 2, held: 2 });
 
-  it("says how far over its limit the box will be", () => {
-    expect(overBy(full)).toBe(1);
-    expect(overBy(full, 3)).toBe(3);
-    expect(overBy(box({ id: "o", capacity: 2, held: 3 }))).toBe(2);
-    expect(overBy(box({ id: "r", capacity: 5, held: 1 }))).toBe(0);
-    expect(overBy(box({ id: "u", held: 900 }))).toBe(0);
+  it("has no room, and says why in her words", () => {
+    expect(hasRoom(full)).toBe(false);
+    expect(fullBoxReason(full)).toBe("Shoebox is full (2 of 2 cards). Pick another box.");
   });
 
-  it("the warning keeps the full-box reason first; the confirm says Add anyway · N over", () => {
-    expect(addAnywayWarning(full)).toBe(
-      "Shoebox is full (2 of 2 cards). Pick another box. Or add it anyway: it will be 1 over.",
-    );
-    expect(addAnywayLabel(full)).toBe("Add anyway · 1 over");
-    expect(addAnywayLabel(full, 2)).toBe("Add anyway · 2 over");
+  it("an untracked box, or one with room, is never refused", () => {
+    expect(hasRoom(box({ id: "u", held: 900 }))).toBe(true);
+    expect(hasRoom(box({ id: "r", capacity: 5, held: 4 }))).toBe(true);
   });
 });

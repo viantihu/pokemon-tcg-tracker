@@ -218,7 +218,7 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
     expect(within(where).queryByRole("button", { name: /Bulk · Bulk box/ })).toBeNull();
   });
 
-  it("UIL-130 / 0037 · every box full: the popup warns where the card would go, and she adds it anyway", async () => {
+  it("UIL-130 · every box full: the popup says so, and the swap waits for another place", async () => {
     const onConfirm = vi.fn();
     const user = userEvent.setup();
     render(
@@ -233,30 +233,18 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
       }),
     );
     await user.click(radio(/Swap in 169\/165/));
-    // The full-box reason first, then what adding it anyway does (Karvi, 2026-10-01: she can override every rule).
+    // A full box takes no more cards: the reason, and no "add anyway".
     expect(screen.getByRole("alert").textContent).toBe(
-      "Bulk box is full (1 of 1 cards). Pick another box. Or add it anyway: it will be 1 over.",
+      "Bulk box is full (1 of 1 cards). Pick another box.",
     );
-    // Never silently over its limit: the swap waits for her knowing Add anyway (or another place).
-    expect((confirmBtn() as HTMLButtonElement).disabled).toBe(true);
     const where = screen.getByRole("group", { name: /Where 027\/197 goes/ });
-    await user.click(within(where).getByRole("button", { name: "Add anyway · 1 over" }));
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(document.querySelector(".lp-dest .lp-note")?.textContent).toBe(
-      "→ Bulk box · 1 over its limit",
-    );
-    expect(movesText()).toMatch(/To bulk.*027\/197.*→ Bulk box · 1 over its limit/);
-    expect((confirmBtn() as HTMLButtonElement).disabled).toBe(false);
+    expect(within(where).queryByRole("button", { name: /Add anyway/ })).toBeNull();
+    expect((confirmBtn() as HTMLButtonElement).disabled).toBe(true);
     await user.click(confirmBtn());
-    expect(onConfirm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        keep: false,
-        outgoing: { kind: "bulk", unitId: "d", overFull: true },
-      }),
-    );
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 
-  it("0037 · a full box picked on the Move sheet ('Another box…') comes back as Add anyway, and is sent so", async () => {
+  it("a full box on the Move sheet ('Another box…') is greyed and cannot be sent", async () => {
     const onConfirm = vi.fn();
     const user = userEvent.setup();
     render(
@@ -276,17 +264,17 @@ describe("REPLACE · opens on Keep, and nothing moves unless she picks Swap", ()
     await user.click(radio(/Swap in 169\/165/));
     await user.click(screen.getByRole("button", { name: "Another box…" }));
     const sheet = await screen.findByRole("dialog", { name: "Move Charmeleon" });
-    await user.click(
-      within(within(sheet).getByRole("group", { name: "Which bulk box" })).getByRole("button", {
-        name: /Shoebox/,
-      }),
-    );
-    await user.click(within(sheet).getByRole("button", { name: "Add anyway · 1 over" }));
-    expect(screen.queryByRole("dialog", { name: "Move Charmeleon" })).toBeNull();
-    expect((confirmBtn() as HTMLButtonElement).disabled).toBe(false);
-    await user.click(confirmBtn());
-    expect(onConfirm).toHaveBeenCalledWith(
-      expect.objectContaining({ outgoing: { kind: "bulk", unitId: "s", overFull: true } }),
+    const shoebox = within(within(sheet).getByRole("group", { name: "Which bulk box" })).getByRole(
+      "button",
+      { name: /Shoebox/ },
+    ) as HTMLButtonElement;
+    expect(shoebox.disabled).toBe(true);
+    expect(within(sheet).queryByRole("button", { name: /Add anyway/ })).toBeNull();
+    await user.click(shoebox);
+    await user.click(within(sheet).getByRole("button", { name: "Place it here ▶" }));
+    // Still on her default box, which has no limit: that is what comes back.
+    expect(onConfirm).not.toHaveBeenCalledWith(
+      expect.objectContaining({ outgoing: { kind: "bulk", unitId: "s" } }),
     );
   });
 

@@ -72,8 +72,6 @@ import {
 import type { LineChoice, LinePopupModel, LineProposal } from "@/lib/line/popup";
 import { lineModelAction } from "../_components/line-popup-actions";
 import { PlanLinePopup } from "./PlanLinePopup";
-import { SwapBoxPicker, swapBoxReady } from "./SwapBoxPicker";
-import { initialBox, type BulkUnitView } from "@/lib/plan/bulk-units";
 import {
   inLineOrder,
   lineKeyFor,
@@ -175,7 +173,6 @@ export function shelvesWithoutCollection(item: PlanItem, chosen: Record<string, 
 }
 
 /** A bulk place: where the card a swap displaces goes when she picks its box (0037). */
-type BulkDestination = Extract<MoveDestination, { kind: "bulk" }>;
 
 export function subgroupKey(bandKey: string, kind: "basic" | "nonbasic"): string {
   return `${bandKey}:${kind}`;
@@ -447,11 +444,6 @@ export function PlanScreen({
   );
   const [moveOptions, setMoveOptions] = useState<MoveOptions | null>(null);
   const [moveTarget, setMoveTarget] = useState<MoveTargetCard | null>(null);
-  /**
-   * 0037: the box she picks for the card a swap displaces when every box is full, by draft id ("Pick a box…" on a
-   * swap row). Sent with Done; the server records an `overFull` pick on the swap's decision.
-   */
-  const [displaced, setDisplaced] = useState<Record<string, BulkDestination>>({});
   const [toast, setToast] = useState<string | null>(null);
   // Pending-placement queue (UIL-003). Seeded from the server render, then re-read after a commit.
   const [pendingState, setPendingState] = useState<"loading" | "ready">("ready");
@@ -556,32 +548,6 @@ export function PlanScreen({
             : undefined),
         plan?.blockNeeds,
       ),
-    );
-  }
-
-  /**
-   * 0037, a swap row with every box full: "Pick a box…" opens the picker for the card it swaps out, in the spotlight,
-   * on her default box (the Move sheet would move the holo instead and skip the swap).
-   */
-  async function openSwapBox(item: PlanItem) {
-    let opts = moveOptions;
-    if (!opts) {
-      try {
-        opts = await getMoveOptions();
-        setMoveOptions(opts);
-      } catch {
-        setError("Could not load the placement options.");
-        return;
-      }
-    }
-    const first = initialBox(opts.bulkUnits ?? []);
-    setDisplaced((prev) =>
-      prev[item.incomingId]
-        ? prev
-        : {
-            ...prev,
-            [item.incomingId]: first ? { kind: "bulk", unitId: first } : { kind: "bulk" },
-          },
     );
   }
 
@@ -890,8 +856,6 @@ export function PlanScreen({
                   (fresh?.id === item.incomingId && fresh.item) || item,
                   collectionChoice,
                 ),
-            // 0037: the box she picked for the card a swap displaces (every box full). Her Move skips the swap.
-            displacedTo: overrides[item.incomingId] ? null : (displaced[item.incomingId] ?? null),
             // …or her "Shelve without a collection" (0037), which the server records as her override.
             noCollection:
               !overrides[item.incomingId] &&
@@ -976,7 +940,6 @@ export function PlanScreen({
     setError(null);
     setOverrides({});
     setCollectionChoice({});
-    setDisplaced({});
     setMoveTarget(null);
     setPlanIsResumed(false);
     setLiveStamp(stateStamp);
@@ -1447,10 +1410,6 @@ export function PlanScreen({
           overrides={overrides}
           overrideNames={overrideNames}
           onMove={openMove}
-          displaced={displaced}
-          bulkUnits={moveOptions?.bulkUnits ?? null}
-          onOpenSwapBox={(item) => void openSwapBox(item)}
-          onPickSwapBox={(draftId, dest) => setDisplaced((prev) => ({ ...prev, [draftId]: dest }))}
           resumed={planIsResumed}
           collapsed={collapsed}
           setCollapsed={setCollapsed}
@@ -1757,11 +1716,6 @@ function PlanView(props: {
   /** Name maps for override destination sentences (UIL-037); null until options load. */
   overrideNames: MoveNameLookups | null;
   onMove: (item: PlanItem, initial?: MoveDestination) => void;
-  /** 0037: her box for the card each swap displaces, by draft id; her boxes; and the picker's two actions. */
-  displaced: Record<string, BulkDestination>;
-  bulkUnits: BulkUnitView[] | null;
-  onOpenSwapBox: (item: PlanItem) => void;
-  onPickSwapBox: (draftId: string, dest: BulkDestination) => void;
   /** True when this plan was restored from a parked run rather than just computed (UIL-006). */
   resumed: boolean;
   /** Band keys currently folded away (UIL-018). */
@@ -1802,10 +1756,6 @@ function PlanView(props: {
     overrides,
     overrideNames,
     onMove,
-    displaced,
-    bulkUnits,
-    onOpenSwapBox,
-    onPickSwapBox,
     resumed,
     collapsed,
     setCollapsed,
@@ -2092,7 +2042,6 @@ function PlanView(props: {
               overrideNames={overrideNames}
               arrived={arrived}
               collectionChoice={collectionChoice}
-              boxPicked={(id) => swapBoxReady(displaced[id], bulkUnits ?? [])}
               collapsedSubgroups={collapsedSubgroups}
               onToggleSubgroupCollapse={toggleSubgroupCollapse}
             />
@@ -2136,22 +2085,6 @@ function PlanView(props: {
               overrideNames={overrideNames}
               blockNeeds={plan.blockNeeds}
               onMove={() => flatItems[cur] && onMove(flatItems[cur])}
-              onPickBox={() => {
-                const it = flatItems[cur];
-                if (!it) return;
-                // A swap's card coming out gets its box here; this card itself goes to bulk on the Move sheet.
-                if (it.action === "SWAP") onOpenSwapBox(it);
-                else onMove(it, { kind: "bulk" });
-              }}
-              swapBox={
-                flatItems[cur] && displaced[flatItems[cur].incomingId] && bulkUnits
-                  ? {
-                      boxes: bulkUnits,
-                      value: displaced[flatItems[cur].incomingId],
-                      onPick: (dest) => onPickSwapBox(flatItems[cur].incomingId, dest),
-                    }
-                  : undefined
-              }
               onSwapIntoLine={() => flatItems[cur] && onSwapIntoLine(flatItems[cur])}
               // Only when the reply belongs to the card actually in the spotlight (UIL-045).
               freshItem={
@@ -2217,8 +2150,6 @@ export function BandSection(props: {
   arrived?: Set<string>;
   /** Her collection picks (UIL-053), so a row can say it still needs one. Optional for the render tests. */
   collectionChoice?: Record<string, string>;
-  /** 0037: whether a swap row's card coming out has its box picked (so the row no longer asks). */
-  boxPicked?: (draftId: string) => boolean;
   /** Open a line card's popup from its badge (UIL-117). Optional for the render tests. */
   onOpenLine?: (item: PlanItem) => void;
   /**
@@ -2246,7 +2177,6 @@ export function BandSection(props: {
     overrideNames,
     arrived,
     collectionChoice,
-    boxPicked,
     onOpenLine,
     collapsedSubgroups,
     onToggleSubgroupCollapse,
@@ -2334,11 +2264,7 @@ export function BandSection(props: {
                         !pickedCollection(it, collectionChoice ?? {}) &&
                         !shelvesWithoutCollection(it, collectionChoice ?? {})
                       }
-                      needsBox={
-                        !!it.boxesFull &&
-                        !overrides[it.incomingId] &&
-                        !(boxPicked?.(it.incomingId) ?? false)
-                      }
+                      needsBox={!!it.boxesFull && !overrides[it.incomingId]}
                     />
                   ))}
             </div>
@@ -2366,7 +2292,7 @@ export function PlanRow(props: {
   isNew?: boolean;
   /** A specialty card that still needs her pick of collection (UIL-053). */
   needsCollection?: boolean;
-  /** A card for bulk with every box full (0037): she picks a box, anyway. */
+  /** A card for bulk with every box full: it has nowhere to go until she makes room or moves it. */
   needsBox?: boolean;
   /** Open this card's line popup from its badge (UIL-117). */
   onOpenLine?: () => void;
@@ -2461,7 +2387,7 @@ export function PlanRow(props: {
         {override ? <span className="moved u">{done ? "Moved" : "Will move"}</span> : null}
         {item.needsDecision ? <span className="needs u">Decide</span> : null}
         {needsCollection && !done ? <span className="needs u">Pick collection</span> : null}
-        {needsBox && !done ? <span className="needs u">Pick a box</span> : null}
+        {needsBox && !done ? <span className="needs u">Box full</span> : null}
         {/* UIL-117 (v3 section 1): every card headed into a back half says what it would do to a line, and needs
             her OK; the badge opens its popup. Gone once shelved, or once she moved it instead. */}
         {showBadge && item.lineProposal ? (
@@ -2512,16 +2438,6 @@ export function Spotlight(props: {
   /** UIL-030: the plan's open block needs, so the offer can say what is open and lead to the sheet. */
   blockNeeds?: BlockNeedCandidate[];
   onMove: () => void;
-  /**
-   * 0037, every box full: her Move sheet opened on the bulk box, where she adds it to a box anyway; on a swap row, the
-   * picker for the card it swaps out (`swapBox`, once opened).
-   */
-  onPickBox?: () => void;
-  swapBox?: {
-    boxes: BulkUnitView[];
-    value: BulkDestination;
-    onPick: (dest: BulkDestination) => void;
-  };
   /** UIL-126: a plain extra copy's "⇄ Swap this one into the line…". Absent: not offered. */
   onSwapIntoLine?: () => void;
   /**
@@ -2555,8 +2471,6 @@ export function Spotlight(props: {
     overrideNames,
     blockNeeds,
     onMove,
-    onPickBox,
-    swapBox,
     onSwapIntoLine,
     freshItem,
     refreshing = false,
@@ -2582,14 +2496,11 @@ export function Spotlight(props: {
   const without = !!collectionPick && shelvesWithoutCollection(item, collectionChoice);
   const pendingCollection = !!collectionPick && !pickedId && !without && !done;
   /**
-   * 0037: the plan sends it to bulk and every box is full, so it names none (the server would refuse it). Done waits,
-   * and "Pick a box…" opens her Move sheet on the bulk box, where adding it anyway is hers. Her Move names its own.
+   * The plan sends it to bulk (or a swap sends the copy it replaces there) and every box is full, so it names none. A
+   * full box takes no more cards: Done waits until she makes room in Settings, or moves the card somewhere else on her
+   * Move sheet (which skips a swap).
    */
-  const pendingBox =
-    !override &&
-    !!item.boxesFull &&
-    !done &&
-    !(swapBox && swapBoxReady(swapBox.value, swapBox.boxes));
+  const pendingBox = !override && !!item.boxesFull && !done;
   // Only worth telling her when the pocket actually moved; a reworded reason is not news.
   const movedFrom =
     freshItem && !override && freshItem.destination !== forecast.destination
@@ -2730,24 +2641,16 @@ export function Spotlight(props: {
         </div>
       ) : null}
 
-      {pendingBox && !swapBox ? (
+      {pendingBox ? (
         <div className="orow boxfull">
           <span className="oskip" role="alert">
-            Every bulk box is full. Pick a box to add it to anyway, or move it somewhere else.
+            Every bulk box is full. Raise a box&apos;s limit or add a box in Settings, or move it
+            somewhere else.
           </span>
-          <button type="button" className="btn sm" onClick={onPickBox} disabled={busy}>
-            Pick a box…
+          <button type="button" className="btn sm" onClick={onMove} disabled={busy}>
+            Move it somewhere else…
           </button>
         </div>
-      ) : null}
-      {/* A swap row's card coming out, once she opened its picker (0037): its box, until Done writes it. */}
-      {swapBox && !override && !done ? (
-        <SwapBoxPicker
-          boxes={swapBox.boxes}
-          value={swapBox.value}
-          onPick={swapBox.onPick}
-          busy={busy}
-        />
       ) : null}
 
       {/* "Moved" as its own label because Done is now the commit (UIL-027) — there is no separate
@@ -2844,7 +2747,7 @@ export function Spotlight(props: {
                 : pendingCollection
                   ? "Pick a collection above"
                   : pendingBox
-                    ? "Pick a box above"
+                    ? "Every bulk box is full"
                     : lineCard
                       ? "Confirm its line ▶"
                       : "Done, next card"}

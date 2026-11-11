@@ -36,7 +36,7 @@ import {
 import type { OverrideRule, WriteOp } from "@/lib/repo";
 import type { CopyPlacementPatch, LineJoinChoice, MoveDestination, MoveOptions } from "./types";
 import { NOT_A_LINE } from "./popup";
-import { lineRuleNote, overLimitNote, overridesFor, recordOverrides } from "./overrides";
+import { lineRuleNote, recordOverrides } from "./overrides";
 
 /** Derive the four placement columns (+ cleared line link) for a moved copy. */
 export function placementForMove(dest: MoveDestination): CopyPlacementPatch {
@@ -254,8 +254,7 @@ export function moveDecisionReason(dest: MoveDestination, destLabel: string): st
         : dest.kind === "block"
           ? "a reserved pocket, as a repurposed binder block"
           : "a binder half + band";
-  // 0037: a full box she picked knowingly says so.
-  return `Manual placement override (your call, no rule applied): moved to ${where} — ${destLabel}.${overLimitNote([dest])}`;
+  return `Manual placement override (your call, no rule applied): moved to ${where} — ${destLabel}.`;
 }
 
 /** Validate a destination before it is applied (guards the empty picker states the panel allows). */
@@ -508,8 +507,7 @@ export function buildMoveOps(plan: MovePlan): WriteOp[] {
   const join = collectionTargetJoinOp(plan.destination, plan.catalogCardId);
   if (join) ops.push(join);
 
-  // 0037: a full box she picked knowingly, and (UIL-135) a line rule she put it past, are recorded on this move's
-  // decision (lib/line/overrides).
+  // 0037: a line rule (UIL-135) she put it past is recorded on this move's decision (lib/line/overrides).
   ops.push(
     recordOverrides(
       {
@@ -522,7 +520,7 @@ export function buildMoveOps(plan: MovePlan): WriteOp[] {
           lineRuleNote(plan.lineRules ?? []),
         resolved_by: "user",
       },
-      [...overridesFor([plan.destination]), ...(plan.lineRules ?? [])],
+      plan.lineRules ?? [],
     ),
   );
 

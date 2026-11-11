@@ -194,8 +194,8 @@ export function toPlanItem(
           )
         : null,
     formsALine: l.formsALine ? l.formsALine(incoming.card) : true,
-    // 0037: a card the plan sends to bulk, or the copy a holo swaps out of a front half, when every box is full: hers
-    // to place (a swap inside a line is her line popup's, which picks the box itself).
+    // A card the plan sends to bulk, or the copy a holo swaps out of a front half, when every box is full: it has
+    // nowhere to go until she makes room or moves it (a swap inside a line is her line popup's, which picks the box).
     ...(((result.target.kind === "bulk" && !result.swap) ||
       (!!result.swap && result.target.kind !== "back-half-line")) &&
     l.bulkFull?.()

@@ -51,15 +51,9 @@ import {
 } from "@/lib/line/move";
 import type { MoveDestination } from "@/lib/line/types";
 import type { LineChoice } from "@/lib/line/popup";
-import {
-  lineChoiceDestinations,
-  lineRuleNote,
-  overLimitNote,
-  overridesFor,
-  recordOverrides,
-} from "@/lib/line/overrides";
+import { lineRuleNote, recordOverrides } from "@/lib/line/overrides";
 import { lineReadsClosed } from "@/lib/line/popup";
-import { buildBackHalfLineOps } from "@/lib/line/write";
+import { assertSectionRoom, buildBackHalfLineOps } from "@/lib/line/write";
 
 /* ------------------------------- pure planning ------------------------------ */
 
@@ -164,13 +158,9 @@ export function buildCollectionRemovalOps(plan: CollectionRemovalPlan): WriteOp[
       collectionName: plan.collectionName,
       destinationLabel: plan.destinationLabel,
       hasCopy: plan.copies.length > 0,
-    }) +
-    (plan.copies.length > 0
-      ? overLimitNote([plan.destination]) + lineRuleNote(plan.lineRules ?? [])
-      : "");
-  // 0037: a full box she picked knowingly, and (UIL-135) a line rule she put the card past, are recorded on the
-  // removal's decisions (lib/line/overrides).
-  const rules = [...overridesFor([plan.destination]), ...(plan.lineRules ?? [])];
+    }) + (plan.copies.length > 0 ? lineRuleNote(plan.lineRules ?? []) : "");
+  // 0037: a line rule (UIL-135) she put the card past is recorded on the removal's decisions (lib/line/overrides).
+  const rules = plan.lineRules ?? [];
   if (plan.copies.length === 0) {
     ops.push(
       recordOverrides(
@@ -337,17 +327,10 @@ export async function applyCollectionRemoval(
     const own = ops.find((o) => o.op === "update_copy" && o.id === copyRows[0].id);
     if (own && own.op === "update_copy") own.patch = { ...own.patch, line_slot_id: lineSlotId };
   }
-  // The line first: the copy's pointer names a slot this same write creates or fills. 0037: what she overrides, from
-  // every place this removal sends a card; each writer records its own.
-  await applyWriteOps(db, {
-    ops: [...lineOps, ...ops],
-    overrides: [
-      ...new Set([
-        ...overridesFor([req.destination, ...lineChoiceDestinations(req.lineChoice)]),
-        ...lineRules,
-      ]),
-    ],
-  });
+  // The line first: the copy's pointer names a slot this same write creates or fills. 0037: the line rules her choice
+  // put the card past; each writer records its own.
+  await assertSectionRoom(db, [...lineOps, ...ops]);
+  await applyWriteOps(db, { ops: [...lineOps, ...ops], overrides: [...new Set(lineRules)] });
 
   return {
     collectionName: col.name,

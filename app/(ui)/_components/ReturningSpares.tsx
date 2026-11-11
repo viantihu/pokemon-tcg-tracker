@@ -7,14 +7,13 @@
  * silently. So each returning card is named with where it goes; with its home box full (or gone), she picks a box
  * before she can confirm.
  *
- * 0037 (Karvi, 2026-10-01/02: "Users should always be able to override all rules"): a full box, her full home too, is
- * offered as well. Picked, it is warned in her words, and it counts only once she taps "Add anyway · N over"; that
- * card then rides in `overFull`, so the write records it with the move.
+ * A full box takes no more cards, however she got here: it is shown, greyed with why, and cannot be picked. With every
+ * box full there is nowhere to send the card, so confirming waits and she is told how to make room.
  */
 
 import type { BulkUnitView } from "@/lib/repo/bulk-unit";
 import type { ReturningCard } from "@/lib/line/popup";
-import { addAnywayLabel, addAnywayWarning, boxLoad, hasRoom, overBy } from "@/lib/plan/bulk-units";
+import { boxLoad, fullBoxReason, hasRoom } from "@/lib/plan/bulk-units";
 
 /** The box a returning card goes to: hers to pick when its home is full or gone, else its home. */
 function homeOf(spare: ReturningCard, boxes: readonly BulkUnitView[]) {
@@ -22,20 +21,38 @@ function homeOf(spare: ReturningCard, boxes: readonly BulkUnitView[]) {
   return { home, needsPick: !home || !hasRoom(home) };
 }
 
-/**
- * Whether every returning card has somewhere to go: its home with room, or a picked box with room, or a full box she
- * said "Add anyway" to (`overFull`).
- */
+/** Where each returning card goes: its home when that has room, else the box she picked (absent: nowhere yet). */
+function destinations(
+  spares: readonly ReturningCard[],
+  boxes: readonly BulkUnitView[],
+  picked: Readonly<Record<string, string>>,
+): Map<string, string | undefined> {
+  return new Map(
+    spares.map((s) => {
+      const { home, needsPick } = homeOf(s, boxes);
+      return [s.copyId, needsPick ? picked[s.copyId] : home!.id];
+    }),
+  );
+}
+
+/** How many of these cards go into each box: the box's room has to hold them all, not each on its own. */
+function goingTo(dest: ReadonlyMap<string, string | undefined>): Map<string, number> {
+  const n = new Map<string, number>();
+  for (const id of dest.values()) if (id) n.set(id, (n.get(id) ?? 0) + 1);
+  return n;
+}
+
+/** Whether every returning card has somewhere to go that has room for all the cards headed there. */
 export function sparesReady(
   spares: readonly ReturningCard[],
   boxes: readonly BulkUnitView[],
   picked: Readonly<Record<string, string>>,
-  overFull: readonly string[] = [],
 ): boolean {
+  const dest = destinations(spares, boxes, picked);
+  const load = goingTo(dest);
   return spares.every((s) => {
-    if (!homeOf(s, boxes).needsPick) return true;
-    const box = boxes.find((u) => u.id === picked[s.copyId]);
-    return !!box && (hasRoom(box) || overFull.includes(s.copyId));
+    const box = boxes.find((u) => u.id === dest.get(s.copyId));
+    return !!box && hasRoom(box, load.get(box.id) ?? 1);
   });
 }
 
@@ -43,38 +60,40 @@ export function ReturningSpares({
   spares,
   boxes,
   picked,
-  overFull = [],
   onPick,
   busy = false,
 }: {
   spares: readonly ReturningCard[];
   boxes: readonly BulkUnitView[];
   picked: Readonly<Record<string, string>>;
-  /** 0037: the cards she sends into a full box knowingly. */
-  overFull?: readonly string[];
-  /** Her picks, and which of them she sends into a full box knowingly. */
-  onPick(next: Record<string, string>, overFull: string[]): void;
+  onPick(next: Record<string, string>): void;
   busy?: boolean;
 }) {
   if (spares.length === 0) return null;
-  /** How many of these cards go into a box: how far over its limit it will be counts them all. */
-  const goingTo = (unitId: string) => spares.filter((s) => picked[s.copyId] === unitId).length;
+  const load = goingTo(destinations(spares, boxes, picked));
   return (
     <div className="lp-returns" role="group" aria-label="Spare cards going back to the bulk">
       {spares.map((s) => {
         const { home, needsPick } = homeOf(s, boxes);
         if (!needsPick) {
+          // Room for this card alone, but not for every card headed to the same box.
+          const crowded = !hasRoom(home!, load.get(home!.id) ?? 1);
           return (
             <div key={s.copyId} className="lp-mrow">
               <b className="u">Back to bulk</b> {s.name} → {home!.name}
+              {crowded ? (
+                <div className="lp-error" role="alert">
+                  {home!.name} has no room for all {load.get(home!.id)} cards going back to it (
+                  {boxLoad(home!)}). Raise its limit or add a box in Settings first.
+                </div>
+              ) : null}
             </div>
           );
         }
-        const box = boxes.find((u) => u.id === picked[s.copyId]);
-        const full = !!box && !hasRoom(box);
-        const knowing = overFull.includes(s.copyId);
-        // A pick drops her earlier "Add anyway": a new full box is asked again; one with room needs none.
-        const others = overFull.filter((id) => id !== s.copyId);
+        // Room for this card on top of the others already headed to a box (its own pick is not counted twice).
+        const roomFor = (u: BulkUnitView) =>
+          hasRoom(u, (load.get(u.id) ?? 0) + (picked[s.copyId] === u.id ? 0 : 1));
+        const none = !boxes.some(roomFor);
         return (
           <div key={s.copyId} className="lp-mrow" role="group" aria-label={`Where ${s.name} goes`}>
             <b className="u">Back to bulk</b> {s.name}:{" "}
@@ -86,30 +105,17 @@ export function ReturningSpares({
                   type="button"
                   className={"lp-band u" + (picked[s.copyId] === u.id ? " on" : "")}
                   aria-pressed={picked[s.copyId] === u.id}
-                  disabled={busy}
-                  onClick={() => onPick({ ...picked, [s.copyId]: u.id }, others)}
+                  disabled={busy || !roomFor(u)}
+                  title={roomFor(u) ? undefined : fullBoxReason(u)}
+                  onClick={() => onPick({ ...picked, [s.copyId]: u.id })}
                 >
                   {u.name} · {boxLoad(u)}
                 </button>
               ))}
-              {full && !knowing ? (
-                <button
-                  type="button"
-                  className="lp-band u"
-                  disabled={busy}
-                  onClick={() => onPick({ ...picked }, [...others, s.copyId])}
-                >
-                  {addAnywayLabel(box, goingTo(box.id))}
-                </button>
-              ) : null}
             </div>
-            {full && !knowing ? (
+            {none ? (
               <div className="lp-error" role="alert">
-                {addAnywayWarning(box, goingTo(box.id))}
-              </div>
-            ) : full ? (
-              <div className="lp-note">
-                → {box.name} · {overBy(box, goingTo(box.id))} over its limit
+                Every bulk box is full. Raise a box&apos;s limit or add a box in Settings first.
               </div>
             ) : null}
           </div>

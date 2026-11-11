@@ -8,7 +8,7 @@
  */
 
 import { useState } from "react";
-import { boxLoad, overBy } from "@/lib/plan/bulk-units";
+import { boxLoad } from "@/lib/plan/bulk-units";
 import type { BulkUnitInput, BulkUnitRow } from "./settings-types";
 
 export { boxLoad };
@@ -26,8 +26,7 @@ export function BulkBoxes({
   busy: boolean;
   onSave(input: BulkUnitInput): Promise<boolean>;
   onMakeDefault(id: string): void;
-  /** `anyway`: her "Delete anyway" into a box without room for the cards (0037). */
-  onDelete(id: string, moveTo: string, anyway: boolean): Promise<boolean>;
+  onDelete(id: string, moveTo: string): Promise<boolean>;
 }) {
   const [editing, setEditing] = useState<BulkUnitInput | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; moveTo: string } | null>(null);
@@ -110,8 +109,8 @@ export function BulkBoxes({
           busy={busy}
           onPick={(moveTo) => setDeleting({ ...deleting, moveTo })}
           onCancel={() => setDeleting(null)}
-          onConfirm={async (anyway) => {
-            if (await onDelete(deleting.id, deleting.moveTo, anyway)) setDeleting(null);
+          onConfirm={async () => {
+            if (await onDelete(deleting.id, deleting.moveTo)) setDeleting(null);
           }}
         />
       ) : null}
@@ -131,10 +130,8 @@ export function BulkBoxes({
   );
 }
 
-/** Delete asks where its cards go (Karvi: she never loses a card); a box with a limit that cannot take them all is
- * named so before she confirms. 0037 (Karvi, 2026-10-01: "Users should always be able to override all rules"): that is
- * a warning, not a wall. Her "Delete anyway · N over" sends it as her override, recorded; without it the database
- * still refuses. */
+/** Delete asks where its cards go (Karvi: she never loses a card). A box with a limit that cannot take them all is
+ * named so, and Delete stays off: a full box takes no more cards, so she picks another box or raises its limit. */
 function DeleteBox({
   unit,
   others,
@@ -150,13 +147,11 @@ function DeleteBox({
   busy: boolean;
   onPick(id: string): void;
   onCancel(): void;
-  /** `anyway`: she pressed "Delete anyway" (the box she picked has no room for them all). */
-  onConfirm(anyway: boolean): void;
+  onConfirm(): void;
 }) {
   const dest = others.find((o) => o.id === moveTo);
   const room = dest && dest.capacity !== null ? Math.max(dest.capacity - dest.held, 0) : null;
   const tooMany = room !== null && unit.held > room;
-  const over = dest ? overBy(dest, unit.held) : 0;
   return (
     <div className="binderform plate" role="group" aria-label={`Delete ${unit.name}`}>
       <p style={{ fontSize: 12, lineHeight: 1.6 }}>
@@ -186,7 +181,7 @@ function DeleteBox({
       {tooMany && dest ? (
         <div className="hint u" role="alert">
           {dest.name} has room for {room} card{room === 1 ? "" : "s"}. Pick another box, or raise
-          its limit first. Or delete anyway: {dest.name} will be {over} over its limit.
+          its limit first.
         </div>
       ) : null}
       <div className="ffbtns">
@@ -195,10 +190,10 @@ function DeleteBox({
         </button>
         <button
           className="btn btn-primary u"
-          onClick={() => onConfirm(tooMany)}
-          disabled={busy || !dest}
+          onClick={onConfirm}
+          disabled={busy || !dest || tooMany}
         >
-          {busy ? "Deleting…" : tooMany ? `Delete anyway · ${over} over` : `Delete ${unit.name}`}
+          {busy ? "Deleting…" : `Delete ${unit.name}`}
         </button>
       </div>
     </div>

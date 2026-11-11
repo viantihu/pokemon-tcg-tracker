@@ -28,7 +28,8 @@ import type { Json } from "./database.types";
  *
  *   line_fit         species, stage, branch, trainer, region or language fit (no database rule; recorded only)
  *   line_min_stages  a line with a single stage
- *   bulk_box_full    a card into a full box (a move, or a deleted box's cards)
+ *   bulk_box_full    a card into a full box (a move, or a deleted box's cards). The database still honours it, but no
+ *                    writer declares it: a full box takes no more cards, so 0035's check refuses the write.
  *   line_completion  the third pocket and "Decide every stage" prompts (no database rule; recorded only)
  *   collection_pick  a specialty card shelved with no collection (no database rule; recorded only)
  */

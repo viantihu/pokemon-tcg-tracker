@@ -30,6 +30,7 @@ import { catalogCardsOf, loadCatalogCached } from "@/lib/plan/catalog-cache";
 import {
   binderBlockRepo,
   binderRepo,
+  binderSectionRepo,
   bulkUnitRepo,
   collectionRepo,
   colorBandRepo,
@@ -41,6 +42,7 @@ import {
   type BulkUnitView,
   type DbClient,
   type Row,
+  type ViewRow,
 } from "@/lib/repo";
 import {
   deriveAllDecisions,
@@ -49,6 +51,7 @@ import {
   type StageFacts,
 } from "./decisions";
 import { buildLineJoinIndex, joinOptionsFor } from "./join-options";
+import { sectionRooms } from "./section-room";
 import { orderLineViews } from "./order";
 import { buildLineView, type SlotInput } from "./view";
 import type {
@@ -482,6 +485,7 @@ export async function buildScreenModel(
     collectionRows,
     bandRows,
     await bulkUnitRepo.views(db),
+    await binderSectionRepo.list(db),
   );
 
   // Shelved, line-less cards with a way OFF the front half and INTO a line (UIL-056): the strand her
@@ -505,6 +509,7 @@ export async function buildScreenModel(
         : "Unshelved",
       dexId: join.dexId,
       binderHalf: (c.binder_half as "front" | "back" | null) ?? null,
+      binderId: c.binder_id ?? null,
       naturalBandKey: join.naturalBandKey,
       joinCandidates: join.joinCandidates,
       existingLines: join.existingLines,
@@ -543,6 +548,8 @@ export function buildMoveOptions(
   bandRows: Row<"color_band">[],
   /** UIL-130: her bulk boxes with what they hold (`bulkUnitRepo.views`). */
   bulkUnits?: BulkUnitView[],
+  /** Her binder sections with their free pockets (`binderSectionRepo.list`): a full one takes no more cards. */
+  sectionRows?: ViewRow<"binder_section">[],
 ): MoveOptions {
   const specialtyBinderIds = new Set(
     binderRows.filter((b) => b.type === "specialty").map((b) => b.id),
@@ -563,6 +570,7 @@ export function buildMoveOptions(
     collectionsByBinder,
     bands: bandRows.map((b) => ({ key: b.band, display: b.display_name })),
     ...(bulkUnits ? { bulkUnits } : {}),
+    ...(sectionRows ? { sections: sectionRooms(sectionRows) } : {}),
   };
 }
 
@@ -572,13 +580,14 @@ export function buildMoveOptions(
  * full line + decision model.
  */
 export async function loadMoveOptions(db: DbClient): Promise<MoveOptions> {
-  const [binderRows, collectionRows, bandRows, bulkUnits] = await Promise.all([
+  const [binderRows, collectionRows, bandRows, bulkUnits, sectionRows] = await Promise.all([
     binderRepo.list(db),
     collectionRepo.list(db),
     colorBandRepo.listOrdered(db),
     bulkUnitRepo.views(db),
+    binderSectionRepo.list(db),
   ]);
-  return buildMoveOptions(binderRows, collectionRows, bandRows, bulkUnits);
+  return buildMoveOptions(binderRows, collectionRows, bandRows, bulkUnits, sectionRows);
 }
 
 /** The client-facing screen data (decisions flattened to their cards). */

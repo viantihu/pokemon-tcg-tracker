@@ -25,6 +25,7 @@ import type {
 // Leaf import: the "@/lib/line" barrel re-exports load.ts (server repos), which must stay out of
 // the browser bundle.
 import { binderGroups } from "@/lib/line/order";
+import { halfOf } from "@/lib/line/section-room";
 import { CardFace } from "../_components/CardFace";
 import { DecisionCard } from "../_components/DecisionCard";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
@@ -125,6 +126,8 @@ export function slotMoveTarget(line: LineView, slot: SlotView): MoveTargetCard |
     // Any move releases its slot (UIL-061, QA on #394): say which line loses it, and which stage.
     leaves: { lineName: line.speciesLabel, stage: stageLabel(slot.stage) },
     initial: initialDest,
+    // A line card is shelved in its line's back half: moving within it takes no new pocket.
+    ...(line.binderId ? { homeSection: { binderId: line.binderId, half: "back" as const } } : {}),
   };
 }
 
@@ -142,6 +145,9 @@ export function unlinedMoveTarget(card: UnlinedCard): MoveTargetCard {
     joinCandidates: card.joinCandidates,
     existingLines: card.existingLines,
     naturalBandKey: card.naturalBandKey,
+    ...(card.binderId
+      ? { homeSection: { binderId: card.binderId, half: halfOf(card.binderHalf) } }
+      : {}),
   };
 }
 

@@ -21,6 +21,7 @@ import type {
   MoveOptions,
 } from "@/lib/line/types";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
+import type { SectionHalf } from "@/lib/line/section-room";
 import { CardFace } from "./CardFace";
 import { MovePanel, type MoveConfirm } from "./MovePanel";
 
@@ -43,9 +44,11 @@ export interface MoveTargetCard {
   initial?: MoveDestination;
   /**
    * 0037: the bulk box this card is in now, when it is in one (Lookup knows it). Its load leaves the card out, so its
-   * own box is never "full" for it and offers no Add anyway.
+   * own box is never "full" for it.
    */
   homeBoxId?: string;
+  /** The binder section this card is shelved in now, when known: moving within it takes no new pocket. */
+  homeSection?: { binderId: string; half: SectionHalf };
   /** Line screen only (UIL-056/064): existing lines this card could join, flat across every band —
    *  present (even if empty) turns the picker's line-first flow on; absent (a card already filling a
    *  slot elsewhere) keeps today's plain binder/half/band flow. */
@@ -166,6 +169,7 @@ export function MoveOverlay({
             options={options}
             initial={card.initial}
             homeBoxId={card.homeBoxId}
+            homeSection={card.homeSection}
             allowLineJoin={lineJoinOn}
             joinCandidates={card.joinCandidates}
             existingLines={card.existingLines}

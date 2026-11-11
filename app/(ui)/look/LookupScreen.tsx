@@ -15,6 +15,7 @@
 
 import { useState } from "react";
 import type { MoveDestination, MoveOptions } from "@/lib/line/types";
+import { sectionOfDestination } from "@/lib/line/section-room";
 import type { LookupAnswer } from "@/lib/surfaces";
 import { CardFace } from "../_components/CardFace";
 import { cardCaption } from "../_components/CardLightbox";
@@ -67,6 +68,10 @@ export function lookupMoveTarget(
     // 0037: a bulk card opens on its own box, which the Move sheet must not count it against.
     ...(copy.role === "bulk" && copy.initial?.kind === "bulk" && copy.initial.unitId
       ? { homeBoxId: copy.initial.unitId }
+      : {}),
+    // A shelved card is already counted in its section: moving within it takes no new pocket.
+    ...(copy.role === "shelved" && copy.initial && sectionOfDestination(copy.initial)
+      ? { homeSection: sectionOfDestination(copy.initial)! }
       : {}),
   };
 }

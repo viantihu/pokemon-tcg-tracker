@@ -105,25 +105,20 @@ describe("UIL-130 · her boxes, in Settings", () => {
     expect(within(panel).getByText(/Your only bulk box can't be deleted/)).toBeTruthy();
   });
 
-  it("delete asks where its cards go; a box without room for them is named, and she can delete anyway (0037)", async () => {
+  it("delete asks where its cards go; a box without room for them is named, and Delete stays off", async () => {
     const { user, panel } = await mount(TWO);
     await user.click(within(panel).getByRole("button", { name: "Delete Bulk box" }));
     const ask = within(panel).getByRole("group", { name: "Delete Bulk box" });
     expect(within(ask).getByText(/Its 54 cards go to/)).toBeTruthy();
-    // Shoebox has room for 10, not 54: the old hint stays, then what deleting anyway does.
+    // Shoebox has room for 10, not 54: a full box takes no more cards, so there is no "delete anyway".
     expect(within(ask).getByRole("alert").textContent).toBe(
-      "Shoebox has room for 10 cards. Pick another box, or raise its limit first. " +
-        "Or delete anyway: Shoebox will be 44 over its limit.",
+      "Shoebox has room for 10 cards. Pick another box, or raise its limit first.",
     );
-    // Karvi, 2026-10-01: "Users should always be able to override all rules." No longer disabled.
-    expect(within(ask).queryByRole("button", { name: "Delete Bulk box" })).toBeNull();
-    const anyway = within(ask).getByRole("button", {
-      name: "Delete anyway · 44 over",
-    }) as HTMLButtonElement;
-    expect(anyway.disabled).toBe(false);
+    expect(within(ask).queryByRole("button", { name: /Delete anyway/ })).toBeNull();
+    const del = within(ask).getByRole("button", { name: "Delete Bulk box" }) as HTMLButtonElement;
+    expect(del.disabled).toBe(true);
+    await user.click(del);
     expect(deleteBulkUnit).not.toHaveBeenCalled();
-    await user.click(anyway);
-    await waitFor(() => expect(deleteBulkUnit).toHaveBeenCalledWith("bx1", "bx2", true));
   });
 
   it("delete with room: confirmed, its cards go to the box she picked, and her default passes to it", async () => {
