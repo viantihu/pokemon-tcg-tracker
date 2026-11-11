@@ -21,6 +21,7 @@ import {
   forgetSetAlias,
   manualMatch,
   reparkCandidates,
+  restoreRemovedCard,
   restoreWithheldForEntry,
   runSyncPipeline,
   undismissEntry,
@@ -35,7 +36,9 @@ import {
 } from "@/lib/sync";
 import {
   applyWriteOps,
+  catalogCardRepo,
   lastSyncSnapshotRepo,
+  removedPresenceRepo,
   setAliasRepo,
   unresolvedEntryRepo,
   type DbClient,
@@ -53,6 +56,7 @@ import type {
   ApplyOutcome,
   LearnedAliasView,
   QueueEntryView,
+  RemovedCardView,
   SyncState,
   StandInFormInput,
   StandInOutcome,
@@ -236,7 +240,7 @@ export async function loadSyncState(): Promise<SyncState> {
   // UIL-060 Half 2: swap any stand-in TCGdex now carries BEFORE the reads below, so the queue, the undo record and
   // the count check all read the real card.
   const standIns = await reconcileStandIns(db, await loadCatalogCached(db));
-  const [entries, snapshots, aliases, typeRows, countCheck] = await Promise.all([
+  const [entries, snapshots, aliases, typeRows, countCheck, removed] = await Promise.all([
     unresolvedEntryRepo.list(db),
     lastSyncSnapshotRepo.list(db),
     setAliasRepo.list(db),
@@ -244,6 +248,7 @@ export async function loadSyncState(): Promise<SyncState> {
     // UIL-100: does the collection add up to the Dex file? Re-read after every import, match, retry and
     // undo, because the screen refreshes this whole state after each of them — so it is never stale.
     loadCountCheck(db),
+    loadRemovedCards(db),
   ]);
 
   const waiting = entries.filter((e) => e.status === "WAITING").map(toEntryView);
@@ -269,7 +274,45 @@ export async function loadSyncState(): Promise<SyncState> {
     cardTypes: [...new Set(typeRows.map((t) => t.card_type))].sort(),
     countCheck,
     standIns,
+    removed,
   };
+}
+
+/** The cards she removed while Dex still lists them (the count check's "you removed"), named, for "Add it back". */
+async function loadRemovedCards(db: DbClient): Promise<RemovedCardView[]> {
+  const memories = await removedPresenceRepo.listAll(db);
+  if (memories.length === 0) return [];
+  const cards = new Map(
+    (await catalogCardRepo.listByIds(db, [...new Set(memories.map((m) => m.catalog_card_id))])).map(
+      (c) => [c.tcgdex_id, c],
+    ),
+  );
+  return memories.map((m) => {
+    const c = cards.get(m.catalog_card_id);
+    return {
+      catalogCardId: m.catalog_card_id,
+      dexVariantRaw: m.dex_variant_raw,
+      count: m.count,
+      name: c?.name ?? m.catalog_card_id,
+      setName: c?.set_name ?? null,
+      localId: c?.local_id ?? null,
+      imageUrl: c?.image_url ?? null,
+    };
+  });
+}
+
+/** "Add it back" for a card she removed (the count check's "you removed"): back to her haul, ready to place. */
+export async function restoreRemovedAction(
+  catalogCardId: string,
+  dexVariantRaw: string,
+): Promise<{ ok: true; restored: number; alreadyRestored: boolean } | ActionError> {
+  try {
+    const { db } = await getOwnerContext();
+    const r = await restoreRemovedCard(db, catalogCardId, dexVariantRaw);
+    return { ok: true, restored: r.restored, alreadyRestored: r.alreadyRestored === true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
 }
 
 /**

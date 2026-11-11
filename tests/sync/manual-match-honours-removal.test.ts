@@ -22,8 +22,10 @@ import {
   manualMatch,
   manualMatchStandIn,
   MATCH_REFUSED,
+  restoreRemovedCard,
   restoreWithheldForEntry,
   RESTORE_REFUSED,
+  RESTORE_REMOVED_REFUSED,
 } from "@/lib/sync";
 import { runSyncPipeline } from "@/lib/sync/pipeline";
 import { applyCopyRemoval } from "@/lib/copy/remove";
@@ -509,5 +511,44 @@ describe("UIL-099 · a manual match is applied once", () => {
     );
     expect(standIns.rows[0].n).toBe(1);
     expect(await copiesOf(first.standInId)).toBe(1);
+  });
+});
+
+describe("Add it back for ANY removed card (the count check's 'you removed')", () => {
+  it("returns a card removed after an import, shrinks the memory, and the next import keeps it", async () => {
+    const client = pgliteClient(db);
+    const { resolvedCopyId } = await twoRowsImported();
+    await applyCopyRemoval(client, resolvedCopyId);
+    expect(await copiesOf()).toBe(0);
+    expect(await memory()).toBe(1);
+
+    expect(await restoreRemovedCard(client, CARD, "Normal")).toEqual({ restored: 1 });
+    expect(await copiesOf()).toBe(1);
+    expect(await memory()).toBeNull();
+
+    // Nothing left to add back: a second press is refused, not doubled.
+    await expect(restoreRemovedCard(client, CARD, "Normal")).rejects.toThrow(
+      RESTORE_REMOVED_REFUSED.nothingRemoved,
+    );
+    expect(await copiesOf()).toBe(1);
+
+    // The same file again: the card stays (the memory no longer subtracts it).
+    const body = Buffer.from(`${HEADER}\n${RESOLVED_ROW}\n${row(1)}\n`, "utf16le");
+    const again = await runSyncPipeline(client, Uint8Array.from([0xff, 0xfe, ...body]));
+    await executeApply(client, again.bundle, OWNER);
+    expect(await copiesOf()).toBe(1);
+  });
+
+  it("before any import is recorded, brings back what she removed and makes its presence group", async () => {
+    await removed(2);
+    const client = pgliteClient(db);
+    expect(await restoreRemovedCard(client, CARD, "Normal")).toEqual({ restored: 2 });
+    expect(await copiesOf()).toBe(2);
+    expect(await memory()).toBeNull();
+    const g = await db.query<{ desired_count: number }>(
+      "select desired_count from presence_group where catalog_card_id = $1",
+      [CARD],
+    );
+    expect(g.rows).toEqual([{ desired_count: 2 }]);
   });
 });
