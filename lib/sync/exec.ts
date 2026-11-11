@@ -38,7 +38,7 @@ import {
   standInIdFor,
   type Language,
 } from "@/lib/catalog/locale";
-import { standInTwin } from "@/lib/catalog/stand-in";
+import { collectorNumberCandidates, printedSetSize, standInTwin } from "@/lib/catalog/stand-in";
 import { entryAsDexRow, loadAliasMap } from "./pipeline";
 import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
@@ -1225,6 +1225,37 @@ export class StandInTwinError extends Error {
 }
 
 /**
+ * Why ONE match must not teach its whole set, or null when it may (Karvi 2026-11-11).
+ *
+ * A set-code alias maps her Dex set onto a TCGdex set number-for-number: every later row of that set resolves to the
+ * card with ITS number there. So a match only teaches the alias when it is itself one such step — the card she picked
+ * carries the row's number, and its set's size does not contradict the size printed after the row's "/". Her Classic
+ * Collection Sneasel (Dex "5/30") matched to the Neo Genesis original (#25, a 111-card set) agreed on neither, yet
+ * taught `me55cc → neo1`; her Mew VMAX (Dex "28/30") then resolved to Neo Genesis #28, Bayleef. A reprint subset
+ * numbered on its own, like that one, can never be aliased: each of its rows is matched (and pinned) on its own.
+ */
+export function aliasInconsistency(
+  entry: Pick<Row<"unresolved_entry">, "dex_id" | "dex_number">,
+  target: { localId: string | null; setCardCount: number | null },
+): string | null {
+  const rowNumber = parseDexId(entry.dex_id).localId || (entry.dex_number ?? "");
+  const rowNumbers = new Set(collectorNumberCandidates(rowNumber));
+  const targetNumbers = target.localId ? collectorNumberCandidates(target.localId) : [];
+  const size = entry.dex_number ? printedSetSize(entry.dex_number) : null;
+  const sameNumber = targetNumbers.some((n) => rowNumbers.has(n));
+  const sizeContradicts =
+    size !== null && target.setCardCount != null && target.setCardCount !== size;
+  if (sameNumber && !sizeContradicts) return null;
+  return (
+    "This card is matched, but its set was not learned: the card you picked " +
+    (sameNumber
+      ? `is from a ${target.setCardCount}-card set, and your Dex row is numbered out of ${size}`
+      : `is #${target.localId ?? "?"}, and your Dex row is #${rowNumber}`) +
+    ", so the rest of this Dex set does not line up with that set. Match its other cards one by one."
+  );
+}
+
+/**
  * The ops that pin ONE entry to ONE catalog id — alias (when the set was unknown and the target has a
  * set), presence group, N bulk copies, entry RESOLVED — shared by the real-card match and the stand-in
  * match so the two can never drift.
@@ -1232,7 +1263,12 @@ export class StandInTwinError extends Error {
 async function matchOps(
   db: DbClient,
   entry: Row<"unresolved_entry">,
-  target: { tcgdexId: string; setId: string | null },
+  target: {
+    tcgdexId: string;
+    setId: string | null;
+    localId: string | null;
+    setCardCount: number | null;
+  },
   now: string,
 ): Promise<{ ops: WriteOp[]; groupId: string; result: ManualMatchResult }> {
   const ops: WriteOp[] = [];
@@ -1276,6 +1312,12 @@ async function matchOps(
         `matched is an ${targetLocale} printing, so remembering this set would make every other ` +
         `${locale} card from it match an ${targetLocale} card with the same number. Those rows stay ` +
         `in the queue; match one to a ${locale} printing to teach the set.`;
+    } else if (
+      rawCode &&
+      target.setId &&
+      (aliasSkippedReason = aliasInconsistency(entry, target))
+    ) {
+      // Pinned, but not generalised: this match is not one a set-code alias can repeat (see below).
     } else if (rawCode && target.setId) {
       ops.push({
         op: "upsert_set_alias",
@@ -1426,7 +1468,12 @@ export async function manualMatch(
   const { ops, groupId, result } = await matchOps(
     db,
     entry,
-    { tcgdexId, setId: card.set_id },
+    {
+      tcgdexId,
+      setId: card.set_id,
+      localId: card.local_id,
+      setCardCount: card.set_card_count_official,
+    },
     nowIso(),
   );
   try {
@@ -1712,7 +1759,12 @@ export async function manualMatchStandIn(
       card_class: input.cardClass ?? "standard",
     },
   ];
-  const match = await matchOps(db, entry, { tcgdexId: standInId, setId: input.setId }, nowIso());
+  const match = await matchOps(
+    db,
+    entry,
+    { tcgdexId: standInId, setId: input.setId, localId: input.localId, setCardCount: null },
+    nowIso(),
+  );
   ops.push(...match.ops);
   try {
     await applyWriteOps(db, { ops, resyncGroupIds: [match.groupId] });
