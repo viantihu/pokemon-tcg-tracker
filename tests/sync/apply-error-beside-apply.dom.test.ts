@@ -45,7 +45,7 @@ const STATE: SyncState = {
   undo: { available: false, createdAt: null, summary: null },
   aliases: [],
   countCheck: emptyCountCheck(),
-  standIns: { swapped: [], unsure: [] },
+  standIns: { swapped: [], unsure: [], kept: [] },
   removed: [],
 };
 const GATED = {

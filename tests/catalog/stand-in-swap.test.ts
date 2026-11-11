@@ -12,8 +12,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import type { Row } from "@/lib/repo";
 import {
+  FIX_STAND_IN_REFUSED,
+  fixStandIn,
+  keepStandIn,
   manualMatchStandIn,
   reconcileStandIns,
+  reviewStandInAgain,
   swapStandInFor,
   type StandInInput,
 } from "@/lib/sync";
@@ -173,6 +177,7 @@ describe("UIL-060 Half 2 · the swap", () => {
     expect(await reconcileStandIns(pgliteClient(db), await catalog())).toEqual({
       swapped: [],
       unsure: [],
+      kept: [],
     });
   });
 
@@ -236,5 +241,93 @@ describe("UIL-060 Half 2 · the swap", () => {
     await expect(swapStandInFor(pgliteClient(db), standIn, "ja:30th-015")).rejects.toThrow(
       /not in the catalog in this language/,
     );
+  });
+});
+
+describe("settling a stand-in she was asked about: what it holds, keep it, fix it", () => {
+  /** A stand-in whose set name is only close to the real one ("Celebrations"), so the swap is unsure. */
+  async function unsureStandIn(): Promise<string> {
+    return (
+      await manualMatchStandIn(pgliteClient(db), ENTRY, {
+        ...FUECOCO,
+        setName: "30th Celebrations",
+      })
+    ).standInId;
+  }
+
+  it("says how many copies the stand-in holds and where", async () => {
+    const standIn = await unsureStandIn();
+    const report = await reconcileStandIns(pgliteClient(db), await catalog());
+    expect(report.unsure).toHaveLength(1);
+    expect(report.unsure[0].standIn.id).toBe(standIn);
+    expect(report.unsure[0].held).toEqual({
+      count: 2,
+      where: [{ label: "Still in the haul", count: 2 }],
+    });
+  });
+
+  it("kept: not asked again for the same cards, asked again when a new one appears or she asks", async () => {
+    const standIn = await unsureStandIn();
+    await keepStandIn(pgliteClient(db), standIn, [REAL]);
+
+    let report = await reconcileStandIns(pgliteClient(db), await catalog());
+    expect(report.unsure).toEqual([]);
+    expect(report.kept.map((k) => [k.id, k.held.count])).toEqual([[standIn, 2]]);
+
+    // A new candidate in the catalog: asked again.
+    await asSuperuser(db);
+    await db.exec(`
+      insert into catalog_card (tcgdex_id, name, set_id, set_name, local_id, types, stage)
+        values ('30th-147', 'Fuecoco ex', '30th', '30th Celebration', '147', '{Fire}', 'Basic');
+    `);
+    await asOwner(db);
+    report = await reconcileStandIns(pgliteClient(db), await catalog());
+    expect(report.unsure.map((u) => u.standIn.id)).toEqual([standIn]);
+    expect(report.kept).toEqual([]);
+
+    // Kept again, then "Ask me again".
+    await keepStandIn(pgliteClient(db), standIn, ["30th-015", "30th-147"]);
+    expect((await reconcileStandIns(pgliteClient(db), await catalog())).unsure).toEqual([]);
+    await reviewStandInAgain(pgliteClient(db), standIn);
+    expect(
+      (await reconcileStandIns(pgliteClient(db), await catalog())).unsure.map((u) => u.standIn.id),
+    ).toEqual([standIn]);
+  });
+
+  it("fixed: the corrected stand-in is matched again, and swaps on its own when that makes it certain", async () => {
+    const standIn = await unsureStandIn();
+    await keepStandIn(pgliteClient(db), standIn, [REAL]);
+    await fixStandIn(pgliteClient(db), standIn, {
+      name: "Fuecoco ex",
+      setName: "30th Celebration",
+      localId: "15/128",
+    });
+    const report = await reconcileStandIns(pgliteClient(db), await catalog());
+    expect(report.swapped.map((s) => [s.standIn.id, s.real.id])).toEqual([[standIn, REAL]]);
+    await asSuperuser(db);
+    expect(await q(`select count(*)::int n from copy where catalog_card_id = '${REAL}'`)).toEqual([
+      { n: 2 },
+    ]);
+  });
+
+  it("refuses a fix that would make it a twin of another stand-in, or leave it without a name", async () => {
+    const standIn = await unsureStandIn();
+    await asSuperuser(db);
+    await db.exec(`
+      insert into catalog_card (tcgdex_id, name, set_name, local_id, source, owner_id, locale)
+        values ('user:en:22222222-2222-4222-8222-222222222222', 'Fuecoco ex', 'Other Set', '15/128',
+          'user', '${OWNER}', 'en');
+    `);
+    await asOwner(db);
+    await expect(
+      fixStandIn(pgliteClient(db), standIn, {
+        name: "Fuecoco ex",
+        setName: "Other Set",
+        localId: "15/128",
+      }),
+    ).rejects.toThrow(FIX_STAND_IN_REFUSED.twin);
+    await expect(
+      fixStandIn(pgliteClient(db), standIn, { name: " ", setName: "x", localId: "1" }),
+    ).rejects.toThrow(FIX_STAND_IN_REFUSED.empty);
   });
 });

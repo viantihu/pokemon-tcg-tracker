@@ -120,6 +120,36 @@ describe("standInMatch", () => {
     ).toEqual({ kind: "unsure", candidateIds: ["swsh8-114"] });
   });
 
+  it("never reads a set only CLOSE to hers as her set without her card name, nor past her set id", () => {
+    const latios = card({
+      tcgdexId: "me1-101",
+      name: "Latios",
+      setId: "me1",
+      setName: "Mega Evolution",
+      localId: "101",
+      setCardCount: null,
+    });
+    // Her stand-in carries the set id (Mega Evolution Promos): a close set name is no evidence at all.
+    expect(
+      standInMatch(
+        standIn({
+          name: "Nidorina",
+          setId: "mep",
+          setName: "Mega Evolution Promos",
+          localId: "101",
+        }),
+        [latios],
+      ),
+    ).toEqual({ kind: "none" });
+    // No set id: a close set name with her number but another name is still not enough.
+    expect(
+      standInMatch(
+        standIn({ name: "Nidorina", setName: "Mega Evolution Promos", localId: "101" }),
+        [latios],
+      ),
+    ).toEqual({ kind: "none" });
+  });
+
   it("is never CERTAIN when the printed size contradicts the set", () => {
     expect(standInMatch(standIn({ localId: "15/264" }), CATALOG)).toEqual({ kind: "none" });
   });

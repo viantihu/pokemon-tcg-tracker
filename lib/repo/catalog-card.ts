@@ -7,6 +7,7 @@ import {
   type DbClient,
   type Insert,
   type Row,
+  type Update,
 } from "./base";
 
 /**
@@ -121,6 +122,27 @@ export const catalogCardRepo = {
   async swapStandIn(db: DbClient, standInId: string, realId: string): Promise<void> {
     const { error } = await db.rpc("swap_stand_in", { stand_in_id: standInId, real_id: realId });
     if (error) throw error;
+  },
+
+  /** Change one of her own stand-ins (0033's `catalog_card_user_update`): a fix she typed, or her "keep it" (0042). */
+  async updateStandIn(
+    db: DbClient,
+    standInId: string,
+    patch: Pick<
+      Update<"catalog_card">,
+      "name" | "set_name" | "set_id" | "local_id" | "stand_in_kept_candidate_ids"
+    >,
+  ): Promise<void> {
+    const { data, error } = await db
+      .from("catalog_card")
+      .update(patch)
+      .eq("tcgdex_id", standInId)
+      .eq("source", "user")
+      .select("tcgdex_id");
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      throw new Error("That stand-in is not in your catalog any more. Reload the Sync page.");
+    }
   },
 
   /**

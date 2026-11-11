@@ -38,6 +38,9 @@ import {
   retryUnresolvedNow,
   searchCatalog,
   swapStandInAction,
+  fixStandInAction,
+  keepStandInAction,
+  reviewStandInAgainAction,
   undismissEntryAction,
   undoLastSync,
 } from "./actions";
@@ -251,12 +254,25 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
       <StandInSwapPanel
         swapped={swapped}
         unsure={state.standIns.unsure}
+        kept={state.standIns.kept}
         busy={busy}
+        search={searchCatalog}
         onSwap={(standInId, realId) =>
           run("Swapped your stand-in for the real card.", () =>
             swapStandInAction(standInId, realId),
           )
         }
+        onFix={(standInId, fix) =>
+          run("Stand-in fixed and checked against the catalog again.", () =>
+            fixStandInAction(standInId, fix),
+          )
+        }
+        onKeep={(standInId, candidateIds) =>
+          run("Kept as a stand-in. You will be asked again only if a new match appears.", () =>
+            keepStandInAction(standInId, candidateIds),
+          )
+        }
+        onReviewAgain={(standInId) => run(null, () => reviewStandInAgainAction(standInId))}
         onDismissSwapped={() => setSwapped([])}
       />
 

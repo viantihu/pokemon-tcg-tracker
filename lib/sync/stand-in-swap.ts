@@ -9,7 +9,16 @@
  * removes the stand-in, so the next load finds nothing to do for it: running this again is safe.
  */
 import { standInMatch, type MatchableCard } from "@/lib/catalog/stand-in";
-import { catalogCardRepo, type DbClient, type Row } from "@/lib/repo";
+import {
+  binderRepo,
+  bulkUnitRepo,
+  catalogCardRepo,
+  colorBandRepo,
+  copyRepo,
+  type DbClient,
+  type Row,
+} from "@/lib/repo";
+import { IN_THE_HAUL } from "@/lib/line/popup";
 
 type CatalogRow = Readonly<Row<"catalog_card">>;
 
@@ -28,9 +37,20 @@ export interface SwappedStandIn {
   real: StandInCardView;
 }
 
+/**
+ * What a decision about a stand-in touches: how many copies she holds under it, and where they are, in the words the
+ * Line popup uses ("KB-001 · Front · Red", a bulk box, "Still in the haul"). Zero copies says the stand-in is not in
+ * her collection at all.
+ */
+export interface StandInHeld {
+  count: number;
+  where: { label: string; count: number }[];
+}
+
 /** A stand-in that may now be in the catalog, waiting for her to say which card it is. */
 export interface UnsureStandIn {
   standIn: StandInCardView;
+  held: StandInHeld;
   candidates: StandInCardView[];
   /** Why a certain match was not swapped (the database refused it), in her words; absent when only unsure. */
   blocked?: string;
@@ -39,6 +59,8 @@ export interface UnsureStandIn {
 export interface StandInSwapReport {
   swapped: SwappedStandIn[];
   unsure: UnsureStandIn[];
+  /** Stand-ins she chose to keep, not asked about again until a new candidate appears (0042). */
+  kept: (StandInCardView & { held: StandInHeld })[];
 }
 
 function cardView(row: CatalogRow): StandInCardView {
@@ -79,9 +101,10 @@ export async function reconcileStandIns(
   db: DbClient,
   catalog: readonly CatalogRow[],
 ): Promise<StandInSwapReport> {
-  const report: StandInSwapReport = { swapped: [], unsure: [] };
+  const report: StandInSwapReport = { swapped: [], unsure: [], kept: [] };
   const standIns = catalog.filter((r) => r.source === "user");
   if (standIns.length === 0) return report;
+  const heldOf = await heldReader(db);
 
   const mirrored = catalog.filter((r) => r.source !== "user");
   const byId = new Map(mirrored.map((r) => [r.tcgdex_id, r]));
@@ -100,8 +123,15 @@ export async function reconcileStandIns(
     );
     if (match.kind === "none") continue;
     if (match.kind === "unsure") {
+      const keptIds = s.stand_in_kept_candidate_ids;
+      // Kept: asked again only when a candidate she was not shown appears.
+      if (keptIds && match.candidateIds.every((id) => keptIds.includes(id))) {
+        report.kept.push({ ...cardView(s), held: await heldOf(s.tcgdex_id) });
+        continue;
+      }
       report.unsure.push({
         standIn: cardView(s),
+        held: await heldOf(s.tcgdex_id),
         candidates: match.candidateIds.flatMap((id) => {
           const row = byId.get(id);
           return row ? [cardView(row)] : [];
@@ -117,6 +147,7 @@ export async function reconcileStandIns(
     } catch (err) {
       report.unsure.push({
         standIn: cardView(s),
+        held: await heldOf(s.tcgdex_id),
         candidates: [cardView(real)],
         blocked: refusalMessage(err),
       });
@@ -136,4 +167,101 @@ export async function swapStandInFor(
   } catch (err) {
     throw new Error(refusalMessage(err));
   }
+}
+
+/**
+ * Where her copies of a card are, grouped. Reads the names once (binders, bands, boxes), then one query per stand-in
+ * asked about: a handful, never her whole collection.
+ */
+async function heldReader(db: DbClient): Promise<(cardId: string) => Promise<StandInHeld>> {
+  const [binders, bands, boxes] = await Promise.all([
+    binderRepo.list(db),
+    colorBandRepo.listOrdered(db),
+    bulkUnitRepo.listOrdered(db),
+  ]);
+  const binderName = new Map(binders.map((b) => [b.id, b.name]));
+  const bandName = new Map(bands.map((b) => [b.band, b.display_name]));
+  const boxName = new Map(boxes.map((u) => [u.id, u.name]));
+  const whereIs = (c: Row<"copy">): string => {
+    if (c.role === "haul") return IN_THE_HAUL;
+    if (c.role === "bulk" || !c.binder_id)
+      return (c.bulk_unit_id && boxName.get(c.bulk_unit_id)) || "Bulk box";
+    const half = c.binder_half === "back" ? "Back" : c.binder_half === "front" ? "Front" : null;
+    return [
+      binderName.get(c.binder_id) ?? "A binder",
+      half,
+      c.color_band ? (bandName.get(c.color_band) ?? c.color_band) : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  };
+  return async (cardId) => {
+    const copies = await copyRepo.listByCatalogCard(db, cardId);
+    const byLabel = new Map<string, number>();
+    for (const c of copies) byLabel.set(whereIs(c), (byLabel.get(whereIs(c)) ?? 0) + 1);
+    return {
+      count: copies.length,
+      where: [...byLabel].map(([label, count]) => ({ label, count })),
+    };
+  };
+}
+
+/** Why fixing a stand-in is refused, in her words. */
+export const FIX_STAND_IN_REFUSED = {
+  empty: "A stand-in needs a name and a number.",
+  twin: "You already have a stand-in with that name, set and number. Pick it from the list instead.",
+} as const;
+
+/**
+ * Her correction of a stand-in she typed wrong: its name, set name and number. The set id is dropped when the set
+ * name changes (it named the old set). A fixed stand-in is asked about afresh (its kept list is cleared), and the
+ * Sync screen's next load matches it again — swapping it on its own if the fix makes the match certain.
+ *
+ * The stand-in's Pokémon data (species, type, stage) is unchanged: it decides which line the card belongs to, and a
+ * name typo does not change the card in her hand.
+ */
+export async function fixStandIn(
+  db: DbClient,
+  standInId: string,
+  fix: { name: string; setName: string; localId: string },
+): Promise<void> {
+  const name = fix.name.trim();
+  const setName = fix.setName.trim();
+  const localId = fix.localId.trim();
+  if (!name || !localId) throw new Error(FIX_STAND_IN_REFUSED.empty);
+  const current = (await catalogCardRepo.listStandIns(db)).find((r) => r.tcgdex_id === standInId);
+  if (!current) {
+    throw new Error("That stand-in is not in your catalog any more. Reload the Sync page.");
+  }
+  const sameSet = (current.set_name ?? "").trim() === setName;
+  try {
+    await catalogCardRepo.updateStandIn(db, standInId, {
+      name,
+      set_name: setName || null,
+      local_id: localId,
+      set_id: sameSet ? current.set_id : null,
+      stand_in_kept_candidate_ids: null,
+    });
+  } catch (err) {
+    // 0027's one-stand-in-per-card index.
+    if ((err as { code?: string } | null)?.code === "23505")
+      throw new Error(FIX_STAND_IN_REFUSED.twin);
+    throw err;
+  }
+}
+
+/** Keep a stand-in as it is: not asked about again until a candidate other than `candidateIds` appears (0042). */
+export async function keepStandIn(
+  db: DbClient,
+  standInId: string,
+  candidateIds: readonly string[],
+): Promise<void> {
+  await catalogCardRepo.updateStandIn(db, standInId, {
+    stand_in_kept_candidate_ids: [...candidateIds],
+  });
+}
+
+/** Ask about a kept stand-in again. */
+export async function reviewStandInAgain(db: DbClient, standInId: string): Promise<void> {
+  await catalogCardRepo.updateStandIn(db, standInId, { stand_in_kept_candidate_ids: null });
 }
