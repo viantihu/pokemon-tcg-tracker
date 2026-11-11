@@ -501,7 +501,7 @@ describe("sync builders emit the correct ordered op set (fake DbClient)", () => 
           retry_count: 0,
         },
       ],
-      catalog_card: [{ tcgdex_id: "cardM", set_id: "setM" }],
+      catalog_card: [{ tcgdex_id: "cardM", set_id: "setM", local_id: "012" }],
       presence_group: [],
     });
     const res = await manualMatch(fake, "entry-1", "cardM");

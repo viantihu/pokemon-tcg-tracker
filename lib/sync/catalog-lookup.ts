@@ -13,6 +13,7 @@
  */
 import type { DbClient } from "@/lib/repo";
 import { catalogCardRepo, setAliasRepo } from "@/lib/repo";
+import { setNameKey } from "@/lib/catalog/stand-in";
 import type { DexRow, Locale, ResolvedDexId } from "./types";
 import type { UnresolvedReason } from "./reconcile";
 
@@ -26,7 +27,7 @@ export interface CatalogLookupResult {
 /** The narrow slice of the mirror the lookup needs. Backed by repos in prod; faked in tests. */
 export interface CatalogPort {
   /** Cards at `(setId, localId)`; a set+localId maps to at most one printing in a healthy mirror. */
-  findBySetLocal(setId: string, localId: string): Promise<{ tcgdexId: string }[]>;
+  findBySetLocal(setId: string, localId: string): Promise<{ tcgdexId: string; name?: string }[]>;
   /** Distinct TCGdex set ids whose set name matches `setName` exactly. */
   findSetIdsByName(setName: string, locale: Locale): Promise<string[]>;
   /** Stored set ids in `locale` equal to `setId` ignoring case (UIL-086). */
@@ -40,7 +41,7 @@ export function catalogPortFromDb(db: DbClient): CatalogPort {
   return {
     async findBySetLocal(setId, localId) {
       const rows = await catalogCardRepo.findBySetLocal(db, setId, localId);
-      return rows.map((r) => ({ tcgdexId: r.tcgdex_id }));
+      return rows.map((r) => ({ tcgdexId: r.tcgdex_id, name: r.name }));
     },
     findSetIdsByName(setName, locale) {
       return catalogCardRepo.findSetIdsByName(db, setName, locale);
@@ -64,15 +65,34 @@ async function findByCandidates(
   port: CatalogPort,
   setId: string,
   candidates: string[],
-): Promise<string | null> {
+): Promise<{ tcgdexId: string; name?: string } | null> {
   for (const localId of candidates) {
     const hits = await port.findBySetLocal(setId, localId);
     if (hits.length > 0) {
       // Deterministic pick when a mirror somehow holds duplicates at one (set, localId).
-      return [...hits].sort((a, b) => a.tcgdexId.localeCompare(b.tcgdexId))[0].tcgdexId;
+      return [...hits].sort((a, b) => a.tcgdexId.localeCompare(b.tcgdexId))[0];
     }
   }
   return null;
+}
+
+/**
+ * Whether a card found through an alias SHE TAUGHT is the card her Dex row names (Karvi 2026-11-11). A learned alias
+ * generalises one match to a whole set, and when that was wrong (her Classic Collection Sneasel teaching
+ * `me55cc → neo1`) every other row of the set resolved to whatever card shared its number: her Mew VMAX became
+ * Bayleef, silently. A name that disagrees parks the row for her instead (UNKNOWN_CARD), so a wrong alias fails safe.
+ *
+ * English rows only: a Japanese export writes romanised names, which never equal TCGdex's Japanese ones. Case,
+ * accents and punctuation do not count, and one name's words inside the other's ("Mew VMAX" / "Mew VMAX (Full Art)")
+ * agree. A row with no name, or a card the port gives no name for, is not second-guessed.
+ */
+export function namesAgree(dexName: string | undefined, cardName: string | undefined): boolean {
+  const a = setNameKey(dexName);
+  const b = setNameKey(cardName);
+  if (!a || !b || a === b) return true;
+  const wa = a.split(" ");
+  const wb = new Set(b.split(" "));
+  return wa.every((w) => wb.has(w)) || [...wb].every((w) => wa.includes(w));
 }
 
 /**
@@ -86,7 +106,7 @@ async function findByCandidates(
  */
 export async function resolveAgainstCatalog(
   port: CatalogPort,
-  row: Pick<DexRow, "Set">,
+  row: Pick<DexRow, "Set"> & Partial<Pick<DexRow, "Name">>,
   resolved: ResolvedDexId,
   sessionAliases: Map<string, string> = new Map(),
 ): Promise<CatalogLookupResult> {
@@ -100,8 +120,17 @@ export async function resolveAgainstCatalog(
   const sessionSetId = !resolved.aliased ? sessionAliases.get(sessionKey) : undefined;
   const primarySetId = sessionSetId ?? resolved.setId;
 
+  /** A card through an alias she taught must carry the row's name, or the row waits for her (see `namesAgree`). */
+  const checked = (
+    hit: { tcgdexId: string; name?: string },
+    learned: boolean,
+  ): CatalogLookupResult =>
+    learned && resolved.locale === "en" && !namesAgree(row.Name, hit.name)
+      ? { catalogCardId: null, reason: "UNKNOWN_CARD" }
+      : { catalogCardId: hit.tcgdexId };
+
   const primaryHit = await findByCandidates(port, primarySetId, candidates);
-  if (primaryHit) return { catalogCardId: primaryHit };
+  if (primaryHit) return checked(primaryHit, resolved.learned === true || Boolean(sessionSetId));
 
   // The set id came from a known alias (seed or already-learned): the set is known, the card is not.
   if (resolved.aliased || sessionSetId) {
@@ -136,7 +165,7 @@ export async function resolveAgainstCatalog(
       await port.learnAlias(foldedAlias);
       sessionAliases.set(sessionKey, exact[0]);
       const foldedHit = await findByCandidates(port, exact[0], candidates);
-      if (foldedHit) return { catalogCardId: foldedHit, learnedAlias: foldedAlias };
+      if (foldedHit) return { catalogCardId: foldedHit.tcgdexId, learnedAlias: foldedAlias };
       // The set is real and now known; this particular card number is not in it.
       return { catalogCardId: null, reason: "UNKNOWN_CARD", learnedAlias: foldedAlias };
     }
@@ -162,7 +191,7 @@ export async function resolveAgainstCatalog(
   sessionAliases.set(sessionKey, learnedSetId);
 
   const learnedHit = await findByCandidates(port, learnedSetId, candidates);
-  if (learnedHit) return { catalogCardId: learnedHit, learnedAlias: alias };
+  if (learnedHit) return { ...checked(learnedHit, true), learnedAlias: alias };
 
   // Set now resolves (alias learned + drains the set next pass), but this localId has no card.
   return { catalogCardId: null, reason: "UNKNOWN_CARD", learnedAlias: alias };
@@ -191,10 +220,10 @@ export async function resolveAgainstCatalog(
  */
 export function prefetchedCatalogPort(
   inner: CatalogPort,
-  index: Map<string, { tcgdexId: string }[]>,
+  index: Map<string, { tcgdexId: string; name?: string }[]>,
   fetched: Set<string>,
 ): CatalogPort {
-  const liveHits = new Map<string, { tcgdexId: string }[]>();
+  const liveHits = new Map<string, { tcgdexId: string; name?: string }[]>();
   const namedSets = new Map<string, string[]>();
   const foldedSets = new Map<string, string[]>();
   return {
@@ -242,7 +271,11 @@ export function prefetchedCatalogPort(
 export async function buildCatalogPrefetch(
   db: DbClient,
   wants: readonly { setId: string; candidates: readonly string[] }[],
-): Promise<{ index: Map<string, { tcgdexId: string }[]>; fetched: Set<string>; queries: number }> {
+): Promise<{
+  index: Map<string, { tcgdexId: string; name?: string }[]>;
+  fetched: Set<string>;
+  queries: number;
+}> {
   const bySet = new Map<string, Set<string>>();
   for (const w of wants) {
     if (!w.setId || w.candidates.length === 0) continue;
@@ -251,7 +284,7 @@ export async function buildCatalogPrefetch(
     bySet.set(w.setId, set);
   }
 
-  const index = new Map<string, { tcgdexId: string }[]>();
+  const index = new Map<string, { tcgdexId: string; name?: string }[]>();
   const fetched = new Set<string>();
   let queries = 0;
 
@@ -263,7 +296,7 @@ export async function buildCatalogPrefetch(
       if (!r.local_id) continue;
       const k = `${setId}:${r.local_id}`;
       const list = index.get(k) ?? [];
-      list.push({ tcgdexId: r.tcgdex_id });
+      list.push({ tcgdexId: r.tcgdex_id, name: r.name });
       index.set(k, list);
     }
   }
@@ -277,7 +310,7 @@ export async function buildCatalogPrefetch(
 export function createCatalogLookup(db: DbClient) {
   const port = catalogPortFromDb(db);
   const sessionAliases = new Map<string, string>();
-  return (row: Pick<DexRow, "Set">, resolved: ResolvedDexId) =>
+  return (row: Pick<DexRow, "Set"> & Partial<Pick<DexRow, "Name">>, resolved: ResolvedDexId) =>
     resolveAgainstCatalog(port, row, resolved, sessionAliases);
 }
 
@@ -293,6 +326,6 @@ export async function createPrefetchedCatalogLookup(
   const { index, fetched } = await buildCatalogPrefetch(db, wants);
   const port = prefetchedCatalogPort(catalogPortFromDb(db), index, fetched);
   const sessionAliases = new Map<string, string>();
-  return (row: Pick<DexRow, "Set">, resolved: ResolvedDexId) =>
+  return (row: Pick<DexRow, "Set"> & Partial<Pick<DexRow, "Name">>, resolved: ResolvedDexId) =>
     resolveAgainstCatalog(port, row, resolved, sessionAliases);
 }

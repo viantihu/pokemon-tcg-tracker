@@ -172,11 +172,14 @@ export async function loadCurrentGroups(db: DbClient): Promise<CurrentGroup[]> {
 }
 
 /** Rebuild the minimal Dex row a WAITING entry needs to be re-resolved on a retry. */
-export function entryAsDexRow(e: Row<"unresolved_entry">): Pick<DexRow, "Id" | "Locale" | "Set"> {
+export function entryAsDexRow(
+  e: Row<"unresolved_entry">,
+): Pick<DexRow, "Id" | "Locale" | "Set" | "Name"> {
   return {
     Id: e.dex_id,
     Locale: normalizeLocale(e.locale) === "ja" ? "Japanese" : (e.locale ?? ""),
     Set: e.dex_set_name ?? "",
+    Name: e.dex_name ?? "",
   };
 }
 

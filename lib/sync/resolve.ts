@@ -79,13 +79,15 @@ export function resolveSetId(
   locale: Locale,
   rawCode: string,
   alias: Readonly<Record<string, string>> = SET_ALIAS_SEED,
-): { setId: string; aliased: boolean } {
+): { setId: string; aliased: boolean; learned: boolean } {
   const hit = alias[`${locale}:${rawCode}`];
   // UIL-047: an alias target is a STORED set id (en bare, ja namespaced), so it is used as-is. A raw
   // passthrough code is TCGdex's own, so for a non-en row it is namespaced into that locale's space —
   // a Japanese `sv11w` must never look inside the English `sv11w`.
-  if (hit === undefined) return { setId: namespaceId(locale, rawCode), aliased: false };
-  return { setId: hit, aliased: true };
+  if (hit === undefined) {
+    return { setId: namespaceId(locale, rawCode), aliased: false, learned: false };
+  }
+  return { setId: hit, aliased: true, learned: SET_ALIAS_SEED[`${locale}:${rawCode}`] !== hit };
 }
 
 /** Full deterministic resolve of a Dex row's `Id` (§1.3, steps that need no catalog). */
@@ -95,6 +97,13 @@ export function resolveDexId(
 ): ResolvedDexId {
   const locale = detectLocale(row);
   const { rawCode, localId } = parseDexId(row.Id);
-  const { setId, aliased } = resolveSetId(locale, rawCode, alias);
-  return { locale, rawCode, setId, aliased, localIdCandidates: localIdCandidates(localId) };
+  const { setId, aliased, learned } = resolveSetId(locale, rawCode, alias);
+  return {
+    locale,
+    rawCode,
+    setId,
+    aliased,
+    learned,
+    localIdCandidates: localIdCandidates(localId),
+  };
 }

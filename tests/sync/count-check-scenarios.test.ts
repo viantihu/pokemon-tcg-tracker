@@ -37,8 +37,8 @@ const M = [91, 92, 93, 94].map((n) =>
   row("Ancient Origins", `xy7-${n}`, String(n), `Mystery ${n}`, "Normal", 1),
 );
 /** The set does not resolve at all: parks UNKNOWN_SET. */
-const S1 = row("Mystery Set", "zz1-12", "12", "Unknown Twelve", "Normal", 1);
-const S2 = row("Mystery Set", "zz1-13", "13", "Unknown Thirteen", "Normal", 1);
+const S1 = row("Mystery Set", "zz1-12", "12", "Card Twelve", "Normal", 1);
+const S2 = row("Mystery Set", "zz1-13", "13", "Card Thirteen", "Normal", 1);
 
 function exportBytes(rows: string[]): Uint8Array {
   const body = Buffer.from(`${HEADER}\n${rows.join("\n")}\n`, "utf16le");

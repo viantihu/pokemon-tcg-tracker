@@ -50,7 +50,7 @@ describe("UIL-047 C3 · the alias guard", () => {
         ('ja:s12a-083', 'ピカチュウ', 'ja:s12a', 'VSTARユニバース', '083', 'ja');
     `);
     await seed("e0000000-0000-0000-0000-0000000000a1", "jpn_m6-14", "Japanese");
-    await seed("e0000000-0000-0000-0000-0000000000a2", "ba22e-14", "English");
+    await seed("e0000000-0000-0000-0000-0000000000a2", "ba22e-1", "English");
     await seed("e0000000-0000-0000-0000-0000000000a3", "jpn_s12a-83", "Japanese");
     await asOwner(db);
   });

@@ -49,6 +49,11 @@ export interface ResolvedDexId {
   setId: string;
   /** True when `setId` came from the verified alias table, not a passthrough. */
   aliased: boolean;
+  /**
+   * True when that alias is one her own matches taught (`set_alias`), not the curated seed. A learned alias can be
+   * wrong — one match generalised to a whole set — so a card found through it must carry the row's name.
+   */
+  learned?: boolean;
   /** localId candidates to try in order (as-is, zero-padded, stripped). */
   localIdCandidates: string[];
 }
