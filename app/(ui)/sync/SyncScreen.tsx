@@ -18,6 +18,17 @@ import type {
   SyncPreview,
 } from "@/lib/sync";
 import { RETURNING_NOTE } from "@/lib/sync/preview";
+import {
+  answerFor,
+  isAsked,
+  overridesToSend,
+  pickRefill,
+  pickWhere,
+  refillOffer,
+  rowIndexes,
+  unansweredCount,
+  whereOptions,
+} from "@/lib/sync/removal-answers";
 import { forgottenDismissedLine } from "@/lib/sync/preview";
 import { formatCollectorNumber } from "@/lib/catalog/collector-number";
 import { CardFace } from "../_components/CardFace";
@@ -173,7 +184,9 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
     if (!bundle) return;
     setError(null);
     setPhase("working");
-    const res = await reach(() => applySync(bundle, overrides), LOST_APPLY);
+    // Only the answers that still apply: a refill for a card she then said did not leave is dropped, not refused.
+    const toSend = preview ? overridesToSend(preview, overrides) : overrides;
+    const res = await reach(() => applySync(bundle, toSend), LOST_APPLY);
     if (!res.ok) {
       setError(res.error);
       setPhase("preview");
@@ -213,11 +226,9 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
     });
   }
 
-  function chooseRetire(presenceKey: string, copyId: string) {
-    setOverrides((o) => ({
-      ...o,
-      retireChoice: { ...(o.retireChoice ?? {}), [presenceKey]: [copyId] },
-    }));
+  /** Her removal answers (where each card left from; refill from bulk), as a whole (lib/sync/removal-answers). */
+  function changeOverrides(next: SyncOverrides) {
+    setOverrides(next);
   }
 
   return (
@@ -334,7 +345,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
           busy={busy}
           error={error}
           onToggleReject={toggleReject}
-          onChooseRetire={chooseRetire}
+          onChangeOverrides={changeOverrides}
           onApply={onApply}
           onCancel={onCancel}
         />
@@ -669,7 +680,7 @@ export function PreviewPanel({
   busy,
   error,
   onToggleReject,
-  onChooseRetire,
+  onChangeOverrides,
   onApply,
   onCancel,
 }: {
@@ -679,12 +690,15 @@ export function PreviewPanel({
   /** Why the last Apply did not go through; shown right above Apply, not at the top of the page (UIL-139). */
   error?: string | null;
   onToggleReject: (migrationKey: string) => void;
-  onChooseRetire: (presenceKey: string, copyId: string) => void;
+  /** Her removal answers changed: where a card left from, or a refill from bulk (Karvi, 2026-11-11). */
+  onChangeOverrides: (next: SyncOverrides) => void;
   onApply: () => void;
   onCancel: () => void;
 }) {
   const { sections } = preview;
   const rejected = new Set(overrides.rejectedMigrations ?? []);
+  const removalIdx = rowIndexes(sections.removals);
+  const unanswered = unansweredCount(preview, overrides);
   return (
     <div className="panel" style={{ padding: 16, display: "grid", gap: 16 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -698,12 +712,17 @@ export function PreviewPanel({
         <section>
           <div className="hd u">Removals · highest risk</div>
           <div style={{ display: "grid", gap: 8 }}>
-            {sections.removals.map((r) => {
-              const opts = preview.retireOptions[r.presenceKey] ?? [];
-              const canSwap = opts.length > 1;
-              const chosen = overrides.retireChoice?.[r.presenceKey]?.[0] ?? r.copyId;
+            {sections.removals.map((r, i) => {
+              const asked = isAsked(preview, r.presenceKey);
+              const where = asked ? answerFor(overrides, r.presenceKey, removalIdx[i]) : r.copyId;
+              const offer = refillOffer(preview, overrides, r, removalIdx[i]);
+              const pulled = offer ? (overrides.bulkPulls?.[offer.retiredCopyId] ?? "") : "";
               return (
-                <div key={r.copyId} className="plate" style={{ padding: 10 }}>
+                <div
+                  key={`${r.presenceKey}:${removalIdx[i]}`}
+                  className="plate"
+                  style={{ padding: 10 }}
+                >
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                     <CardFace
                       name={r.name}
@@ -721,10 +740,11 @@ export function PreviewPanel({
                         ) : null}
                       </div>
                       <div style={{ fontSize: 11, color: "var(--ink-2)" }}>
-                        {r.dexVariantRaw} · {r.consequenceLabel}
-                        {r.placementLabel ? ` · ${r.placementLabel}` : ""}
+                        {asked
+                          ? r.dexVariantRaw
+                          : `${r.dexVariantRaw} · ${r.consequenceLabel}${r.placementLabel ? ` · ${r.placementLabel}` : ""}`}
                       </div>
-                      {r.needsReview ? (
+                      {r.needsReview && !asked ? (
                         <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 4 }}>
                           BINDER BLOCK — kept as-is; free it from the line detail if you want the
                           pockets back.
@@ -733,17 +753,54 @@ export function PreviewPanel({
                     </div>
                     <BandChip bandKey={r.bandKey} />
                   </div>
-                  {canSwap ? (
+                  {asked ? (
                     <label style={{ display: "block", marginTop: 8, fontSize: 11 }}>
-                      Which copy leaves:{" "}
+                      Where did this one leave from?{" "}
                       <select
-                        value={chosen}
+                        value={where}
                         disabled={busy}
-                        onChange={(e) => onChooseRetire(r.presenceKey, e.target.value)}
+                        aria-invalid={!where}
+                        data-testid="removal-where"
+                        onChange={(e) =>
+                          onChangeOverrides(
+                            pickWhere(
+                              preview,
+                              overrides,
+                              r.presenceKey,
+                              removalIdx[i],
+                              e.target.value,
+                            ),
+                          )
+                        }
                       >
-                        {opts.map((o) => (
+                        <option value="" disabled>
+                          Pick one
+                        </option>
+                        {whereOptions(preview, overrides, r.presenceKey, removalIdx[i]).map((o) => (
                           <option key={o.copyId} value={o.copyId}>
-                            {o.label || "unplaced"}
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  {offer ? (
+                    <label style={{ display: "block", marginTop: 8, fontSize: 11 }}>
+                      You have another in a bulk box. Pull it into your haul plan to fill this spot?{" "}
+                      <select
+                        value={pulled}
+                        disabled={busy}
+                        data-testid="removal-refill"
+                        onChange={(e) =>
+                          onChangeOverrides(
+                            pickRefill(overrides, offer.retiredCopyId, e.target.value),
+                          )
+                        }
+                      >
+                        <option value="">No, leave it in the box</option>
+                        {offer.options.map((o) => (
+                          <option key={o.copyId} value={o.copyId}>
+                            Yes · {o.label}
                           </option>
                         ))}
                       </select>
@@ -870,8 +927,22 @@ export function PreviewPanel({
 
       {error ? <ErrorPanel message={error} reveal /> : null}
 
+      {unanswered > 0 ? (
+        <div style={{ fontSize: 11, color: "var(--ink-2)" }} data-testid="removal-unanswered">
+          {unanswered === 1
+            ? "1 removed card needs you to pick where it left from."
+            : `${unanswered} removed cards need you to pick where they left from.`}
+        </div>
+      ) : null}
+
       <div style={{ display: "flex", gap: 10 }}>
-        <button type="button" className="btn btn-primary" disabled={busy} onClick={onApply}>
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={busy || unanswered > 0}
+          title={unanswered > 0 ? "Pick where each removed card left from first" : undefined}
+          onClick={onApply}
+        >
           Apply
         </button>
         <button type="button" className="btn" disabled={busy} onClick={onCancel}>

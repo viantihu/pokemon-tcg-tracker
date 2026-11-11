@@ -114,6 +114,12 @@ export interface SyncOverrides {
    * carried (sync-ui-spec §B.3, §D).
    */
   rejectedMigrations?: string[];
+  /**
+   * Refills she accepted (Karvi, 2026-11-11): `retiredCopyId → bulkCopyId`. The shelved copy that left is
+   * replaced by a bulk duplicate pulled back into the Haul Plan. Validated by `resolveBulkPulls` against the
+   * final plan; never folded into the plan itself (a pull moves no presence, only a copy's role).
+   */
+  bulkPulls?: Record<string, string>;
 }
 
 /**
@@ -183,16 +189,21 @@ export function applyOverrides(
       list.push(r);
       byKey.set(key, list);
     }
+    const migratingIds = new Set(variantUpdates.map((v) => v.copyId));
     const swapped: RetireOp[] = [];
     for (const [key, ops] of byKey) {
       const choice = retireChoice[key];
       const group = groupByKey.get(key);
       // Only honour a choice that names exactly as many valid copies as the shrink retires.
+      // Distinct copies of THIS group, none of them carried by a variant migration: a choice that named a
+      // migrating copy retired it AND moved it, and one that named a copy twice retired one copy for two.
+      const groupIds = new Set(group?.copies.map((c) => c.copyId) ?? []);
       if (
         choice &&
         group &&
         choice.length === ops.length &&
-        choice.every((id) => copyById.has(id))
+        new Set(choice).size === choice.length &&
+        choice.every((id) => groupIds.has(id) && !migratingIds.has(id))
       ) {
         for (const copyId of choice) {
           const c = copyById.get(copyId)!;

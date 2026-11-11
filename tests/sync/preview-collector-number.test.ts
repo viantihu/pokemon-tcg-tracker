@@ -68,7 +68,7 @@ const render = (p: SyncPreview) =>
       overrides: {},
       busy: false,
       onToggleReject: () => {},
-      onChooseRetire: () => {},
+      onChangeOverrides: () => {},
       onApply: () => {},
       onCancel: () => {},
     }),

@@ -12,6 +12,7 @@
 import type { DbClient, Json, Row, WriteOp } from "@/lib/repo";
 import {
   applyWriteOps,
+  bulkUnitRepo,
   catalogCardRepo,
   copyRepo,
   dexImportRepo,
@@ -41,6 +42,17 @@ import { standInTwin } from "@/lib/catalog/stand-in";
 import { entryAsDexRow, loadAliasMap } from "./pipeline";
 import { buildForgetAliasOps, type LearnedAlias } from "./alias";
 import { applyOverrides, type SyncOverrides } from "./apply";
+import {
+  BULK_PULL_DECISION,
+  BULK_RETURN_DECISION,
+  REFILL_STALE,
+  REMOVAL_UNANSWERED,
+  pulledFromBulkNote,
+  resolveBulkPulls,
+  unansweredRemovals,
+} from "./removal-source";
+import { toCatalogCard } from "@/lib/plan/adapt";
+import type { CatalogCard } from "@/lib/engine";
 import { deriveVariantFlag, dexQuantity } from "./reconcile";
 import type { SyncPlanBundle } from "./pipeline";
 import {
@@ -50,7 +62,7 @@ import {
   parseFileTotalRefusal,
   type CardLabel,
 } from "./count-check";
-import type { PresenceKeyRef } from "@/lib/repo/write-ops";
+import type { OverrideRule, PresenceKeyRef } from "@/lib/repo/write-ops";
 import {
   assertFreshBase,
   derivedUuid,
@@ -83,6 +95,8 @@ export interface ApplyResult {
   flagFixes: number;
   waiting: number;
   fastPath: boolean;
+  /** Bulk copies she asked to pull back into the Haul Plan (Karvi, 2026-11-11). */
+  pulledFromBulk?: number;
 }
 
 const nowIso = () => new Date().toISOString();
@@ -294,6 +308,30 @@ export async function executeApply(
   assertFreshBase(bundle.baseSnapshotId, latestSnapshot(priorSnapshots), ownerScope, digest);
 
   const plan = applyOverrides(bundle.plan, bundle.current, overrides);
+
+  /**
+   * WHERE DID IT LEAVE FROM (Karvi, 2026-11-11). When the copies that could have left sit in more than one
+   * place, she says which; the app never guesses. Checked HERE, the one apply path, not only by the screen's
+   * disabled button, so no client can apply a guess she never saw (RCA RC-2: enforcement is not opt-in).
+   */
+  if (unansweredRemovals(plan, bundle.current, overrides?.retireChoice).length > 0) {
+    throw new Error(REMOVAL_UNANSWERED);
+  }
+  /** The refills she accepted, validated against the FINAL plan; a bad one refuses the apply (RC-6). */
+  const pulls = await (async () => {
+    if (!overrides?.bulkPulls || Object.keys(overrides.bulkPulls).length === 0) return [];
+    const bulkCardIds = bundle.current
+      .filter((g) => g.copies.some((c) => c.role === "bulk"))
+      .map((g) => g.catalogCardId);
+    const rows = await catalogCardRepo.listByIds(db, [
+      ...plan.retires.map((r) => r.catalogCardId),
+      ...bulkCardIds,
+    ]);
+    const catalogById = new Map<string, CatalogCard>(
+      rows.map((r) => [r.tcgdex_id, toCatalogCard(r)]),
+    );
+    return resolveBulkPulls(plan, bundle.current, catalogById, overrides.bulkPulls);
+  })();
   const now = nowIso();
 
   const ops: WriteOp[] = [];
@@ -433,6 +471,34 @@ export async function executeApply(
     ops.push({ op: "delete_copy", id: copy.id });
   }
 
+  /**
+   * 4b. Refills from bulk (Karvi, 2026-11-11). The bulk duplicate goes back into her HAUL — role 'haul' (the
+   *     copy trigger clears its box) — with a decision that says so. That decision is what puts an already-placed
+   *     copy back in the Haul Plan's queue (lib/plan/pending.ts); the plan then routes it like any waiting card,
+   *     which is where its suggested binder spot comes from. Presence does not move: the same card, same group.
+   */
+  const bulkPulls: { copyId: string; bulkUnitId: string | null }[] = [];
+  if (pulls.length > 0) {
+    const boxNameById = new Map((await bulkUnitRepo.listOrdered(db)).map((u) => [u.id, u.name]));
+    for (const p of pulls) {
+      const copy = await copyRepo.getByPk(db, p.bulkCopyId);
+      // Moved since the preview (placed, removed, re-boxed): what she agreed to no longer describes it.
+      if (!copy || copy.role !== "bulk") throw new Error(REFILL_STALE);
+      bulkPulls.push({ copyId: copy.id, bulkUnitId: copy.bulk_unit_id });
+      ops.push({ op: "update_copy", id: copy.id, patch: { role: "haul" } });
+      ops.push({
+        op: "insert_decision",
+        haul_id: null,
+        copy_id: copy.id,
+        decision: BULK_PULL_DECISION,
+        reason: pulledFromBulkNote(
+          (copy.bulk_unit_id && boxNameById.get(copy.bulk_unit_id)) || null,
+        ),
+        resolved_by: "user",
+      });
+    }
+  }
+
   // 5. Park CSV rows still unresolved — deduped on (dex_id, dex_variant_raw) (A.6).
   // A row she DISMISSED is the same row: refresh it, keep it dismissed (the patch below sets no status).
   // Parking it again inserted a second entry for one (dex_id, variant) — the table's unique key — and failed
@@ -547,6 +613,8 @@ export async function executeApply(
     ...(recordTouched ? { priorDexRecord: priorDexRecord ?? null } : {}),
     // Absent unless this import forgets a memory (UIL-111), so older Undo behaviour is untouched.
     ...(forgottenMemories.length > 0 ? { priorRemovedMemories: forgottenMemories } : {}),
+    // Absent unless she accepted a refill, so older Undo behaviour is untouched.
+    ...(bulkPulls.length > 0 ? { bulkPulls } : {}),
   };
   // 7b. Forget the removal memories (UIL-089, UIL-111). "Not mine" lasts for the haul, and a full import ends
   //     it: EVERY memory goes, and the cards Dex still lists come back with this import (the preview named
@@ -612,6 +680,7 @@ export async function executeApply(
     flagFixes: flagFixes.length,
     waiting: bundle.queue.stillWaiting,
     fastPath,
+    pulledFromBulk: bulkPulls.length,
   };
 }
 
@@ -761,6 +830,56 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
   for (const id of undo.deleteEntryIds) {
     if (keptMatchIds.has(id)) continue; // A': this import parked it, she matched it — keep the match
     ops.push({ op: "delete_unresolved_entry", id });
+  }
+
+  /**
+   * Refills go back in their box (Karvi, 2026-11-11). Undo reverses what the sync did, and the sync took this
+   * card out of a bulk box; so it returns there wherever she has put it since — as Undo already takes back a
+   * card the sync created even after she shelved it. BEFORE the retired copies come back: the card that left
+   * may be returning to the very slot this one filled. That slot is restored by `restoreSlots` below, so only
+   * the pointer on this copy is cleared; any OTHER slot it fills is released through the one release path.
+   * Back into its own box, or her default box if that box is gone; a box filled up since takes it anyway,
+   * recorded as an override (0037), because the card is physically going back to where it came from.
+   */
+  const pullOverrides: OverrideRule[] = [];
+  if (snap.bulkPulls?.length) {
+    const boxes = new Map((await bulkUnitRepo.listOrdered(db)).map((u) => [u.id, u.name]));
+    const restoredSlotIds = new Set(undo.restoreSlots.map((r) => r.id));
+    for (const p of snap.bulkPulls) {
+      const copy = await copyRepo.getByPk(db, p.copyId);
+      // Gone ("Not mine", merged) or made a binder block since: nothing to put back, or not ours to unpick.
+      if (!copy || copy.role === "block" || copy.role === "bulk") continue;
+      if (copy.line_slot_id && !restoredSlotIds.has(copy.line_slot_id)) {
+        const slot = await lineSlotRepo.getByPk(db, copy.line_slot_id);
+        if (slot && slot.copy_id === copy.id) {
+          const line = await evolutionLineRepo.getByPk(db, slot.line_id);
+          ops.push(...releaseSlotOps(slot.id, lineReadsClosed(line?.status) ? line!.id : null));
+        }
+      }
+      const box = p.bulkUnitId && boxes.has(p.bulkUnitId) ? p.bulkUnitId : null;
+      ops.push({
+        op: "update_copy",
+        id: copy.id,
+        patch: {
+          role: "bulk",
+          binder_id: null,
+          binder_half: null,
+          color_band: null,
+          line_slot_id: null,
+          bulk_unit_id: box,
+        },
+      });
+      ops.push({
+        op: "insert_decision",
+        haul_id: null,
+        copy_id: copy.id,
+        decision: BULK_RETURN_DECISION,
+        reason: `Sync undone: back in ${(box && boxes.get(box)) || "your bulk box"}.`,
+        resolved_by: "user",
+        overrides: ["bulk_box_full"],
+      });
+      pullOverrides.push("bulk_box_full");
+    }
   }
 
   // Bring retired copies back (with placement), then re-point their freed slots.
@@ -913,6 +1032,7 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
     await applyWriteOps(db, {
       ops,
       resyncGroupIds: [...new Set([...undo.resyncGroupIds, ...handMatchedGroupIds])],
+      ...(pullOverrides.length > 0 ? { overrides: ["bulk_box_full"] as OverrideRule[] } : {}),
     });
   } catch (err) {
     // A racing Undo of this same snapshot committed first (a double click): this one rolled back whole.
