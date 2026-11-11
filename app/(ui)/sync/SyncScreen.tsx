@@ -76,6 +76,15 @@ function localeLabel(locale: string): string {
 const aliasKeyOf = (a: LearnedAliasView) => `${a.locale}:${a.dexCode}`;
 
 /**
+ * Which learned alias an entry's known set rests on (UIL-047 C3), if any. Shown inside the match sheet, not on the
+ * main list: it only matters once she is looking at that card and suspects its set was taught wrong.
+ */
+export function aliasNote(aliases: LearnedAliasView[], e: QueueEntryView): string | null {
+  const a = aliases.find((x) => aliasKeyOf(x) === e.aliasKey);
+  return a ? `set known through the learned alias ${a.dexCode} → ${a.tcgdexSetId}` : null;
+}
+
+/**
  * A server action that THROWS never reached her data or never answered: the app was redeployed while the page
  * was open (a new deployment retires the old action ids), or the connection dropped. The actions return their own
  * failures as `{ ok: false }`, so a throw is only ever this. Before, nothing caught it and the progress bar ran
@@ -228,9 +237,10 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
         <h1 className="u" style={{ fontSize: 18, letterSpacing: "0.1em", marginBottom: 8 }}>
           Sync
         </h1>
-        <p style={{ fontSize: 11, color: "var(--ink-2)", marginBottom: 14 }}>
-          Import a Dex export. Pure additions apply on their own; anything that could move a card
-          stops here for your review. The last sync is always one tap to undo.
+        <p style={{ fontSize: 12, color: "var(--ink-2)", marginBottom: 14, maxWidth: 560 }}>
+          Import the CSV you exported from Dex to bring your collection up to date. New cards are
+          added right away. Anything that would remove or change a card waits for your OK, and you
+          can always undo the last sync.
         </p>
         <label className="btn btn-primary" style={{ cursor: busy ? "wait" : "pointer" }}>
           {phase === "parsing" ? "Reading…" : "Import Dex export"}
@@ -249,7 +259,29 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
       {/* While a preview is open its error shows beside Apply, where she is looking (UIL-139). */}
       {error && preview === null ? <ErrorPanel message={error} /> : null}
 
-      <CountCheckPanel check={state.countCheck} />
+      {/* The last sync's result sits right under the import, where the eye goes after importing. */}
+      <UndoBar
+        state={state}
+        busy={busy}
+        pending={preview !== null}
+        onUndo={() => run("Reverted the last sync.", undoLastSync)}
+      />
+
+      {preview ? (
+        <PreviewPanel
+          preview={preview}
+          overrides={overrides}
+          busy={busy}
+          error={error}
+          onToggleReject={toggleReject}
+          onChooseRetire={chooseRetire}
+          onApply={onApply}
+          onCancel={onCancel}
+        />
+      ) : null}
+
+      {/* A count that does not add up is a problem to act on, so it comes before the routine panels. */}
+      {state.countCheck.status === "mismatch" ? <CountCheckPanel check={state.countCheck} /> : null}
 
       <StandInSwapPanel
         swapped={swapped}
@@ -276,26 +308,6 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
         onDismissSwapped={() => setSwapped([])}
       />
 
-      <RemovedCardsPanel
-        removed={state.removed}
-        busy={busy}
-        onAddBack={(card) =>
-          run(null, async () => {
-            const r = await restoreRemovedAction(card.catalogCardId, card.dexVariantRaw);
-            if (r.ok) {
-              setToast(
-                r.alreadyRestored
-                  ? "Already added back."
-                  : r.restored > 0
-                    ? `Added back ${r.restored} ${card.name}. Ready to place.`
-                    : "Nothing to add back: your Dex file no longer lists it.",
-              );
-            }
-            return r;
-          })
-        }
-      />
-
       {withheld ? (
         <WithheldNotice
           notice={withheld}
@@ -320,26 +332,6 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
         />
       ) : null}
 
-      <UndoBar
-        state={state}
-        busy={busy}
-        pending={preview !== null}
-        onUndo={() => run("Reverted the last sync.", undoLastSync)}
-      />
-
-      {preview ? (
-        <PreviewPanel
-          preview={preview}
-          overrides={overrides}
-          busy={busy}
-          error={error}
-          onToggleReject={toggleReject}
-          onChooseRetire={chooseRetire}
-          onApply={onApply}
-          onCancel={onCancel}
-        />
-      ) : null}
-
       <QueuePanel
         state={state}
         busy={busy}
@@ -349,15 +341,38 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
             if (r.ok)
               setToast(
                 r.applied
-                  ? `${r.promoted} previously-unresolved card(s) resolved — ready to place.`
-                  : "No unresolved cards resolved yet.",
+                  ? `${r.promoted} card(s) matched — ready to place.`
+                  : "Still waiting — none of these are in the catalog yet.",
               );
             return r;
           })
         }
         onMatch={setMatching}
         onDismiss={(id) => run("Dismissed.", () => dismissEntryAction(id))}
-        onUndismiss={(id) => run("Back in the queue.", () => undismissEntryAction(id))}
+        onUndismiss={(id) => run("Back in the list.", () => undismissEntryAction(id))}
+      />
+
+      {/* Routine status and rarely-needed tools: quiet, at the bottom, folded until asked for. */}
+      {state.countCheck.status !== "mismatch" ? <CountCheckPanel check={state.countCheck} /> : null}
+
+      <RemovedCardsPanel
+        removed={state.removed}
+        busy={busy}
+        onAddBack={(card) =>
+          run(null, async () => {
+            const r = await restoreRemovedAction(card.catalogCardId, card.dexVariantRaw);
+            if (r.ok) {
+              setToast(
+                r.alreadyRestored
+                  ? "Already added back."
+                  : r.restored > 0
+                    ? `Added back ${r.restored} ${card.name}. Ready to place.`
+                    : "Nothing to add back: your Dex file no longer lists it.",
+              );
+            }
+            return r;
+          })
+        }
       />
 
       <AliasPanel
@@ -380,6 +395,7 @@ export function SyncScreen({ initialState }: { initialState: SyncState }) {
       {matching ? (
         <MatchOverlay
           entry={matching}
+          aliasNote={aliasNote(state.aliases, matching)}
           cardTypes={state.cardTypes}
           onClose={() => setMatching(null)}
           onStandIn={async (input) => {
@@ -696,7 +712,7 @@ export function PreviewPanel({
 
       {sections.removals.length > 0 ? (
         <section>
-          <div className="hd u">Removals · highest risk</div>
+          <div className="hd u">Leaving your collection · check these</div>
           <div style={{ display: "grid", gap: 8 }}>
             {sections.removals.map((r) => {
               const opts = preview.retireOptions[r.presenceKey] ?? [];
@@ -764,7 +780,7 @@ export function PreviewPanel({
 
       {sections.variantChanges.length > 0 ? (
         <section>
-          <div className="hd u">Variant changes · placement preserved</div>
+          <div className="hd u">Variant changes · stays in its pocket</div>
           <div style={{ display: "grid", gap: 8 }}>
             {sections.variantChanges.map((v) => {
               const isRejected = rejected.has(v.migrationKey);
@@ -797,7 +813,8 @@ export function PreviewPanel({
                       </div>
                       {isRejected ? (
                         <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 4 }}>
-                          REJECTED — will be a real remove + a real add; placement released.
+                          Treated as a different card: the old one is removed and this one is added
+                          new, so its pocket is freed.
                         </div>
                       ) : null}
                     </div>
@@ -819,7 +836,7 @@ export function PreviewPanel({
 
       {sections.additions.length > 0 ? (
         <section>
-          <div className="hd u">Additions · headed to the cascade unplaced</div>
+          <div className="hd u">New cards · ready to place after you apply</div>
           <div style={{ display: "grid", gap: 6 }}>
             {sections.additions.map((a) => (
               <div
@@ -846,11 +863,11 @@ export function PreviewPanel({
 
       {sections.unresolved.newParks.length > 0 || sections.unresolved.stillWaiting > 0 ? (
         <section>
-          <div className="hd u">Unresolved · waiting on catalog</div>
+          <div className="hd u">Not matched yet</div>
           <div style={{ fontSize: 11, color: "var(--ink-2)" }}>
-            {sections.unresolved.newParks.length} newly parked · {sections.unresolved.stillWaiting}{" "}
-            waiting total. These are safe — nothing is lost; they resolve automatically once the
-            card is in the catalog.
+            {sections.unresolved.newParks.length} new from this import ·{" "}
+            {sections.unresolved.stillWaiting} waiting in total. Nothing is lost: they are listed
+            under Cards to match below and match on their own once the card is in the catalog.
           </div>
         </section>
       ) : null}
@@ -882,6 +899,11 @@ export function PreviewPanel({
   );
 }
 
+/**
+ * Cards from her export the app could not match yet. The healthy state is one quiet line. When there are some, the
+ * ones she can act on ("Needs your match") come first; the ones that fix themselves ("Waiting on catalog") come
+ * second and say so; dismissed rows are folded away.
+ */
 function QueuePanel({
   state,
   busy,
@@ -899,52 +921,58 @@ function QueuePanel({
 }) {
   if (!state) return null;
   const { waiting, dismissed, counts } = state;
-  const empty = counts.waiting === 0 && counts.dismissed === 0;
-  // "Needs your match" means the set IS known. When that is only because of a learned alias, say which
-  // one — that alias is the thing to forget if the set was taught wrong (UIL-047 C3).
-  const aliasByKey = new Map(state.aliases.map((a) => [aliasKeyOf(a), a]));
-  const aliasHint = (e: QueueEntryView): string | null => {
-    const a = aliasByKey.get(e.aliasKey);
-    return a ? `set known through the learned alias ${a.dexCode} → ${a.tcgdexSetId}` : null;
-  };
+  const needs = waiting.unknownCard.length;
+  const parked = waiting.unknownSet.length;
+  if (counts.waiting === 0 && dismissed.length === 0) {
+    return (
+      <div className="panel" style={{ padding: 12, fontSize: 12 }} data-testid="queue-empty">
+        <b>✓ Every card in your export is matched.</b>
+      </div>
+    );
+  }
+  const headline = [
+    needs > 0 ? `${needs} need${needs === 1 ? "s" : ""} your match` : null,
+    parked > 0 ? `${parked} waiting on the catalog` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <div className="panel" style={{ padding: 16, display: "grid", gap: 14 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <span className="tag">UNRESOLVED QUEUE</span>
+        <span className="tag">CARDS TO MATCH</span>
         <span style={{ fontSize: 11, color: "var(--ink-2)", flex: 1 }}>
-          {counts.waiting} waiting on catalog
+          {headline || "Nothing waiting"}
         </span>
-        <button type="button" className="btn sm" disabled={busy} onClick={onRetry}>
-          Retry now
-        </button>
+        {counts.waiting > 0 ? (
+          <button type="button" className="btn sm" disabled={busy} onClick={onRetry}>
+            Check again
+          </button>
+        ) : null}
       </div>
 
-      {empty ? (
-        <div style={{ fontSize: 11, color: "var(--ink-2)" }}>
-          Nothing waiting. This is the healthy, normal state.
-        </div>
-      ) : null}
-
+      <QueueGroup
+        title="Needs your match"
+        note="The set is known, but this card was not found in it. Pick the right card."
+        entries={waiting.unknownCard}
+        busy={busy}
+        onMatch={onMatch}
+        onDismiss={onDismiss}
+      />
       <QueueGroup
         title="Waiting on catalog"
+        note="This set is not in the catalog yet. These match on their own once it is. Nothing is lost."
         entries={waiting.unknownSet}
         busy={busy}
         onMatch={onMatch}
         onDismiss={onDismiss}
       />
-      <QueueGroup
-        title="Needs your match"
-        entries={waiting.unknownCard}
-        busy={busy}
-        hint={aliasHint}
-        onMatch={onMatch}
-        onDismiss={onDismiss}
-      />
 
       {dismissed.length > 0 ? (
-        <section>
-          <div className="hd u">Dismissed</div>
-          <div style={{ display: "grid", gap: 6 }}>
+        <details>
+          <summary style={{ cursor: "pointer", fontSize: 11 }}>
+            <b>Dismissed</b> ({dismissed.length}) — left out of your collection.
+          </summary>
+          <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
             {dismissed.map((e) => (
               <div
                 key={e.id}
@@ -959,12 +987,12 @@ function QueuePanel({
                   disabled={busy}
                   onClick={() => onUndismiss(e.id)}
                 >
-                  Un-dismiss
+                  Bring back
                 </button>
               </div>
             ))}
           </div>
-        </section>
+        </details>
       ) : null}
     </div>
   );
@@ -972,17 +1000,17 @@ function QueuePanel({
 
 function QueueGroup({
   title,
+  note,
   entries,
   busy,
-  hint,
   onMatch,
   onDismiss,
 }: {
   title: string;
+  /** One plain line: what this group means and whether she needs to do anything. */
+  note: string;
   entries: QueueEntryView[];
   busy: boolean;
-  /** An optional one-line note under an entry (e.g. which learned alias its set came from). */
-  hint?: (e: QueueEntryView) => string | null;
   onMatch: (e: QueueEntryView) => void;
   onDismiss: (id: string) => void;
 }) {
@@ -992,6 +1020,7 @@ function QueueGroup({
       <div className="hd u">
         {title} · {entries.length}
       </div>
+      <p style={{ fontSize: 11, color: "var(--ink-2)", margin: "0 0 8px" }}>{note}</p>
       <div style={{ display: "grid", gap: 8 }}>
         {entries.map((e) => (
           <div key={e.id} className="plate" style={{ padding: 10 }}>
@@ -1005,9 +1034,6 @@ function QueueGroup({
                   {e.dexSetName} · {e.dexVariantRaw} · ×{e.quantity} · waited{" "}
                   {waited(e.firstSeenSync)}
                 </div>
-                {hint?.(e) ? (
-                  <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 4 }}>{hint(e)}</div>
-                ) : null}
               </div>
               <button type="button" className="btn sm" disabled={busy} onClick={() => onMatch(e)}>
                 Match manually
@@ -1029,11 +1055,11 @@ function QueueGroup({
 }
 
 /**
- * Learned set aliases (UIL-047 C3, second half). Each row is one `(locale, code) → set` the app has been
- * taught; every card from that Dex set resolves through it. Forgetting is two-step and inline: the first
- * tap opens the consequences UNDER the row (how many queue entries change, what does not change, what
- * the next import will do), the second tap forgets. Nothing is gated silently and nothing happens
- * without the condition being named first.
+ * Learned set aliases (UIL-047 C3, second half) — an edge-case tool, so it lives folded under "Advanced" at the
+ * bottom of the page and is absent until something has been learned. Each row is one `(locale, code) → set` the app
+ * has been taught; every card from that Dex set resolves through it. Forgetting is two-step and inline: the first
+ * tap opens the consequences UNDER the row, the second tap forgets. Nothing happens without the condition being
+ * named first.
  */
 function AliasPanel({
   aliases,
@@ -1045,21 +1071,22 @@ function AliasPanel({
   onForget: (a: LearnedAliasView) => void;
 }) {
   const [confirming, setConfirming] = useState<string | null>(null);
+  if (aliases.length === 0) return null;
   return (
-    <div className="panel" style={{ padding: 16, display: "grid", gap: 14 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <span className="tag">LEARNED SET ALIASES</span>
-        <span style={{ fontSize: 11, color: "var(--ink-2)", flex: 1 }}>
-          {aliases.length} learned · a Dex set code the app reads as one TCGdex set. Every card from
-          that set resolves through it, so a wrong one mis-files the whole set.
-        </span>
-      </div>
-
-      {aliases.length === 0 ? (
-        <div style={{ fontSize: 11, color: "var(--ink-2)" }}>
-          Nothing learned yet. Matching a card whose set is unknown teaches one.
+    <details className="panel" style={{ padding: 12, fontSize: 12 }} data-testid="sync-advanced">
+      <summary style={{ cursor: "pointer" }}>
+        <b>Advanced</b> · set codes the app has learned ({aliases.length})
+      </summary>
+      <div style={{ display: "grid", gap: 12, marginTop: 10 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="tag">LEARNED SET ALIASES</span>
+          <span style={{ fontSize: 11, color: "var(--ink-2)", flex: 1 }}>
+            {aliases.length} learned · a Dex set code the app reads as one catalog set. You only
+            need this if a whole set is landing on the wrong cards: forget its code here, then match
+            one of its cards by hand.
+          </span>
         </div>
-      ) : (
+
         <div style={{ display: "grid", gap: 8 }}>
           {aliases.map((a) => {
             const key = aliasKeyOf(a);
@@ -1142,19 +1169,22 @@ function AliasPanel({
             );
           })}
         </div>
-      )}
-    </div>
+      </div>
+    </details>
   );
 }
 
 export function MatchOverlay({
   entry,
+  aliasNote,
   cardTypes,
   onClose,
   onPicked,
   onStandIn,
 }: {
   entry: QueueEntryView;
+  /** Which learned set alias this entry's set rests on, if any (UIL-047 C3): the thing to forget if it is wrong. */
+  aliasNote?: string | null;
   /** Every card type the band map knows — the Pokémon stand-in's type pick (UIL-060). */
   cardTypes: string[];
   onClose: () => void;
@@ -1183,9 +1213,15 @@ export function MatchOverlay({
             {entry.dexSetName} · #{entry.dexNumber} · {entry.dexVariantRaw} · ×{entry.quantity}
           </div>
           <p style={{ fontSize: 11, color: "var(--ink-2)" }}>
-            Pin this to the real catalog card. Matching a card whose set is unknown teaches the app
-            that set, so the rest of it drains on the next retry.
+            Search for the real card and tap it. If its set was unknown, the app learns the set and
+            the rest of that set matches on the next check.
           </p>
+          {aliasNote ? (
+            <p style={{ fontSize: 10, color: "var(--ink-3)" }}>
+              {aliasNote}. If that set is wrong, forget it under Advanced at the bottom of the Sync
+              page.
+            </p>
+          ) : null}
           <CardResultsGrid
             search={searchCatalog}
             onPick={(card) => onPicked(card.tcgdexId)}

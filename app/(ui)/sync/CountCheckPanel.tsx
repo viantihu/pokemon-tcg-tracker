@@ -23,7 +23,11 @@ function detail(m: NamedCountMismatch): string {
 export function CountCheckPanel({ check }: { check: CountCheckView }) {
   if (check.status === "none") {
     return (
-      <div className="panel" style={{ padding: 12, fontSize: 12 }} data-testid="count-check">
+      <div
+        className="panel"
+        style={{ padding: 12, fontSize: 12, color: "var(--ink-2)" }}
+        data-testid="count-check"
+      >
         <b>Count check:</b> starts at your next import. Re-import your Dex file once to turn it on;
         from then on every import, match and undo is checked against it.
       </div>
@@ -40,9 +44,12 @@ export function CountCheckPanel({ check }: { check: CountCheckView }) {
 
   if (check.status === "ok") {
     return (
-      <div className="panel" style={{ padding: 12, fontSize: 12 }} data-testid="count-check">
-        <b>Your collection adds up to your Dex file.</b> {sum}.
-      </div>
+      <details className="panel" style={{ padding: 12, fontSize: 12 }} data-testid="count-check">
+        <summary style={{ cursor: "pointer" }}>
+          <b>✓ Your collection adds up to your Dex file.</b>
+        </summary>
+        <div style={{ marginTop: 8, color: "var(--ink-2)" }}>{sum}.</div>
+      </details>
     );
   }
 
