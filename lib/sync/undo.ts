@@ -26,6 +26,11 @@ export interface SnapshotCopy {
   color_band: string | null;
   line_slot_id: string | null;
   created_at: string;
+  /**
+   * The bulk box a retired BULK copy was in (UIL-140), so Undo puts it back in that box rather than her default
+   * one. Absent on snapshots written before UIL-140: Undo then restores it as it always did (her default box).
+   */
+  bulk_unit_id?: string | null;
 }
 
 /** A line slot's fill state before a retire freed it (state → placeholder, copy_id → null). */

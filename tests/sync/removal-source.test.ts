@@ -95,7 +95,11 @@ async function shelve(id: string) {
 }
 /** Put one copy in a bulk box, with the decision that sent it there (a routed duplicate). */
 async function toBulk(id: string, box: string | null = null) {
-  await q(`update copy set role = 'bulk', bulk_unit_id = $1 where id = $2`, [box, id]);
+  await q(
+    `update copy set role = 'bulk', bulk_unit_id = $1, binder_id = null, binder_half = null,
+       color_band = null, line_slot_id = null where id = $2`,
+    [box, id],
+  );
   await q(
     `insert into placement_decision (owner_id, copy_id, decision, reason, resolved_by)
        values ($1, $2, 'BULK', 'test', 'auto')`,
@@ -459,6 +463,34 @@ describe("Undo puts a pulled card back in its box", () => {
     expect(await q(`select id from copy where line_slot_id = $1`, [S0]).then((r) => r.length)).toBe(
       1,
     );
+  });
+
+  it("a card she says left from her KB-2 box comes back to KB-2, not her default box", async () => {
+    await addBox2();
+    const [binder, bulk] = await binderAndBulk(BOX2);
+    const run = await runSyncPipeline(client(), bytes(row(PIKACHU, "062", "Pikachu", 1)));
+    await executeApply(client(), run.bundle, OWNER, pickWhere(run.preview, {}, KEY, 0, bulk));
+    expect((await copies()).map((c) => c.id)).toEqual([binder]);
+
+    await executeUndo(client());
+    expect((await copies()).find((c) => c.id === bulk)).toMatchObject({
+      role: "bulk",
+      bulk_unit_id: BOX2,
+    });
+    // Back in its box, not back in the Haul Plan.
+    expect(await loadPendingPlacements(client())).toEqual([]);
+  });
+
+  it("…even when KB-2 has filled up since", async () => {
+    await addBox2(1);
+    const [binder, bulk] = await binderAndBulk(BOX2);
+    const run = await runSyncPipeline(client(), bytes(row(PIKACHU, "062", "Pikachu", 1)));
+    await executeApply(client(), run.bundle, OWNER, pickWhere(run.preview, {}, KEY, 0, bulk));
+    // Another card takes KB-2's only place (a move, not a sync, so this sync is still the one Undo reverses).
+    await toBulk(binder, BOX2);
+
+    await executeUndo(client());
+    expect((await copies()).find((c) => c.id === bulk)).toMatchObject({ bulk_unit_id: BOX2 });
   });
 
   it("an Undo with no pull behaves exactly as before", async () => {
