@@ -9784,9 +9784,17 @@ for lost calls), UIL-136 (the other way an import looked like it had failed on t
   silently ignored (count mismatch). Choices are now per copy, must be distinct, and never name a copy a variant
   migration carries.
 
-**Known, not changed here.** Undo re-inserts a retired BULK copy without its box (`insert_copy` carries no
-`bulk_unit_id`), so it lands in her default box. Pre-existing; now more visible because "it left the bulk box"
-is an answer she gives. A binder-block copy that leaves is still flagged for review and offered no refill.
+**Follow-up (2026-11-11, Karvi's ruling: "Undo sync should undo all actions that occurred during that sync").**
+Undo re-inserted a retired BULK copy without its box (`insert_copy` carries no `bulk_unit_id`), so it landed in
+her default box. Fixed: the snapshot records the box, and Undo re-inserts the copy into it (her default box only
+if that box was deleted; a box filled since takes it as a recorded `bulk_box_full` override). Snapshots written
+before this restore as they always did. A binder-block copy that leaves is still flagged for review and offered
+no refill.
+
+Her location model, as ruled the same day: a card is in exactly one of the Haul Plan (a holding spot, not
+storage: anything not in a binder or bulk box is here), a binder, or a bulk box; a card reaches a binder or a box
+only through the Haul Plan. Undo puts back every location the sync changed, including a pulled card she has since
+shelved; the next sync handles the trade again.
 
 **Proof.** `tests/sync/removal-source.test.ts`, 21 scenarios on real PGlite through the real pipeline, apply,
 Undo and Haul Plan queue (one copy / all leaving / same place: not asked; refusal writes nothing; two leaving at

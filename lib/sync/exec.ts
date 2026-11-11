@@ -118,6 +118,7 @@ function toSnapshotCopy(c: Row<"copy">): SnapshotCopy {
     color_band: c.color_band,
     line_slot_id: c.line_slot_id,
     created_at: c.created_at,
+    bulk_unit_id: c.bulk_unit_id,
   };
 }
 
@@ -882,8 +883,36 @@ export async function executeUndo(db: DbClient): Promise<UndoResult> {
     }
   }
 
-  // Bring retired copies back (with placement), then re-point their freed slots.
-  for (const c of undo.reinsertCopies) ops.push(reinsertCopyOp(c));
+  /**
+   * Bring retired copies back (with placement), then re-point their freed slots.
+   *
+   * A BULK copy goes back in ITS box (UIL-140; Karvi: "Undo sync should undo all actions that occurred during
+   * that sync"). `insert_copy` cannot name a box, so it is re-inserted waiting in the haul — no box, no room check
+   * — and moved into its box in the same transaction, recorded with a decision. Its own box takes it even if it
+   * has filled since (a recorded `bulk_box_full` override, 0037): the card is physically going back where it was.
+   * A box she has deleted since: her default box. A snapshot from before UIL-140 carries no box: as before.
+   */
+  let boxNames: Map<string, string> | null = null;
+  for (const c of undo.reinsertCopies) {
+    if (c.role !== "bulk" || c.bulk_unit_id === undefined) {
+      ops.push(reinsertCopyOp(c));
+      continue;
+    }
+    boxNames ??= new Map((await bulkUnitRepo.listOrdered(db)).map((u) => [u.id, u.name]));
+    const box = c.bulk_unit_id && boxNames.has(c.bulk_unit_id) ? c.bulk_unit_id : null;
+    ops.push(reinsertCopyOp({ ...c, role: "haul" }));
+    ops.push({ op: "update_copy", id: c.id, patch: { role: "bulk", bulk_unit_id: box } });
+    ops.push({
+      op: "insert_decision",
+      haul_id: null,
+      copy_id: c.id,
+      decision: BULK_RETURN_DECISION,
+      reason: `Sync undone: back in ${(box && boxNames.get(box)) || "your bulk box"}.`,
+      resolved_by: "user",
+      overrides: ["bulk_box_full"],
+    });
+    pullOverrides.push("bulk_box_full");
+  }
   for (const s of undo.restoreSlots) {
     ops.push({ op: "update_slot", id: s.id, patch: { state: s.state, copy_id: s.copy_id } });
   }
