@@ -56,15 +56,15 @@ describe("localId padding helpers", () => {
 
 describe("resolveSetId", () => {
   it("applies the verified me* set-code drift", () => {
-    expect(resolveSetId("en", "me2")).toEqual({ setId: "me02", aliased: true });
+    expect(resolveSetId("en", "me2")).toEqual({ setId: "me02", aliased: true, learned: false });
     // me25 -> me02.5 is a DECIMAL, not a zero-pad. The single most important alias.
-    expect(resolveSetId("en", "me25")).toEqual({ setId: "me02.5", aliased: true });
+    expect(resolveSetId("en", "me25")).toEqual({ setId: "me02.5", aliased: true, learned: false });
   });
 
   it("passes unknown set codes through unchanged for name-based resolution", () => {
-    expect(resolveSetId("en", "sv10")).toEqual({ setId: "sv10", aliased: false });
+    expect(resolveSetId("en", "sv10")).toEqual({ setId: "sv10", aliased: false, learned: false });
     // UIL-047: a Japanese passthrough is namespaced into the ja catalog space (0016).
-    expect(resolveSetId("ja", "mc")).toEqual({ setId: "ja:mc", aliased: false });
+    expect(resolveSetId("ja", "mc")).toEqual({ setId: "ja:mc", aliased: false, learned: false });
   });
 });
 
@@ -76,6 +76,7 @@ describe("resolveDexId (end-to-end deterministic resolve)", () => {
       rawCode: "sv10",
       setId: "sv10",
       aliased: false,
+      learned: false,
       localIdCandidates: ["103"],
     });
   });
@@ -86,6 +87,7 @@ describe("resolveDexId (end-to-end deterministic resolve)", () => {
       rawCode: "me25",
       setId: "me02.5",
       aliased: true,
+      learned: false,
       localIdCandidates: ["20", "020"],
     });
   });
@@ -97,6 +99,7 @@ describe("resolveDexId (end-to-end deterministic resolve)", () => {
       rawCode: "sv11w",
       setId: "ja:sv11w", // UIL-047: the ja catalog space, never the English `sv11w`
       aliased: false,
+      learned: false,
       localIdCandidates: ["2", "002"],
     });
   });
@@ -108,6 +111,7 @@ describe("resolveDexId (end-to-end deterministic resolve)", () => {
       rawCode: "me2",
       setId: "me02",
       aliased: true,
+      learned: false,
       localIdCandidates: ["112"],
     });
   });

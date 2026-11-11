@@ -31,8 +31,8 @@ const A = (qty: number) => row("Obsidian Flames", "sv03-026", "026", "Charmander
 /** The set resolves by name, the card does not: parks UNKNOWN_CARD, for her to match. */
 const X = row("Ancient Origins", "xy7-91", "91", "Mystery X", 1);
 const Y = row("Ancient Origins", "xy7-92", "92", "Mystery Y", 1);
-const S1 = row("Mystery Set", "zz1-12", "12", "Unknown Twelve", 1);
-const S2 = row("Mystery Set", "zz1-13", "13", "Unknown Thirteen", 1);
+const S1 = row("Mystery Set", "zz1-12", "12", "Card Twelve", 1);
+const S2 = row("Mystery Set", "zz1-13", "13", "Card Thirteen", 1);
 const R1 = row("Ancient Origins", "xy7-12", "12", "Card Twelve", 1);
 const bytes = (rows: string[]) =>
   Uint8Array.from([0xff, 0xfe, ...Buffer.from(`${HEADER}\n${rows.join("\n")}\n`, "utf16le")]);
