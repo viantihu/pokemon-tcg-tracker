@@ -25,8 +25,7 @@ export function RemovedCardsPanel({
   return (
     <details className="panel" style={{ padding: 12, fontSize: 12 }} data-testid="removed-cards">
       <summary style={{ cursor: "pointer" }}>
-        <b>Cards you removed</b> ({removed.reduce((n, c) => n + c.count, 0)}) — still in your Dex
-        file, so each import leaves them out. Add one back if it was removed by mistake.
+        <b>Cards you removed</b> ({removed.reduce((n, c) => n + c.count, 0)})
       </summary>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 10 }}>
         {removed.map((c) => (
