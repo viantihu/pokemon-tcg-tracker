@@ -65,6 +65,8 @@ export type Database = {
           locale: string;
           set_card_count_official: number | null;
           set_release_date: string | null;
+          /** 0042: stand-ins only — the real cards shown when she kept it; null = never kept. */
+          stand_in_kept_candidate_ids: string[] | null;
         };
         Insert: {
           tcgdex_id: string;
@@ -94,6 +96,7 @@ export type Database = {
           locale?: string;
           set_card_count_official?: number | null;
           set_release_date?: string | null;
+          stand_in_kept_candidate_ids?: string[] | null;
         };
         Update: {
           tcgdex_id?: string;
@@ -123,6 +126,7 @@ export type Database = {
           locale?: string;
           set_card_count_official?: number | null;
           set_release_date?: string | null;
+          stand_in_kept_candidate_ids?: string[] | null;
         };
         Relationships: [];
       };

@@ -2,9 +2,8 @@
 /**
  * UIL-060 Half 2, the screen half — driven through the REAL SyncScreen in a DOM.
  *
- * A stand-in swapped on load is named, and stays named until she says OK (a later load finds nothing to swap, so it
- * must not wipe the notice). An unsure stand-in shows the real cards it might be; "Swap for this card" swaps THAT
- * pair. A swap the database refused shows why and offers no button.
+ * A stand-in swapped on load is named until she says OK. An unsure stand-in says what it touches (copies and where),
+ * and offers four ways out: a suggestion (confirmed first), a catalog search, a fix, or keeping it as a stand-in.
  */
 import { createElement } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -34,6 +33,9 @@ vi.mock("@/app/(ui)/sync/actions", () => ({
   retryUnresolvedNow: vi.fn(),
   searchCatalog: vi.fn(async () => []),
   swapStandInAction: vi.fn(),
+  fixStandInAction: vi.fn(),
+  keepStandInAction: vi.fn(),
+  reviewStandInAgainAction: vi.fn(),
   undismissEntryAction: vi.fn(),
   undoLastSync: vi.fn(),
 }));
@@ -68,7 +70,9 @@ function state(standIns: SyncState["standIns"]): SyncState {
 }
 
 const m = vi.mocked(actions);
-const EMPTY = state({ swapped: [], unsure: [] });
+const EMPTY = state({ swapped: [], unsure: [], kept: [] });
+const HELD = { count: 2, where: [{ label: "KB-001 · Front · Red", count: 2 }] };
+const NONE_HELD = { count: 0, where: [] };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -76,65 +80,165 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("UIL-060 Half 2 · the Sync screen shows stand-in swaps", () => {
+describe("UIL-060 Half 2 · the Sync screen settles stand-ins", () => {
   it("shows nothing when there is nothing to say", () => {
     render(createElement(SyncScreen, { initialState: EMPTY }));
     expect(screen.queryByText(/stand-in/i)).toBeNull();
   });
 
-  it("names a swap made on load, keeps it across a reload, and lets her dismiss it", async () => {
-    m.swapStandInAction.mockResolvedValue({ ok: true });
+  it("names a swap made on load and lets her dismiss it", async () => {
     const user = userEvent.setup();
-    const other = { ...STAND_IN, id: "user:en:11111111-1111-4111-8111-111111111111" };
     render(
       createElement(SyncScreen, {
-        initialState: state({
-          swapped: [{ standIn: STAND_IN, real: REAL }],
-          unsure: [{ standIn: other, candidates: [REAL] }],
-        }),
+        initialState: state({ swapped: [{ standIn: STAND_IN, real: REAL }], unsure: [], kept: [] }),
       }),
     );
     const notice = screen.getByText(/swapped for the real card/).closest("section");
     expect(notice?.textContent).toContain("Fuecoco ex · 30th Celebration · #015");
-
-    // Any action reloads the state; that load swaps nothing, and the notice stays.
-    await user.click(screen.getByRole("button", { name: "Swap for this card" }));
-    expect(await screen.findByText("Swapped your stand-in for the real card.")).toBeTruthy();
-    expect(screen.getByText(/swapped for the real card\./)).toBeTruthy();
-
     await user.click(screen.getByRole("button", { name: "OK" }));
     expect(screen.queryByText(/swapped for the real card/)).toBeNull();
   });
 
-  it("offers the candidates for an unsure stand-in and swaps the pair she picks", async () => {
-    m.swapStandInAction.mockResolvedValue({ ok: true });
-    const user = userEvent.setup();
-    render(
-      createElement(SyncScreen, {
-        initialState: state({ swapped: [], unsure: [{ standIn: STAND_IN, candidates: [REAL] }] }),
-      }),
-    );
-    expect(screen.getByText(/may now be in the catalog/)).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Swap for this card" }));
-    expect(m.swapStandInAction).toHaveBeenCalledWith(STAND_IN.id, REAL.id);
-    expect(await screen.findByText("Swapped your stand-in for the real card.")).toBeTruthy();
-    expect(m.loadSyncState).toHaveBeenCalled();
-  });
-
-  it("says why a swap was refused, and offers no button for it", () => {
+  it("says how many copies the stand-in holds and where, or that it holds none", () => {
+    const other = { ...STAND_IN, id: "user:en:11111111-1111-4111-8111-111111111111" };
     render(
       createElement(SyncScreen, {
         initialState: state({
           swapped: [],
           unsure: [
-            { standIn: STAND_IN, candidates: [REAL], blocked: "You already have the real card." },
+            { standIn: STAND_IN, held: HELD, candidates: [REAL] },
+            { standIn: other, held: NONE_HELD, candidates: [REAL] },
           ],
+          kept: [],
         }),
       }),
     );
-    expect(screen.getByText("You already have the real card.")).toBeTruthy();
+    const [first, second] = screen.getAllByTestId("stand-in-review");
+    expect(first.textContent).toContain("You have 2 copies: KB-001 · Front · Red");
+    expect(second.textContent).toContain("Not in your collection (0 copies).");
+  });
+
+  it("swaps a suggestion only after she confirms, naming the copies it moves", async () => {
+    m.swapStandInAction.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(
+      createElement(SyncScreen, {
+        initialState: state({
+          swapped: [],
+          unsure: [{ standIn: STAND_IN, held: HELD, candidates: [REAL] }],
+          kept: [],
+        }),
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "This is the card" }));
+    expect(m.swapStandInAction).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog").textContent).toContain(
+      "Your 2 copies will be filed as that card.",
+    );
+    await user.click(screen.getByRole("button", { name: "Swap" }));
+    expect(m.swapStandInAction).toHaveBeenCalledWith(STAND_IN.id, REAL.id);
+    expect(await screen.findByText("Swapped your stand-in for the real card.")).toBeTruthy();
+  });
+
+  it("finds another card in the catalog when every suggestion is wrong", async () => {
+    m.swapStandInAction.mockResolvedValue({ ok: true });
+    m.searchCatalog.mockResolvedValue([
+      {
+        tcgdexId: "30th-147",
+        name: "Fuecoco ex",
+        setId: "30th",
+        setName: "30th Celebration",
+        localId: "147",
+        imageUrl: null,
+      } as never,
+    ]);
+    const user = userEvent.setup();
+    render(
+      createElement(SyncScreen, {
+        initialState: state({
+          swapped: [],
+          unsure: [{ standIn: STAND_IN, held: HELD, candidates: [REAL] }],
+          kept: [],
+        }),
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Find the right card" }));
+    await user.type(screen.getByPlaceholderText("Find the real card…"), "fuecoco");
+    await user.click(await screen.findByText(/#147|147/, { selector: "button *, button" }));
+    await user.click(screen.getByRole("button", { name: "Swap" }));
+    expect(m.swapStandInAction).toHaveBeenCalledWith(STAND_IN.id, "30th-147");
+  });
+
+  it("fixes the stand-in she typed", async () => {
+    m.fixStandInAction.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    render(
+      createElement(SyncScreen, {
+        initialState: state({
+          swapped: [],
+          unsure: [{ standIn: STAND_IN, held: HELD, candidates: [REAL] }],
+          kept: [],
+        }),
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Fix the stand-in" }));
+    const set = screen.getByLabelText("Set");
+    await user.clear(set);
+    await user.type(set, "30th Celebration");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(m.fixStandInAction).toHaveBeenCalledWith(STAND_IN.id, {
+      name: "Fuecoco ex",
+      setName: "30th Celebration",
+      localId: "15/128",
+    });
+  });
+
+  it("leaves it as a stand-in, remembering the cards she was shown, and can ask again", async () => {
+    m.keepStandInAction.mockResolvedValue({ ok: true });
+    m.reviewStandInAgainAction.mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    const { unmount } = render(
+      createElement(SyncScreen, {
+        initialState: state({
+          swapped: [],
+          unsure: [{ standIn: STAND_IN, held: HELD, candidates: [REAL] }],
+          kept: [],
+        }),
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Leave it as a stand-in" }));
+    expect(m.keepStandInAction).toHaveBeenCalledWith(STAND_IN.id, [REAL.id]);
+    unmount();
+
+    render(
+      createElement(SyncScreen, {
+        initialState: state({ swapped: [], unsure: [], kept: [{ ...STAND_IN, held: HELD }] }),
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Ask me again" }));
+    expect(m.reviewStandInAgainAction).toHaveBeenCalledWith(STAND_IN.id);
+  });
+
+  it("says why a swap was refused, and offers no swap for it", () => {
+    render(
+      createElement(SyncScreen, {
+        initialState: state({
+          swapped: [],
+          unsure: [
+            {
+              standIn: STAND_IN,
+              held: HELD,
+              candidates: [REAL],
+              blocked: "Something went wrong.",
+            },
+          ],
+          kept: [],
+        }),
+      }),
+    );
+    expect(screen.getByText("Something went wrong.")).toBeTruthy();
     expect(
-      (screen.getByRole("button", { name: "Swap for this card" }) as HTMLButtonElement).disabled,
+      (screen.getByRole("button", { name: "This is the card" }) as HTMLButtonElement).disabled,
     ).toBe(true);
   });
 });

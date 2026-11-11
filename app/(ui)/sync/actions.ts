@@ -33,6 +33,9 @@ import {
   reconcileStandIns,
   StandInTwinError,
   swapStandInFor,
+  fixStandIn,
+  keepStandIn,
+  reviewStandInAgain,
 } from "@/lib/sync";
 import {
   applyWriteOps,
@@ -326,6 +329,47 @@ export async function swapStandInAction(
   try {
     const { db } = await getOwnerContext();
     await swapStandInFor(db, standInId, realId);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/** Her correction of a stand-in she typed wrong (name, set name, number). The screen reloads and matches it again. */
+export async function fixStandInAction(
+  standInId: string,
+  fix: { name: string; setName: string; localId: string },
+): Promise<{ ok: true } | ActionError> {
+  try {
+    const { db } = await getOwnerContext();
+    await fixStandIn(db, standInId, fix);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/** "Leave it as a stand-in": not asked about again until a candidate other than these appears (0042). */
+export async function keepStandInAction(
+  standInId: string,
+  candidateIds: string[],
+): Promise<{ ok: true } | ActionError> {
+  try {
+    const { db } = await getOwnerContext();
+    await keepStandIn(db, standInId, candidateIds);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) };
+  }
+}
+
+/** Ask about a kept stand-in again. */
+export async function reviewStandInAgainAction(
+  standInId: string,
+): Promise<{ ok: true } | ActionError> {
+  try {
+    const { db } = await getOwnerContext();
+    await reviewStandInAgain(db, standInId);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: errorMessage(err) };

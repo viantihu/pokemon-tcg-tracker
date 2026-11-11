@@ -164,11 +164,13 @@ export function printedSetSize(localId: string): number | null {
  *
  * Anything less is UNSURE, and weighs EVIDENCE rather than trusting any one thing she typed: a stand-in is made by
  * hand, so its name, set or number can each be the typo. What she typed gives three signals:
- *   SET    her set, a set whose name is close to hers, or a set whose printed size is the one after her "/";
+ *   SET    her set (its id when she has one, else its name), or a set whose printed size is the one after her "/";
  *   NAME   her card name;
  *   NUMBER her collector number.
  * A card is offered when the SET agrees and the NAME or the NUMBER does too, and the printed size does not contradict
- * it (her "/264" rules out a 128-card set). So:
+ * it (her "/264" rules out a 128-card set). A set whose name is only CLOSE to hers ("Celebrations") is weaker: it
+ * counts only beside her card name, and never when her stand-in carries a set id, which is exact — "Mega Evolution"
+ * #101 is not her "Mega Evolution Promos" #101. So:
  *   - "Hisuian Zorua 123/128" in 30th Celebration offers Hisuian Zoroark #123 (set, size and number agree; the name
  *     was the typo) and Hisuian Zorua #122 / #145 (set and name agree; the number was the typo);
  *   - "Mew VMAX 114/264" filed under 30th Celebration offers Fusion Strike's Mew VMAX #114 (its 264 cards are the
@@ -207,13 +209,12 @@ export function standInMatch(
 
   const scored = printings.flatMap((c, order) => {
     if (sizeContradicts(c)) return [];
-    const set =
-      isMySet(c) ||
-      (!!mySet && setNamesClose(setNameKey(c.setName), mySet)) ||
-      (size !== null && c.setCardCount === size);
     const name = cardNameKey(c.name) === myName;
     const number = hasMyNumber(c);
-    if (!set || (!name && !number)) return [];
+    const strongSet = isMySet(c) || (size !== null && c.setCardCount === size);
+    const closeSet =
+      !standIn.setId && !!mySet && name && setNamesClose(setNameKey(c.setName), mySet);
+    if (!(strongSet || closeSet) || (!name && !number)) return [];
     return [{ id: c.tcgdexId, score: 1 + Number(name) + Number(number), name, order }];
   });
   scored.sort((a, b) => b.score - a.score || Number(b.name) - Number(a.name) || a.order - b.order);
