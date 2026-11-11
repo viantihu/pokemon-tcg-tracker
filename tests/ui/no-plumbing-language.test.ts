@@ -84,7 +84,7 @@ describe("UIL-011 · every touched screen, non-comment source: no rendered strin
     expect(backfill).toContain("Could not find that species' evolution line.");
     // JSX text, so prettier may wrap it anywhere: match across whitespace.
     expect(sync).toMatch(
-      /they\s+resolve\s+automatically\s+once\s+the\s+card\s+is\s+in\s+the\s+catalog\./,
+      /match\s+on\s+their\s+own\s+once\s+the\s+card\s+is\s+in\s+the\s+catalog\./,
     );
     expect(coll).toContain("CSV EXPORTS BACK INTO DEX FOR SCANNING");
   });

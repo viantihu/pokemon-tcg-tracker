@@ -10,7 +10,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { SyncScreen } from "@/app/(ui)/sync/SyncScreen";
+import { MatchOverlay, SyncScreen, aliasNote } from "@/app/(ui)/sync/SyncScreen";
 import type { QueueEntryView, SyncState } from "@/app/(ui)/sync/sync-types";
 import { emptyCountCheck } from "@/lib/sync/count-check";
 
@@ -107,17 +107,35 @@ describe("UIL-047 C3 · learned aliases are visible and forgettable from the Syn
     expect(html).not.toContain("Forget alias");
   });
 
-  it("marks exactly the 'needs your match' entries whose set rests on a learned alias", () => {
+  it("keeps the alias out of the main list, and names it in the match sheet of exactly the entry it touches", () => {
     const html = render(LIVE);
-    const hint = "set known through the learned alias m6 → swshp";
-    expect(html.split(hint).length - 1).toBe(1);
-    // The Minior entry (en:sv04, no learned alias) gets no hint at all.
-    expect(html).not.toContain("learned alias sv04");
+    // The main list carries no alias jargon; the aliases live folded under Advanced.
+    expect(html).not.toContain("set known through the learned alias");
+    expect(html).toContain('data-testid="sync-advanced"');
+    expect(html).not.toMatch(/<details[^>]*data-testid="sync-advanced"[^>]*open/);
+    const [underAlias, notLearned] = LIVE.waiting.unknownCard;
+    expect(aliasNote(LIVE.aliases, underAlias)).toBe(
+      "set known through the learned alias m6 → swshp",
+    );
+    // The Minior entry (en:sv04, no learned alias) gets no note at all.
+    expect(aliasNote(LIVE.aliases, notLearned)).toBeNull();
+    const sheet = renderToStaticMarkup(
+      createElement(MatchOverlay, {
+        entry: underAlias,
+        aliasNote: aliasNote(LIVE.aliases, underAlias),
+        cardTypes: [],
+        onClose: () => {},
+        onPicked: () => {},
+        onStandIn: async () => ({ ok: true }) as never,
+      }),
+    );
+    expect(sheet).toContain("set known through the learned alias m6 → swshp");
+    expect(sheet).toContain("forget it under Advanced");
   });
 
-  it("says so plainly when nothing has been learned", () => {
+  it("shows no Advanced section at all when nothing has been learned", () => {
     const html = render(state({}));
-    expect(html).toContain("Nothing learned yet");
+    expect(html).not.toContain("LEARNED SET ALIASES");
     expect(html).not.toContain("Forget…");
   });
 });
