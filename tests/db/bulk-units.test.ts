@@ -495,6 +495,9 @@ describe("0035 · every writer of a bulk copy is on the list above (a new one mu
     "lib/line/line-choice.ts":
       "the line builder: a spare card coming out of the pocket a card takes",
     "lib/backfill/context.ts": "not a write: the shared rule's view of a bulk copy",
+    "lib/sync/exec.ts":
+      "executeUndo: a card pulled from bulk goes back in its box (UIL-140; its own box, the default if gone, " +
+      "a full box by override — tested in tests/sync/removal-source.test.ts)",
   };
   const files = (dir: string): string[] =>
     readdirSync(dir).flatMap((f) => {
