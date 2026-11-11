@@ -709,6 +709,12 @@ export function LineScreen() {
   );
 }
 
+const UNLINED_HINT_STYLE: React.CSSProperties = {
+  fontSize: 12,
+  color: "var(--ink-2)",
+  margin: "0 0 4px",
+};
+
 /**
  * Shelved cards with no line yet (UIL-056) — the way OFF the front half her UAT report was missing.
  * Nothing to show is the common case (most shelved cards are already lined or have no line
@@ -735,6 +741,7 @@ function UnlinedCardsPanel({
       {stranded.length > 0 ? (
         <div className="box panel" style={{ gridColumn: "1 / -1" }}>
           <div className="k u">STRANDED IN THE BACK HALF · {stranded.length}</div>
+          <p style={UNLINED_HINT_STYLE}>Move to start or join a line.</p>
           <UnlinedCardGrid cards={stranded} onMove={onMove} />
         </div>
       ) : null}
@@ -743,6 +750,7 @@ function UnlinedCardsPanel({
           <summary className="k u" style={{ cursor: "pointer" }}>
             OTHER UNLINED CARDS (FRONT HALF) · {rest.length}
           </summary>
+          <p style={UNLINED_HINT_STYLE}>Move to start or join a line.</p>
           <UnlinedCardGrid cards={rest} onMove={onMove} />
         </details>
       ) : null}
@@ -758,9 +766,17 @@ function UnlinedCardGrid({
   onMove: (card: UnlinedCard) => void;
 }) {
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 8 }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+        gap: 16,
+        marginTop: 10,
+      }}
+    >
       {cards.map((c) => (
-        <div key={c.copyId} className="hand" style={{ minWidth: 160 }}>
+        // `.hand` carries its own bottom margin; zero it so the grid gap is the only spacing.
+        <div key={c.copyId} className="hand" style={{ margin: 0 }}>
           <CardFace
             name={c.card.name}
             tcgdexId={c.card.tcgdexId}
