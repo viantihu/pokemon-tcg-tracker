@@ -9,9 +9,10 @@
  * line's status follows her choices (`lineStatusOf`). PURE: the caller reads the state and applies the writes.
  */
 
-import { buildChain, type CatalogCard, type TypeColorMap } from "@/lib/engine";
+import type { CatalogCard, TypeColorMap } from "@/lib/engine";
 import { localeOfId } from "@/lib/catalog/locale";
 import type { Row, WriteOp } from "@/lib/repo";
+import { knownStageCards, lineChain } from "./line-chain";
 import { stageStateFor, typeOfBand } from "./line-choice";
 import { fillerReturnedDecision, returnDestination } from "./overrides";
 import { lineReadsClosed, lineStatusOf, type StageDecision, type ThirdPocketChoice } from "./popup";
@@ -28,6 +29,11 @@ export interface DecideStagesChoice {
   lineId: string;
   stages: Record<number, StageDecision>;
   thirdPocket?: ThirdPocketChoice;
+  /**
+   * #493: the species she picked where the line's chain branches (Gloom → Vileplume or Bellossom), when a stage she
+   * decides lies past the branch. Checked against the species the line can really follow there.
+   */
+  branchDexId?: number;
   /**
    * UIL-130: the box a spare card coming out of its pocket goes back to, by copy id, when she picked one (its home
    * box is full). Absent: it goes back to its home box.
@@ -53,6 +59,7 @@ export interface DecideStagesState {
 export const DECIDE_REFUSAL = {
   filled: "That stage already holds a card. Move or replace the card instead.",
   noStage: "That line has no such stage any more. Reload and choose again.",
+  branch: "Pick which way this line evolves before choosing for that stage.",
 } as const;
 
 /** A copy out of a pocket, back to her bulk box: the box she picked, else its home box (UIL-130). */
@@ -96,10 +103,17 @@ export function buildDecideStagesOps(st: DecideStagesState, choice: DecideStages
       .map((s) => (s.copy_id ? st.copiesById.get(s.copy_id)?.catalog_card_id : null))
       .find(Boolean) ?? st.catalog.find((c) => c.dexId.includes(line.root_dex_id))?.tcgdexId;
   const anchorCard = anchor ? cardOf.get(anchor) : undefined;
-  const chain = anchorCard
-    ? buildChain({ id: "line", card: anchorCard, variant: "normal" }, st.catalog)
-    : [];
   const lineLocale = anchorCard ? localeOfId(anchorCard.tcgdexId) : "en";
+  // #493: from the highest card the line knows, and through her pick where it branches (./line-chain).
+  const { chain, branchAt } = lineChain({
+    catalog: st.catalog,
+    byId: cardOf,
+    locale: lineLocale,
+    slotCount: slots.length,
+    known: knownStageCards(slots, st.copiesById),
+    fallback: anchorCard,
+    ...(choice.branchDexId !== undefined ? { branchDexId: choice.branchDexId } : {}),
+  });
   const shared = stageStateFor(st.catalog, st.copiesById);
   const requiredType = typeOfBand(line.color_band, st.typeColorMap);
 
@@ -110,6 +124,9 @@ export function buildDecideStagesOps(st: DecideStagesState, choice: DecideStages
     const index = Number(key);
     const slot = slots.find((s) => s.stage_index === index);
     const node = chain[index];
+    if (slot && !node && branchAt !== null && index >= branchAt) {
+      throw new Error(DECIDE_REFUSAL.branch);
+    }
     if (!slot || !node) throw new Error(DECIDE_REFUSAL.noStage);
     if (slot.state === "filled") throw new Error(DECIDE_REFUSAL.filled);
 

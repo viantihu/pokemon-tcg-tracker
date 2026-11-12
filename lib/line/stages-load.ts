@@ -6,11 +6,11 @@
  */
 
 import {
-  buildChain,
   band,
   lineFormOf,
   type CardForm,
   type CatalogCard,
+  type ChainNode,
   type TypeColorMap,
 } from "@/lib/engine";
 import { localeOfId } from "@/lib/catalog/locale";
@@ -35,6 +35,7 @@ import {
   type StageDecision,
   type ThirdPocketChoice,
 } from "./popup";
+import { knownStageCards, lineChain } from "./line-chain";
 import { stageOptionsFrom, stageSuggestion } from "./stage-options";
 import { printingFromRow } from "./stage-options-load";
 import type { CardIdentity } from "./types";
@@ -57,6 +58,19 @@ export interface LineStagesModel {
   current: Record<number, StageDecision>;
   /** A complete line shorter than three pockets: its third pocket, and what fills it now (null: not decided). */
   thirdPocket: { current: ThirdPocketChoice | null } | null;
+  /**
+   * #493: the line's chain stops at a branch (Gloom → Vileplume or Bellossom) before its last stages, so she picks
+   * which way it evolves before choosing for those stages. Each way carries the species and suggestion of every
+   * stage from `stageIndex` on. Absent when the line's stages are all known.
+   */
+  branch?: {
+    stageIndex: number;
+    options: {
+      dexId: number;
+      name: string;
+      stages: Record<number, Pick<LinePopupStage, "dexId" | "suggestion">>;
+    }[];
+  };
   /**
    * UIL-130: every spare card filling one of this line's pockets now, by copy id. A choice that takes one out sends
    * it back to its home box, or to a box she picks when that one is full.
@@ -103,8 +117,17 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
       .map((s) => (s.copy_id ? copyById.get(s.copy_id)?.catalog_card_id : null))
       .find(Boolean) ?? catalog.find((c) => c.dexId.includes(line.root_dex_id))?.tcgdexId;
   const anchor = anchorId ? byId.get(anchorId) : undefined;
-  const chain = anchor ? buildChain({ id: "line", card: anchor, variant: "normal" }, catalog) : [];
   const locale = (anchor ? localeOfId(anchor.tcgdexId) : "en") as Locale;
+  // #493: from the highest card the line knows; where it branches short of its stages, she picks the way.
+  const chainArgs = {
+    catalog,
+    byId,
+    locale,
+    slotCount: ordered.length,
+    known: knownStageCards(ordered, copyById),
+    fallback: anchor,
+  };
+  const { chain, branchAt, branches } = lineChain(chainArgs);
   // Its form (UIL-133): stored when it was made (0038), else from what it holds or chases.
   const form = storedOr(line.form, () =>
     lineFormOf(
@@ -120,6 +143,18 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
     ),
   );
   const lineBlocks = blocks.filter((b) => b.line_id === line.id);
+
+  const facts = (node: ChainNode): Pick<LinePopupStage, "dexId" | "suggestion"> => ({
+    dexId: node.dexId,
+    suggestion: stageSuggestion(
+      stageOptionsFrom(
+        catalogRows
+          .filter((r) => r.dex_id.includes(node.dexId))
+          .map((r) => printingFromRow(r, map)),
+        { locale, bandKey: line.color_band, form },
+      ),
+    ),
+  });
 
   const current: Record<number, StageDecision> = {};
   const stages: LinePopupStage[] = ordered.map((s) => {
@@ -156,21 +191,30 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
       state: s.state === "block" ? "blocked" : "wanted",
       card: target ? identity(target) : null,
       choice,
-      ...(node
-        ? {
-            dexId: node.dexId,
-            suggestion: stageSuggestion(
-              stageOptionsFrom(
-                catalogRows
-                  .filter((r) => r.dex_id.includes(node.dexId))
-                  .map((r) => printingFromRow(r, map)),
-                { locale, bandKey: line.color_band, form },
-              ),
-            ),
-          }
-        : {}),
+      ...(node ? facts(node) : {}),
     };
   });
+
+  // #493: each way the line can go from its branch, with the facts of every unfilled stage from there on.
+  const openPast =
+    branchAt === null
+      ? []
+      : ordered.filter((s) => s.stage_index >= branchAt && s.state !== "filled");
+  const branch =
+    branchAt !== null && openPast.length > 0
+      ? {
+          stageIndex: branchAt,
+          options: branches.map((b) => {
+            const through = lineChain({ ...chainArgs, branchDexId: b.dexId }).chain;
+            const stages: Record<number, Pick<LinePopupStage, "dexId" | "suggestion">> = {};
+            for (const s of openPast) {
+              const n = through[s.stage_index];
+              if (n) stages[s.stage_index] = facts(n);
+            }
+            return { dexId: b.dexId, name: b.name, stages };
+          }),
+        }
+      : undefined;
 
   const complete = ordered.length > 0 && ordered.every((s) => s.state === "filled");
   const pocketBlock = lineBlocks.find(
@@ -209,6 +253,7 @@ export async function loadLineStagesModel(db: DbClient, lineId: string): Promise
     stages,
     current,
     thirdPocket,
+    ...(branch ? { branch } : {}),
     spares: Object.fromEntries(
       lineBlocks
         .filter((b) => b.copy_id)

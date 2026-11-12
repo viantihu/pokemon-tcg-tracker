@@ -80,10 +80,24 @@ export function LineStagesPopup({
     };
   }, [lineId, loadModel]);
 
-  const open = useMemo(
-    () => (model?.stages ?? []).filter((s) => s.state !== "here" && s.dexId !== undefined),
-    [model],
+  // #493: where the line's chain branches (Gloom → Vileplume or Bellossom), she picks the way first; the stages past
+  // it take their species from her pick. Nothing is picked for her.
+  const [branchDex, setBranchDex] = useState<number | null>(null);
+  const branchPick = model?.branch?.options.find((o) => o.dexId === branchDex) ?? null;
+  const unfilled = useMemo(
+    () =>
+      (model?.stages ?? [])
+        .filter((s) => s.state !== "here")
+        .map((s) =>
+          s.dexId === undefined && branchPick?.stages[s.stageIndex]
+            ? { ...s, ...branchPick.stages[s.stageIndex] }
+            : s,
+        ),
+    [model, branchPick],
   );
+  const open = useMemo(() => unfilled.filter((s) => s.dexId !== undefined), [unfilled]);
+  /** Unfilled stages still waiting on her pick at the branch. */
+  const waiting = unfilled.length - open.length;
   /** Only what she changed is sent. */
   const changed = useMemo(() => {
     if (!model) return null;
@@ -158,7 +172,53 @@ export function LineStagesPopup({
             <div className="lp-note">Loading the line…</div>
           ) : (
             <>
-              {open.length === 0 && !model.thirdPocket ? (
+              {model.branch ? (
+                <section
+                  className="lp-stagechoice"
+                  role="group"
+                  aria-label="Which way this line evolves"
+                >
+                  <div className="lp-lbl u">
+                    Which way does this line evolve?
+                    {branchPick ? ` · ${branchPick.name}` : " · Not decided"}
+                  </div>
+                  <div className="lp-choice">
+                    {model.branch.options.map((o) => (
+                      <button
+                        key={o.dexId}
+                        type="button"
+                        className={"btn sm" + (branchDex === o.dexId ? " picked" : "")}
+                        aria-pressed={branchDex === o.dexId}
+                        disabled={busy}
+                        onClick={() => {
+                          if (o.dexId === branchDex) return;
+                          setBranchDex(o.dexId);
+                          // A choice made for the other way's species does not carry over.
+                          setStages((prev) => {
+                            const next = { ...prev };
+                            for (const k of Object.keys(next).map(Number)) {
+                              if (k >= model.branch!.stageIndex) {
+                                if (model.current[k]) next[k] = model.current[k];
+                                else delete next[k];
+                              }
+                            }
+                            return next;
+                          });
+                        }}
+                      >
+                        {o.name}
+                      </button>
+                    ))}
+                  </div>
+                  {!branchPick ? (
+                    <div className="lp-note">
+                      Pick one to choose what fills{" "}
+                      {waiting === 1 ? "its open stage" : `its ${waiting} open stages`}.
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+              {open.length === 0 && waiting === 0 && !model.thirdPocket ? (
                 <div className="lp-note">Every stage of this line holds a card.</div>
               ) : null}
               {open.map((s) => (
@@ -242,6 +302,7 @@ export function LineStagesPopup({
                   lineId,
                   stages: changed.stages,
                   ...(changed.pocket ? { thirdPocket: changed.pocket } : {}),
+                  ...(branchDex !== null ? { branchDexId: branchDex } : {}),
                   ...(Object.keys(picks).length > 0 ? { returnBoxes: picks } : {}),
                   ...(over.length > 0 ? { returnOverFull: over } : {}),
                 });
